@@ -1,0 +1,473 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "config/test_system_config.h" 
+#include "fs/dir/dir_model.seh" 
+#include "fs/meta/access_model.seh" 
+
+const char* getCurrentTestScenarioName(void);
+
+
+/********************************************************************/
+/**                 Common Scenario Initialization                 **/
+/********************************************************************/
+void initCommonScenarioState(void)
+{
+    errno_model = create_ErrorCode(0);
+}
+
+
+/********************************************************************/
+/**                           Model Errno                         **/
+/********************************************************************/
+ErrorCode* errno_model;
+
+ErrorCode* requestErrorCode(void)
+{
+  return create_ErrorCode(0);
+}
+
+
+/********************************************************************/
+/**                     Common Cancellation Status                 **/
+/********************************************************************/
+static bool is_cancelled;
+CancelStatus cancel_status = &is_cancelled;
+
+
+/********************************************************************/
+/**           Common Scenario Initialization Functions             **/
+/********************************************************************/
+
+/* 
+ * Different systems has different ways to make context appropriate privileges.
+ * The test suite have to be configured to use the right way.
+ *
+ * The default POSIX way is setup in process.meta.user.
+ */
+static MakeSureProcessHasAppropriatePrivileges make_sure_process_has_appropriate_privileges = NULL;
+
+void setupMakeSureProcessHasAppropriatePrivileges( MakeSureProcessHasAppropriatePrivileges function )
+{
+  make_sure_process_has_appropriate_privileges = function;
+}
+
+/* 
+ * Makes sure the context has appropriate privileges.
+ * Returns true on success.
+ */
+bool makeSureProcessHasAppropriatePrivileges(CallContext context)
+{
+    if (make_sure_process_has_appropriate_privileges != NULL)
+    {
+        return make_sure_process_has_appropriate_privileges(context);
+    }
+    return true;
+}
+
+
+// Temporary here
+#include "process/meta/fs_model.seh"
+
+/* 
+ * Update the current working directory of the process.
+ * Returns true on success.
+ */
+bool updateProcessWorkDirectory(CallContext context)
+{
+SizeT size = 1024;
+StringTPtr buf = allocateMemoryBlock(context, size);
+StringTPtr res;
+
+    if (isNULL_VoidTPtr(buf))
+    {
+        return false;
+    }
+    res = getcwd_spec(context, buf, size, requestErrorCode());
+    deallocateMemoryBlock(context, buf);
+    
+    return !isNULL_VoidTPtr(res);
+}
+
+
+/********************************************************************/
+/**                           Call Contexts                        **/
+/********************************************************************/
+
+/* 
+ * Returns a context available at the moment from the process given.
+ */
+CallContext getSystemContext( SystemId system, PidT pid )
+{
+CallContext context;
+int i,size;
+
+  size = size_Map(taMap);
+  for( i = 0; i < size; i++ )
+   {TestAgentDesc* agent = get_Map( taMap, key_Map( taMap, i ) );
+    if ((agent->threadid.system == system) && (agent->threadid.process == pid))
+     {
+      context = agent->threadid;
+      if (!isThreadBlocked(context))
+        return context;
+     }
+   }
+  return context;
+}
+
+/* 
+ * Returns a context available at the moment.
+ */
+CallContext getContext(void)
+{
+CallContext context;
+int i,size;
+
+  size = size_Map(taMap);
+  for( i = 0; i < size; i++ )
+   {TestAgentDesc* agent = get_Map( taMap, key_Map( taMap, i ) );
+    context = agent->threadid;
+    if (!isThreadBlocked(context))
+      return context;
+   }
+  return context;
+}
+
+/* 
+ * Writes num contexts available at the moment to the array pointed to 
+ * by res. Returns true if success and false if there are no num available
+ * contexts.
+ */
+bool getContexts(int num,CallContext* res)
+{
+CallContext context;
+int i,j,size;
+
+  j = 0;
+  size = size_Map(taMap);
+  for( i = 0; i < size; i++ )
+   {TestAgentDesc* agent = get_Map( taMap, key_Map( taMap, i ) );
+    context = agent->threadid;
+    if (!isThreadBlocked(context))
+     {
+      res[j] = context;
+      j++;
+      if (j == num)
+        return true;
+     }
+   }
+  return false;
+}
+
+/* 
+ * Returns the number of contexts available at the moment.
+ */
+int getNumberOfContexts(void)
+{
+int res = 0;
+int i,size;
+
+  size = size_Map(taMap);
+  for( i = 0; i < size; i++ )
+   {TestAgentDesc* agent = get_Map( taMap, key_Map( taMap, i ) );
+    if (!isThreadBlocked(agent->threadid))
+     {
+      res++;
+     }
+   }
+  return res;
+}
+
+/* 
+ * Returns the number of processes containing a context available at the moment.
+ */
+int getNumberOfProcessContexts(void)
+{
+int i,j,k,size1,size2,size3;
+int res = 0;
+
+  size1 = size_Map(systems);
+  for( i = 0; i < size1; i++ )
+   {
+    SystemState* systemState = get_Map( systems, key_Map( systems, i ) );
+    size2 = size_Map(systemState->processes);
+    for( j = 0; j < size2; j++ )
+     {
+      ProcessState* processState = get_Map( systemState->processes, key_Map( systemState->processes, j ) );
+      size3 = size_Map(processState->threads);
+      for( k = 0; k < size3; k++ )
+       {
+        ThreadIdObj* threadId = key_Map( processState->threads, k );
+        if (!isThreadBlocked(*threadId))
+         {
+          res++;
+          break;
+         }
+       }
+     }
+   }
+  return res;
+}
+
+/* 
+ * Returns true iff the thread is blocked.
+ */
+bool isThreadBlocked( ThreadId threadid )
+{
+ThreadState* threadState = getThread(threadid);
+
+  if (threadState == NULL)
+    return false;
+  return threadState->is_blocked;
+}
+
+
+/********************************************************************/
+/**                         Virtual Pointers                       **/
+/********************************************************************/
+static sut_ptr_t virtual_address = 1;
+
+VoidTPtr generateVirtualPointer( CallContext context )
+{
+VoidTPtr ptr;
+
+  ptr.system = context.system;
+  ptr.process = context.process;
+  ptr.address = virtual_address++;
+  return ptr;
+}
+
+VoidTPtr createVirtualPointer( CallContext context, sut_ptr_t virtual_address )
+{
+VoidTPtr ptr;
+
+  ptr.system = context.system;
+  ptr.process = context.process;
+  ptr.address = virtual_address;
+  return ptr;
+}
+
+
+/********************************************************************/
+/**                            CByteArray                          **/
+/********************************************************************/
+static unsigned value = 0;
+
+CByteArray* generateCByteArray(int size)
+{
+    int i;
+    CByteArray *res = create_CByteArray(NULL, size);
+
+    for(i = 0; i < size; i++)
+        setByteAt_CByteArray(res, i, (ByteT)(value = ((5 * value + 13) & 0xFF)));
+
+    return res;
+}
+
+
+/********************************************************************/
+/**                            File System                         **/
+/********************************************************************/
+
+/*
+ * Returns path of the directory, which is the default sandbox for 
+ * the test suite within file system.
+ */
+CString* getTestDirectoryPath()
+{
+    return create_CString( (char*)TEST_FILES_ROOT );
+}
+
+/*
+ * Returns a string representing result of concatenation of 
+ * getTestDirectoryPath() and relPath.
+ */
+CString* getRelativeTestPath(CString* relPath)
+{
+    CString* result = getTestDirectoryPath();
+    if(length_CString(relPath)>0 && charAt_CString(relPath, 0)!=(CharT)'/')
+    {
+        result = concat_CString( result, create_CString( "/" ) );
+    }
+    result = concat_CString( result, relPath );
+    return result;
+}
+
+/*
+ * Returns a string representing result of concatenation of 
+ * getTestDirectoryPath() and relPath.
+ */
+CString* getRelativeTestPathCh(const char* relPath)
+{
+    return getRelativeTestPath( create_CString((char*)relPath) );
+}
+
+/*
+ * Returns path of the directory for test data.
+ */
+CString* getTestDataPath()
+{
+    return create_CString( (char*)TEST_DATA_PATH  );
+}
+
+/*
+ * Returns a string representing result of concatenation of 
+ * getTestDataPath() and relPath.
+ */
+CString* getRelativeTestDataPath(CString* relPath)
+{
+    CString* result = getTestDataPath();
+    if(length_CString(relPath)>0 && charAt_CString(relPath, 0)!=(CharT)'/')
+    {
+        result = concat_CString( result, create_CString( "/" ) );
+    }
+    result = concat_CString( result, relPath );
+    return result;
+}
+
+/*
+ * Returns a string representing result of concatenation of 
+ * getTestDataPath() and relPath.
+ */
+CString* getRelativeTestDataPathCh(const char* relPath)
+{
+    return getRelativeTestDataPath( create_CString((char*)relPath) );
+}
+
+static CString* quote_Char(CharT ch)
+{
+    static CharT quotedStr[5];
+    CharT *pch = &quotedStr[0];
+    
+    if(ch>=' ')
+    {
+        *pch++ = ch;
+    }else
+    {
+        *pch++ = '\\';
+        switch(ch)
+        {
+                case '\n': *pch++ = 'n';break; 
+                case '\r': *pch++ = 'r';break;
+                case '\\': *pch++ = '\\';break; 
+                case '\t': *pch++ = 't';break;
+                default:
+                    pch+=sprintf(pch,"%03o", ch);
+                    break;
+                
+        }
+    }
+    
+    *pch++ = 0;
+
+    return create_CString(quotedStr);
+        
+}   
+
+static CString* quote_CString(CString* str)
+{
+    int i;
+    CString* result = create_CString("");
+
+    for(i=0; i < length_CString(str); i++)
+    {
+        CString* quoted_char = quote_Char(charAt_CString(str, i));
+        result = concat_CString(result, quoted_char);
+    }
+    return result;
+}
+
+/*
+ * Creates text file in the file system for use in test scenarios 
+ * and updates the model accordingly. 
+ *
+ * Returns true on success.
+ */
+bool createTestFile(CallContext context, CString* path, CString* contents)
+{
+    FILETPtr pFile;
+    FilePermissions* fp = create_FilePermissions_String("rwxrwxrwx");
+
+    assertion(path != NULL, "createTestFile: path is NULL");
+    if(contents == NULL) contents = _CS("");
+
+    pFile = fopen_spec(context, path, _CS("w"), requestErrorCode(), false);
+    if(isNULL_VoidTPtr(pFile)) return false;
+
+    /* TODO: delete this line after fstream's */
+    registerFile_Kind(getFileSystem(context), path, RegularFile);
+
+    if(contents != NULL) fputs_spec(context, contents, pFile, requestErrorCode());
+
+    fclose_spec(context, pFile, requestErrorCode());
+
+    chmod_spec(context, path, fp, requestErrorCode());
+
+    return true;
+}
+
+/* 
+ * Prepare test scenario sandbox directory.
+ * Returns true on success.
+ */
+bool createTestScenarioSandboxDir(CallContext context)
+{
+int res2;
+    
+    res2 = mkdir_spec(context, getRelativeTestPathCh(getCurrentTestScenarioName()), create_FilePermissions_String("rwxrwxrwx"), requestErrorCode());
+    return (res2 == 0);
+}
+
+/* 
+ * Remove test scenario sandbox directory.
+ * Returns true on success.
+ */
+void recursive_remove( CallContext context, CString *directory);
+
+bool removeTestScenarioSandboxDir(CallContext context)
+{
+    recursive_remove(context, getRelativeTestPathCh(getCurrentTestScenarioName()));
+    return true;
+}
+
+/*
+ * Returns a string representing result of concatenation of 
+ * test scenario sandbox directory and relPath.
+ */
+CString* getTestScenarioSandboxPath( CString* relPath )
+{
+    CString* result = getRelativeTestPathCh(getCurrentTestScenarioName());
+    if(length_CString(relPath)>0 && charAt_CString(relPath, 0)!=(CharT)'/')
+    {
+        result = concat_CString( result, create_CString( "/" ) );
+    }
+    result = concat_CString( result, relPath );
+    return result;
+}
+
+CString* getTestScenarioSandboxPathCh( const char* relPath )
+{
+    return getTestScenarioSandboxPath( create_CString((char*)relPath) );
+}
+

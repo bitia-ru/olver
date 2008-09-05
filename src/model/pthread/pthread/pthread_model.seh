@@ -1,0 +1,547 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#ifndef PTHREAD_MODEL_SEH
+#define PTHREAD_MODEL_SEH
+
+#include "atl/list.h"
+#include "atl/multiset.h"
+#include "common/common_model.seh"
+#include "data/sched_model.seh"
+#include "pthread/attr/attr_model.seh"
+#include "config/interpretation.seh"
+#include "pthread/pthread/pthread_pthread_config.h"
+#include "data/locale_model.seh"
+
+/********************************************************************/
+/**                        StartedThread Type                      **/
+/********************************************************************/
+
+specification typedef struct StartedThread
+{
+    VoidTPtr arg;
+    PThreadAttr* attr;
+    ThreadId thid;
+} StartedThread;
+
+StartedThread *create_StartedThread(
+            VoidTPtr arg,
+            PThreadAttr* attr,
+            ThreadId thid);
+
+
+/********************************************************************/
+/**                    PThread pthread_once_t Type                 **/
+/********************************************************************/
+
+/* 
+ * This type represents data definition requirements of
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'pthread.h'.
+ */
+
+typedef sut_int PThreadOnceT;
+typedef VoidTPtr PThreadOnceTPtr;
+
+
+/********************************************************************/
+/**                    Process Shared Attribute                    **/
+/********************************************************************/
+
+/* 
+ * This type represents data definition requirements of
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'pthread.h'.
+ */
+typedef 
+enum PThreadPShared
+{
+    SUT_PTHREAD_PROCESS_PRIVATE,
+    SUT_PTHREAD_PROCESS_SHARED
+} PThreadPShared;
+
+
+/********************************************************************/
+/**                          pthread_key_t                         **/
+/********************************************************************/
+typedef bool PThreadKeyDestructor;
+
+specification typedef
+struct PThreadKey
+{
+    VoidTPtr                address;
+    PThreadKeyDestructor    destruct;
+} PThreadKey;
+
+PThreadKey *create_PThreadKey(VoidTPtr address, PThreadKeyDestructor destruct);
+
+PThreadKey* registerPThreadKey(VoidTPtr address, PThreadKeyDestructor destruct);
+
+void unregisterPThreadKey(PThreadKey* key);
+
+/********************************************************************/
+/**                         ThreadSpecific                         **/
+/********************************************************************/
+specification typedef
+struct ThreadSpecific
+{
+    PThreadKey  *key;
+    VoidTPtr    address;
+} ThreadSpecific;
+
+ThreadSpecific* create_ThreadSpecific(PThreadKey* key, VoidTPtr address);
+
+
+/********************************************************************/
+/**                           ThreadState                          **/
+/********************************************************************/
+#define SUT_PTHREAD_ONCE_INIT 0
+
+typedef enum
+PThreadDestroyStatus
+{
+    PTHREAD_DESTROY_NONE=0,
+    PTHREAD_DESTROY_SOFT,
+    PTHREAD_DESTROY_HARD 
+} PThreadDestroyStatus;
+
+
+typedef enum PThreadCancelTypes
+{
+  SUT_PTHREAD_CANCEL_DEFERRED,
+  SUT_PTHREAD_CANCEL_ASYNCHRONOUS
+} PThreadCancelTypes;
+  
+
+typedef enum PThreadCancelStates
+{
+    SUT_PTHREAD_CANCEL_ENABLE,
+    SUT_PTHREAD_CANCEL_DISABLE
+} PThreadCancelStates;
+
+typedef enum PThreadTerminatingStates
+{
+    PTHREAD_RUNNING,        // thread is running
+    PTHREAD_CANCELLING,     // pthread_cancel already called
+    PTHREAD_TERMINATING,    // cancel point fired
+    PTHREAD_TERMINATED      // thread died, joinable, but not yet joined
+} PThreadTerminatingStates;
+
+
+specification typedef
+struct ThreadState
+{
+    ThreadId                id;
+    ThreadPriority          priority;
+
+    /*
+     * Stack of calls.
+     */
+    List*                   call_stack; // Object-list
+    bool                    is_blocked; // Is the thread in the blocked call
+
+    /*
+     * Thread local storage.
+     */
+    Map*                    key_specific;// Map* ProcessKey -> ThreadSpecific
+    PThreadDestroyStatus    destroyStatus;
+
+
+    /*
+     * Stack of Signal Masks, List contains Set of SignalObj. Elem with 
+     * index 0 is current mask.
+     */
+    List*                   signal_masks_stack;
+    /*
+     * Stack of functions call. List contains CalledFunctionDescription.
+     * Elem with index 0 is description of last non processed call of function.
+     * Used when standard says, that delivery of signal should be before the 
+     * function returns. 
+     */
+    List*                   stack_of_calls;
+    /*
+     * Unique identifiers for elems of signal_masks_stack
+     */
+    int                     current_unique_id_of_function;
+    /*
+     * Represents queue for signals.
+     *      key   - signal number (SignalObj)
+     *      value - List of Lists of unique identificators (type IntTObj)
+     *
+     * Unique identificator for next signal to this thread defined in process
+     */
+    Map*                    signal_queue;
+    /*
+     * Is this thread is waiting for signal
+     */
+    int                     is_waiting_for_signal;
+    // this checking is done by other way
+    /*
+     * This variable should be false on exit of kill. It is needed when 
+     * some signal handler should be called before exit of kill
+     */
+    // int is_waiting_signal_handler; 
+
+    PThreadAttr*            attr;
+    IntT                    cancelstate;
+    IntT                    canceltype;
+
+    IntT                    numberOfPopPushBraces;
+    IntT                    numberOfExecutableFunctions;
+
+    List*                   cleanupArgs;
+  
+    PThreadTerminatingStates terminating;
+    VoidTPtr exit_value;
+
+    bool                    join_called; 
+    bool                    join_done; 
+    bool                    detach_called;
+    
+    LocaleT                 currentLocale;
+} ThreadState;
+
+ThreadState* create_DefaultThreadState(ThreadId threadid);
+
+ThreadState* registerDefaultThread(ThreadId threadid);
+
+ThreadState* registerThread(ThreadId threadid, ThreadPriority priority);
+
+/********************************************************************/
+/**                       Thread Cancellation                      **/
+/********************************************************************/
+
+specification typedef struct PThreadTestCancelReturnType 
+{
+    CallContext context;
+    bool cancel;
+    ThreadState *oldState;
+} PThreadTestCancelReturnType;
+
+PThreadTestCancelReturnType* create_PThreadTestCancelReturnType(
+    CallContext context,
+    bool cancel,
+    ThreadState *oldState
+    );
+
+
+/********************************************************************/
+/**                           Thread Storage                       **/
+/********************************************************************/
+ThreadState* getThread(ThreadId threadid);
+ThreadState* findThread(Map* threads, ThreadId threadid);
+
+
+/********************************************************************/
+/**                        Thread Status                           **/
+/********************************************************************/
+ThreadState* getThreadState_CallContext(CallContext context);
+ThreadState* findThreadState_CallContext(Map* threads, CallContext context);
+ThreadId getCallContext_ThreadId( CallContext context );
+CallContext getThreadId_CallContext( ThreadId threadId );
+
+/********************************************************************/
+/**                       Thread Attributes                        **/
+/********************************************************************/
+void checkThreadDelete(ThreadState* thstate);
+
+bool isThreadActive(ThreadId threadId);
+
+bool isCancellationRequest(CallContext context);
+IntT getThreadCancelState(CallContext context);
+IntT getThreadStateCancelState(ThreadState *thState);
+bool isCancellationRequestThreadState(ThreadState *thState);
+
+/********************************************************************/
+/**                       Thread Id Lists                          **/
+/********************************************************************/
+void insert_ThreadIdList(List* list, ThreadId threadid);
+void remove_ThreadIdList(List* list, ThreadId threadid);
+ThreadState* getThread_ThreadIdList(Map* threads, List* list, int i);
+bool isAdded_ThreadIdList(List* pre_list, ThreadId threadid, List* post_list);
+bool isRemoved_ThreadIdList(List* pre_list, ThreadId threadid, List* post_list);
+
+bool isHighestPriorityThread(Map* pre_threads, List* pre_list, ThreadId threadid);
+ThreadId getNextThread_SchedulingPolicy(Map* threads, List* list);
+
+// Temporary defines
+#define isThreadIdAddedList    isAdded_ThreadIdList
+#define isThreadIdRemovedList  isRemoved_ThreadIdList
+
+
+
+void remove_ThreadIdSet(Set* set, ThreadId threadid);
+bool isThreadIdRemovedSet(Set* pre_set, ThreadId threadid, Set* post_set);
+bool isThreadIdRemovedMultiSet(MultiSet* pre_set, ThreadId threadid, MultiSet* post_set);
+
+
+/********************************************************************/
+/**                          Return Types                          **/
+/********************************************************************/
+specification typedef
+struct PThreadStartedEventType
+{
+    CallContext      context;
+    VoidTPtr         arg;
+} PThreadStartedEventType;
+
+PThreadStartedEventType *create_PThreadStartedEventType(
+            CallContext      context,
+            VoidTPtr         arg
+        );
+
+specification typedef
+struct SetCancelStateReturnType
+{
+    IntT returnValue;
+    IntT oldState;
+} SetCancelStateReturnType;
+
+SetCancelStateReturnType *create_SetCancelStateReturnType(
+        IntT returnValue,
+        IntT oldState
+        );
+
+specification typedef
+struct SetCancelTypeReturnType
+{
+        IntT returnValue;
+        IntT oldType;
+} SetCancelTypeReturnType;
+
+SetCancelTypeReturnType *create_SetCancelTypeReturnType(
+        IntT returnValue,
+        IntT oldType
+        );
+
+specification typedef
+struct PThreadCleanupPopReturnType
+{
+    CallContext context;
+    IntT arg;
+} PThreadCleanupPopReturnType;
+
+PThreadCleanupPopReturnType *create_PThreadCleanupPopReturnType(
+        CallContext context,
+        IntT arg
+        );
+
+specification typedef
+struct PThreadCleanupReturnType
+{
+    CallContext context;
+    VoidTPtr arg;
+} PThreadCleanupReturnType;
+
+PThreadCleanupReturnType *create_PThreadCleanupReturnType(
+        CallContext context,
+        VoidTPtr arg
+        );
+
+specification typedef
+struct PThreadCleanupArg
+{
+    VoidTPtr arg;
+} PThreadCleanupArg;
+
+PThreadCleanupArg *create_PThreadCleanupArg(
+        VoidTPtr arg
+        );
+
+specification typedef
+struct PThreadOnceInitReturnType
+{
+    IntT result;
+    IntT routineCalled;
+} PThreadOnceInitReturnType;
+
+PThreadOnceInitReturnType *create_PThreadOnceInitReturnType(
+    IntT result,
+    IntT routineCalled
+        );
+
+specification typedef struct PThreadJoinReturnType
+{
+    CallContext context;
+    bool        cancel;
+    IntT        functionResult;
+    VoidTPtr    value_ptr;
+    ThreadId    thread;
+    ThreadState *finalJoinToThreadState;
+    ThreadState *finalJoinFromThreadState;
+    bool        notZeroPointer;
+} PThreadJoinReturnType;
+
+PThreadJoinReturnType *create_PThreadJoinReturnType(
+                                 CallContext context,
+                                 bool   cancel,
+                                 IntT functionResult, 
+                                 VoidTPtr value_ptr,
+                                 ThreadId thread,
+                                 ThreadState *finalJoinToThreadState,
+                                 ThreadState *finalJoinFromThreadState,
+                                 bool notZeroPointer
+                                 );
+
+specification typedef struct PThreadJoinCall
+{
+    ThreadIdObj *threadId;
+    ThreadState *oldState;
+} PThreadJoinCall;
+
+PThreadJoinCall *create_PThreadJoinCall( ThreadIdObj* id );
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** __errno_location_spec **/
+specification
+VoidTPtr __errno_location_spec(CallContext context);
+
+/** _pthread_cleanup_pop_spec **/
+specification
+void _pthread_cleanup_pop_spec(CallContext context, IntT execute);
+
+void onPThreadCleanupPop(CallContext context, IntT execute);
+
+reaction PThreadCleanupPopReturnType* _pthread_cleanup_pop_return(void);
+
+void onPThreadCleanupPopReturn(CallContext context, IntT execute);
+
+reaction PThreadCleanupReturnType* _pthread_cleanup_return(void);
+
+void onPThreadCleanupReturn(CallContext context, VoidTPtr arg);
+
+/** _pthread_cleanup_push_spec **/
+specification
+void _pthread_cleanup_push_spec(CallContext context, VoidTPtr arg);
+
+void onPThreadCleanupPush(CallContext context, VoidTPtr arg);
+
+/** pthread_cancel_spec **/
+specification
+IntT pthread_cancel_spec(CallContext context, ThreadId thread);
+
+void onPThreadCancel(CallContext context, ThreadId thread, 
+                     IntT pthread_cancel_spec);
+
+
+/** pthread_create_spec **/
+specification
+IntT  pthread_create_spec(CallContext context, ThreadId* thread, 
+                          PThreadAttrTPtr attr, VoidTPtr arg);
+
+void onPThreadCreate(CallContext context, ThreadId* thread, 
+                     PThreadAttrTPtr attr, VoidTPtr arg, 
+                     IntT pthread_create_spec);
+
+reaction PThreadStartedEventType* pthread_started_event(void);
+
+/** pthread_detach_spec **/
+specification
+IntT pthread_detach_spec(CallContext context, ThreadId thread);
+
+void onPThreadDetach(CallContext context, ThreadId thread, 
+                     IntT pthread_detach_spec);
+
+/** pthread_equal_spec **/
+specification
+IntT pthread_equal_spec(CallContext context, ThreadId t1, ThreadId t2);
+
+/** pthread_exit_spec **/
+specification
+void pthread_exit_spec(CallContext context, VoidTPtr value_ptr);
+
+void onPThreadExit(CallContext context, VoidTPtr value_ptr);
+
+/** pthread_join_spec **/
+specification
+void pthread_join_spec(CallContext context, ThreadId thread, 
+                       VoidTPtr* value_ptr);
+
+void onPThreadJoin(CallContext context, ThreadId thread);
+
+reaction PThreadJoinReturnType* pthread_join_return(void);
+
+void onPThreadJoinReturn(PThreadJoinReturnType* pthread_join_return);
+
+/** pthread_once_spec **/
+specification
+PThreadOnceInitReturnType* pthread_once_spec(CallContext context, 
+                                             PThreadOnceTPtr once_control);
+
+void onPThreadOnce(CallContext context, PThreadOnceTPtr once_control, 
+                   IntT pthread_once_spec);
+
+/** pthread_self_spec **/
+specification
+ThreadId pthread_self_spec(CallContext context);
+
+/** pthread_setcancelstate_spec **/
+specification
+SetCancelStateReturnType* pthread_setcancelstate_spec(CallContext context, 
+                                                      IntT pstate);
+
+void onPThreadSetCancelState(CallContext context, IntT pstate, 
+                        SetCancelStateReturnType* pthread_setcancelstate_spec);
+
+/** pthread_setcanceltype_spec **/
+specification
+SetCancelTypeReturnType* pthread_setcanceltype_spec(CallContext context, 
+                                                   IntT canceltype);
+
+void onPThreadSetCancelType( CallContext context, IntT ptype, 
+                            SetCancelTypeReturnType* 
+                            pthread_setcanceltype_spec);
+
+/** pthread_testcancel_spec **/
+specification
+void pthread_testcancel_spec(CallContext context, CancelStatus status);
+void onPThreadTestCancel(CallContext context);
+
+reaction PThreadTestCancelReturnType* pthread_testcancel_return(void);
+void onPThreadTestCancelReturn(PThreadTestCancelReturnType *test_cancel_return);
+
+/** pthread_finish is a fake function, it just do return from the thread **/
+specification
+void pthread_finish_spec(CallContext context, VoidTPtr value_ptr);
+
+/********************************************************************/
+/**                    Signal Helper Functions                     **/
+/********************************************************************/
+/*
+ * Returns new unique identificator of called function
+ */
+int MakeFunctionCallUID(ThreadState* thSt);
+void PrintfStack(ThreadState* thSt);
+
+/********************************************************************/
+/**                    Helper Functions                            **/
+/********************************************************************/
+
+StartedThread* searchThreadsSet(Set* startedThreads, ThreadId id);
+
+#endif
+

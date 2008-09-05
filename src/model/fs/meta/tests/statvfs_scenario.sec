@@ -1,0 +1,363 @@
+ /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/meta/tests/statvfs_scenario.seh"
+
+CallContext context;
+
+static char * pathsChr[]={
+
+    //Symlink paths...
+
+    "/tester/test_system/Dir_Link_Deep/abs_dir_link/file2.c",
+
+    "/tester/test_system/Dir_Link/file.c",
+
+    "/tester/test_system",
+    "/tester/test_system/Dir_Link/Dir_Link2",
+    "/tester/test_system/Dir_Link/Dir_Link2/file2.c",
+
+    "/tester/test_system/Link_Test/Link_Test2/abs_dir_link",
+    "/tester/test_system/Dir_Link/Dir_Link2",
+
+    "/tester/test_system/Dir_Link/Dir_Link2",
+    "/tester/test_system/Dir_Link_Deep/abs_dir_link",
+    "/tester/test_system/Link_Test/file.c",
+    "/tester/test_system/Link_Test/abs_link",
+    "/tester/test_system/Link_Test/rel_link",
+
+    "/tester/test_system/Dir_Link/file.c",
+    "/tester/test_system/Dir_Link/abs_link",
+    "/tester/test_system/Dir_Link/rel_link",
+
+    "/tester/test_system/Link_Test/Link_Test2/file2.c",
+    "/tester/test_system/Link_Test/Link_Test2/abs_link2",
+    "/tester/test_system/Link_Test/Link_Test2/rel_link2",
+
+    "/tester/test_system/Link_Test/Dir_Link2/file2.c",
+    "/tester/test_system/Link_Test/Dir_Link2/abs_link2",
+    "/tester/test_system/Link_Test/Dir_Link2/rel_link2",
+
+    "/tester/test_system/Dir_Link/Link_Test2/file2.c",
+    "/tester/test_system/Dir_Link/Link_Test2/abs_link2",
+    "/tester/test_system/Dir_Link/Link_Test2/rel_link2",
+
+    "/tester/test_system/Dir_Link/Dir_Link2/file2.c",
+    "/tester/test_system/Dir_Link/Dir_Link2/abs_link2",
+    "/tester/test_system/Dir_Link/Dir_Link2/rel_link2"
+};
+
+static int paths_num=sizeof(pathsChr)/sizeof(char*);
+
+static CString * paths[sizeof(pathsChr)/sizeof(char*)];
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_fs_meta_statvfs_scenario(int argc, char** argv)
+{
+    int i;
+    SKIP_LXSTAT_CHECK = 1;
+
+    context=getContext();
+    initPathSystemConfiguration();
+
+    // make sure process has appropriate priviledges
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    for(i=0;i<paths_num;i++)
+        paths[i] = getTestScenarioSandboxPathCh(pathsChr[i]);
+
+    return true;
+}
+
+static void finish_fs_meta_statvfs_scenario(void)
+{
+    removeTestScenarioSandboxDir(context);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(fs_meta_statvfs_scenario);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool fs_meta_statvfs_creat_scenario_scen()
+{
+    FilePermission* perm=create_FilePermission(true, true, true);
+    FilePermissions* mode=create_FilePermissions(perm, perm, perm,
+                            Unknown_Bool3,Unknown_Bool3,Unknown_Bool3);
+    struct OpenFlags flags={ReadWrite, Nonblocking, false, true, false, false,
+                                                                false, false};
+    FileStatus* fstat=create_emptyFileStatus();
+
+    // NOTE: initially, mkdir_spec following this comment was placed AFTER __lxstat_spec
+    // calls and this lead to mkdir_spec EACCESS error predicate to be true, while no
+    // errors returned. It seems, that __lxstat fills some permission bits for FS_HOME
+    // incorrectly, so mkdir_spec for FS_HOME/tester fails with requirement assertion.
+
+    mkdir_spec(context, SANDBOX_FILE("/tester"),
+        mode, requestErrorCode());
+    mkdir_spec(context, SANDBOX_FILE("/tester/test_system"),
+                                                    mode, requestErrorCode());
+    mkdir_spec(context, SANDBOX_FILE("/tester/test_system/Link_Test"),
+                                                    mode, requestErrorCode());
+    mkdir_spec(context, SANDBOX_FILE("/tester/test_system/Link_Test/Link_Test2"),
+                                                   mode, requestErrorCode());
+
+    open_spec(context, SANDBOX_FILE("/tester/test_system/Link_Test/file.c"),
+                    flags, mode, requestErrorCode(), false);
+    open_spec(context,
+                SANDBOX_FILE("/tester/test_system/Link_Test/Link_Test2/file2.c"),
+                    flags, mode, requestErrorCode(), false);
+
+    symlink_spec(context, SANDBOX_FILE("/tester/test_system/Link_Test"),
+                SANDBOX_FILE("/tester/test_system/Dir_Link"), requestErrorCode(), cancel_status);
+
+    symlink_spec(context, SANDBOX_FILE("Link_Test2"),
+        SANDBOX_FILE("/tester/test_system/Dir_Link/Dir_Link2"), requestErrorCode(), cancel_status);
+
+    symlink_spec(context, SANDBOX_FILE("/tester/test_system/Dir_Link/Dir_Link2"),
+            SANDBOX_FILE("/tester/test_system/Dir_Link_Deep"), requestErrorCode(), cancel_status);
+    symlink_spec(context, SANDBOX_FILE("/tester/test_system/Link_Test/file.c"),
+        SANDBOX_FILE("/tester/test_system/Link_Test/abs_link"), requestErrorCode(), cancel_status);
+    symlink_spec(context, create_CString("file.c"),
+        SANDBOX_FILE("/tester/test_system/Link_Test/rel_link"), requestErrorCode(), cancel_status);
+    symlink_spec(context,
+        SANDBOX_FILE("/tester/test_system/Link_Test/Link_Test2/file2.c"),
+        SANDBOX_FILE("/tester/test_system/Link_Test/Link_Test2/abs_link2"),
+        requestErrorCode(), cancel_status);
+    symlink_spec(context, create_CString("file2.c"),
+        SANDBOX_FILE("/tester/test_system/Link_Test/Link_Test2/rel_link2"),
+        requestErrorCode(), cancel_status);
+
+    symlink_spec(context, getRelativeTestPathCh("/tester/test_system/Dir_Link/Dir_Link2"),
+        SANDBOX_FILE("/tester/test_system/Dir_Link/Dir_Link2/abs_dir_link"),
+        requestErrorCode(), cancel_status);
+
+    return true;
+}
+scenario
+bool fs_meta_statvfs_remove_scenario_scen()
+{
+    recursive_remove(context, SANDBOX_FILE("/tester/test_system"));
+
+    return true;
+}
+
+scenario
+bool fs_meta_statvfs_init_scenario_scen()
+{
+    CString* path;
+    File* file;
+    FileSystem* fs=getFileSystem(context);
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        path=paths[i];
+        registerFileFileSystem_Ext2(context, fs, path);
+    }
+
+    VERBOSE("*****************************END OF INIT******************");
+
+    return true;
+}
+
+scenario
+bool fs_fstatvfs_scen()
+{
+    MountPointStatus* fstat;
+    FileStatus* buff;
+    CString* str, *resolved;
+    struct OpenFlags fl={ReadOnly, Blocking, false, false, false, false,
+                                                                false, false};
+    FileDescId fildes;
+    FileSystem* fs=getFileSystem(context);
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        str=paths[i];
+        fstat=create_emptyMountPointStatus();
+        buff=create_emptyFileStatus();
+        if(__xstat_spec(context, 3, str, buff, requestErrorCode())!=-1)
+        {
+            fildes=open_spec(context, str, fl, buff->permissions, requestErrorCode(), false);
+            VERBOSE("file descriptor==%d\n", fildes.filedesc);
+            fstatvfs_spec(context, fildes, fstat, requestErrorCode());
+        } else {
+            FileDescId fildes = WrongFileDescId;
+            MountPointStatus* fstat;
+            FileStatus* buff;
+
+            fstat=create_emptyMountPointStatus();
+            buff=create_emptyFileStatus();
+            fstatvfs_spec(context, fildes, fstat, requestErrorCode());
+        }
+    }
+
+    return true;
+}
+scenario
+bool fs_fstatvfs64_scen()
+{
+    MountPointStatus* fstat;
+    FileStatus* buff;
+    CString* str, *resolved;
+    struct OpenFlags fl={ReadOnly, Blocking, false, false, false, false,
+                                                                false, true};
+    FileDescId fildes;
+    FileSystem* fs=getFileSystem(context);
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        str=paths[i];
+        fstat=create_emptyMountPointStatus();
+        buff=create_emptyFileStatus();
+        if(__xstat_spec(context, 3, str, buff, requestErrorCode())!=-1)
+        {
+            fildes=open_spec(context, str, fl, buff->permissions, requestErrorCode(), false);
+            VERBOSE("file descriptor==%d\n", fildes.filedesc);
+            fstatvfs64_spec(context, fildes, fstat, requestErrorCode());
+        } else {
+            // We need to minimally cover this function
+            FileDescId fildes = WrongFileDescId;
+            MountPointStatus* fstat;
+            FileStatus* buff;
+
+            fstat=create_emptyMountPointStatus();
+            buff=create_emptyFileStatus();
+            fstatvfs64_spec(context, fildes, fstat, requestErrorCode());
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool fs_statvfs_simple_scen()
+{
+    MountPointStatus* mp;
+    CString* str;
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        str=paths[i];
+        mp=create_emptyMountPointStatus();
+        statvfs_spec(context, str, mp, requestErrorCode());
+    }
+
+
+    return true;
+}
+
+scenario
+bool fs_statvfs64_simple_scen()
+{
+    MountPointStatus* mp;
+    CString* str;
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        str=paths[i];
+        mp=create_emptyMountPointStatus();
+        statvfs64_spec(context, str, mp, requestErrorCode());
+    }
+
+
+    return true;
+}
+scenario dfsm fs_meta_statvfs_scenario =
+{
+    .init = init_fs_meta_statvfs_scenario,
+    .finish = finish_fs_meta_statvfs_scenario,
+    .actions = {
+                fs_meta_statvfs_creat_scenario_scen,
+
+                fs_meta_statvfs_init_scenario_scen,
+
+                fs_fstatvfs64_scen,
+                fs_statvfs_simple_scen,
+                fs_fstatvfs_scen,
+                fs_statvfs64_simple_scen,
+
+                fs_meta_statvfs_remove_scenario_scen,
+
+                NULL
+               }
+};
+
+
+bool main_fs_meta_statvfs(int argc, char** argv)
+{
+    fs_meta_statvfs_scenario(argc, argv);
+
+    return true;
+}
+
+#ifdef  FS_META_STATVFS_LOCAL_MAIN
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initPathSystemConfiguration();
+    initFsFsSubsystem();
+    initIoFileSubsystem();
+    initFsMetaSubsystem();
+    initFsSymlinkSubsystem();
+    initFsDirSubsystem();
+    initProcessProcessSubsystem();
+
+    initFsMetaStatvfsSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    addTraceToFile("trace.xml");
+    main_fs_meta_statvfs(argc, argv);
+
+    //  unloadSUT();
+    return 0;
+}
+#endif

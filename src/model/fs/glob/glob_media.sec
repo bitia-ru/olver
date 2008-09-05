@@ -1,0 +1,440 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "common/common_media.seh"
+#include "common/common_model.seh"
+#include "config/system_config.seh"
+#include "fs/glob/glob_media.seh"
+
+/********************************************************************/
+/**                          Formatters                            **/
+/********************************************************************/
+void writeGlobFlagsObj_TSStream(TSStream *stream, GlobFlagsObj *flags)
+{
+    assertion(stream != NULL, "writeGlobFlagsObj_TSStream: stream is NULL");
+    assertion(flags  != NULL, "writeGlobFlagsObj_TSStream: flags is NULL");
+
+    writeTypeHeaderTSStream(stream, "globflags");
+
+    writeChar_TSStream(stream, flags->err         ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->mark        ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->nosort      ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->dooffs      ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->nocheck     ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->append      ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->noescape    ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->period      ? '\xFF' : '\x00');
+    //writeChar_TSStream(stream, flags->magchar     ? '\xFF' : '\x00');
+    //writeChar_TSStream(stream, flags->altdirfunc  ? '\xFF' : '\x00');
+    //writeChar_TSStream(stream, flags->brace       ? '\xFF' : '\x00');
+    //writeChar_TSStream(stream, flags->nomagic     ? '\xFF' : '\x00');
+    //writeChar_TSStream(stream, flags->tilde       ? '\xFF' : '\x00');
+    //writeChar_TSStream(stream, flags->onlydir     ? '\xFF' : '\x00');
+    //writeChar_TSStream(stream, flags->tilde_check ? '\xFF' : '\x00');
+}
+
+static void globflags_formatter(TSStream *stream, GlobFlagsObj *flags)
+{
+    VERIFY_TYPE(globflags_formatter, &type_GlobFlagsObj, flags);
+
+    writeGlobFlagsObj_TSStream(stream, flags);
+}
+
+void writeGlobErrorFunction_TSStream(TSStream *stream, GlobErrorFunction *errfunc)
+{
+    assertion(stream != NULL, "writeErrorFunction_TSStream: stream is NULL");
+
+    if(errfunc == NULL)
+    {
+        writeTypeHeaderTSStream(stream, "null");
+        return;
+    }
+    
+    writeTypeHeaderTSStream(stream, "globerrfunc");
+
+    writeInt_TSStream(stream, errfunc->type);
+    writeInt_TSStream(stream, errfunc->param);
+}
+
+static void globerrfunc_formatter(TSStream *stream, GlobErrorFunction *errfunc)
+{
+    VERIFY_TYPE(globerrfunc_formatter, &type_GlobErrorFunction, errfunc);
+
+    writeGlobErrorFunction_TSStream(stream, errfunc);
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initFsGlobSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_setglob_spec(setglob_media);
+    set_mediator_setglob64_spec(setglob64_media);
+    set_mediator_glob_spec(glob_media);
+    set_mediator_glob64_spec(glob64_media);
+    set_mediator_globfree_spec(globfree_media);
+    set_mediator_globfree64_spec(globfree64_media);
+
+    // Set up formatters
+    registerTSFormatter("globflags",(TSFormatterFuncType)globflags_formatter);
+    registerTSFormatter("globerrfunc",(TSFormatterFuncType)globerrfunc_formatter);
+}
+
+/*****************************************************************************/
+/**                   Auxiliary Specification Functions                     **/
+/*****************************************************************************/
+
+/** setglob_spec **/
+mediator setglob_media for specification
+void setglob_spec(CallContext context, GlobTPtr pglob, GlobT *glob)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "setglob:$(ptr)$(size)",
+            create_VoidTPtrObj(pglob),
+            create_SizeTObj(glob->offs));
+        
+        executeCommandInContext(context, &command);
+    }
+    state
+    {
+        GlobT *post_glob = getGlobT(pglob);
+        
+        if(post_glob != NULL)
+        {
+            post_glob->offs = glob->offs;
+        }
+    }
+}
+
+/** setglob64_spec **/
+mediator setglob64_media for specification
+void setglob64_spec(CallContext context, Glob64TPtr pglob, Glob64T *glob64)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "setglob:$(ptr)$(size)",
+            create_VoidTPtrObj(pglob),
+            create_SizeTObj(glob64->offs));
+        
+        executeCommandInContext(context, &command);
+    }
+    state
+    {
+        Glob64T *post_glob64 = getGlob64T(pglob);
+        
+        if(post_glob64 != NULL)
+        {
+            post_glob64->offs = glob64->offs;
+        }
+    }
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+static void readGlobErrorFunctionCalls(TSStream *stream, GlobErrorFunction *errfunc)
+{
+    CString *epath;
+
+    if(errfunc != NULL)
+    {
+        reset_GlobErrorFunction(errfunc);
+    }
+
+    for(epath = readCString_TSStream(stream); epath != NULL;
+        epath = readCString_TSStream(stream))
+    {
+        ErrorCode *eerrno = create_ErrorCode(readInt_TSStream(stream));
+        IntT result = readInt_TSStream(stream);
+
+        if(errfunc != NULL)
+        {
+            append_List(errfunc->calls, create_GlobErrorFunctionCall(epath, eerrno, result));
+        }
+    }
+}
+
+/** glob_spec **/
+mediator glob_media for specification
+GlobErrorCode glob_spec(CallContext context, CString *pattern, GlobFlags flags,
+                        GlobErrorFunction *errfunc, GlobTPtr pglob)
+{
+    call
+    {
+        GlobErrorCode res = SUT_GLOB_UNKNOWN;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "glob:$(str)$(globflags)$(globerrfunc)$(ptr)",
+            pattern,
+            create_GlobFlagsObj(flags),
+            errfunc,
+            create_VoidTPtrObj(pglob));
+        
+        executeCommandInContext(context, &command);
+
+        /*
+         * The first pointer after the last pathname shall be a null pointer.
+         */
+        REQ_MEDIA("glob.04", "The last pointer shall be NULL", !isBadVerdict());
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            readGlobErrorFunctionCalls(&command.response, errfunc);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        mapGlobTStateUp(context, pglob, flags);
+    }
+}
+
+/** glob64_spec **/
+mediator glob64_media for specification
+GlobErrorCode glob64_spec(CallContext context, CString *pattern, GlobFlags flags,
+                          GlobErrorFunction *errfunc, Glob64TPtr pglob)
+{
+    call
+    {
+        GlobErrorCode res = SUT_GLOB_UNKNOWN;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "glob64:$(str)$(globflags)$(globerrfunc)$(ptr)",
+            pattern,
+            create_GlobFlagsObj(flags),
+            errfunc,
+            create_VoidTPtrObj(pglob));
+
+        executeCommandInContext(context, &command);
+
+        /*
+         * The first pointer after the last pathname shall be a null pointer.
+         */
+        REQ_MEDIA("glob64.04", "The last pointer shall be NULL", !isBadVerdict());
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            readGlobErrorFunctionCalls(&command.response, errfunc);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        mapGlob64TStateUp(context, pglob, flags);
+    }
+}
+
+/** globfree_spec **/
+mediator globfree_media for specification
+void globfree_spec(CallContext context, GlobTPtr pglob)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "globfree:$(ptr)", create_VoidTPtrObj(pglob));
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        unregisterObjectInMemory(pglob);
+    }
+}
+
+/** globfree64_spec **/
+mediator globfree64_media for specification
+void globfree64_spec(CallContext context, Glob64TPtr pglob)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "globfree64:$(ptr)", create_VoidTPtrObj(pglob));
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        unregisterObjectInMemory(pglob);
+    }
+}
+
+/********************************************************************/
+/**                      Helper Functions                         **/
+/********************************************************************/
+GlobT *getGlobTState(CallContext context, GlobTPtr pglob, GlobFlags flags)
+{
+    SizeT i, pathc, offs, size;
+    List *pathv = create_List(&type_CString);
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "getglob:$(ptr)$(globflags)",
+        create_VoidTPtrObj(pglob),
+        create_GlobFlagsObj(flags));
+
+    executeCommandInContext(context, &command);
+
+    pathc = readSize_TSStream(&command.response);
+    offs = readSize_TSStream(&command.response);
+
+    size = pathc + (flags.dooffs ? offs : 0);
+
+    for(i = 0; i < size; i++)
+    {
+        CString* path = readCString_TSStream(&command.response);
+
+        if(flags.dooffs && i < offs)
+        {
+            /*
+             * GLOB_DOOFFS
+             *
+             * Make use of pglob->gl_offs. If this flag is set, pglob->gl_offs
+             * is used to specify how many null pointers to add to the
+             * beginning of pglob->gl_pathv. In other words, pglob->gl_pathv
+             * shall point to pglob->gl_offs null pointers, followed by
+             * pglob->gl_pathc pathname pointers, followed by a null pointer.
+             */
+            REQ_MEDIA("glob.07.02", "The offset pointers shall be NULL",
+                path == NULL);
+        }
+
+        if(i >= (flags.dooffs ? offs : 0))
+        {
+            append_List(pathv, path);
+        }
+    }
+
+    return create_GlobT(pglob, pathc, offs, pathv, flags);
+}
+
+void mapGlobTStateUp(CallContext context, GlobTPtr pglob, GlobFlags flags)
+{
+    if(isValidPointer(context, pglob))
+    {
+        GlobT *pre_glob = getGlobT(pglob);
+        GlobT *post_glob = getGlobTState(context, pglob, flags);
+
+        post_glob->address = NULL_VoidTPtr;
+
+        if(pre_glob == NULL)
+        {
+            registerObjectInMemory(pglob, sizeof_Type(context, "glob_t"), post_glob);
+        }
+        else
+        {
+            copy(post_glob, pre_glob);
+        }
+    }
+}
+
+Glob64T *getGlob64TState(CallContext context, Glob64TPtr pglob, GlobFlags flags)
+{
+    SizeT i, pathc, offs, size;
+    List *pathv = create_List(&type_CString);
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "getglob64:$(ptr)$(globflags)",
+        create_VoidTPtrObj(pglob),
+        create_GlobFlagsObj(flags));
+
+    executeCommandInContext(context, &command);
+
+    pathc = readSize_TSStream(&command.response);
+    offs = readSize_TSStream(&command.response);
+
+    size = pathc + (flags.dooffs ? offs : 0);
+
+    for(i = 0; i < size; i++)
+    {
+        CString* path = readCString_TSStream(&command.response);
+
+        if(flags.dooffs && i < offs)
+        {
+            /*
+             * GLOB_DOOFFS
+             *
+             * Make use of pglob->gl_offs. If this flag is set, pglob->gl_offs
+             * is used to specify how many null pointers to add to the
+             * beginning of pglob->gl_pathv. In other words, pglob->gl_pathv
+             * shall point to pglob->gl_offs null pointers, followed by
+             * pglob->gl_pathc pathname pointers, followed by a null pointer.
+             */
+            REQ_MEDIA("glob64.07.02", "The offset pointers shall be NULL",
+                path == NULL);
+        }
+
+        if(i >= (flags.dooffs ? offs : 0))
+        {
+            append_List(pathv, path);
+        }
+    }
+
+    return create_Glob64T(pglob, pathc, offs, pathv, flags);
+}
+
+void mapGlob64TStateUp(CallContext context, Glob64TPtr pglob, GlobFlags flags)
+{
+    if(isValidPointer(context, pglob))
+    {
+        Glob64T *pre_glob64 = getGlob64T(pglob);
+        Glob64T *post_glob64 = getGlob64TState(context, pglob, flags);
+
+        post_glob64->address = NULL_VoidTPtr;
+
+        if(pre_glob64 == NULL)
+        {
+            registerObjectInMemory(pglob, sizeof_Type(context, "glob64_t"), post_glob64);
+        }
+        else
+        {
+            copy(post_glob64, pre_glob64);
+        }
+    }
+}

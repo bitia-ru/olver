@@ -1,0 +1,175 @@
+/* 
+ * File: ncurses/screen/tests/screen_scenario.sec
+ * 
+ * Author:
+ * Version:  $Id: screen_scenario.sec,v 1.12 2007/11/06 12:41:35 lex Exp $
+ * 
+ * Copyright (c) 2005 ISP RAS.
+ * 25, B.Communisticheskaya, Moscow, Russia.
+ * All rights reserved.
+ */
+
+#include "ncurses/screen/tests/screen_scenario.seh"
+#include "ncurses/screen/tests/screen_main.seh"
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+
+#include "ncurses/terminal/terminal_model.seh"
+#include "ncurses/window/window_model.seh"
+#include "process/process/process_model.seh"
+
+#include "ncurses/screen/screen_model.seh"
+#include "ncurses/border/border_media.seh"
+#include "ncurses/window/refresh_model.seh"
+
+static CallContext context;
+static StringTPtr str;
+static CByteArray *termInfo;
+static ChTypeT NULL_ChTypeT = {0,0,0,0,0,0,0,0,0,0,0};
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_screen_scenario(int argc, char** argv)
+{
+    context = createDefaultProcessForNCurses();
+    termInfo = ncursesReadTerminfo(context);
+    traceFormattedUserInfo("terminfo:$(obj)", termInfo);
+
+    initscr_spec(context);
+
+    onAcsMapUpdate(context);
+
+    initReqFilters();
+
+    registerStdTerminal(context);  
+
+    setVariables_StdTerminal(context);
+
+    str = allocateMemoryBlock(context, 1024);
+    
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+    
+    return true;
+}
+
+static void finish_screen_scenario(void)
+{
+    endwin_spec(context);
+
+    deallocateMemoryBlock(context, str);
+
+    removeTestScenarioSandboxDir(context);
+    
+    TEST_SCENARIO_VERDICT_VERBOSE(screen_scenario);
+}
+
+/********************************************************************/
+/**                          Utilities                             **/
+/********************************************************************/
+
+void DumpScr(void)
+{
+    ChTypeTArray* scrDump;
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+    IntT i;
+    
+    scrDump = create_ChTypeTArray_ScreenDump(ncursesScreenDump(context), stdWnd->ncols, stdWnd->nlines);
+    traceFormattedUserInfo("screen dump:$(obj)", scrDump);
+
+    DUMP("\n\n");
+    for(i = 0; i < scrDump->size; i++) DUMP("%c", chtypeAt_ChTypeTArray(scrDump, i).letter);
+    DUMP("\n\n");
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool screen_scen()
+{
+    VoidTPtr p[4];
+    
+    box_spec(context, NULL, NULL_ChTypeT, NULL_ChTypeT);
+    
+    refresh_spec(context, NULL);
+
+    p[0] = add_VoidTPtr(str, 0);
+    writeCString_VoidTPtr(p[0], SANDBOX_FILE("dump1"));
+    p[1] = add_VoidTPtr(str, 128);
+    writeCString_VoidTPtr(p[1], SANDBOX_FILE("dump2"));
+    p[2] = add_VoidTPtr(str, 256);
+    writeCString_VoidTPtr(p[2], SANDBOX_FILE("dump3"));
+
+    scr_dump_spec(context, p[0]);
+
+    scr_restore_spec(context, p[0]);
+    
+    scr_dump_spec(context, NULL_VoidTPtr);
+    scr_restore_spec(context, NULL_VoidTPtr);
+
+    scr_dump_spec(context, p[1]);
+    scr_init_spec(context, p[1]);
+    scr_init_spec(context, NULL_VoidTPtr);
+
+    scr_dump_spec(context, p[2]);
+    scr_set_spec(context, p[2]);
+    scr_set_spec(context, NULL_VoidTPtr);
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm screen_scenario =
+{
+    .init = init_screen_scenario,
+    .finish = finish_screen_scenario,
+    .actions = {
+        screen_scen,
+        NULL
+    }
+};
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+#ifdef NCURSES_SCREEN_LOCAL_MAIN
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initNcurses();
+}
+
+int main(int argc, char** argv)
+{    
+    initTestSystem();
+    loadSUT();
+    addTraceToFile("trace.xml");
+       
+    screen_scenario(argc, argv);
+    
+    return 0;
+}
+
+#endif

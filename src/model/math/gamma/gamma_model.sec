@@ -1,0 +1,1551 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee 
+ * document. The original document can be obtained online at 
+ * http://www.unix.org/version2/online.html.
+ */
+
+#include "math/gamma/gamma_model.seh"
+#include "math/gamma/gamma_config.h"
+
+#pragma SEC subsystem gamma "math.gamma"
+
+
+/* 
+   The group of functions 'math.gamma' consists of: 
+       gamma [4]
+       gammaf [1]
+       gammal [1]
+       lgamma [2]
+       lgamma_r [1]
+       lgammaf [2]
+       lgammaf_r [1]
+       lgammal [2]
+       lgammal_r [1]
+       tgamma [2]
+       tgammaf [2]
+       tgammal [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX (R) Specification, Version 2 
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+NAME
+
+    gamma, signgam - log gamma function (LEGACY) 
+
+SYNOPSIS
+
+    #include <math.h> 
+    double gamma(double x); 
+    extern int signgam; 
+
+DESCRIPTION
+
+    The gamma() function performs identically to lgamma(), including the use of 
+    signgam. This interface need not be reentrant. 
+
+RETURN VALUE
+
+    Refer to lgamma(). 
+
+ERRORS
+
+    None. 
+
+EXAMPLES
+
+    None.
+*/
+
+/** gamma_spec **/
+//This specification refers to: gammaf, gamma, gammal
+specification
+Unifloat* gamma_spec(CallContext context, Unifloat* x, 
+                      IntT* signgam,  ErrorCode* errno)
+{
+    char type[3][10] = {"gammaf", "gamma", "gammal"};
+    Unifloat* One, * Two;
+
+    One = convertInteger_Unifloat(1, x->type);
+    Two = convertInteger_Unifloat(2, x->type);
+    FILTER(type[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "signgam shall not be NULL", signgam != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(!isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x))
+            return {X_IS_NORMAL_POSITIVE, "X IS NORMAL POSITIVE" };
+        
+        if(((x->sign == -1) && isNormal_Unifloat(x)) || isZero_Unifloat(x))
+            return {X_IS_NORMAL_NON_POSITIVE, "X IS NORMAL NON POSITIVE" };
+        
+        if(isNan_Unifloat(x))
+            return {X_IS_NAN, "X IS NAN" };
+    }
+    post
+    {
+        IntT mant = digMant_Unifloat(x->type);
+
+        /*[Calculate model function]*/
+        Unifloat* model_res;
+        signgam_model = 0;
+
+        model_res = gamma_model(x);
+        
+        round_Unifloat(model_res, mant);
+        round_Unifloat(gamma_spec, mant);
+        
+        if(!isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x))
+        {
+            /*
+             * The sign of GAMMA(x) is returned in the external integer signgam.
+             */
+            REQ("gamma.lgamma.04;gammaf.lgamma.04;gammal.lgamma.04", 
+                "The sign of GAMMA(x) is returned in the external integer signgam", 
+                *signgam == signgam_model);
+        }
+
+        /*
+         * If errno is non-zero on return, or the return value is NaN, an error 
+         * has occurred.
+         */
+        REQ("gamma.lgamma.07;gammaf.lgamma.07;gammal.lgamma.07", "", TODO_REQ());
+
+        /*
+         * This interface need not be reentrant.
+         */
+        REQ("gamma.lgamma.08;gammaf.lgamma.08;gammal.lgamma.08", "", TODO_REQ());
+
+        if(!isOverflow_Unifloat(model_res) && !isUnderflow_Unifloat(model_res) 
+           && !isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x))
+        {
+            /*
+             * Upon successful completion, lgamma() returns the logarithmic 
+             * gamma of x.
+             */
+            REQ("gamma.lgamma.09;gammaf.lgamma.09;gammal.lgamma.09", 
+                "Function returns the logarithmic gamma of x", 
+                compareWithPrecision_Unifloat(model_res, gamma_spec, mant) == 0);
+        }
+
+#if NAN_SUPPORT == 1
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * If x is NaN, NaN is returned and errno may be set to [EDOM].
+             */
+            REQ("gamma.lgamma.10;gammaf.lgamma.10;gammal.lgamma.10", 
+                "If x is NaN, NaN is returned", 
+                isNan_Unifloat(gamma_spec));
+        }
+#endif
+
+#if NAN_SUPPORT == 1
+        if(((x->sign == -1) && isNormal_Unifloat(x)) || isZero_Unifloat(x))
+        {
+            /*
+             * If x is a non-positive integer, either HUGE_VAL or NaN is 
+             * returned and errno may be set to [EDOM].
+             */
+            REQ("gamma.lgamma.11;gammaf.lgamma.11;gammal.lgamma.11", 
+            "If x is a non-positive integer, either HUGE_VAL or NaN is "
+            "returned", 
+            isNan_Unifloat(gamma_spec) || isInfinity_Unifloat(gamma_spec));
+        }
+#endif
+
+        if(isOverflow_Unifloat(model_res))
+        {
+            /*
+             * If the correct value would cause overflow, lgamma() returns 
+             * HUGE_VAL and may set errno to [ERANGE].
+             */
+            REQ("gamma.lgamma.12;gammaf.lgamma.12;gammal.lgamma.12", 
+            "If the correct value would cause overflow, gamma() returns "
+            "HUGE_VAL", 
+            isInfinity_Unifloat(gamma_spec));
+        }
+
+        if(isUnderflow_Unifloat(model_res))
+        {
+            /*
+             * If the correct value would cause underflow, lgamma() returns 0 
+             * and may set errno to [ERANGE].
+             */
+            REQ("gamma.lgamma.13;gammaf.lgamma.13;gammal.lgamma.13", 
+                "If the correct value would cause underflow, gamma() "
+                "returns 0", 
+                isZero_Unifloat(gamma_spec));
+        }
+
+        /*
+         * This interface need not be reentrant.
+         */
+        REQ("gamma.02;gammaf.gamma.02;gammal.gamma.02", "", TODO_REQ());
+
+ 
+
+        return true;
+    }
+    
+    FILTER_CLEAN;
+}
+
+Unifloat* gamma_model(Unifloat* x)
+{
+    Unifloat* res, * Half, * pi, * One, * Two, * int_x, * Ten, * z, * new_x;
+    Unifloat* huge_val[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), 
+                             clone(infinity_LongDoubleT)};
+    IntT i, num, error;
+    One = createOne_Unifloat(x->type);
+    Two = createOne_Unifloat(x->type);
+    Two->exp++;
+    Ten = convertString_Unifloat(create_CString("10"), x->type);
+    new_x = clone(x);
+    z = createZero_Unifloat(x->type);
+    
+    if((x->sign == -1) && isNormal_Unifloat(x))
+    {
+        int_x = clone(x);
+        for(i = int_x->exp + 1; i < PRECISION; i++)
+            setMant_Unifloat(int_x, i, 0);
+        int_x = div_Unifloat(int_x, Two);
+        
+        signgam_model = -1;
+        for(i = int_x->exp + 1; i < PRECISION; i++)
+            if(getMant_Unifloat(int_x, i) != 0)
+            {
+                signgam_model = 1;
+                break;
+            }
+
+        return clone(huge_val[x->type]);
+    }
+
+    if(isZero_Unifloat(x))
+    {
+        signgam_model = 1;
+        return clone(huge_val[x->type]);
+    }
+    
+    if(isNan_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = NaN;
+        return res;
+    }
+    
+    if(compare_Unifloat(x, One) == 0 || compare_Unifloat(x, Two) == 0)
+    {
+        res = createZero_Unifloat(x->type);
+        res->sign = 1;
+        signgam_model = 1;
+        return res;
+    }
+
+    if(isInfinity_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = Infinity;
+        res->sign = 1;
+        if(x->sign == 1)
+            signgam_model = 1;
+        
+        return res;
+    }
+    
+    //change argument
+    if(compare_Unifloat(x, Ten) == -1)
+    {
+        z = sub_Unifloat(Ten, x);
+        if(z->exp>0)
+            for(i = z->exp + 1; i < PRECISION + 1; i++)
+                setMant_Unifloat(z, i, 0);
+        else z = createZero_Unifloat(x->type);
+        z = add_Unifloat(z, One);
+        new_x = add_Unifloat(x, z);
+        num = convertUnifloat_Integer(z, &error);
+        z = clone(x);
+        for(i = 1; i < num; i++)
+            z = mul_Unifloat(z, add_Unifloat(x, 
+            convertInteger_Unifloat(i, x->type)));
+    }
+    ////////
+
+    Half = createOne_Unifloat(x->type);
+    Half->exp--;
+    pi = convertBinaryString_Unifloat(create_CString(PI), x->type);
+
+    res = clone(new_x);
+    res = sub_Unifloat(res, Half);
+    res = mul_Unifloat(res, log_Unifloat(new_x));
+    res = sub_Unifloat(res, new_x);
+    res = add_Unifloat(res, mul_Unifloat(log_Unifloat(mul_Unifloat(pi, Two)), 
+                                         Half));
+    res = add_Unifloat(res, gammaSeries_Unifloat(new_x));
+    if(!isZero_Unifloat(z))
+        res = sub_Unifloat(res, log_Unifloat(z));
+    signgam_model = 1;
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    lgamma, lgammaf, lgammal - log gamma function 
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double lgamma(double x);
+
+    float lgammaf(float x);
+
+    long double lgammal(long double x);
+
+    [XSI] extern int signgam; 
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and 
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 
+    defers to the ISO C standard. These functions shall compute 
+
+    The argument x need not be a non-positive integer ( is defined over the 
+    reals, except the non-positive integers).
+
+    [XSI] The sign of is returned in the external integer signgam. 
+
+    [CX] These functions need not be reentrant. A function that is not required 
+    to be reentrant is not required to be thread-safe. 
+
+    An application wishing to check for error situations should set errno to 
+    zero and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. 
+    On return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO | 
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the logarithmic 
+    gamma of x.
+
+    If x is a non-positive integer, a pole error shall occur and lgamma(), 
+    lgammaf(), and lgammal() shall return +HUGE_VAL, +HUGE_VALF, and 
+    +HUGE_VALL, respectively.
+
+    If the correct value would cause overflow, a range error shall occur and 
+    lgamma(), lgammaf(), and lgammal() shall return ±HUGE_VAL, ±HUGE_VALF, 
+    and ±HUGE_VALL (having the same sign as the correct value), respectively.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is 1 or 2, +0 shall be returned.
+
+    If x is ±Inf, +Inf shall be returned. 
+
+ERRORS
+
+    These functions shall fail if:
+
+        Pole Error The x argument is a negative integer or zero.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression (math_errhandling 
+    &amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point 
+    exception shall be raised.
+
+        Range Error The result overflows.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression (math_errhandling 
+    &amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point 
+    exception shall be raised.
+*/
+
+/** lgamma_spec **/
+//This specification refers to: lgammaf, lgamma, lgammal
+specification
+Unifloat* lgamma_spec(CallContext context, Unifloat* x, 
+                      IntT* signgam,  ErrorCode* errno)
+{
+    char type[3][10] = {"lgammaf", "lgamma", "lgammal"};
+    Unifloat* One, * Two;
+    One = convertInteger_Unifloat(1, x->type);
+    Two = convertInteger_Unifloat(2, x->type);
+    FILTER(type[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "signgam shall not be NULL", signgam != NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(!isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x) && 
+           compare_Unifloat(x, One) != 0 && compare_Unifloat(x, Two) != 0)
+            return {X_IS_NORMAL_POSITIVE_EXCEPT_ONE_OR_TWO, 
+                    "X IS NORMAL POSITIVE EXCEPT ONE OR TWO" };
+
+        if(((x->sign == -1) && isNormal_Unifloat(x)) || isZero_Unifloat(x))
+            return {X_IS_NORMAL_NON_POSITIVE, "X IS NORMAL NON POSITIVE" };
+        
+        if(isNan_Unifloat(x))
+            return {X_IS_NAN, "X IS NAN" };
+
+        if((x->sign == 1) && isInfinity_Unifloat(x))
+            return {X_IS_POSITIVE_INFINITY, "X IS POSITIVE INFINITY" };
+
+        if((x->sign == -1) && isInfinity_Unifloat(x))
+            return {X_IS_NEGATIVE_INFINITY, "X IS NEGATIVE INFINITY" };
+
+        if(compare_Unifloat(x, One) == 0)
+            return {X_IS_ONE, "X IS ONE" };
+        
+        if(compare_Unifloat(x, Two) == 0)
+            return {X_IS_TWO, "X IS TWO" };
+    }
+    post
+    {
+        IntT mant = digMant_Unifloat(x->type);
+
+        /*[Calculate model function]*/
+        Unifloat* model_res;
+        signgam_model = 0;
+
+        model_res = lgamma_model(x);
+        
+        round_Unifloat(model_res, mant);
+        round_Unifloat(lgamma_spec, mant);
+
+        if(((x->sign == -1) || (isZero_Unifloat(x))) && isNormal_Unifloat(x))
+        {
+            /*
+             * If x is a non-positive integer, a pole error shall occur and 
+             * lgamma(), lgammaf(), and lgammal() shall return +HUGE_VAL, 
+             * +HUGE_VALF, and +HUGE_VALL, respectively.
+             */
+            REQ("lgamma.08;lgammaf.08;lgammal.08", 
+                "If x is a non-positive integer function shall return "
+                "+HUGE_VAL", 
+                isInfinity_Unifloat(lgamma_spec) && (lgamma_spec->sign == 1));
+        }
+
+        if(isOverflow_Unifloat(model_res))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall 
+             * occur and lgamma(), lgammaf(), and lgammal() shall return 
+             * ±HUGE_VAL, ±HUGE_VALF, and ± HUGE_VALL 
+             * (having the same sign as the correct value), respectively.
+             */
+            REQ("lgamma.09;lgammaf.09;lgammal.09", 
+            "If the correct value would cause overflow function shall return "
+            "±HUGE_VAL", 
+            isInfinity_Unifloat(lgamma_spec) && 
+            (lgamma_spec->sign == model_res->sign));
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Pole Error The x argument is a negative integer or zero.
+         *
+         * Range Error The result overflows.
+         */
+         ERROR_BEGIN(POSIX_LGAMMA, 
+                    "lgamma.13.01.01;lgammaf.13.01.01;lgammal.13.01.01;"
+                    "lgamma.13.02.01;lgammaf.13.02.01;lgammal.13.02.01", 
+                    *errno, *errno)
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error The x argument is a negative integer or zero.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) 
+             * is non-zero, then errno shall be set to [ERANGE].
+             */
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) 
+             * is non-zero, then errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_LGAMMA, ERANGE, 
+                        "lgamma.13.01.01;lgammaf.13.01.01;lgammal.13.01.01;"
+                        "lgamma.13.02.01;lgammaf.13.02.01;lgammal.13.02.01", 
+            (isZero_Unifloat(x) || ((x->sign == -1) && isNormal_Unifloat(x))) 
+            || 
+            (isOverflow_Unifloat(model_res))
+                       )
+
+         ERROR_END()
+
+        if(!isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x) && 
+           compare_Unifloat(x, One) != 0 && compare_Unifloat(x, Two) != 0)
+        {
+            /*
+             * [XSI] The sign of GAMMA(x) is returned in the external integer 
+             * signgam.
+             */
+            REQ("lgamma.03;lgammaf.03;lgammal.03", 
+                "The sign of GAMMA(x) is returned in the external integer signgam", 
+                *signgam == signgam_model);
+        }
+
+        /*
+         * [CX] These functions need not be reentrant.
+         */
+        REQ("lgamma.04;lgammaf.04;lgammal.04", "", TODO_REQ());
+
+        if(!isOverflow_Unifloat(model_res) && !isZero_Unifloat(x) && 
+           (x->sign == 1) && isNormal_Unifloat(x) && 
+           compare_Unifloat(x, One) != 0 && compare_Unifloat(x, Two) != 0)
+        {
+            /*
+             * Upon successful completion, these functions shall return the 
+             * logarithmic gamma of x.
+             */
+            REQ("lgamma.07;lgammaf.07;lgammal.07", 
+                "Upon successful completion, these functions shall return the "
+                "logarithmic gamma of x", 
+                compareWithPrecision_Unifloat(lgamma_spec, model_res, mant) == 0);
+        }
+
+#if NAN_SUPPORT == 1
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("lgamma.10;lgammaf.10;lgammal.10", 
+            "If x is NaN, a NaN shall be returned", 
+            isNan_Unifloat(lgamma_spec));
+        }
+#endif
+
+        if(compare_Unifloat(x, One) == 0 || compare_Unifloat(x, Two) == 0)
+        {
+            /*
+             * If x is 1 or 2, +0 shall be returned.
+             */
+            REQ("lgamma.11;lgammaf.11;lgammal.11", 
+                "If x is 1 or 2, +0 shall be returned", 
+                isZero_Unifloat(lgamma_spec) && (lgamma_spec->sign == 1));
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±Inf, +Inf shall be returned.
+             */
+            REQ("lgamma.12;lgammaf.12;lgammal.12", 
+            "If x is ±Inf, +Inf shall be returned", 
+            isInfinity_Unifloat(lgamma_spec) && (lgamma_spec->sign == 1));
+        }
+
+     
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+Unifloat* lgamma_model(Unifloat* x)
+{
+    Unifloat* res, * Half, * pi, * One, * Two, * int_x, * Ten, * z, * new_x;
+    Unifloat* huge_val[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), 
+                             clone(infinity_LongDoubleT)};
+    IntT i, num, error;
+
+    One = createOne_Unifloat(x->type);
+    Two = createOne_Unifloat(x->type);
+    Two->exp++;
+    Ten = convertString_Unifloat(create_CString("10"), x->type);
+    new_x = clone(x);
+    z = createZero_Unifloat(x->type);
+    
+    if((x->sign == -1) && isNormal_Unifloat(x))
+    {
+        int_x = clone(x);
+        for(i = int_x->exp + 1; i < PRECISION; i++)
+            setMant_Unifloat(int_x, i, 0);
+        int_x = div_Unifloat(int_x, Two);
+        
+        signgam_model = -1;
+        for(i = int_x->exp + 1; i < PRECISION; i++)
+            if(getMant_Unifloat(int_x, i) != 0)
+            {
+                signgam_model = 1;
+                break;
+            }
+
+        return clone(huge_val[x->type]);
+    }
+
+    if(isZero_Unifloat(x))
+    {
+        signgam_model = 1;
+        return clone(huge_val[x->type]);
+    }
+    
+    if(isNan_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = NaN;
+        return res;
+    }
+    
+    if(compare_Unifloat(x, One) == 0 || compare_Unifloat(x, Two) == 0)
+    {
+        res = createZero_Unifloat(x->type);
+        res->sign = 1;
+        signgam_model = 1;
+        return res;
+    }
+
+    if(isInfinity_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = Infinity;
+        res->sign = 1;
+        if(x->sign == 1)
+            signgam_model = 1;
+        
+        return res;
+    }
+    
+    //change argument
+    if(compare_Unifloat(x, Ten) == -1)
+    {
+        z = sub_Unifloat(Ten, x);
+        if(z->exp>0)
+            for(i = z->exp + 1; i < PRECISION + 1; i++)
+                setMant_Unifloat(z, i, 0);
+        else z = createZero_Unifloat(x->type);
+        z = add_Unifloat(z, One);
+        new_x = add_Unifloat(x, z);
+        num = convertUnifloat_Integer(z, &error);
+        z = clone(x);
+        for(i = 1; i < num; i++)
+            z = mul_Unifloat(z, add_Unifloat(x, 
+            convertInteger_Unifloat(i, x->type)));
+    }
+    ////////
+
+    Half = createOne_Unifloat(x->type);
+    Half->exp--;
+    pi = convertBinaryString_Unifloat(create_CString(PI), x->type);
+
+    res = clone(new_x);
+    res = sub_Unifloat(res, Half);
+    res = mul_Unifloat(res, log_Unifloat(new_x));
+    res = sub_Unifloat(res, new_x);
+    res = add_Unifloat(res, mul_Unifloat(log_Unifloat(mul_Unifloat(pi, Two)), 
+                                         Half));
+    res = add_Unifloat(res, gammaSeries_Unifloat(new_x));
+    if(!isZero_Unifloat(z))
+        res = sub_Unifloat(res, log_Unifloat(z));
+    signgam_model = 1;
+    return res;
+}
+
+/*
+NAME
+
+    lgamm_r, lgammaf_r, lgammal_r - log gamma function 
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double lgamma_r(double x, int *signp);
+    float lgammaf_r(float x, int *signp);
+    long double lgammal_r(long double x, int *signp);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and 
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 
+    defers to the ISO C standard. These functions shall compute 
+
+    The argument x need not be a non-positive integer ( is defined over the 
+    reals, except the non-positive integers).
+
+    [XSI] The sign of is returned in the integer signp. 
+
+    [CX] These functions need not be reentrant. A function that is not required 
+    to be reentrant is not required to be thread-safe. 
+
+    An application wishing to check for error situations should set errno to 
+    zero and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. 
+    On return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO | 
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the logarithmic 
+    gamma of x.
+
+    If x is a non-positive integer, a pole error shall occur and lgamm_r(), 
+    lgammaf_r(), and lgammal_r() shall return +HUGE_VAL, +HUGE_VALF, and 
+    +HUGE_VALL, respectively.
+
+    If the correct value would cause overflow, a range error shall occur and 
+    lgamm_r(), lgammaf_r(), and lgamml_r() shall return ±HUGE_VAL, ±HUGE_VALF, 
+    and ±HUGE_VALL (having the same sign as the correct value), respectively.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is 1 or 2, +0 shall be returned.
+
+    If x is ±Inf, +Inf shall be returned. 
+
+ERRORS
+
+    These functions shall fail if:
+
+        Pole Error The x argument is a negative integer or zero.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression (math_errhandling 
+    &amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point 
+    exception shall be raised.
+
+        Range Error The result overflows.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression (math_errhandling 
+    &amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point 
+    exception shall be raised.
+*/
+
+/** lgamma_r_spec **/
+//This specification refers to: lgammaf_r, lgamma_r, lgammal_r
+specification
+Unifloat* lgamma_r_spec(CallContext context, Unifloat* x, 
+                      IntT* signp,  ErrorCode* errno)
+{
+    char type[3][10] = {"lgammaf_r", "lgamma_r", "lgammal_r"};
+    Unifloat* One, * Two;
+    One = convertInteger_Unifloat(1, x->type);
+    Two = convertInteger_Unifloat(2, x->type);
+    FILTER(type[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "signgam shall not be NULL", signp != NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(!isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x) && 
+           compare_Unifloat(x, One) != 0 && compare_Unifloat(x, Two) != 0)
+            return {X_IS_NORMAL_POSITIVE_EXCEPT_ONE_OR_TWO, 
+                    "X IS NORMAL POSITIVE EXCEPT ONE OR TWO" };
+
+        if(((x->sign == -1) && isNormal_Unifloat(x)) || isZero_Unifloat(x))
+            return {X_IS_NORMAL_NON_POSITIVE, "X IS NORMAL NON POSITIVE" };
+        
+        if(isNan_Unifloat(x))
+            return {X_IS_NAN, "X IS NAN" };
+
+        if((x->sign == 1) && isInfinity_Unifloat(x))
+            return {X_IS_POSITIVE_INFINITY, "X IS POSITIVE INFINITY" };
+
+        if((x->sign == -1) && isInfinity_Unifloat(x))
+            return {X_IS_NEGATIVE_INFINITY, "X IS NEGATIVE INFINITY" };
+
+        if(compare_Unifloat(x, One) == 0)
+            return {X_IS_ONE, "X IS ONE" };
+        
+        if(compare_Unifloat(x, Two) == 0)
+            return {X_IS_TWO, "X IS TWO" };
+    }
+    post
+    {
+        IntT mant = digMant_Unifloat(x->type);
+
+        /*[Calculate model function]*/
+        Unifloat* model_res;
+        signgam_model = 0;
+
+        model_res = lgamma_model(x);
+        
+        round_Unifloat(model_res, mant);
+        round_Unifloat(lgamma_r_spec, mant);
+
+        if(((x->sign == -1) || (isZero_Unifloat(x))) && isNormal_Unifloat(x))
+        {
+            /*
+             * If x is a non-positive integer, a pole error shall occur and 
+             * lgamma_r(), lgammaf_r(), and lgammal_r() shall return +HUGE_VAL, 
+             * +HUGE_VALF, and +HUGE_VALL, respectively.
+             */
+            REQ("lgamma_r.08;lgammaf_r.08;lgammal_r.08", 
+                "If x is a non-positive integer function shall return "
+                "+HUGE_VAL", 
+                isInfinity_Unifloat(lgamma_r_spec) && (lgamma_r_spec->sign == 1));
+        }
+
+        if(isOverflow_Unifloat(model_res))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall 
+             * occur and lgamma_r(), lgammaf_r(), and lgammal_r() shall return 
+             * ±HUGE_VAL, ±HUGE_VALF, and ± HUGE_VALL 
+             * (having the same sign as the correct value), respectively.
+             */
+            REQ("lgamma_r.09;lgammaf_r.09;lgammal_r.09", 
+            "If the correct value would cause overflow function shall return "
+            "±HUGE_VAL", 
+            isInfinity_Unifloat(lgamma_r_spec) && 
+            (lgamma_r_spec->sign == model_res->sign));
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Pole Error The x argument is a negative integer or zero.
+         *
+         * Range Error The result overflows.
+         */
+         ERROR_BEGIN(POSIX_LGAMMA, 
+                    "lgamma_r.13.01.01;lgammaf_r.13.01.01;lgammal_r.13.01.01;"
+                    "lgamma_r.13.02.01;lgammaf_r.13.02.01;lgammal_r.13.02.01", 
+                    *errno, *errno)
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error The x argument is a negative integer or zero.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) 
+             * is non-zero, then errno shall be set to [ERANGE].
+             */
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) 
+             * is non-zero, then errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_LGAMMA, ERANGE, 
+                        "lgamma_r.13.01.01;lgammaf_r.13.01.01;lgammal_r.13.01.01;"
+                        "lgamma_r.13.02.01;lgammaf_r.13.02.01;lgammal_r.13.02.01", 
+            (isZero_Unifloat(x) || ((x->sign == -1) && isNormal_Unifloat(x))) 
+            || 
+            (isOverflow_Unifloat(model_res))
+                       )
+
+         ERROR_END()
+
+        if(!isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x) && 
+           compare_Unifloat(x, One) != 0 && compare_Unifloat(x, Two) != 0)
+        {
+            /*
+             * [XSI] The sign of GAMMA(x) is returned in the external integer 
+             * signgam.
+             */
+            REQ("lgamma_r.03;lgammaf_r.03;lgammal_r.03", 
+                "The sign of GAMMA(x) is returned in the external integer signgam", 
+                *signp == signgam_model);
+        }
+
+        /*
+         * [CX] These functions need not be reentrant.
+         */
+        REQ("lgamma_r.04;lgammaf_r.04;lgammal_r.04", "", TODO_REQ());
+
+        if(!isOverflow_Unifloat(model_res) && !isZero_Unifloat(x) && 
+           (x->sign == 1) && isNormal_Unifloat(x) && 
+           compare_Unifloat(x, One) != 0 && compare_Unifloat(x, Two) != 0)
+        {
+            /*
+             * Upon successful completion, these functions shall return the 
+             * logarithmic gamma of x.
+             */
+            REQ("lgamma_r.07;lgammaf_r.07;lgammal_r.07", 
+                "Upon successful completion, these functions shall return the "
+                "logarithmic gamma of x", 
+                compareWithPrecision_Unifloat(lgamma_r_spec, model_res, mant) == 0);
+        }
+
+#if NAN_SUPPORT == 1
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("lgamma_r.10;lgammaf_r.10;lgammal_r.10", 
+            "If x is NaN, a NaN shall be returned", 
+            isNan_Unifloat(lgamma_r_spec));
+        }
+#endif
+
+        if(compare_Unifloat(x, One) == 0 || compare_Unifloat(x, Two) == 0)
+        {
+            /*
+             * If x is 1 or 2, +0 shall be returned.
+             */
+            REQ("lgamma_r.11;lgammaf_r.11;lgammal_r.11", 
+                "If x is 1 or 2, +0 shall be returned", 
+                isZero_Unifloat(lgamma_r_spec) && (lgamma_r_spec->sign == 1));
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±Inf, +Inf shall be returned.
+             */
+            REQ("lgamma_r.12;lgammaf_r.12;lgammal_r.12", 
+            "If x is ±Inf, +Inf shall be returned", 
+            isInfinity_Unifloat(lgamma_r_spec) && (lgamma_r_spec->sign == 1));
+        }
+
+     
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    tgamma, tgammaf, tgammal - compute gamma() function 
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double tgamma(double x);
+
+    float tgammaf(float x);
+
+    long double tgammal(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and 
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 
+    defers to the ISO C standard. These functions shall compute the gamma() 
+    function of x.
+
+    An application wishing to check for error situations should set errno to 
+    zero and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. 
+    On return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO | 
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+    RETURN VALUE
+
+    Upon successful completion, these functions shall return Gamma( x).
+
+    If x is a negative integer, a domain error shall occur, and either a NaN 
+    (if supported), or an implementation-defined value shall be returned.
+
+    If the correct value would cause overflow, a range error shall occur and 
+    tgamma(), tgammaf(), and tgammal() shall return ±HUGE_VAL, ±HUGE_VALF, or ± 
+    HUGE_VALL, respectively, with the same sign as the correct value of the 
+    function.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is +Inf, x shall be returned.
+
+    If x is ±0, a pole error shall occur, and tgamma(), tgammaf(), and 
+    tgammal() shall return ±HUGE_VAL, ±HUGE_VALF, and ±HUGE_VALL, respectively.
+
+    If x is -Inf, a domain error shall occur, and either a NaN (if supported), 
+    or an implementation-defined value shall be returned. 
+
+ERRORS
+
+    These functions shall fail if:
+
+    Domain Error The value of x is a negative integer, [MX] or x is -Inf. 
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [EDOM]. If the integer expression (math_errhandling & 
+    MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception 
+    shall be raised.
+
+    Pole Error [MX] The value of x is zero.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression 
+    (math_errhandling & amp; MATH_ERREXCEPT) is non-zero, then the 
+    divide-by-zero floating-point exception shall be raised. 
+
+    Range Error The value overflows.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression 
+    (math_errhandling & amp; MATH_ERREXCEPT) is non-zero, then the overflow 
+    floating-point exception shall be raised.
+*/
+
+/** tgamma_spec **/
+//This specification refers to: tgammaf, tgamma, tgammal
+specification
+Unifloat* tgamma_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    char type[3][10] = {"tgammaf", "tgamma", "tgammal"};
+    FILTER(type[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(!isZero_Unifloat(x) && (x->sign == 1) && isNormal_Unifloat(x))
+            return {X_IS_NORMAL_POSITIVE, 
+                    "X IS NORMAL POSITIVE" };
+
+        if((x->sign == -1) && isNormal_Unifloat(x))
+            return {X_IS_NORMAL_NEGATIVE, "X IS NEGATIVE" };
+
+        if(isZero_Unifloat(x))
+            return {X_IS_ZERO, "X IS ZERO" };
+        
+        if(isNan_Unifloat(x))
+            return {X_IS_NAN, "X IS NAN" };
+
+        if((x->sign == 1) && isInfinity_Unifloat(x))
+            return {X_IS_POSITIVE_INFINITY, "X IS POSITIVE INFINITY" };
+
+        if((x->sign == -1) && isInfinity_Unifloat(x))
+            return {X_IS_NEGATIVE_INFINITY, "X IS NEGATIVE INFINITY" };
+    }
+    post
+    {
+        IntT mant = digMant_Unifloat(x->type);
+
+        /*[Calculate model function]*/
+        Unifloat* model_res;
+
+        model_res = tgamma_model(x);
+        
+        round_Unifloat(model_res, mant);
+        round_Unifloat(tgamma_spec, mant);
+
+#if NAN_SUPPORT == 1
+        if((x->sign == -1) && isNormal_Unifloat(x))
+        {
+            /*
+             * If x is a negative integer, a domain error shall occur, and 
+             * either a NaN (if supported), or an implementation-defined value 
+             * shall be returned.
+             */
+            REQ("tgamma.05;tgammaf.05;tgammal.05", 
+            "If x is a negative integer a NaN shall be returned", 
+            isNan_Unifloat(tgamma_spec));
+        }
+#endif
+
+        if(isOverflow_Unifloat(model_res))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall 
+             * occur and tgamma(), tgammaf(), and tgammal() shall return 
+             * ±HUGE_VAL, ±HUGE_VALF, or ± HUGE_VALL, respectively, with the 
+             * same sign as the correct value of the function.
+             */
+            REQ("tgamma.06;tgammaf.06;tgammal.06", 
+            "If the correct value would cause overflow function shall return "
+            "±HUGE_VAL", 
+            isInfinity_Unifloat(tgamma_spec) && 
+            (tgamma_spec->sign == model_res->sign));
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, a pole error shall occur, and tgamma(), tgammaf(), 
+             * and tgammal() shall return ±HUGE_VAL, ±HUGE_VALF, and 
+             * ±HUGE_VALL, respectively.
+             */
+            REQ("tgamma.09;tgammaf.09;tgammal.09", 
+            "If x is ±0 function shall return ±HUGE_VAL", 
+            isInfinity_Unifloat(tgamma_spec) && 
+            (tgamma_spec->sign == x->sign));
+        }
+
+#if NAN_SUPPORT == 1
+        if(isInfinity_Unifloat(x) && (x->sign == -1))
+        {
+            /*
+             * If x is -Inf, a domain error shall occur, and either a NaN 
+             * (if supported), or an implementation-defined value shall be 
+             * returned.
+             */
+            REQ("tgamma.10;tgammaf.10;tgammal.10", 
+            "If x is -Inf a NaN shall be returned", 
+            isNan_Unifloat(tgamma_spec));
+        }
+#endif
+
+       /*
+        * These functions shall fail if:
+        *
+        * Domain Error The value of x is a negative integer, [MX] or x is -Inf.
+        *
+        * Pole Error [MX] The value of x is zero.
+        *
+        * Range Error The value overflows.
+        */
+        ERROR_BEGIN(POSIX_TGAMMA, 
+            "tgamma.11.01.01;tgammaf.11.01.01;tgammal.11.01.01;"
+            "tgamma.11.02.01;tgammaf.11.02.01;tgammal.11.02.01;"
+            "tgamma.11.03.01;tgammaf.11.03.01;tgammal.11.03.01", 
+            *errno, *errno)
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The value of x is a negative integer, [MX] or x is 
+             * -Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is 
+             * non-zero, then errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_TGAMMA, EDOM, 
+            "tgamma.11.01.01;tgammaf.11.01.01;tgammal.11.01.01", 
+            (x->sign == -1) && (!isNan_Unifloat(x)))
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error [MX] The value of x is zero.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is 
+             * non-zero, then errno shall be set to [ERANGE].
+             */
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The value overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is 
+             * non-zero, then errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_TGAMMA, ERANGE, 
+            "tgamma.11.02.01;tgamma.11.03.01;"
+            "tgammaf.11.02.01;tgammaf.11.03.01;"
+            "tgammal.11.02.01;tgammal.11.03.01", 
+            isZero_Unifloat(x)
+            || isOverflow_Unifloat(model_res)
+                        )
+
+        ERROR_END()
+        
+        if(!isOverflow_Unifloat(model_res) && !isZero_Unifloat(x) && 
+           (x->sign == 1) && isNormal_Unifloat(x))
+        {
+            /*
+             * Upon successful completion, these functions shall return 
+             * Gamma(x).
+             */
+            REQ("tgamma.04;tgammaf.04;tgammal.04", 
+                "Function shall return Gamma(x)", 
+                compareWithPrecision_Unifloat(model_res, tgamma_spec, mant) == 0);
+        }
+
+#if NAN_SUPPORT == 1
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("tgamma.07;tgammaf.07;tgammal.07", 
+                "If x is NaN, a NaN shall be returned", 
+                isNan_Unifloat(tgamma_spec));
+        }
+#endif
+
+        if(isInfinity_Unifloat(x) && (x->sign == 1))
+        {
+            /*
+             * If x is +Inf, x shall be returned.
+             */
+            REQ("tgamma.08;tgammaf.08;tgammal.08", 
+            "If x is +Inf, x shall be returned", 
+            isInfinity_Unifloat(tgamma_spec) && (tgamma_spec->sign == 1));
+        }
+
+    
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* tgamma_model(Unifloat* x)
+{
+    Unifloat* res, * Half, * pi, * One, * Two, * Ten, * z, * new_x;
+    Unifloat* huge_val[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), 
+                             clone(infinity_LongDoubleT)};
+    IntT i, num, error;
+    One = createOne_Unifloat(x->type);
+    Two = createOne_Unifloat(x->type);
+    Two->exp++;
+    Ten = convertString_Unifloat(create_CString("10"), x->type);
+    new_x = clone(x);
+    z = createZero_Unifloat(x->type);
+    if((x->sign == -1) && isNormal_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = NaN;
+        return res;
+    }
+
+    if(isNan_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = NaN;
+        return res;
+    }
+
+    if(isInfinity_Unifloat(x) && (x->sign == 1))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = Infinity;
+        res->sign = 1;
+        return res;
+    }
+
+    if(isZero_Unifloat(x))
+    {
+        return clone(huge_val[x->type]);
+    }
+
+    if(isInfinity_Unifloat(x) && (x->sign == -1))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = NaN;
+        return res;
+    }
+
+    //change argument
+    if(compare_Unifloat(x, Ten) == -1)
+    {
+        z = sub_Unifloat(Ten, x);
+        if(z->exp>0)
+            for(i = z->exp + 1; i < PRECISION + 1; i++)
+                setMant_Unifloat(z, i, 0);
+        else z = createZero_Unifloat(x->type);
+        z = add_Unifloat(z, One);
+        new_x = add_Unifloat(x, z);
+        num = convertUnifloat_Integer(z, &error);
+        z = clone(x);
+        for(i = 1; i < num; i++)
+            z = mul_Unifloat(z, add_Unifloat(x, 
+            convertInteger_Unifloat(i, x->type)));
+    }
+    ////////
+
+    Half = createOne_Unifloat(x->type);
+    Half->exp--;
+    pi = convertBinaryString_Unifloat(create_CString(PI), x->type);
+
+    res = clone(new_x);
+    res = sub_Unifloat(res, Half);
+    res = mul_Unifloat(res, log_Unifloat(new_x));
+    res = sub_Unifloat(res, new_x);
+    res = add_Unifloat(res, mul_Unifloat(log_Unifloat(mul_Unifloat(pi, Two)), 
+                                         Half));
+    res = add_Unifloat(res, gammaSeries_Unifloat(new_x));
+    if(!isZero_Unifloat(z))
+        res = sub_Unifloat(res, log_Unifloat(z));
+    res = exp_Unifloat(res);
+
+    return res;
+}
+
+/********************************************************************/
+/**                     Unifloat gamma functions                   **/
+/********************************************************************/
+
+Unifloat* gammaSeries_Unifloat(Unifloat* x)
+{
+    IntT type = x->type;
+    Unifloat* result = createZero_Unifloat(type);
+    Unifloat* current1 = createZero_Unifloat(type);
+    Unifloat* current2 = createZero_Unifloat(type);
+    Unifloat* A;
+    Unifloat* x_sq;
+    x_sq = mul_Unifloat(x, x);
+    
+    ////////
+    current1 = convertString_Unifloat(create_CString("-261082718496449122051"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("21106800"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = div_Unifloat(A, x_sq);
+    
+    ////////
+    current1 = convertString_Unifloat(create_CString("154210205991661"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("444"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+    
+    ////////
+    current1 = convertString_Unifloat(create_CString("-26315271553053477373"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("2418179400"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("151628697551"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("396"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-7709321041217"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("505920"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("1723168255201"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("2492028"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-3392780147"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("93960"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("657931"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("300"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-236364091"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("1506960"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("77683"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("5796"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-174611"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("125400"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("43867"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("244188"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-3617"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("122400"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("1"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("156"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-691"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("360360"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("1"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("1188"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-1"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("1680"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("1"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("1260"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("-1"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("360"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x_sq);
+
+    ////////
+    current1 = convertString_Unifloat(create_CString("1"), 
+                                      type);
+    current2 = convertString_Unifloat(create_CString("12"), 
+                                      type);
+    A = div_Unifloat(current1, current2);
+    result = add_Unifloat(A, result);
+    result = div_Unifloat(result, x);
+    ////////
+
+    return result;
+}

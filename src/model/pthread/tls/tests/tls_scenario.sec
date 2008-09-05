@@ -1,0 +1,1344 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "pthread/tls/tls_config.h"
+
+#include "pthread/tls/tests/tls_scenario.seh"
+#include "pthread/tls/tls_model.seh"
+
+#include "system/system/system_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_model.seh"
+#include "common/common_scenario.seh"
+#include "common/pointer.seh"
+#include "common/explicit_fsm.h"
+
+#include "system/sysconf/sysconf_model.seh"
+#include "pthread/tls/tls_media.seh"
+#include <atl/integer.h>
+#include <stdio.h>
+
+
+typedef struct SpecificT
+{
+    sut_ptr_t ta_data;
+    //IntT scen_data;
+} SpecificT;
+
+typedef VoidTPtr SpecificTPtr;
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static int num_processes, num_threads, num_keys;
+static int to_fork = 0;
+
+// Number of keys with destructors. Shall be not more than NUM_KEYS
+static int num_destructors;
+
+// Number of keys with cleanup handlers. Shall be not more than `num_destructors`;
+static int num_cleanups;
+
+// maximum number of recalls for destructor if it is not 
+// affected by {PTHREAD_DESTRUCTOR_ITERATIONS}
+#define MAX_DESTR_RECALLS 10
+
+#define MAX_PROCESSES 4
+#define MAX_THREADS   61
+#define MAX_KEYS      10
+
+#define NUM_KEYS_M      1025
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+// ThreadId (default thread) of each process 
+static ThreadId    processes    [MAX_PROCESSES];
+
+// Number of threads in each process. 0 means process is not created
+static int         numThreads[MAX_PROCESSES];
+
+static CallContext threads      [MAX_PROCESSES][MAX_THREADS];
+static VoidTPtr    postpones    [MAX_PROCESSES][MAX_THREADS];
+static SpecificTPtr    specifics    [MAX_PROCESSES][MAX_THREADS][MAX_KEYS];
+static VoidTPtr                 keys        [MAX_PROCESSES][MAX_KEYS+1]; // +1 extra key for creating in destructor
+static PThreadKeyDestructor     destructors [MAX_PROCESSES][MAX_KEYS];
+static bool        createdKeys  [MAX_PROCESSES][MAX_KEYS+1];
+static LongT       maxDestrIterations;
+
+static VoidTPtr    keys_mk       [MAX_PROCESSES][NUM_KEYS_M];
+static bool        createdKeys_mk       [MAX_PROCESSES][NUM_KEYS_M];
+
+static bool failed = false;
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+
+static bool init_tls_scenario(int argc, char** argv)
+{
+    /* Init test scenario data */
+
+    int i, j, k;
+    
+    set_assertion_exit_callback();
+
+    //setWTimeMSec(100);
+
+    if( (num_keys > MAX_KEYS+1) || (num_processes > MAX_PROCESSES) || (num_threads > MAX_THREADS) )
+    {
+        DUMP("Invalid scenario parameters.");
+        return false;
+    }
+    for(i=0;i<num_processes;i++)
+    {
+        ErrorCode * errno = requestErrorCode();
+        processes[i] = createProcess();
+        DUMP("processes[%d]=%d\n", i, processes[i].process);
+        //- init_sysconf_data(getCallContext_ThreadId(processes[i]));
+        sysconf_spec(processes[i], SUT_SC_THREADS, requestErrorCode());
+        sysconf_spec(processes[i], SUT_SC_THREAD_KEYS_MAX, requestErrorCode());
+        maxDestrIterations = sysconf_spec(processes[i], SUT_SC_THREAD_DESTRUCTOR_ITERATIONS, errno);
+        if(maxDestrIterations==-1 && *errno != SUT_EOK)
+        {
+            traceUserInfo("init_tls_scenario: sysconf_spec(SUT_SC_THREAD_KEYS_MAX) failed!");
+            return false;
+        } // if maxDestrIterations equals -1, it means no limit. 
+
+        // Allocate keys
+        for(j=0;j<num_keys;j++)
+        {
+            VoidTPtr address = 
+                allocateMemoryBlock(processes[i], sizeof_Type(processes[i], "pthread_key_t"));
+            
+            keys[i][j] = address;
+            destructors[i][j] = j<num_destructors;
+            createdKeys[i][j] = false;
+        }
+        // additional keys for creating in destructor
+        keys[i][num_keys] = allocateMemoryBlock(processes[i], sizeof_Type(processes[i], "pthread_key_t"));
+
+        // Create threadsT
+        for(j=0;j<num_threads;j++)
+        {
+            if(j==0)
+                threads[i][j] = getCallContext_ThreadId(processes[i]);
+            else
+                threads[i][j] = createThreadInContext(threads[i][0]);
+            for(k=0;k<num_keys;k++)
+            {
+                specifics[i][j][k] = allocateMemoryBlock(threads[i][j], sizeof(SpecificT));
+                //DUMP("specifics[%d][%d][%d] = {%d, %d}\n", i, j, k, specifics[i][j][k].process, specifics[i][j][k].address);
+            }
+            postpones[i][j] = NULL_VoidTPtr;
+        }
+
+    }
+
+    //setTSTimeModel(NotUseTSTime);
+
+    return true;
+}// end of init_tls_scenario
+
+
+
+static bool init_pthread_tls_setget_scenario(int argc, char** argv)
+{
+    num_processes=2;
+    num_threads=3;
+    num_keys=3;
+    num_destructors = 1;
+    return init_tls_scenario(argc, argv);
+}
+
+static bool init_pthread_tls_tls_scenario(int argc, char** argv)
+{
+    num_processes=1;
+    num_threads=3;
+    num_keys=2;
+    num_destructors = 1;
+    return init_tls_scenario(argc, argv);  
+}
+
+static bool init_pthread_tls_errors_scenario(int argc, char** argv)
+{
+    num_processes=1;
+    num_threads=1;
+    num_keys=1;
+    num_destructors = 0;
+    return init_tls_scenario(argc, argv);
+}
+
+
+static bool init_manykeys_scenario(int argc, char** argv)
+{
+    int i, j, k;
+    
+    set_assertion_exit_callback();
+
+    if( (num_keys > NUM_KEYS_M) || (num_processes > MAX_PROCESSES) 
+        || (num_threads > MAX_THREADS) || (num_destructors > MAX_KEYS) 
+      )
+    {
+        DUMP("Invalid scenario parameters.");
+        return false;
+    }
+    for(i=0;i<num_processes;i++)
+    {
+        ErrorCode * errno = requestErrorCode();
+        processes[i] = createProcess();
+        DUMP("processes[%d]=%d\n", i, processes[i].process);
+        //- init_sysconf_data(getCallContext_ThreadId(processes[i]));
+        sysconf_spec(processes[i], SUT_SC_THREADS, requestErrorCode());
+        sysconf_spec(processes[i], SUT_SC_THREAD_KEYS_MAX, requestErrorCode());
+        maxDestrIterations = sysconf_spec(processes[i], SUT_SC_THREAD_DESTRUCTOR_ITERATIONS, errno);
+        if(maxDestrIterations==-1 && *errno != SUT_EOK)
+        {
+            traceUserInfo("init_tls_scenario: sysconf_spec(SUT_SC_THREAD_KEYS_MAX) failed!");
+            return false;
+        } // if maxDestrIterations equals -1, it means no limit. 
+
+        // Allocate keys
+        for(j=0;j<num_keys;j++)
+        {
+            VoidTPtr address = 
+                allocateMemoryBlock(processes[i], sizeof_Type(processes[i], "pthread_key_t"));
+            
+            keys_mk[i][j] = address;
+
+            if(j<MAX_KEYS)
+                destructors[i][j] = j<num_destructors;
+            
+            createdKeys_mk[i][j] = false;
+        }
+
+        threads[i][0] = processes[i];
+        
+        // Create threads
+        for(j=1;j<num_threads;j++)
+        {
+            threads[i][j] = createThreadInContext(threads[i][0]);
+
+            for(k=0;k<MAX_KEYS;k++)
+            {
+                specifics[i][j][k] = allocateMemoryBlock(threads[i][j], sizeof(SpecificT));
+                DUMP("specifics[%d][%d][%d] = {%d, %d}\n", i, j, k, specifics[i][j][k].process, specifics[i][j][k].address);
+            }
+            postpones[i][j] = NULL_VoidTPtr;
+        }
+
+    }
+
+    return true;
+
+}// end of init_manykeys_scenario
+
+void cleanupTlsModel(void)
+{
+    int i,j,k;
+    for(i=0;i<num_processes;i++)
+    {
+        for (j=0;j<num_threads;j++) 
+        {           
+            Map * key_specific;
+            int map2size;
+            ThreadState * threadState = getThreadState_CallContext(getCallContext_ThreadId(threads[i][j]));
+            if(threadState->terminating==PTHREAD_RUNNING)
+                continue;
+            
+            key_specific = threadState->key_specific;
+            
+            map2size = size_Map(key_specific);
+            for(k=0;k<map2size;k++)
+            {
+                ThreadSpecific *threadSpecific;
+                PThreadKey * key = key_Map(key_specific,k);
+                if(!key->destruct)
+                    continue;
+                
+                threadSpecific  = (ThreadSpecific*)get_Map(key_specific, key);
+                if( (threadSpecific!=NULL) && !isNULL_VoidTPtr(threadSpecific->address) )
+                {
+                    DUMP("Cleanup model. Specific: thread %d", threadState->id.thread);
+                    DUMP(" address %d\n", threadSpecific->address.address);
+                    threadSpecific->address = NULL_VoidTPtr;
+                }
+            }
+            checkThreadDelete(threadState);
+        }
+    }
+}       
+
+
+static void finish_tls_scenario(void)
+{
+    int i,j;
+
+    for(i=0;i<num_processes;i++)
+    {
+        for (j=0;j<num_keys+1;j++) 
+        {
+            deallocateMemoryBlock( processes[i], keys[i][j] );
+            keys[i][j] = NULL_VoidTPtr;
+        }
+    }
+
+    for(i=0;i<num_processes;i++)
+        for (j=0;j<num_threads;j++)
+        {
+            pthread_exit_spec(threads[i][j],NULL_VoidTPtr);
+        } 
+
+    /* [Cleans specifics from model in case of overcalled destructors] */
+    cleanupTlsModel(); 
+
+ //   setWTimeMSec(SERIALIZATION_TIME);
+}
+
+static void finish_destruct_scenario(void)
+{
+    int i,j;
+
+    for(i=0;i<num_processes;i++)
+    {
+        for (j=0;j<num_threads;j++) 
+            if(!isNULL_VoidTPtr(postpones[i][j]))
+            {
+                deallocate(processes[i], postpones[i][j]);
+                postpones[i][j] = NULL_VoidTPtr;
+            }
+    }
+
+    for(i=0;i<num_processes;i++)
+    {
+        for (j=0;j<num_keys+1;j++)
+        {
+            deallocateMemoryBlock( processes[i], keys[i][j] );
+            keys[i][j] = NULL_VoidTPtr;
+        }
+    }
+    
+    /* [Cleans specifics from model in case of overcalled destructors] */
+    cleanupTlsModel(); 
+
+ //   setWTimeMSec(SERIALIZATION_TIME);
+}
+
+static void finish_manykeys_scenario(void)
+{
+    int i,j;
+
+    for(i=0;i<num_processes;i++)
+    {
+        for (j=0;j<num_keys;j++) 
+        {
+            deallocateMemoryBlock( processes[i], keys_mk[i][j] );
+            keys_mk[i][j] = NULL_VoidTPtr;
+        }
+    }
+
+    for(i=0;i<num_processes;i++)
+        for (j=0;j<num_threads;j++)
+        {
+            pthread_exit_spec(threads[i][j],NULL_VoidTPtr);
+        } 
+
+    /* [Cleans specifics from model in case of overcalled destructors] */
+    cleanupTlsModel(); 
+ //   setWTimeMSec(SERIALIZATION_TIME);
+}
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+specification typedef struct ProcessSpecifics
+{
+    ProcessId   process;
+    List        *keys;
+    List        *threads;
+    Map         *thread_key_specific; // List*(ThreadIdObj, PThreadKey) => ThreadSpecific*
+} ProcessSpecifics;
+
+String* toString_ProcessSpecifics(void* ref)
+{
+    static char buff[65536];
+    ProcessSpecifics *ps=(ProcessSpecifics*)ref;
+    int offs = 0;
+    int i, j;
+
+    offs = sprintf(buff, "\nProcess:%p\n", ps->process.process);
+
+    offs += sprintf(buff+offs, "\t\t" );
+
+    for(i=0;i<size_List(ps->keys);i++)
+    {
+        offs += sprintf(buff+offs, "K:%p\t", ((PThreadKey*)get_List(ps->keys, i))->address.address);
+    }
+    
+    offs += sprintf(buff+offs, "\n");
+
+    for(j=0;j<size_List(ps->threads);j++)
+    {
+        ThreadIdObj *tio = (ThreadIdObj*)get_List(ps->threads, j);
+        offs += sprintf(buff+offs, "T:%lu\t", tio->thread);
+        
+        for(i=0;i<size_List(ps->keys);i++)
+        {
+            PThreadKey *pk = (PThreadKey*)get_List(ps->keys, i);
+            List *thread_key = create_List(&type_Object);
+            ThreadSpecific *ts = NULL;
+
+            append_List(thread_key, tio);
+            append_List(thread_key, pk);
+
+            ts = (ThreadSpecific*)get_Map(ps->thread_key_specific, thread_key);
+            offs += sprintf(buff+offs, "S:%d\t\t", ts->address.address);
+        }
+        offs += sprintf(buff+offs, "\n");
+    }
+
+    return create_String(buff);
+}
+
+specification typedef struct ProcessSpecifics ProcessSpecifics = { 
+	  .to_string = toString_ProcessSpecifics
+};
+
+void dump_specifics()
+{
+    int i,j,k;
+    for(k=0;k<num_processes;k++)
+    {
+          
+        for (j=0;j<num_threads;j++) 
+        {
+            CallContext context = threads[k][j];
+            ThreadState * thState=getThreadState_CallContext(context);         
+            Map * map_specif = thState->key_specific;
+            int map_sz = size_Map(map_specif);
+
+
+            for(i=0;i<map_sz;i++)
+            {
+                ThreadSpecific * thread_specif;
+                DestrSpecif * destr_specif;
+                DestructorState * destr_state;
+                int numcalls;
+                
+                PThreadKey * thread_key = key_Map(map_specif,i);      
+                
+                if(thread_key->destruct == false)
+                    continue;
+                
+                thread_specif = get_Map(map_specif,thread_key);
+                if( isNULL_VoidTPtr(thread_specif->address) )
+                {
+                    continue;
+                }
+                
+                // the specific hasn't been deleted. May be destructor's overcall.
+                
+                destr_specif = create_DestrSpecif(context, thread_specif);
+                
+                destr_state = get_Map(destructorCalls, destr_specif);
+                if(destr_state==NULL)
+                    numcalls = 0;
+                else
+                    numcalls = destr_state->num_calls;
+
+                DUMP("p: %d ", k);
+                DUMP("pid: %d ", context.process);
+                DUMP("tid: %d ",context.thread);
+                DUMP("key: %d ",thread_key->address.address);
+                DUMP("data: %d ",destr_specif->specific->address.address);
+                //DUMP("calls: %d ",numcalls);
+                DUMP("\n");
+            }            
+        }/**/
+    } 
+}
+
+List* getKeysByProcess(ProcessId pid)
+{
+    int i;
+    List *res = create_List(&type_PThreadKey);
+    ObjectsInMemory *allKeys = getAllTypedObjectsInMemory(&type_PThreadKey);
+    int mapSize = size_Map(allKeys);
+
+    for( i = 0 ; i<mapSize; i++)
+    {
+        PThreadKey *pkey = (PThreadKey*)get_Map(allKeys, key_Map(allKeys, i));
+        if(  pkey->address.process == pid.process )
+        {
+            append_List(res, pkey);
+        }
+    }
+
+    return res;
+}
+
+List* getThreadsByProcess(ProcessId pid)
+{
+    Map *threads = getThreads_ProcessId(pid); //ThreadIdObj -m-> ThreadState
+    int mapSize, ind;
+    List* res = create_List(&type_ThreadIdObj);
+
+    // Iterate through the threads of the given process
+    mapSize = size_Map(threads);
+
+    for(ind = 0; ind<mapSize; ind++)
+    {
+        ThreadIdObj *mapKey = key_Map(threads, ind);
+
+        if( isThreadActive(*mapKey) )
+        {
+            append_List(res, mapKey);
+        }
+    }
+
+    return res;
+}
+
+ProcessSpecifics *create_ProcessSpecifics(ProcessId process)
+{
+    ProcessSpecifics *res = create(&type_ProcessSpecifics,
+        process, 
+        getKeysByProcess(process),
+        getThreadsByProcess(process),
+        create_Map(&type_List, &type_ThreadSpecific)
+        );
+
+
+    int k, t, ksize, tsize;
+    ksize = size_List(res->keys);
+    tsize = size_List(res->threads);
+
+    for(t=0;t<tsize;t++)
+        for(k=0;k<ksize;k++)
+        {
+            List *thread_key = create_List(&type_Object);
+            ThreadIdObj *tid = get_List(res->threads, t);
+            PThreadKey  *pkey = get_List(res->keys, k);
+            ThreadState *threadState = (ThreadState*)getThread(*tid);
+            ThreadSpecific *ts = (ThreadSpecific*)get_Map(threadState->key_specific, pkey);
+
+            append_List(thread_key, tid);
+            append_List(thread_key, pkey);
+
+            put_Map(res->thread_key_specific, thread_key, ts);
+        }
+        
+    return res;
+}
+
+Object* getTlsScenarioGenState(void)
+{
+    List* res = create_List(&type_ProcessSpecifics);
+    int p;
+
+    for(p=0;p<num_processes;p++)
+    {
+        ProcessId pid = {processes[p].system, processes[p].process};
+        append_List(res,  create_ProcessSpecifics(pid) );
+    }
+
+    return res;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool tls_create_key_scen(void)
+{
+    IntT res;
+
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;!createdKeys[i][j])
+        {
+            DUMP("pthread_key_create_spec pn: %d kn: %d\n",i,j);
+            res = pthread_key_create_spec(threads[i][0], keys[i][j], destructors[i][j]);
+            if( res == 0 ) 
+                createdKeys[i][j] = true;
+        }
+    }
+    return true;
+}
+
+scenario
+bool tls_delete_key_scen(void)
+{
+    PThreadKeyFunctionResult * res;
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;createdKeys[i][j])
+        {
+            PThreadKey *pkey = (PThreadKey*)getObjectInMemory(keys[i][j]);
+            DUMP("deleting: p:%d a:%d\n", pkey->address.process,pkey->address.address);
+            res = pthread_key_delete_spec(threads[i][0], pkey);
+            if(res->errno == SUT_EOK)
+                createdKeys[i][j] = false;
+        }
+    }
+    return true;
+}
+
+scenario
+bool tls_set_specific_scen(void)
+{
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;createdKeys[i][j])
+        {
+            iterate(IntT k=1;k<num_threads;k++;)
+            {
+                SpecificT specif;
+
+                if(destructors[i][j] && isNULL_VoidTPtr(postpones[i][k]))
+                    postpones[i][k] = postpone_thread_cleanup(threads[i][k]);
+                
+                specif.ta_data = postpones[i][k].address;
+                writeCByteArray_VoidTPtr( specifics[i][k][j], 
+                      create_CByteArray( (ByteT *)&specif, sizeof(specif) )
+                     );/**/
+                pthread_setspecific_spec(threads[i][k], (PThreadKey*)getObjectInMemory(keys[i][j]), specifics[i][k][j]);
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool tls_get_specific_scen(void)
+{
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;createdKeys[i][j])
+        {
+            iterate(int k=0;k<num_threads;k++;)
+            {
+                PThreadKey * key = getObjectInMemory(keys[i][j]);
+                DUMP("dbg: getObjectInMemory KEY p:%d a:%d\n",keys[i][j].process,keys[i][j].address);
+                
+                pthread_getspecific_spec(threads[i][k], key, requestErrorCode());
+            }
+        }
+    }
+    return true;
+}
+
+
+scenario
+bool tls_setget_scen(void)
+{
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;createdKeys[i][j])
+        {
+            // set
+            iterate(IntT k=0;k<num_threads;k++;)
+            {         
+                SpecificT specif;
+
+                if(destructors[i][j] && isNULL_VoidTPtr(postpones[i][k]))
+                    postpones[i][k] = postpone_thread_cleanup(threads[i][k]);
+                
+                specif.ta_data = postpones[i][k].address;
+                writeCByteArray_VoidTPtr( specifics[i][k][j], 
+                      create_CByteArray( (ByteT *)&specif, sizeof(specif) )
+                     );/**/
+                pthread_setspecific_spec(threads[i][k], (PThreadKey*)getObjectInMemory(keys[i][j]), specifics[i][k][j]);
+            }
+
+            // get
+            iterate(IntT k=0;k<num_threads;k++;)
+            {
+                PThreadKey * key = getObjectInMemory(keys[i][j]);
+                DUMP("dbg: getObjectInMemory KEY p:%d a:%d\n",keys[i][j].process,keys[i][j].address);
+                
+                pthread_getspecific_spec(threads[i][k], key, requestErrorCode());
+
+                if(k>0)
+                {
+                    /* Different threads may bind different values to the same key. */
+                    IMPLEMENT_REQ("pthread_setspecific.02");
+                }
+            }
+        }
+    }
+    
+    return true;
+}
+
+
+DestrSpecif * WaitForAnyActiveDestructor(void)
+{
+    int mapSize;
+    DestrSpecif * destr;
+    int i;
+
+    DUMP("Serialization... \n");
+    serialize();
+    
+    mapSize = size_Map(destructorCalls);
+    for(i=0;i<mapSize;i++) 
+    {
+        destr = key_Map(destructorCalls, i);
+        if( ((DestructorState *)get_Map(destructorCalls, destr))->isActive )
+            return destr;
+    }
+    DUMP("Nothing found\n");
+    return NULL;
+}
+
+
+Map* saveTlsState(void)
+{
+    return clone(systems);
+}
+
+void restoreTlsState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+bool isTlsModelStateStationary(void)
+{
+    return true;
+}
+
+void destr_scenario_expl(void);
+
+scenario
+bool destr_scenario(void)
+{
+    EXECUTE_EXPLICIT_FSM(destr_scenario_expl);    
+}
+
+bool destr_scenario_indestr_expl(void)
+{
+    int i,j;
+    DestrSpecif * active_destr;
+    DestructorState * active_destr_state;
+    CallContext active_context;
+    int pn,tn,kn;
+    PThreadKey* key;
+    ThreadSpecific * tmp;
+    VoidTPtr tmpAddr = NULL_VoidTPtr;
+    
+    while(active_destr =  WaitForAnyActiveDestructor())    
+    {
+        active_context = getCallContext_ThreadId(active_destr->threadId);
+        active_destr_state = get_Map(destructorCalls,active_destr);
+        if(active_destr_state == NULL)
+        {
+            traceUserInfo("active_destr_state == NULL");
+    
+            DUMP("(1)unknown destructor\nsend: destructor_return\n"); 
+            destructor_return(active_context , active_destr);
+            continue;
+        }
+
+        // searching for numbers of the process, thread and key.
+        pn = tn = kn = -1;
+        for(i=0;i<num_processes;i++)
+        {
+            for (j=0;j<num_threads;j++) 
+                if( equals_ThreadId(threads[i][j],active_context))
+                { // thread found!
+                    tn = j;
+                    pn = i;
+                }
+
+            for(j=0;j<num_keys+1;j++)
+                if( equals_VoidTPtr(keys[i][j], active_destr->specific->key->address) )
+                {
+                    kn = j;
+                }
+        }
+        if( (pn<0) || (kn<0))
+        {
+            traceUserInfo("Unable to find process or key by context");          
+            DUMP("Unable to find process or key by context");          
+
+            DUMP("(2)unknown destructor\nsend: destructor_return\n"); 
+            destructor_return(active_context , active_destr);
+            continue;
+        }
+
+        key = (PThreadKey*)getObjectInMemory(keys[pn][kn]);
+        if(key==NULL)
+        {
+            traceUserInfo("getObjectInMemory failed.");
+            DUMP("getObjectInMemory failed.");
+
+            DUMP("(3)unknown destructor\nsend: destructor_return\n"); 
+            destructor_return(active_context , active_destr);
+            continue;
+        }
+
+        DUMP("p:%d t:%d k:%d ",pn,tn,kn);
+        DUMP("pid: %d ", active_context.process);
+        DUMP("tid: %d ", active_context.thread);
+        DUMP("key: %d ", keys[pn][kn].address);
+        DUMP("data: %d ", active_destr->specific->address.address);
+        DUMP("\n");
+
+
+        // here are different scenaries depending on process number.
+        switch(pn)
+        {
+        case 0: // overcall
+            if( active_destr_state->num_calls<MAX_DESTR_RECALLS )
+            {
+                pthread_getspecific_spec(active_context, key, requestErrorCode());
+                DUMP("Re setspecific self. addr = %d\n", active_destr->specific->address.address);
+                pthread_setspecific_spec(active_context, key, active_destr->specific->address);
+                pthread_getspecific_spec(active_context, key, requestErrorCode());
+                serialize();
+            }
+            break;
+        case 1: // setspecific for another key. Here we set specific for zero's key.
+            tmp = findSpecificByAddr(active_context, specifics[pn][tn][0]);
+            if((tmp == NULL) && !isNULL_VoidTPtr(tmpAddr) && (kn!=0) && (tn==1) )
+            {
+                DUMP("tmpaddr %d\n", tmpAddr.address);
+                DUMP("Re setspecific another. addr = %d\n", tmpAddr.address);
+                pthread_setspecific_spec(active_context, (PThreadKey*)getObjectInMemory(keys[pn][0]), tmpAddr);
+                serialize();
+                break;
+            }
+
+            if( isNULL_VoidTPtr(tmpAddr) && (tmp == NULL) )
+            {
+                tmpAddr = active_destr->specific->address;
+                DUMP("Storing tmpAddr %d\n", tmpAddr.address);
+                break;
+            }
+            if( isNULL_VoidTPtr(tmpAddr) && (active_destr_state->num_calls<MAX_DESTR_RECALLS) )
+            {
+                DUMP("Re setspecific self1. addr = %d\n", active_destr->specific->address.address);
+                pthread_setspecific_spec(active_context, key, active_destr->specific->address);
+                serialize();
+                break;
+            }
+            break;
+        case 2: // trying to delete this key;
+            DUMP("Re setspecific self2. addr = %d\n", active_destr->specific->address.address);
+            pthread_setspecific_spec(active_context, key, active_destr->specific->address);
+            serialize();
+
+            /* The pthread_key_delete() function shall be callable from within destructor functions. */
+            DUMP("deleting key %d\n",key->address.address);
+            pthread_key_delete_spec(active_context, key);
+            serialize();
+
+            break;
+        case 3: // trying to create a key in a destructor
+            if(!createdKeys[pn][num_keys])
+            {
+                DUMP("creating key %d\n",keys[pn][num_keys].address);
+                pthread_key_create_spec(active_context, keys[pn][num_keys], true);
+                createdKeys[pn][num_keys] = true;
+                serialize();
+                DUMP("setspecific for this key %d\n",(int)getObjectInMemory(keys[pn][num_keys]));
+                pthread_setspecific_spec(active_context,(PThreadKey*)getObjectInMemory(keys[pn][num_keys]), active_destr->specific->address);
+                serialize();
+            }
+            break;
+        default:;
+        }
+
+        DUMP("send: destructor_return\n"); 
+        destructor_return(active_context , active_destr);
+    }
+    return true;
+}
+
+void destr_scenario_expl(void)
+{
+    int i,j;
+    bool status;
+
+    DUMP("scenario: initializing cleanup handlers\n");
+    for(i=0;i<num_processes;i++)
+        for (j=1;j<=num_cleanups;j++)
+        {
+            _pthread_cleanup_push_spec(threads[0][j],generateVirtualPointer(threads[0][j]));  
+        }      
+
+    serialize();
+   
+    DUMP("scenario: start closing threads\n");
+    for(i=0;i<num_processes;i++)
+    {
+        for (j=1;j<num_threads;j++)
+        {
+            store_ThreadState(threads[i][j]);
+            switch(j)
+            {           
+            case 1:
+                pthread_cancel_spec(threads[i][0],threads[i][j]);
+                pthread_testcancel_spec(threads[i][j],&status);
+                break;
+            case 2:
+                pthread_finish_spec(threads[i][j],NULL_VoidTPtr);
+                break;
+            default:
+                pthread_exit_spec(threads[i][j],NULL_VoidTPtr);
+            }
+        } 
+        if( !destr_scenario_indestr_expl() )
+            return;
+    }
+        
+    for(i=0;i<num_processes;i++)
+        for (j=1;j<num_threads;j++)
+        {
+            checkAllDestructorsHaveBeenCalled(threads[i][j]);
+        }
+
+    /*[Do not remove this traceUserInfo.]*/
+    traceUserInfo("Finishing destruct_scenario.");
+}
+
+
+scenario
+bool mk_create_key_scen(void)
+{
+    IntT res;
+
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=num_keys-1;j>=0;j--;!createdKeys_mk[i][j])
+        {
+            DUMP("mk_key_create_spec pn: %d kn: %d\n",i,j);
+            res = pthread_key_create_spec(threads[i][0], keys_mk[i][j], j<MAX_KEYS? destructors[i][j] : false );
+            if( res == 0 ) 
+                createdKeys_mk[i][j] = true;
+        }
+    }
+    return true;
+}
+
+scenario
+bool mk_delete_key_scen(void)
+{
+    PThreadKeyFunctionResult * res;
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;createdKeys_mk[i][j])
+        {
+            PThreadKey *pkey = (PThreadKey*)getObjectInMemory(keys_mk[i][j]);            
+            res = pthread_key_delete_spec(threads[i][0], pkey);
+            if(res->errno == SUT_EOK)
+                createdKeys_mk[i][j] = false;
+        }
+    }
+    return true;
+}
+
+scenario
+bool mk_set_specific_scen(void)
+{
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;createdKeys_mk[i][j])
+        {
+            iterate(int k=1;k<num_threads;k++;)
+            {
+                if( (j<MAX_KEYS) && destructors[i][j] )
+                {
+                    if( isNULL_VoidTPtr(postpones[i][k]) )
+                        postpones[i][k] = postpone_thread_cleanup(threads[i][k]);
+                    
+                    writeCByteArray_VoidTPtr( specifics[i][k][j], 
+                                               create_CByteArray( (ByteT *)&postpones[i][k].address, 
+                                                                  sizeof(postpones[i][k].address) 
+                                                                )
+                                             );
+                    pthread_setspecific_spec(threads[i][k], (PThreadKey*)getObjectInMemory(keys_mk[i][j]), 
+                                             specifics[i][k][j]
+                                            );
+                }
+                else
+                    pthread_setspecific_spec(threads[i][k], (PThreadKey*)getObjectInMemory(keys_mk[i][j]), 
+                                             generateVirtualPointer(threads[i][k])
+                                            );
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool mk_get_specific_scen(void)
+{
+    iterate(int i=0;i<num_processes;i++;)
+    {
+        iterate(int j=0;j<num_keys;j++;createdKeys_mk[i][j])
+        {
+            iterate(int k=0;k<num_threads;k++;)
+            {
+                pthread_getspecific_spec(threads[i][k], (PThreadKey*)getObjectInMemory(keys_mk[i][j]), requestErrorCode());
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool tls_fork_scen(void)
+{
+    int i,j,k;
+    ErrorCode * errno = requestErrorCode();
+
+    iterate(int fn=0;fn<to_fork;fn++; num_processes+1<MAX_PROCESSES)
+    {
+        int def_pn = 0;
+        ThreadId tid;
+        
+        tid = forkProcess(threads[def_pn][0]);
+        DUMP("FORK! p:%d t:%d\n", tid.process, tid.thread);
+        num_processes++;
+        i=num_processes-1;
+        processes[i]=tid;
+
+        DUMP("processes[%d]=%d\n", i, processes[i].process);
+        //- init_sysconf_data(getCallContext_ThreadId(processes[i]));
+        sysconf_spec(processes[i], SUT_SC_THREADS, requestErrorCode());
+        sysconf_spec(processes[i], SUT_SC_THREAD_KEYS_MAX, requestErrorCode());
+        maxDestrIterations = sysconf_spec(processes[i], SUT_SC_THREAD_DESTRUCTOR_ITERATIONS, errno);
+        if(maxDestrIterations==-1 && *errno != SUT_EOK)
+        {
+            traceUserInfo("mk_fork_scen: sysconf_spec(SUT_SC_THREAD_KEYS_MAX) failed!");
+            return false;
+        } // if maxDestrIterations equals -1, it means no limit. 
+
+        // Allocate keys
+        for(j=0;j<num_keys;j++)
+        {          
+            keys[i][j] = keys[def_pn][j]; keys[i][j].process = tid.process;
+            destructors[i][j] = destructors[def_pn][j];
+            createdKeys[i][j] = createdKeys[def_pn][j];
+        }
+
+        threads[i][0] = getCallContext_ThreadId(processes[i]);
+        DUMP("threads[i][0] = %d\n",threads[i][0].thread);
+        // Create threadsT
+        for(j=1;j<num_threads;j++)
+        {
+            threads[i][j] = createThreadInContext(threads[i][0]);
+            DUMP("threads[i][%d]:  p:%d t:%d\n",j,threads[i][j].process,threads[i][j].thread);
+            for(k=0;k<num_keys;k++)
+            {
+                specifics[i][j][k] = allocateMemoryBlock(threads[i][j], sizeof(postpones[i][k].address));//generateVirtualPointer(threads[i][j]);// NULL_VoidTPtr; //
+                //DUMP("specifics[%d][%d][%d] = {%d, %d}\n", i, j, k, specifics[i][j][k].process, specifics[i][j][k].address);
+            }
+            postpones[i][j] = NULL_VoidTPtr;
+        }       
+    }
+    return true;
+}
+
+
+scenario
+bool errors_scen(void)
+{
+    PThreadKey * key;
+    VoidTPtr val = specifics[0][0][0];
+    VoidTPtr key_addr = keys[0][0];
+    CallContext context = threads[0][0];
+
+    pthread_key_create_spec(context,key_addr,0);
+    key = (PThreadKey*)getObjectInMemory(key_addr);
+
+    pthread_key_delete_spec(context, key);
+
+    // now key is invalid;
+
+    pthread_key_delete_spec(context, key);
+    
+    pthread_setspecific_spec(context, key, val);
+
+  
+    return true;
+}
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario ndfsm tls_scenario =
+{
+    .init = init_tls_scenario,
+    .finish = finish_tls_scenario,
+    .getState = getTlsScenarioGenState,
+
+    .saveModelState = (PtrSaveModelState)saveTlsState,
+    .restoreModelState = (PtrRestoreModelState)restoreTlsState,
+    .isStationaryState = (PtrIsStationaryState)isTlsModelStateStationary,
+
+    .actions = {
+        tls_create_key_scen,
+        tls_set_specific_scen,
+        tls_get_specific_scen,
+        tls_delete_key_scen,
+        NULL
+    }
+};
+
+scenario ndfsm setget_scenario =
+{
+    .init = init_tls_scenario,
+    .finish = finish_tls_scenario,
+
+    .actions = {
+        tls_create_key_scen,
+        tls_setget_scen,
+        tls_delete_key_scen,
+        NULL
+    }
+};
+
+scenario ndfsm destruct_scenario = 
+{
+    .init = init_tls_scenario,
+    .finish = finish_destruct_scenario,
+
+    .saveModelState = (PtrSaveModelState)saveTlsState,
+    .restoreModelState = (PtrRestoreModelState)restoreTlsState,
+    .isStationaryState = (PtrIsStationaryState)isTlsModelStateStationary,
+
+    .actions = {
+        tls_create_key_scen,
+        tls_set_specific_scen,
+        destr_scenario,
+        NULL
+    }
+};
+
+scenario ndfsm manykeys_scenario = 
+{
+    .init = init_manykeys_scenario,
+    .finish = finish_manykeys_scenario,
+
+    .actions = {
+        mk_create_key_scen,
+        mk_set_specific_scen,
+        mk_get_specific_scen,
+        mk_delete_key_scen,
+        NULL
+    }
+};
+
+scenario ndfsm tls_fork_scenario =
+{
+    .init = init_tls_scenario,
+    .finish = finish_destruct_scenario,
+
+    .actions = {
+        tls_create_key_scen,
+        tls_set_specific_scen,
+        tls_fork_scen,
+        tls_get_specific_scen,
+        tls_set_specific_scen,
+        tls_get_specific_scen,
+        tls_delete_key_scen,
+        NULL
+    }
+};
+
+scenario ndfsm errors_scenario =
+{
+    .init = init_tls_scenario,
+    .finish = finish_tls_scenario,
+
+    .actions = {
+        errors_scen,
+        NULL
+    }
+};
+
+scenario ndfsm pthread_tls_setget =
+{
+    .init = init_pthread_tls_setget_scenario,
+        .finish = finish_tls_scenario,
+        
+        .actions = {
+        tls_create_key_scen,
+            tls_setget_scen,
+            tls_delete_key_scen,
+            NULL
+    }
+};
+
+scenario ndfsm pthread_tls_tls =
+{
+    .init = init_pthread_tls_tls_scenario,
+        .finish = finish_tls_scenario,
+        .getState = getTlsScenarioGenState,
+        
+        .saveModelState = (PtrSaveModelState)saveTlsState,
+        .restoreModelState = (PtrRestoreModelState)restoreTlsState,
+        .isStationaryState = (PtrIsStationaryState)isTlsModelStateStationary,
+        
+        .actions = {
+        tls_create_key_scen,
+            tls_set_specific_scen,
+            tls_get_specific_scen,
+            tls_delete_key_scen,
+            NULL
+    }
+};
+
+
+
+bool pthread_tls_destruct(int argc, char** argv)
+{
+    num_processes=4; // set 4
+    num_threads=3; // 1 thread is unused
+    num_keys=2;
+    num_destructors = 3; // 1 thread is unused
+    num_cleanups = 1; // cleanups
+    return destruct_scenario(argc, argv); 
+}
+
+bool pthread_tls_manykeys(int argc, char** argv)
+{
+    num_processes=1;
+    num_threads=2;
+    num_keys=1024; // PTHREAD_KEYS_MAX === 1024
+    num_destructors = 6;
+    return manykeys_scenario(argc, argv);
+}
+
+bool pthread_tls_manythreads(int argc, char** argv)
+{
+    num_processes=1;
+    num_threads = 30; // manythreads
+    num_keys=20; 
+    num_destructors = 10;
+    return manykeys_scenario(argc, argv);
+}
+
+bool pthread_tls_fork(int argc, char** argv)
+{
+    num_processes=2;
+    num_threads=3;
+    num_keys=2;
+    num_destructors = 1;
+    to_fork=1;
+    tls_fork_scenario(argc, argv); // Known bug.
+    return true;
+}
+
+
+scenario ndfsm pthread_tls_errors =
+{
+    .init = init_pthread_tls_errors_scenario,
+        .finish = finish_tls_scenario,
+        
+        .actions = {
+        errors_scen,
+            NULL
+    }
+};
+
+
+bool main_pthread_tls( int argc, char** argv )
+{
+    pthread_tls_setget(argc, argv);
+    pthread_tls_tls(argc, argv);
+    pthread_tls_destruct(argc, argv);
+
+    if(PTHREAD_TLS_MANYKEYS_SCEN)
+    {
+        pthread_tls_manykeys(argc, argv);
+    }
+
+    pthread_tls_manythreads(argc, argv);
+
+    
+    if(PTHREAD_TLS_FORK_SCEN)
+    {
+        pthread_tls_fork(argc, argv);
+    }
+
+    pthread_tls_errors(argc, argv);
+
+    return true;
+}
+
+#ifdef PTHREAD_TLS_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "process/process/process_media.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "system/sysconf/sysconf_media.seh"
+
+
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+  reinitControlCenter();
+  initCommonModel();
+  initCommonMedia();
+  //initCommonScenarioState();
+
+  initSystemConfiguration();
+  initSystemModel();
+  initProcessModel();
+  initPThreadModel();
+  initProcessProcessSubsystem();//
+  initSystemSysconfSubsystem();
+  initPthreadPthreadSubsystem();
+
+  initPthreadTlsSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+    addTraceToFile("trace.xml");
+    
+    // Run test scenario
+    main_pthread_tls(argc,argv);
+    
+    //  unloadSUT();
+    return 0;
+}
+#endif
+

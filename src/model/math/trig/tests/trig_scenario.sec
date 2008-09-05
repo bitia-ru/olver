@@ -1,0 +1,1163 @@
+ /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "math/trig/tests/trig_scenario.seh"
+#include "math/trig/trig_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "math/math/math_data.seh"
+#include <stdio.h>
+
+static CallContext context;
+static VoidTPtr ptr;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_math_trig_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    context = getContext();  
+
+    initReqFilters();
+
+    ptr = allocateMemoryBlock(context, 1024);
+
+    setFinishMode(UNTIL_END);     
+
+    return true;
+}
+static void finish_math_trig_scenario(void)
+{
+    deallocateMemoryBlock(context, ptr);
+    TEST_SCENARIO_VERDICT_VERBOSE(trig_scenario);
+}
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool sin_cos_tan_scen()
+{
+    int leng_num[3] = {digMant_FloatT, digMant_DoubleT, digMant_LongDoubleT};
+    Unifloat* Nan[3] = {clone(nan_FloatT), clone(nan_DoubleT), clone(nan_LongDoubleT)};
+    Unifloat* Inf[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), clone(infinity_LongDoubleT)};
+    Unifloat* Almost_Zero[3] = {createOne_Unifloat(UniFloatT),
+                        createOne_Unifloat(UniDoubleT),
+                        createOne_Unifloat(UniLongDoubleT)};
+    int type, i, sign;
+    IntT err_code = 0, dist = 0;
+    Almost_Zero[0]->exp = 1 - digMant_FloatT + minExp_FloatT;
+    Almost_Zero[1]->exp = 1 - digMant_DoubleT + minExp_DoubleT;
+    Almost_Zero[2]->exp = 1 - digMant_LongDoubleT + minExp_LongDoubleT;
+    for(type = 0; type < 3; type++)
+    {
+        Unifloat* Two = convertInteger_Unifloat(2, type);
+        Unifloat* Three = convertInteger_Unifloat(3, type);
+        Unifloat* Four = convertInteger_Unifloat(4, type);
+        Unifloat* par[10] = { 
+            clone(Nan[type]),
+            clone(Inf[type]),
+            createZero_Unifloat(type),
+            clone(Almost_Zero[type]),
+            Two,
+            mul_Unifloat(Pi[type], Two),
+            clone(Pi[type]),
+            div_Unifloat(Pi[type], Two),
+            div_Unifloat(mul_Unifloat(Pi[type], Three), Two),
+            div_Unifloat(Pi[type], Four)
+            };
+        for(i = 0; i<10; i++)
+        {
+//            to_string_Unifloat((struct Unifloat*)par[i]);
+            for(sign = 1; sign>-2; sign = sign - 2)
+            {
+                sin_spec(context, changeSign_Unifloat(round_Unifloat(par[i], 
+                    leng_num[type]), sign), requestErrorCode());
+                cos_spec(context, changeSign_Unifloat(round_Unifloat(par[i], 
+                    leng_num[type]), sign), createZero_Unifloat(type), 0, &err_code, &dist, requestErrorCode());
+                tan_spec(context, changeSign_Unifloat(round_Unifloat(par[i], 
+                    leng_num[type]), sign), createZero_Unifloat(type), 0, &err_code, &dist, requestErrorCode());
+            }
+        }
+    }
+    return true;
+}
+
+void ReadFromFile(CharT* file_name, List* x)
+{
+    FILE* f;
+    char st[100];
+    CString* str;
+    Unifloat* tmp, *tmp_exp;
+    IntT error;
+
+    f = fopen(file_name, "r+");
+     while (!feof(f))
+    {
+        fscanf(f, "%s\n", &st);
+        if (strcmp(st, "0.0000000000000000000000000000000000000000000000000000e+00") == 0)
+        {
+            append_List(x, createZero_Unifloat(UniDoubleT));
+            continue;
+        }
+        str = create_CString(   st);
+        tmp = convertBinaryString_Unifloat(substring_CString(str, 0, indexOfChar_CString(str, 'e')), UniDoubleT);
+        tmp_exp = convertString_Unifloat(substring_CString(str, indexOfChar_CString(str, 'e')+1, length_CString(str)), UniDoubleT);
+        tmp->exp = convertUnifloat_Integer(tmp_exp, &error) + 1;
+        
+        append_List(x, tmp); 
+    }
+    fclose(f);
+}
+
+void CorrectFile(CharT* input_file, CharT* out_file)
+{
+    FILE *f, *f1;
+    char st[100];
+    CString* str;
+    Unifloat* tmp, *tmp_exp;
+    IntT error, exp, i;
+
+    f = fopen(input_file, "r+");
+    f1 = fopen(out_file, "w+");
+     while (!feof(f))
+    {
+        fscanf(f, "%s\n", &st);
+        str = create_CString(   st);
+        tmp = convertBinaryString_Unifloat(substring_CString(str, 0, indexOfChar_CString(str, 'e')), UniDoubleT);
+        tmp_exp = convertString_Unifloat(substring_CString(str, indexOfChar_CString(str, 'e')+1, length_CString(str)), UniDoubleT);
+        tmp->exp = convertUnifloat_Integer(tmp_exp, &error) + 1;
+        if (tmp->exp <= -1022)
+        {
+            exp = -tmp->exp - 1022 + 1;
+            for (i = 53; i > 53 - exp; i--)
+                st[i] = '0';
+            if (tmp->exp == -1074)
+                st[1] = '.';
+        }
+        fprintf(f1,"%s\n", st);
+    }
+    fclose(f);
+    fclose(f1);
+}
+
+
+scenario
+bool tan_advance_scen()
+{
+    List* x, *tan[4] = {NULL, NULL, NULL, NULL};
+    Unifloat* X = createZero_Unifloat(UniDoubleT);
+    Unifloat* TAN = createZero_Unifloat(UniDoubleT);
+    int rounding;
+    IntT i;
+    Unifloat* Neg_inf = clone(infinity_Unifloat(UniDoubleT));
+    char file[4][100] = {"src/testdata/math.trig/tan_nearest.txt", "src/testdata/math.trig/tan_neg_infinity.txt", "src/testdata/math.trig/tan_pos_infinity.txt", "src/testdata/math.trig/tan_zero.txt"};
+    char round_name[4][50] = {"NEAREST", "DOWNWARD", "UPWARD", "TOWARDZERO"};
+    int Dist[54+50];
+    int Dist_inf[54+50];
+    int Dist_inf_N = 0;
+    int Dist_zero[54+50];
+    int Dist_zero_N = 0;
+    int Dist_one[54+50];
+    int exp_dist[1024+100];
+    int exp_N[1024+100];
+    int Err[5];
+    int mono_err_N = 0;
+    int odd_err_N = 0;
+    IntT err_code = 0, dist = 0;
+    Unifloat *res1, *res2, *last_res = createZero_Unifloat(UniDoubleT);
+    
+    Neg_inf->sign = -1;
+    verbose("TANGENT:\n");
+    verbose("Reading arguments...\n");
+    x = create_List(&type_Unifloat);
+    ReadFromFile("src/testdata/math.trig/data_pi.txt", x);
+
+    append_List(x, createZero_Unifloat(UniDoubleT));
+    append_List(x, clone(nan_Unifloat(UniDoubleT)));
+    append_List(x, clone(infinity_Unifloat(UniDoubleT)));
+    append_List(x, clone(Neg_inf));
+    verbose("Finished readign arguments\n");
+
+    for (i = 0; i < 4; i++)
+    {
+        verbose("Reading tangent with round '%s'\n", round_name[i]);
+        tan[i] = create_List (&type_Unifloat);
+        ReadFromFile(file[i], tan[i]);
+
+        append_List(tan[i], createZero_Unifloat(UniDoubleT));
+        append_List(tan[i], clone(nan_Unifloat(UniDoubleT)));
+        append_List(tan[i], clone(nan_Unifloat(UniDoubleT)));
+        append_List(tan[i], clone(nan_Unifloat(UniDoubleT)));
+        verbose("Size_list = %d\n", size_List(tan[i]));
+        verbose("Finished reading tangent\n");
+    }
+
+    for (rounding = 0; rounding < 1; rounding++)
+    {
+//        verbose("Tangent. Rounding - '%s'\n", round_name[rounding]);
+//        Dist_inf_N = 0;
+//        Dist_zero_N = 0;
+//        mono_err_N = 0;
+//        odd_err_N = 0;
+//        for (i = 0; i < 54; i++)
+//        {
+//            Dist[i] = 0;
+//            Dist_inf[i] = 0;
+//            Dist_zero[i] = 0;
+//            Dist_one[i] = 0;
+//        }
+//        for (i = 0; i< 1024; i++)
+//        {
+//            exp_dist[i] = 0;
+//            exp_N[i] = 0;
+//        }
+//        for (i = 0; i < 5; i++)
+//            Err[i] = 0;
+
+        for (i = 0; i < size_List(x); i++)
+        {
+            X = clone((Unifloat*)get_List(x, i));
+            TAN = clone((Unifloat*)get_List(tan[rounding], i));
+            res1 = tan_spec(context, X, TAN, rounding, &err_code, &dist, requestErrorCode());
+//            if ((err_code >= 0) && (err_code <=4) && (dist >= 0))
+//            {
+//                Err[err_code]++;
+//                Dist[dist]++;
+//            }
+//            if (TAN->exp > 10)
+//            {
+//                Dist_inf[dist]++;
+//                Dist_inf_N++;
+//            }
+//            if (TAN->exp < -10)
+//            {
+//                Dist_zero[dist]++;
+//                Dist_zero_N++;
+//            }
+//            if (compareWithPrecision_Unifloat(abs_Unifloat(TAN), createOne_Unifloat(UniDoubleT), 10) == 0)
+//                Dist_one[dist]++;
+//            if ((X->exp >= 0) && (X->exp < 1024))
+//            {
+//                    exp_dist[X->exp] += dist;
+//                    exp_N[X->exp]++;
+//            }
+            /* monotony checking */
+            if (i > 0)
+                if (compare_Unifloat(
+                    abs_Unifloat(sub_Unifloat((Unifloat*)get_List(x, i), (Unifloat*)get_List(x, i - 1))), 
+                    Pi[UniDoubleT]) == -1)
+                    if (compare_Unifloat((Unifloat*)get_List(tan[rounding], i), (Unifloat*)get_List(tan[rounding], i - 1)) == 1)
+                        if (compare_Unifloat(last_res, res1) == 1)
+                        {
+/*                            verbose("Error in monotony\n");
+                            printExp_Unifloat((Unifloat*)get_List(x, i - 1), 53);
+                            printExp_Unifloat((Unifloat*)get_List(x, i), 53);
+                            printExp_Unifloat((Unifloat*)get_List(tan[rounding], i - 1), 53);
+                            printExp_Unifloat((Unifloat*)get_List(tan[rounding], i), 53);
+                            printExp_Unifloat(last_res, 53);
+                            printExp_Unifloat(res1, 53);*/
+                            mono_err_N++;
+                        }
+            last_res = res1;
+            /******************/
+            /* odd checking */
+            X->sign = -X->sign;
+            if (rounding == 1)
+            {
+                TAN = clone(get_List(tan[2], i));
+                TAN->sign = -TAN->sign;
+                res2 = tan_spec(context, X, TAN, rounding + 1, &err_code, &dist, requestErrorCode());
+            }
+
+            if (rounding == 2)
+            {
+                TAN = clone(get_List(tan[1], i));
+                TAN->sign = -TAN->sign;
+                res2 = tan_spec(context, X, TAN, rounding - 1, &err_code, &dist, requestErrorCode());
+            }
+
+            if ((rounding != 1) && (rounding != 2))
+            {
+                TAN->sign = -TAN->sign;
+                res2 = tan_spec(context, X, TAN, rounding, &err_code, &dist, requestErrorCode());
+            }
+
+            res2->sign = - res2->sign;
+
+            if (compare_Unifloat(res1, res2) !=0)
+            {
+/*                verbose("Error in odd at rounding %d\n", rounding);
+                printExp_Unifloat(X, 53);
+                printExp_Unifloat(get_List(tan[rounding], i), 53);
+                printExp_Unifloat(TAN, 53);
+                printExp_Unifloat(res1, 53);
+                printExp_Unifloat(res2, 53);*/
+                odd_err_N++;
+            }
+            /******************/
+
+        }
+
+/*        verbose("Number of errors:\n");
+        for (i = 0; i < 5; i ++)
+            verbose("%d - %d\n", i, Err[i]);
+
+        verbose("Number of odd error: %d\n", odd_err_N);
+        verbose("Number of monotony error: %d\n", mono_err_N);
+
+        verbose("Distances:\n");
+        for (i = 0; i < 54; i ++)
+            verbose("%d\n", Dist[i]);
+
+        verbose("Number of infinity: %d\n", Dist_inf_N);
+        verbose("Distance in infinity\n");
+        for (i = 0; i < 54; i ++)
+            verbose("%d\n", Dist_inf[i]);
+    
+        verbose("Number of near zero: %d\n", Dist_zero_N);
+        verbose("Distance near zero\n");
+        for (i = 0; i < 54; i ++)
+            verbose("%d\n", Dist_zero[i]);
+
+        verbose("Distance near one\n");
+        for (i = 0; i < 54; i ++)
+            verbose("%d\n", Dist_one[i]);
+
+        verbose("Distribution of an average deviation in exponent\n");
+        for (i = 0; i< 1024; i++)
+            if (exp_N[i] != 0)
+                verbose("%e\n", ((float)exp_dist[i]/exp_N[i]));
+            else
+                verbose("0\n");*/
+    }
+    return true;
+}
+
+scenario
+bool cos_advance_scen()
+{
+static    List *x;
+static    List *cos_arr;
+Unifloat* X = createZero_Unifloat(UniDoubleT);
+Unifloat* COS = createZero_Unifloat(UniDoubleT);
+static    int rounding;
+static    IntT i;
+Unifloat* Neg_inf = clone(infinity_Unifloat(UniDoubleT));
+static    char file[4][50] = {"src/testdata/math.trig/cos_nearest.txt", "src/testdata/math.trig/cos_neg_infinity.txt", "src/testdata/math.trig/cos_pos_infinity.txt", "src/testdata/math.trig/cos_zero.txt"};
+static    char round_name[4][50] = {"NEAREST", "DOWNWARD", "UPWARD", "TOWARDZERO"};
+static    int Dist[54+100];
+static    int Dist_one[54+100];
+static    int Dist_one_N = 0;
+static    int Dist_zero[54+100];
+static    int Dist_zero_N = 0;
+static    int Dist_onetwo[54+100];
+static    int exp_dist[1024+100];
+static    int exp_N[1024+100];
+static    int Err[5+10];
+static    int mono_err_N = 0;
+static    int even_err_N = 0;
+static    IntT err_code = 0, dist = 0;
+static    Unifloat *res1, *res2, *last_res;
+Unifloat *OneTwo = createOne_Unifloat(UniDoubleT);
+
+    OneTwo->exp--;
+    Neg_inf->sign = -1;
+    verbose("COSINE:\n");
+    verbose("Reading arguments...\n");
+    x = create_List(&type_Unifloat);
+    cos_arr = create_List(&type_List);
+
+    for (i = 0; i < 4; i++)
+        append_List(cos_arr, create_List(&type_Unifloat));
+
+    ReadFromFile("src/testdata/math.trig/data_cos.txt", x);
+
+    append_List(x, createZero_Unifloat(UniDoubleT));
+    append_List(x, clone(nan_Unifloat(UniDoubleT)));
+    append_List(x, clone(infinity_Unifloat(UniDoubleT)));
+    append_List(x, clone(Neg_inf));
+    verbose("Finished readign arguments\n");
+
+    for (i = 0; i < 4; i++)
+    {
+        verbose("Reading cosine with round '%s'\n", round_name[i]);
+        ReadFromFile(file[i], get_List(cos_arr, i));
+
+        append_List(get_List(cos_arr, i), createOne_Unifloat(UniDoubleT));
+        append_List(get_List(cos_arr, i), clone(nan_Unifloat(UniDoubleT)));
+        append_List(get_List(cos_arr, i), clone(nan_Unifloat(UniDoubleT)));
+        append_List(get_List(cos_arr, i), clone(nan_Unifloat(UniDoubleT)));
+        verbose("Size_list = %d\n", size_List(get_List(cos_arr,i)));
+        verbose("Finished reading cosine\n");
+    }
+
+    for (rounding = 0; rounding < 1; rounding++)
+    {
+//        verbose("Cosine. Rounding - '%s'\n", round_name[rounding]);
+//        Dist_one_N = 0;
+//        Dist_zero_N = 0;
+//        mono_err_N = 0;
+//        even_err_N = 0;
+//        for (i = 0; i < 54; i++)
+//        {
+//            Dist[i] = 0;
+//            Dist_one[i] = 0;
+//            Dist_zero[i] = 0;
+//            Dist_onetwo[i] = 0;
+//        }
+//        for (i = 0; i< 1024; i++)
+//        {
+//            exp_dist[i] = 0;
+//            exp_N[i] = 0;
+//        }
+//        for (i = 0; i < 5; i++)
+//            Err[i] = 0;
+
+
+        for (i = 0; i < size_List(x); i++)
+        {
+            X = clone((Unifloat*)get_List(x, i));
+            COS = clone((Unifloat*)get_List(get_List(cos_arr,rounding), i));
+            res1 = cos_spec(context, X, COS, rounding, &err_code, &dist, requestErrorCode());
+//            Err[err_code]++;
+//            Dist[dist]++;
+//            if (compareWithPrecision_Unifloat(COS, createOne_Unifloat(UniDoubleT), 10) == 0)
+//            {
+//                Dist_one[dist]++;
+//                Dist_one_N++;
+//            }
+//            if (COS->exp < -10)
+//            {
+//                Dist_zero[dist]++;
+//                Dist_zero_N++;
+//            }
+//            if (compareWithPrecision_Unifloat(abs_Unifloat(COS), OneTwo, 20) == 0)
+//                Dist_onetwo[dist]++;
+//            if ((X->exp >= 0) && (X->exp < 1024))
+//            {
+//                    exp_dist[X->exp] += dist;
+//                    exp_N[X->exp]++;
+//            }
+            /* monotony checking */
+            if (i > 0)
+                if (compare_Unifloat(
+                    abs_Unifloat(sub_Unifloat((Unifloat*)get_List(x, i), (Unifloat*)get_List(x, i - 1))), 
+                    Pi[UniDoubleT]) == -1)
+                    if (((compare_Unifloat((Unifloat*)get_List(get_List(cos_arr,rounding), i), (Unifloat*)get_List(get_List(cos_arr,rounding), i - 1)) == 1)
+                        && (compare_Unifloat(last_res, res1) == 1)) ||
+                            ((compare_Unifloat((Unifloat*)get_List(get_List(cos_arr,rounding), i), (Unifloat*)get_List(get_List(cos_arr, rounding), i - 1)) == -1)
+                        && (compare_Unifloat(last_res, res1) == -1)))
+                        {
+//                            verbose("Error in monotony\n");
+//                            printExp_Unifloat((Unifloat*)get_List(x, i - 1), 53);
+//                            printExp_Unifloat((Unifloat*)get_List(x, i), 53);
+//                            printExp_Unifloat((Unifloat*)get_List(get_List(cos_arr, rounding), i - 1), 53);
+//                            printExp_Unifloat((Unifloat*)get_List(get_List(cos_arr, rounding), i), 53);
+//                            printExp_Unifloat(last_res, 53);
+//                            printExp_Unifloat(res1, 53);
+                            mono_err_N++;
+                        }
+            last_res = res1;
+            /******************/
+            /* even checking */
+            X->sign = -X->sign;
+            res2 = cos_spec(context, X, COS, rounding, &err_code, &dist, requestErrorCode());
+
+            if (compare_Unifloat(res1, res2) !=0)
+            {
+//                verbose("Error in even at rounding %d\n", rounding);
+//                printExp_Unifloat(X, 53);
+//                printExp_Unifloat(get_List(get_List(cos_arr, rounding), i), 53);
+//                printExp_Unifloat(COS, 53);
+//                printExp_Unifloat(res1, 53);
+//                printExp_Unifloat(res2, 53);
+                even_err_N++;
+            }
+            /******************/
+        }
+
+//        verbose("Number of errors:\n");
+//        for (i = 0; i < 5; i ++)
+//            verbose("%d - %d\n", i, Err[i]);
+//
+//        verbose("Number of even error: %d\n", even_err_N);
+//        verbose("Number of monotony error: %d\n", mono_err_N);
+//
+//        verbose("Distances:\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist[i]);
+//
+//        verbose("Number of one: %d\n", Dist_one_N);
+//        verbose("Distance in one\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist_one[i]);
+//    
+//        verbose("Number of near zero: %d\n", Dist_zero_N);
+//        verbose("Distance near zero\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist_zero[i]);
+//
+//        verbose("Distance near first-two\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist_onetwo[i]);
+//
+//        verbose("Distribution of an average deviation in exponent\n");
+//        for (i = 0; i< 1024; i++)
+//            if (exp_N[i] != 0)
+//                verbose("%e\n", ((float)exp_dist[i]/exp_N[i]));
+//            else
+//                verbose("0\n");
+    }
+    return true;
+}
+
+scenario bool acos_asin_atan_scen()
+{
+    int leng_num[3] = {digMant_FloatT, digMant_DoubleT, digMant_LongDoubleT};
+    Unifloat* Nan[3] = {clone(nan_FloatT), clone(nan_DoubleT), clone(nan_LongDoubleT)};
+    Unifloat* Inf[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), clone(infinity_LongDoubleT)};
+    Unifloat* Almost_Zero[3] = {createOne_Unifloat(UniFloatT),
+                        createOne_Unifloat(UniDoubleT),
+                        createOne_Unifloat(UniLongDoubleT)};
+    int type, i, sign;
+    IntT err_code = 1, dist = 0;
+    Almost_Zero[0]->exp = 1 - digMant_FloatT + minExp_FloatT;
+    Almost_Zero[1]->exp = 1 - digMant_DoubleT + minExp_DoubleT;
+    Almost_Zero[2]->exp = 1 - digMant_LongDoubleT + minExp_LongDoubleT;
+    for(type = 0; type < 3; type++)
+    {
+        Unifloat* One = createOne_Unifloat(type);
+        Unifloat* Two = convertInteger_Unifloat(2, type);
+        Unifloat* Three = convertInteger_Unifloat(3, type);
+        Unifloat* Four = convertInteger_Unifloat(4, type);
+        Unifloat* par[9] = { 
+            Nan[type],
+            Inf[type],
+            createZero_Unifloat(type),
+            createOne_Unifloat(type),
+            Two,
+            clone(Almost_Zero[type]),
+            div_Unifloat(One, Two),
+            div_Unifloat(One, Three),
+            div_Unifloat(One, Four)
+            };
+        for(i = 0; i<9; i++)
+            for(sign = 1; sign>-2; sign = sign - 2)
+            {
+                acos_spec(context, changeSign_Unifloat(round_Unifloat(par[i], 
+                    leng_num[type]), sign), createZero_Unifloat(type), 0, &err_code, &dist, requestErrorCode());
+                asin_spec(context, changeSign_Unifloat(round_Unifloat(par[i], 
+                    leng_num[type]), sign), requestErrorCode());
+                atan_spec(context, changeSign_Unifloat(round_Unifloat(par[i], 
+                    leng_num[type]), sign), createZero_Unifloat(type), 0, &err_code, &dist, requestErrorCode());
+            }
+    }
+    return true;
+}
+
+scenario
+bool atan_advance_scen()
+{
+    List* x, *atan[4] = {NULL, NULL, NULL, NULL};
+    Unifloat* X = createZero_Unifloat(UniDoubleT);
+    Unifloat* ATAN = createZero_Unifloat(UniDoubleT);
+    int rounding;
+    IntT i;
+    Unifloat* Neg_inf = clone(infinity_Unifloat(UniDoubleT));
+    char file[4][100] = {"src/testdata/math.trig/arctg_nearest.txt", "src/testdata/math.trig/arctg_neg_infinity.txt", "src/testdata/math.trig/arctg_pos_infinity.txt", "src/testdata/math.trig/arctg_zero.txt"};
+    char round_name[4][30] = {"NEAREST", "DOWNWARD", "UPWARD", "TOWARDZERO"};
+    int Dist[54 + 100];
+    int Dist_inf[54 + 100];
+    int Dist_inf_N = 0;
+    int Dist_zero[54 + 100];
+    int Dist_zero_N = 0;
+    int Dist_one[54 + 100];
+    int exp_dist[1024+1074];
+    int exp_N[1024+1074];
+    int Err[5 + 10];
+    int mono_err_N = 0;
+    int odd_err_N = 0;
+    IntT err_code = 0, dist = 0;
+    Unifloat *res1, *res2, *last_res, *tmp;
+    Neg_inf->sign = -1;
+    verbose("ARCTANGENT:\n");
+    verbose("Reading arguments...\n");
+    x = create_List(&type_Unifloat);
+    ReadFromFile("src/testdata/math.trig/data_arctg.txt", x);
+    append_List(x, createZero_Unifloat(UniDoubleT));
+    append_List(x, clone(nan_Unifloat(UniDoubleT)));
+    append_List(x, clone(infinity_Unifloat(UniDoubleT)));
+    append_List(x, clone(Neg_inf));
+    verbose("Finished readign arguments\n");
+
+    for (i = 0; i < 4; i++)
+    {
+        verbose("Reading arctangent with round '%s'\n", round_name[i]);
+        atan[i] = create_List (&type_Unifloat);
+        ReadFromFile(file[i], atan[i]);
+        tmp = clone(get_List(atan[i], size_List(atan[i]) - 10));
+        append_List(atan[i], createZero_Unifloat(UniDoubleT));
+        append_List(atan[i], clone(nan_Unifloat(UniDoubleT)));
+        append_List(atan[i], clone(tmp));
+        tmp->sign = -tmp->sign;
+        append_List(atan[i], tmp);
+        verbose("Size_list = %d\n", size_List(atan[i]));
+        verbose("Finished reading arctangent\n");
+    }
+    for (rounding = 0; rounding < 4; rounding++)
+    {
+//        verbose("Arctan. Rounding - '%s'\n", round_name[rounding]);
+//        Dist_inf_N = 0;
+//        Dist_zero_N = 0;
+//        mono_err_N = 0;
+//        odd_err_N = 0;
+//        for (i = 0; i < 54; i++)
+//        {
+//            Dist[i] = 0;
+//            Dist_inf[i] = 0;
+//            Dist_zero[i] = 0;
+//            Dist_one[i] = 0;
+//        }
+//        for (i = 0; i< 1024 + 1074; i++)
+//        {
+//            exp_dist[i] = 0;
+//            exp_N[i] = 0;
+//        }
+//        for (i = 0; i < 5; i++)
+//            Err[i] = 0;
+        for (i = 0; i < size_List(x); i++)
+        {
+            X = clone((Unifloat*)get_List(x, i)); 
+            ATAN = clone((Unifloat*)get_List(atan[rounding], i));
+            res1 = atan_spec(context, X, ATAN, rounding, &err_code, &dist, requestErrorCode());
+//            Err[err_code]++;
+//            Dist[dist]++;
+//            if (X->exp > 53)
+//            {
+//                Dist_inf[dist]++;
+//                Dist_inf_N++;
+//            }
+//            if (X->exp < -10)
+//            {
+//                Dist_zero[dist]++;
+//                Dist_zero_N++;
+//            }
+//            if (compare_Unifloat(X, createOne_Unifloat(UniDoubleT)) == 0)
+//                Dist_one[dist]++;
+//            if (((X->exp + 1074) >=0) && ((X->exp + 1074) < (1024 + 1074)))
+//            {
+//                exp_dist[X->exp + 1074] += dist;
+//                exp_N[X->exp+1074]++;
+//            }
+//            /* monotony checking */
+          if (i > 0)
+              if (compare_Unifloat((Unifloat*)get_List(x, i), (Unifloat*)get_List(x, i - 1)) == 1)
+                  if (compare_Unifloat((Unifloat*)get_List(atan[rounding], i), (Unifloat*)get_List(atan[rounding], i - 1)) != -1)
+                      if (compare_Unifloat(last_res, res1) == 1)
+                      {
+                            verbose("Error in monotony\n");
+                            printExp_Unifloat((Unifloat*)get_List(x, i - 1), 53);
+                            printExp_Unifloat((Unifloat*)get_List(x, i), 53);
+                            printExp_Unifloat((Unifloat*)get_List(atan[rounding], i - 1), 53);
+                            printExp_Unifloat((Unifloat*)get_List(atan[rounding], i), 53);
+                            printExp_Unifloat(last_res, 53);
+                            printExp_Unifloat(res1, 53);
+                        mono_err_N = 1;
+                      }
+          last_res = clone(res1);
+            /******************/
+            /* odd checking */
+            X->sign = -X->sign;
+            if (rounding == 1)
+            {
+                ATAN = clone(get_List(atan[2], i));
+                ATAN->sign = -ATAN->sign;
+                res2 = atan_spec(context, X, ATAN, rounding + 1, &err_code, &dist, requestErrorCode());
+            }
+            if (rounding == 2)
+            {
+                ATAN = clone(get_List(atan[1], i));
+                ATAN->sign = -ATAN->sign;
+                res2 = atan_spec(context, X, ATAN, rounding - 1, &err_code, &dist, requestErrorCode());
+            }
+            if ((rounding != 1) && (rounding != 2))
+            {
+                ATAN->sign = -ATAN->sign;
+                res2 = atan_spec(context, X, ATAN, rounding, &err_code, &dist, requestErrorCode());
+            }
+            res2->sign = -res2->sign;
+            if (compare_Unifloat(res1, res2) !=0)
+            {
+//                verbose("Error in odd at rounding %d\n", rounding);
+//                printExp_Unifloat(X, 53);
+//                printExp_Unifloat(get_List(atan[rounding], i), 53);
+//                printExp_Unifloat(ATAN, 53);
+//                printExp_Unifloat(res1, 53);
+//                printExp_Unifloat(res2, 53);
+//                odd_err_N++;
+            }
+            /******************/
+            Err[err_code]++;
+            Dist[dist]++;
+            if (X->exp > 53)
+            {
+                Dist_inf[dist]++;
+                Dist_inf_N++;
+            }
+            if (X->exp < -10)
+            {
+                Dist_zero[dist]++;
+                Dist_zero_N++;
+            }
+            if (compare_Unifloat(X, createOne_Unifloat(UniDoubleT)) == 0)
+                Dist_one[dist]++;
+            if (((X->exp + 1074) >=0) && ((X->exp + 1074) < (1024 + 1074)))
+            {
+                exp_dist[X->exp + 1074] += dist;
+                exp_N[X->exp+1074]++;
+            }
+        }
+//        verbose("Number of errors:\n");
+//        for (i = 0; i < 5; i ++)
+//            verbose("%d - %d\n", i, Err[i]);
+//
+//        verbose("Number of odd error: %d\n", odd_err_N);
+//        verbose("Number of monotony error: %d\n", mono_err_N);
+//
+//        verbose("Distances:\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist[i]);
+//
+//        verbose("Number of infinity: %d\n", Dist_inf_N);
+//        verbose("Distance in infinity\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist_inf[i]);
+//    
+//        verbose("Number of near zero: %d\n", Dist_zero_N);
+//        verbose("Distance near zero\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist_zero[i]);
+//
+//        verbose("Distance near one\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist_one[i]);
+//
+//        verbose("Distribution of an average deviation in exponent\n");
+//        for (i = 0; i< 1024 + 1074; i++)
+//            if (exp_N[i] != 0)
+//                verbose("%e\n", ((float)exp_dist[i]/exp_N[i]));
+//            else
+//                verbose("0\n");
+    }
+    return true;
+}
+
+scenario
+bool acos_advance_scen()
+{
+    List* x, *acos[4] = {NULL, NULL, NULL, NULL};
+    Unifloat* X = createZero_Unifloat(UniDoubleT);
+    Unifloat* ACOS = createZero_Unifloat(UniDoubleT);
+    int rounding;
+    IntT i;
+    Unifloat* Neg_inf = clone(infinity_Unifloat(UniDoubleT));
+    char file[4][100] = {"src/testdata/math.trig/arccos_nearest.txt", "src/testdata/math.trig/arccos_neg_infinity.txt", "src/testdata/math.trig/arccos_pos_infinity.txt", "src/testdata/math.trig/arccos_zero.txt"};
+    char round_name[4][30] = {"NEAREST", "DOWNWARD", "UPWARD", "TOWARDZERO"};
+    int Dist[54 + 100];
+    int Dist_zero[54 + 100];
+    int Dist_zero_N = 0;
+    int exp_dist[1024+1074];
+    int exp_N[1024+1074];
+    int Err[5 + 10];
+    int mono_err_N = 0;
+    IntT err_code = 0, dist = 0;
+    Unifloat *res1, *res2, *last_res, *tmp;
+
+    Neg_inf->sign = -1;
+    verbose("ARCCOSINE:\n");
+    verbose("Reading arguments...\n");
+    x = create_List(&type_Unifloat);
+    ReadFromFile("src/testdata/math.trig/data_arccos.txt", x);
+
+    append_List(x, clone(nan_Unifloat(UniDoubleT)));
+    append_List(x, clone(infinity_Unifloat(UniDoubleT)));
+    append_List(x, clone(Neg_inf));
+    verbose("Finished readign arguments\n");
+
+    for (i = 0; i < 4;i++)
+    {
+        verbose("Reading arccosine with round '%s'\n", round_name[i]);
+        acos[i] = create_List (&type_Unifloat);
+        ReadFromFile(file[i], acos[i]);
+
+        append_List(acos[i], clone(nan_Unifloat(UniDoubleT)));
+        append_List(acos[i], clone(nan_Unifloat(UniDoubleT)));
+        append_List(acos[i], clone(nan_Unifloat(UniDoubleT)));
+        verbose("Size_list = %d\n", size_List(acos[i]));
+        verbose("Finished reading arccosine\n");
+    }
+
+    for (rounding = 0; rounding < 4; rounding++)
+    {
+//        verbose("Arccos. Rounding - '%s'\n", round_name[rounding]);
+//        Dist_zero_N = 0;
+//        mono_err_N = 0;
+//        for (i = 0; i < 54; i++)
+//        {
+//            Dist[i] = 0;
+//            Dist_zero[i] = 0;
+//        }
+//        for (i = 0; i< 1024 + 1074; i++)
+//        {
+//            exp_dist[i] = 0;
+//            exp_N[i] = 0;
+//        }
+//        for (i = 0; i < 5; i++)
+//            Err[i] = 0;
+
+
+        for (i = 0; i < size_List(x); i++)
+        {
+            X = clone((Unifloat*)get_List(x, i));
+            ACOS = clone((Unifloat*)get_List(acos[rounding], i));
+            res1 = acos_spec(context, X, ACOS, rounding, &err_code, &dist, requestErrorCode());
+
+//            Err[err_code]++;
+//            if (err_code == 2) printf("!!!!!! %d\n", Err[err_code]);
+//            Dist[dist]++;
+//            if (X->exp < -10)
+//            {
+//                Dist_zero[dist]++;
+//                Dist_zero_N++;
+//            }
+//            if (((X->exp + 1074) >=0) && ((X->exp + 1074) < (1024 + 1074)))
+//            {
+//                exp_dist[X->exp + 1074] += dist;
+//                exp_N[X->exp+1074]++;
+////                if ((float)exp_dist[X->exp + 1074]/exp_N[X->exp+1074] >53) printf("%d %d %d\n", X->exp+1074, exp_dist[X->exp+1074], exp_N[X->exp+1074]);
+//            }
+            /* monotony checking */
+            if (i > 0)
+                if (compare_Unifloat((Unifloat*)get_List(x, i), (Unifloat*)get_List(x, i - 1)) == 1)
+                    if (compare_Unifloat((Unifloat*)get_List(acos[rounding], i), (Unifloat*)get_List(acos[rounding], i - 1)) != 1)
+                        if (compare_Unifloat(last_res, res1) == -1)
+                        {
+//                            verbose("Error in monotony\n");
+//                            printExp_Unifloat((Unifloat*)get_List(x, i - 1), 53);
+//                            printExp_Unifloat((Unifloat*)get_List(x, i), 53);
+//                            printExp_Unifloat((Unifloat*)get_List(acos[rounding], i - 1), 53);
+//                            printExp_Unifloat((Unifloat*)get_List(acos[rounding], i), 53);
+//                            printExp_Unifloat(last_res, 53);
+//                            printExp_Unifloat(res1, 53);
+                            mono_err_N++;
+                        }
+            last_res = clone(res1);
+        }
+
+//        verbose("Number of errors:\n");
+//        for (i = 0; i < 5; i ++)
+//            verbose("%d - %d\n", i, Err[i]);
+//
+//        verbose("Number of monotony error: %d\n", mono_err_N);
+//
+//        verbose("Distances:\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist[i]);
+//
+//        verbose("Number of near zero: %d\n", Dist_zero_N);
+//        verbose("Distance near zero\n");
+//        for (i = 0; i < 54; i ++)
+//            verbose("%d\n", Dist_zero[i]);
+//
+//        verbose("Distribution of an average deviation in exponent\n");
+//        for (i = 0; i< 1 + 1074; i++)
+//            if (exp_N[i] != 0)
+//                verbose("%e\n", ((float)exp_dist[i]/exp_N[i]));
+//            else
+//                verbose("0\n");
+    }
+    return true;
+}
+
+scenario
+bool sincos_scen()
+{
+    int leng_num[3] = {digMant_FloatT, digMant_DoubleT, digMant_LongDoubleT};
+    Unifloat* Nan[3] = {clone(nan_FloatT), clone(nan_DoubleT), clone(nan_LongDoubleT)};
+    Unifloat* Inf[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), clone(infinity_LongDoubleT)};
+    Unifloat* Almost_Zero[3] = {createOne_Unifloat(UniFloatT),
+                        createOne_Unifloat(UniDoubleT),
+                        createOne_Unifloat(UniLongDoubleT)};
+    int type, i, sign;
+    Almost_Zero[0]->exp = 1 - digMant_FloatT + minExp_FloatT;
+    Almost_Zero[1]->exp = 1 - digMant_DoubleT + minExp_DoubleT;
+    Almost_Zero[2]->exp = 1 - digMant_LongDoubleT + minExp_LongDoubleT;
+    for(type = 0; type < 3; type++)
+    {
+        Unifloat *sin = createZero_Unifloat(type);
+        Unifloat *cos = createZero_Unifloat(type);
+        Unifloat* Two = convertInteger_Unifloat(2, type);
+        Unifloat* Three = convertInteger_Unifloat(3, type);
+        Unifloat* Four = convertInteger_Unifloat(4, type);
+        Unifloat* par[10] = { 
+            clone(Nan[type]),
+            clone(Inf[type]),
+            createZero_Unifloat(type),
+            clone(Almost_Zero[type]),
+            Two,
+            mul_Unifloat(Pi[type], Two),
+            clone(Pi[type]),
+            div_Unifloat(Pi[type], Two),
+            div_Unifloat(mul_Unifloat(Pi[type], Three), Two),
+            div_Unifloat(Pi[type], Four)
+            };
+        for(i = 0; i<10; i++)
+            for(sign = 1; sign>-2; sign = sign - 2)
+            {
+                sincos_spec(context, changeSign_Unifloat(round_Unifloat(par[i], 
+                    leng_num[type]), sign), &sin, &cos);
+            }
+    }
+    return true;
+}
+
+scenario bool atan2_scen()
+{
+    int leng_num[3] = {digMant_FloatT, digMant_DoubleT, digMant_LongDoubleT};
+    Unifloat* Nan[3] = {clone(nan_FloatT), clone(nan_DoubleT), clone(nan_LongDoubleT)};
+    Unifloat* Inf[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), clone(infinity_LongDoubleT)};
+    Unifloat* Almost_Zero[3] = {createOne_Unifloat(UniFloatT),
+                        createOne_Unifloat(UniDoubleT),
+                        createOne_Unifloat(UniLongDoubleT)};
+    Unifloat* One_Two_Three[3] = 
+    {        convertInteger_Unifloat(123, UniFloatT),
+             convertInteger_Unifloat(123, UniDoubleT),
+             convertInteger_Unifloat(123, UniLongDoubleT)};
+    int type, i, sign;
+    Almost_Zero[0]->exp = 1 - digMant_FloatT + minExp_FloatT;
+    Almost_Zero[1]->exp = 1 - digMant_DoubleT + minExp_DoubleT;
+    Almost_Zero[2]->exp = 1 - digMant_LongDoubleT + minExp_LongDoubleT;
+    for(type = 0; type < 3; type++)
+    {
+        Unifloat* One = createOne_Unifloat(type);
+        Unifloat* Two = convertInteger_Unifloat(2, type);
+        Unifloat* Three = convertInteger_Unifloat(3, type);
+        Unifloat* Four = convertInteger_Unifloat(4, type);
+        Unifloat* Ten = convertInteger_Unifloat(10, type);
+        Unifloat* par_y[18] = { 
+            clone(Nan[type]),
+            clone(Nan[type]),
+            clone(One),
+
+            clone(Inf[type]),
+            clone(Inf[type]),
+            clone(Inf[type]),
+
+            createZero_Unifloat(type),
+            createZero_Unifloat(type),
+            createZero_Unifloat(type),
+
+            clone(One),
+            clone(One),
+            clone(One),
+        
+            clone(Almost_Zero[type]),
+            clone(Almost_Zero[type]),
+            clone(One),
+
+            clone(One_Two_Three[type]),
+            clone(Ten),
+            clone(One)
+            };
+        Unifloat* par_x[18] = { 
+            clone(Nan[type]),
+            clone(One),
+            clone(Nan[type]),
+
+            clone(Inf[type]),
+            createZero_Unifloat(type),
+            clone(One),
+
+            clone(Inf[type]),
+            createZero_Unifloat(type),
+            clone(One),
+
+            clone(Inf[type]),
+            createZero_Unifloat(type),
+            clone(One),
+
+            clone(One),
+            clone(Almost_Zero[type]),
+            clone(Almost_Zero[type]),
+
+            clone(Ten),
+            clone(One_Two_Three[type]),
+            clone(One)
+            };
+        par_x[17]->sign = -1;
+        for(i = 0; i<18; i++)
+            for(sign = 1; sign>-2; sign = sign - 2)
+            {
+                atan2_spec(context, 
+                    changeSign_Unifloat(
+                        round_Unifloat(par_y[i], leng_num[type]), sign), 
+                    changeSign_Unifloat(
+                        round_Unifloat(par_x[i], leng_num[type]), sign),
+                    requestErrorCode());
+            }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm math_trig_scenario =
+{
+    .init = init_math_trig_scenario,
+    .finish = finish_math_trig_scenario,
+    .actions = { 
+                    sin_cos_tan_scen,
+                    acos_asin_atan_scen,
+                    atan_advance_scen,
+                    acos_advance_scen,
+                    tan_advance_scen,
+//                    cos_advance_scen,
+                    sincos_scen,
+                    atan2_scen,
+                    NULL 
+                }
+};
+
+bool main_math_trig(int argc, char** argv)
+{
+    math_trig_scenario(argc,argv);
+    return true;
+}
+
+#include "math/trig/tests/trig_scenario.seh"
+#include "math/math/math_data.seh"
+
+#ifdef MATH_TRIG_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "math/trig/trig_media.seh"
+#include "math/math/math_data.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initMath();
+
+    initMathTrigSubsystem();
+}
+
+#ifdef WIN32
+
+//void myAssertionExit(const char *format, va_list args)
+//{
+//    int i = 0;
+//    i++;
+//    printf(format);
+//}
+
+int main(int argc, char** argv)
+{
+    clock_t start, finish;
+    double duration;
+    Unifloat *x, *y, *res;
+    IntT type;
+    initTestSystem();
+
+    loadSUT();
+
+//    atAssertion(myAssertionExit);
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    addTraceToFile("trace.xml");
+
+    
+    start = clock();
+
+    main_math_trig(argc,argv);
+
+
+    finish = clock();
+    duration = (double) (finish - start) / CLOCKS_PER_SEC;
+
+    verbose( "%2.3f seconds\n", duration );        
+    
+    
+    
+    //  unloadSUT();
+    return 0;
+}
+
+#else
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    addTraceToFile("trace.xml");
+    main_math_trig(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif
+
+#endif
+
+

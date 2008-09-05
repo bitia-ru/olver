@@ -1,0 +1,205 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "process/ipc/shm_media.seh"
+#include "common/common_media.seh"
+#include "process/ipc/msg_media.seh"
+
+
+/********************************************************************/
+/**                    Formatters                                  **/
+/********************************************************************/
+
+void shmid_formatter(TSStream *stream, ShmidDs* data)
+{
+    VERIFY_TYPE(shmid_formatter, &type_ShmidDs, data);
+    
+    writeTypeHeaderTSStream(stream, "shmid");
+    
+    ipcperm_formatter(stream, data->shm_perm);
+    writeSize_TSStream(stream, data->shm_segsz);
+    writeInt_TSStream(stream, data->shm_lpid);
+    writeInt_TSStream(stream, data->shm_cpid);
+    writeUShort_TSStream(stream, data->shm_nattch);
+
+    writeLong_TSStream(stream, data->shm_atime);
+    writeLong_TSStream(stream, data->shm_dtime);
+    writeLong_TSStream(stream, data->shm_ctime);
+}
+
+
+ShmidDs* readShmidDs_TSStream(TSStream* stream)
+{
+    ShmidDs* data = create_ShmidDs(NULL, 0, 0, 0, 0, 0, 0, 0);
+    
+    data->shm_perm = readIpcPerm_TSStream(stream);
+    data->shm_segsz = readSize_TSStream(stream);
+    data->shm_lpid =  readInt_TSStream(stream);
+    data->shm_cpid =  readInt_TSStream(stream);
+    data->shm_nattch = readUShort_TSStream(stream);
+    data->shm_atime = readLong_TSStream(stream);
+    data->shm_dtime = readLong_TSStream(stream);
+    data->shm_ctime = readLong_TSStream(stream);
+
+    return data;
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initProcessIpcShmSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_shmat_spec(shmat_media);
+    set_mediator_shmctl_spec(shmctl_media);
+    set_mediator_shmdt_spec(shmdt_media);
+    set_mediator_shmget_spec(shmget_media);
+
+    // Set up formatters
+    registerTSFormatter("shmid",(TSFormatterFuncType)shmid_formatter);
+
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** shmat_spec **/
+mediator shmat_media for specification
+VoidTPtr shmat_spec( CallContext context, IntT shmid, VoidTPtr shmaddr, IntT shmflg, ErrorCode* errno)
+{
+    call
+    {
+        VoidTPtr res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "shmat:$(int)$(ptr)$(int)", create_IntTObj(shmid), create_VoidTPtrObj(shmaddr), 
+            create_IntTObj(shmflg));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+            
+            res=readPointer_TSStream(context, &command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+}
+
+
+/** shmctl_spec **/
+mediator shmctl_media for specification
+ShmCtlRetunType* shmctl_spec( CallContext context, IntT shmid, IntT cmd, ShmidDs* buf, ErrorCode* errno)
+{
+    call
+    {
+        IntT funcRes;
+        ShmidDs* data;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "shmctl:$(int)$(int)$(shmid)", create_IntTObj(shmid), create_IntTObj(cmd), buf);
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            data=readShmidDs_TSStream(&command.response);
+            funcRes=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_ShmCtlRetunType(funcRes, data);  
+    }
+}
+
+
+/** shmdt_spec **/
+mediator shmdt_media for specification
+IntT shmdt_spec( CallContext context, VoidTPtr shmaddr, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "shmdt:$(ptr)", create_VoidTPtrObj(shmaddr));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+            
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+}
+
+
+/** shmget_spec **/
+mediator shmget_media for specification
+IntT shmget_spec( CallContext context, KeyT key, SizeT size, IntT shmflag, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "shmget:$(int)$(size)$(int)", create_IntTObj(key), create_SizeTObj(size), 
+            create_IntTObj(shmflag));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+            
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+}
+
+
+

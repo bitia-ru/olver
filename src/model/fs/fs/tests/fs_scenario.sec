@@ -1,0 +1,216 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/init.seh"
+#include "common/common_model.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_media.seh"
+#include "system/sysconf/sysconf_model.seh"
+
+#include "system/system/system_model.seh"
+#include "fs/fs/fs_media.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "process/meta/fs_media.seh"
+#include "fs/symlink/symlink_model.seh"
+#include "fs/dir/dir_media.seh"
+#include "fs/dir/tests/fs_dump.seh"
+#include "fs/fs/tests/fs_scenario.seh"
+#include "process/meta/user_model.seh"
+
+#include <atl/integer.h>
+
+static CallContext context;
+
+#ifdef FS_FS_LOCAL_MAIN
+
+/********************************************************************/
+/**                          Debug Functions                       **/
+/********************************************************************/
+
+static AssertionExit system_assertion_handler;
+
+static void myAssertionExit(const char * format, va_list  arg_list)
+{
+    DUMPV(format, arg_list);
+    getchar();
+    system_assertion_handler(format, arg_list);
+}
+
+static void assert_init()
+{
+    system_assertion_handler = atAssertion(myAssertionExit);    
+   
+}
+#endif
+
+/********************************************************************/
+/**                          Utility Functions                     **/
+/********************************************************************/
+
+#define DUMP_FS(msg)     if(verbose_enabled){\
+        FileSystem *fs;\
+        verbose(msg);\
+        fs = getFileSystem(context);\
+        dump_FileSystem(fs, fs->root);\
+    }
+
+
+/********************************************************************/
+/**                          Test Scenario Functions               **/
+/********************************************************************/
+bool init_fs_scenario(int argc, char** argv)
+{
+#ifdef FS_FS_LOCAL_MAIN
+    assert_init();
+    VERBOSE_ON()
+#endif
+
+    context = getContext();
+    initPathSystemConfiguration();    
+
+    // make sure process has appropriate priviledges
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    return true;
+}
+
+void finish_fs_scenario(void)
+{
+    //clean up
+    DUMP_FS("File System after finish_fs_scenario:\n");
+
+    removeTestScenarioSandboxDir(context);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario 
+bool init_scen()
+{
+    createTestFile(context, SANDBOX_FILE("file1"), create_CString("file1_contents"));
+    createTestFile(context, SANDBOX_FILE("file2"), create_CString("file2_contents"));
+    mkdir_spec(context, SANDBOX_FILE("subdir_empty"), create_FilePermissions_String("rwxrwxrwx"),requestErrorCode());
+    mkdir_spec(context, SANDBOX_FILE("subdir"), create_FilePermissions_String("rwxrwxrwx"),requestErrorCode());
+    createTestFile(context, SANDBOX_FILE("subdir/file11"),create_CString("file11_contents"));
+
+    DUMP_FS("File System after init_scen:\n");
+   
+    return true;
+}
+
+scenario
+bool rename_scen()
+{
+    // should succeed
+    rename_spec(context, SANDBOX_FILE("file1"), SANDBOX_FILE("file3"), requestErrorCode(), cancel_status);
+
+    // should fail since dest dir exists and not empty
+    rename_spec(context, SANDBOX_FILE("file2"), SANDBOX_FILE("subdir"), requestErrorCode(), cancel_status);
+
+    DUMP_FS("File System after renaming file2 to subdir:\n");
+
+    // shoud succeed with directory
+    rename_spec(context, SANDBOX_FILE("subdir"), SANDBOX_FILE("subdir_empty"), requestErrorCode(), cancel_status);
+
+
+    DUMP_FS("File System after rename_scen:\n");
+   
+    return true;
+}
+
+scenario
+bool remove_scen()
+{
+    remove_spec(context, SANDBOX_FILE("file2"), requestErrorCode(), cancel_status);
+
+    remove_spec(context, SANDBOX_FILE("subdir"), requestErrorCode(), cancel_status);
+
+    DUMP_FS("File System after remove_scen:\n");
+   
+    return true;
+}
+
+scenario
+bool link_scen()
+{
+    FileSystem *fs = getFileSystem(context);
+    
+    link_spec(context, SANDBOX_FILE("file3"), SANDBOX_FILE("file3_link"), requestErrorCode(), cancel_status); 
+
+
+    DUMP_FS("File System after link_scen:\n");
+   
+    return true;
+}
+
+
+scenario
+bool unlink_scen()
+{
+    unlink_spec(context, SANDBOX_FILE("file3"), requestErrorCode(), cancel_status);
+
+    DUMP_FS("File System after unlink_scen:\n");
+   
+    return true;
+}
+
+scenario
+bool xmknod_scen()
+{
+    __xmknod_spec( context, (IntT) 1, SANDBOX_FILE("mknod_test"), FIFOFile, create_FilePermissions_String("rwxrwxrwx"), (DevT) 0, requestErrorCode());
+
+    DUMP_FS("File System after xmknod_scen:\n");
+
+    // and again for error
+    __xmknod_spec( context, (IntT) 1, SANDBOX_FILE("mknod_test"), FIFOFile, create_FilePermissions_String("rwxrwxrwx"), (DevT) 0, requestErrorCode());
+
+    DUMP_FS("File System after xmknod_scen:\n");
+   
+    return true;
+}
+
+scenario dfsm fs_scenario =
+{
+    .init=init_fs_scenario,
+    .finish=finish_fs_scenario,
+    .actions=
+    {
+        init_scen,
+        rename_scen,
+        remove_scen,
+        link_scen,
+        unlink_scen,
+        unlink_scen,
+        xmknod_scen,
+        NULL
+    },
+};
+
+

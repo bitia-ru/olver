@@ -1,0 +1,149 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "process/process/process_model.seh"
+#include "util/regex/regex_media.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initUtilRegexSubsystem( void ) {
+    // Set up mediators
+    set_mediator_fnmatch_spec ( fnmatch_media  );
+    set_mediator_regcomp_spec ( regcomp_media  );
+    set_mediator_regerror_spec( regerror_media );
+    set_mediator_regexec_spec ( regexec_media  );
+    set_mediator_regfree_spec ( regfree_media  );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** fnmatch_spec **/
+mediator fnmatch_media for specification
+IntT fnmatch_spec( CallContext context, CString * pattern, CString * str, IntT flags ) {
+    call {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( & command, "fnmatch:$(str)$(str)$(int)", pattern, str, create_IntTObj( flags ) );
+        executeCommandInContext( context, &command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        destroy_TSCommand( & command );
+        return res;
+    }
+}
+
+/** regcomp_spec **/
+mediator regcomp_media for specification
+RegcompReturnType * regcomp_spec( CallContext context, CString * pattern, IntT cflags ) {
+    call {
+        IntT      funcRes;
+        RegexTPtr resPtr ;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( & command, "regcomp:$(str)$(int)", pattern, create_IntTObj( cflags ) );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            funcRes = readInt_TSStream    (          & command.response );
+            resPtr  = readPointer_TSStream( context, & command.response );
+        }
+        destroy_TSCommand( & command );
+        return create_RegcompReturnType( funcRes, resPtr );
+    }
+    state {
+        if ( regcomp_spec->funcRes == 0 ) {
+            add_CompiledRegularExpressions( fromCallContext_CompiledRegularExpressions( context ),
+                                            create_CompiledRegularExpression( regcomp_spec->preg, pattern, cflags )
+                                          );
+        }
+    }
+}
+
+/** regerror_spec **/
+mediator regerror_media for specification
+RegerrorReturnType * regerror_spec( CallContext context, IntT errcode, RegexTPtr preg, SizeT errbuf_size ) {
+    call {
+        SizeT     funcRes;
+        CString * errbuf ;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( & command, "regerror:$(int)$(ptr)$(size)",
+                                     create_IntTObj( errcode ), create_VoidTPtrObj( preg ), create_SizeTObj( errbuf_size )
+                        );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            funcRes = readSize_TSStream( & command.response );
+            if ( errbuf_size != 0 ) { errbuf = readCString_TSStream( & command.response ); }
+                               else { errbuf = NULL                                      ; }
+        }
+        destroy_TSCommand( & command );
+        return create_RegerrorReturnType( funcRes, errbuf );
+    }
+}
+
+/** regexec_spec **/
+mediator regexec_media for specification
+RegexecReturnType * regexec_spec( CallContext context, RegexTPtr preg, CString * str, SizeT nmatch, IntT eflags ) {
+    call {
+        IntT funcRes ;
+        List /* RegmatchT */ * pmatch = create_List( & type_RegmatchT );
+        TSCommand command = create_TSCommand();
+        format_TSCommand( & command, "regexec:$(ptr)$(str)$(size)$(int)",
+                                     create_VoidTPtrObj( preg ), str, create_SizeTObj( nmatch ), create_IntTObj( eflags )
+                        );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            SizeT i;
+            timestamp = command.meta.timestamp;
+            funcRes = readInt_TSStream( & command.response );
+            for ( i = 0; i < nmatch; i++ ) {
+                RegoffT rm_so = readInt_TSStream( & command.response );
+                RegoffT rm_eo = readInt_TSStream( & command.response );
+                RegmatchT * rm = create_RegmatchT( rm_so, rm_eo );
+                append_List( pmatch, rm );
+            }
+        }
+        destroy_TSCommand( & command );
+        return create_RegexecReturnType( funcRes, pmatch );
+    }
+}
+
+
+/** regfree_spec **/
+mediator regfree_media for specification
+void regfree_spec( CallContext context, RegexTPtr preg ) {
+    call {
+        TSCommand command = create_TSCommand();
+        format_TSCommand( & command, "regfree:$(ptr)", create_VoidTPtrObj( preg ) );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+        }
+        destroy_TSCommand(&command);
+        return;
+    }
+    state {
+        remove_CompiledRegularExpressions( fromCallContext_CompiledRegularExpressions( context ), preg );
+    }
+}

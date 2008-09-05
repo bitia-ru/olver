@@ -1,0 +1,282 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "signal/sigsend/tests/sigsend_scenario.seh"
+#include <stdio.h>
+
+
+/********************************************************************/
+/**                  Tests Local Data                              **/
+/********************************************************************/
+
+specification typedef struct State_Kill_and_Sigaction_Scenario State_Kill_and_Sigaction_Scenario = {};
+
+static CallContext context_rec_sigsend_usual;
+static CallContext context_send_sigsend_usual;
+
+static SigAction* s_oact_sigsend_usual;
+static SigAction* s_act_sigsend_usual;
+
+static SigSetTPtr  temp_sset;
+static SigSet*    temp_msset;
+
+static bool is_recived_thread_mask_empty;
+
+/********************************************************************/
+/**                  Test Scenarios Initialization                 **/
+/********************************************************************/
+
+static bool init_kill_and_sigaction_scenario(int argc, char** argv)
+{
+    bool result;
+    ProcessState* pr_st;
+
+    result = true;
+    is_recived_thread_mask_empty = true;
+    
+    context_send_sigsend_usual = createProcess();
+    if(isWrong_ThreadId(context_send_sigsend_usual)) result = false;
+
+    /* create process */
+    context_rec_sigsend_usual = createProcess();
+    if(isWrong_ThreadId(context_rec_sigsend_usual)) result = false;
+        
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME*20);
+
+    //setFindFirstSeriesOnly(true);
+
+    s_act_sigsend_usual = create_SigAction();
+    if (SIGNAL_SIGINFO_FLAG != 0)
+    {
+        s_act_sigsend_usual->m_sa_flag.SA_SIGINFO_Flag = true;
+    }   
+    s_oact_sigsend_usual = create_SigAction();
+
+    s_oact_sigsend_usual->m_sa_handler = SIG_USER_CATCHER;
+    s_oact_sigsend_usual->m_sa_sigaction = SIGACT_UNDEFINED;
+    s_act_sigsend_usual->m_sa_handler = SIG_USER_CATCHER;
+    s_act_sigsend_usual->m_sa_sigaction = SIGACT_UNDEFINED;
+
+    pr_st = getProcessState_CallContext(context_rec_sigsend_usual);
+    //put_Map(pr_st->signal_actions, create_SignalObj(31), s_oact_sigsend_usual);
+    
+    sigaction_spec(context_rec_sigsend_usual, create_Signal(SUT_SIGUSR1),
+                   s_act_sigsend_usual, s_oact_sigsend_usual, requestErrorCode());
+    sigaction_spec(context_rec_sigsend_usual, create_Signal(SUT_SIGUSR2),
+                   s_act_sigsend_usual, s_oact_sigsend_usual, requestErrorCode());
+    
+    //create sigset variable temp_sset
+    temp_sset = allocateMemoryBlock(context_rec_sigsend_usual, sizeof_SUTType("sigset_t"));
+    if(isNULL_VoidTPtr(temp_sset)) result = false;
+    temp_msset = create_SigSet(temp_sset);    
+    registerObjectInMemory(temp_sset, 0, (Object*)temp_msset);
+
+    return result;
+}
+
+/********************************************************************/
+/**                  Test Scenarios Finalization                   **/
+/********************************************************************/
+
+static void finish_kill_and_sigaction_scenario(void) 
+{
+}
+
+
+/********************************************************************/
+/**                  Scenario State Functions                      **/
+/********************************************************************/
+
+/*
+ * The function returning the model state
+ */
+Object* get_state_kill_and_sigaction_scenario(void)
+{
+    Map* res = create_Map(&type_Integer, &type_Integer);
+    int signal_number = 0;
+    List* temp_list;
+    ProcessState* pr_st = getProcessState_CallContext(context_rec_sigsend_usual);
+    if (pr_st == NULL)
+    {
+        return res;
+    }
+
+    if (is_recived_thread_mask_empty)
+    {
+        put_Map(res, create_Integer(0), create_Integer(0));
+    }
+    else
+    {
+        put_Map(res, create_Integer(0), create_Integer(1));
+    }
+
+    temp_list = get_Map(pr_st->signal_queue, create_Signal(SUT_SIGUSR1));
+    if (temp_list != NULL)
+    {
+        put_Map(res, create_Integer(SUT_SIGUSR1), create_Integer(size_List(temp_list)));
+    }
+    temp_list = get_Map(pr_st->signal_queue, create_Signal(SUT_SIGUSR2));
+    if (temp_list != NULL)
+    {
+        put_Map(res, create_Integer(SUT_SIGUSR2), create_Integer(size_List(temp_list)));
+    }
+        
+    return res;
+}
+
+/*
+ * The function saving the model state
+ */
+State_Kill_and_Sigaction_Scenario* save_KillAndSigactionState(void)
+{
+    return create_state_kill_and_sigaction_scenario(clone(systems), is_recived_thread_mask_empty);
+}
+
+/*
+ * The function restoring the model state.
+ */
+void restore_KillAndSigactionState(State_Kill_and_Sigaction_Scenario* saved_state)
+{
+    systems = saved_state->systems;
+    is_recived_thread_mask_empty = saved_state->is_recived_thread_mask_empty;
+}
+
+/*
+ * The function checking if the model state was stationary
+ */
+bool is_stationary_KillAndSigactionState(void)
+{
+    return true;
+}
+
+
+State_Kill_and_Sigaction_Scenario* create_state_kill_and_sigaction_scenario(Map* systems, bool is_empty_mask)
+{
+    return create(&type_State_Kill_and_Sigaction_Scenario, systems, is_empty_mask);
+}
+
+int get_signals_number_in_queue(Map* signal_queue)
+{
+    int res = 0;
+    int i;
+    List* temp_list;
+    if (signal_queue == NULL)
+    {
+        return 0;
+    }
+    
+    for (i = 0; i < size_Map(signal_queue); i++)
+    {
+        temp_list = get_Map(signal_queue, key_Map(signal_queue, i));
+        if (temp_list != NULL)
+        {
+            res += size_List(temp_list);
+        }
+    }
+    
+    return res;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario bool kill_scen()
+{
+    ProcessState* pr_st = getProcessState_CallContext(context_rec_sigsend_usual);  
+    if ((pr_st != NULL) && (pr_st->processid.process > 0) && 
+        (get_signals_number_in_queue(pr_st->signal_queue) < 5))
+    {
+        iterate(int i = 0; i < 2; i++;)
+        {
+            switch(i) {
+            case 0:
+                kill_spec(context_send_sigsend_usual, pr_st->processid, create_Signal(SUT_SIGUSR1), false);
+                break;
+            case 1:
+                kill_spec(context_send_sigsend_usual, pr_st->processid, create_Signal(SUT_SIGUSR2), false);
+                break;
+            default:
+                break;
+            }            
+        }
+        
+    }    
+    verbose("after Kill_scen\n");
+    PrintfProcessSignalQueue(pr_st);
+    return true;
+}
+
+scenario bool sigaction_scen()
+{    
+    s_act_sigsend_usual->m_sa_handler = SIG_USER_CATCHER;
+    s_act_sigsend_usual->m_sa_sigaction = SIG_USER_CATCHER;
+
+
+    sigaction_spec(context_rec_sigsend_usual, create_Signal(SUT_SIGUSR1), 
+                   s_act_sigsend_usual, s_oact_sigsend_usual, requestErrorCode());
+    sigaction_spec(context_rec_sigsend_usual, create_Signal(SUT_SIGUSR2), 
+                   s_act_sigsend_usual, s_oact_sigsend_usual, requestErrorCode());
+    
+      return true;
+}
+
+scenario bool pthread_sigmask_scen()
+{
+    iterate(int i = 0; i < 2; i++;)
+    {
+        switch(i) {
+        case 0:
+            sigemptyset_spec(context_rec_sigsend_usual, temp_sset, requestErrorCode());
+            is_recived_thread_mask_empty = true;
+            break;
+        case 1:
+            sigfillset_spec(context_rec_sigsend_usual, temp_sset, requestErrorCode());
+            is_recived_thread_mask_empty = false;
+            break;
+        default:
+            break;
+        }
+        pthread_sigmask_spec(context_rec_sigsend_usual, SUT_SIG_SETMASK, temp_sset, NULL_VoidTPtr, false);
+    }    
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm kill_and_sigaction_scenario =
+{
+    .init   = init_kill_and_sigaction_scenario,
+    .getState = (PtrGetState) get_state_kill_and_sigaction_scenario,
+    .finish = finish_kill_and_sigaction_scenario,
+
+    .saveModelState    = (PtrSaveModelState)save_KillAndSigactionState,
+    .restoreModelState = (PtrRestoreModelState)restore_KillAndSigactionState,
+    .isStationaryState = (PtrIsStationaryState)is_stationary_KillAndSigactionState,
+    .actions = {
+         sigaction_scen,
+         pthread_sigmask_scen,
+         kill_scen,
+         NULL
+    }
+};

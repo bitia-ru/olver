@@ -1,0 +1,1886 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef IO_TERM_MODEL_SEH
+#define IO_TERM_MODEL_SEH
+
+#include <atl/integer.h>
+#include <atl/list.h>
+
+#include "common/common_model.seh"
+#include "common/cstring.seh"
+#include "data/basis.seh"
+#include "io/file/file_model.seh"
+
+/*****************************************************************************/
+/**                               Defines                                   **/
+/*****************************************************************************/
+#define BOOL_COVERAGE(covid, covstr, id, str, expr)                           \
+{                                                                             \
+    if(expr)                                                                  \
+    {                                                                         \
+        return { covid##_##id, covstr ", " str };                             \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        return { covid##_Not##id, covstr ", not " str};                       \
+    }                                                                         \
+}
+
+#define DEFINED_TERM_SPEED_COVERAGE(speed)                                    \
+{                                                                             \
+    switch(speed)                                                             \
+    {                                                                         \
+    case SUT_B0:     return { B0,     "B0"     };                             \
+    case SUT_B50:    return { B50,    "B50"    };                             \
+    case SUT_B75:    return { B75,    "B75"    };                             \
+    case SUT_B110:   return { B110,   "B110"   };                             \
+    case SUT_B134:   return { B134,   "B134"   };                             \
+    case SUT_B150:   return { B150,   "B150"   };                             \
+    case SUT_B200:   return { B200,   "B200"   };                             \
+    case SUT_B300:   return { B300,   "B300"   };                             \
+    case SUT_B600:   return { B600,   "B600"   };                             \
+    case SUT_B1200:  return { B1200,  "B1200"  };                             \
+    case SUT_B1800:  return { B1800,  "B1800"  };                             \
+    case SUT_B2400:  return { B2400,  "B2400"  };                             \
+    case SUT_B4800:  return { B4800,  "B4800"  };                             \
+    case SUT_B9600:  return { B9600,  "B9600"  };                             \
+    case SUT_B19200: return { B19200, "B19200" };                             \
+    default:         return { B38400, "B38400" };                             \
+    }                                                                         \
+}
+
+#define TERM_INPUT_MODE_COVERAGE(covid, covstr, termios)                      \
+{                                                                             \
+    CCT min  = getControlCharacter_TermIOS(termios, SUT_VMIN);                \
+    CCT time = getControlCharacter_TermIOS(termios, SUT_VTIME);               \
+                                                                              \
+    if(termios->lflag->icanon)                                                \
+    {                                                                         \
+        return { covid##_CanonicalModeInputProcessing,                        \
+            covstr ", canonical mode input processing" };                     \
+    }                                                                         \
+    else if(min > 0 && time > 0)                                              \
+    {                                                                         \
+        return { covid##_NonCanonicalModeInputProcessing_CaseA,               \
+            covstr ", non-canonical mode input processing"                    \
+                   ", case A: MIN>0, TIME>0" };                               \
+    }                                                                         \
+    else if(min > 0 && time == 0)                                             \
+    {                                                                         \
+        return { covid##_NonCanonicalModeInputProcessing_CaseB,               \
+            covstr ", non-canonical mode input processing"                    \
+                   ", case B: MIN>0, TIME=0" };                               \
+    }                                                                         \
+    else if(min == 0 && time > 0)                                             \
+    {                                                                         \
+        return { covid##_NonCanonicalModeInputProcessing_CaseC,               \
+            covstr ", non-canonical mode input processing"                    \
+                   ", case C: MIN=0, TIME>0" };                               \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        return { covid##_NonCanonicalModeInputProcessing_CaseD,               \
+            covstr ", non-canonical mode input processing"                    \
+                   ", case D: MIN=0, TIME=0" };                               \
+    }                                                                         \
+}
+
+#define TERM_INPUT_MODE_DETAIL_COVERAGE(covid, covstr, terminal)              \
+{                                                                             \
+    TermIOS *termios = getTermIOS_Terminal(terminal);                         \
+    Bool3 connection_status = getConnectionStatus_Terminal(terminal);         \
+                                                                              \
+    if(termios->cflag->clocal)                                                \
+    {                                                                         \
+        TERM_INPUT_MODE_COVERAGE(covid##_Local,                               \
+            covstr ", local", termios);                                       \
+    }                                                                         \
+    else if(connection_status == True_Bool3)                                  \
+    {                                                                         \
+        TERM_INPUT_MODE_COVERAGE(covid##_Connected,                           \
+            covstr ", connected", termios);                                   \
+    }                                                                         \
+    else if(connection_status == False_Bool3)                                 \
+    {                                                                         \
+        TERM_INPUT_MODE_COVERAGE(covid##_Disconnected,                        \
+            covstr ", disconnected", termios);                                \
+    }                                                                         \
+    else if(connection_status == Unknown_Bool3)                               \
+    {                                                                         \
+        TERM_INPUT_MODE_COVERAGE(covid##_UnknownConnectionStatus,             \
+            covstr ", unknown connection status", termios);                   \
+    }                                                                         \
+}
+
+#define TERM_OUTPUT_MODE_COVERAGE(covid, covstr, termios)                     \
+{                                                                             \
+    if(termios->oflag->opost)                                                 \
+    {                                                                         \
+        return { covid##_OutputPostProcessingEnabled,                         \
+            covstr ", output post-processing enabled" };                      \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        return { covid##_OutputPostProcessingDisabled,                        \
+            covstr ", output post-processing disabled" };                     \
+    }                                                                         \
+}
+
+#define TERM_OUTPUT_MODE_DETAIL_COVERAGE(covid, covstr, terminal)             \
+{                                                                             \
+    TermIOS *termios = getTermIOS_Terminal(terminal);                         \
+    Bool3 connection_status = getConnectionStatus_Terminal(terminal);         \
+                                                                              \
+    if(termios->cflag->clocal)                                                \
+    {                                                                         \
+        TERM_OUTPUT_MODE_COVERAGE(covid##_Local,                              \
+            covstr ", local", termios);                                       \
+    }                                                                         \
+    else if(connection_status == True_Bool3)                                  \
+    {                                                                         \
+        TERM_OUTPUT_MODE_COVERAGE(covid##_Connected,                          \
+            covstr ", connected", termios);                                   \
+    }                                                                         \
+    else if(connection_status == False_Bool3)                                 \
+    {                                                                         \
+        TERM_OUTPUT_MODE_COVERAGE(covid##_Disconnected,                       \
+            covstr ", disconnected", termios);                                \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        TERM_OUTPUT_MODE_COVERAGE(covid##_UnknownConnectionStatus,            \
+            covstr ", unknown connection status", termios);                   \
+    }                                                                         \
+}
+
+#define TERM_OPEN_MODE_COVERAGE(covid, covstr, oflag)                         \
+{                                                                             \
+    if(oflag.access_mode == ReadOnly)                                         \
+    {                                                                         \
+        BOOL_COVERAGE(covid##_##ReadOnly, covstr ", read only",               \
+            NONBLOCK, "nonblocking", oflag.block_mode == Nonblocking);        \
+    }                                                                         \
+    else if(oflag.access_mode == ReadWrite)                                   \
+    {                                                                         \
+        BOOL_COVERAGE(covid##_##ReadWrite, covstr ", read only",              \
+            NONBLOCK, "nonblocking", oflag.block_mode == Nonblocking);        \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        BOOL_COVERAGE(covid##_##WriteOnly, covstr ", read only",              \
+            NONBLOCK, "nonblocking", oflag.block_mode == Nonblocking);        \
+    }                                                                         \
+}
+
+#define TERM_OPEN_MODE_DETAIL_COVERAGE(covid, covstr, context, path, oflag)   \
+{                                                                             \
+    FileSystem *file_system = getFileSystem(context);                         \
+                                                                              \
+    File *file = file_system != NULL ?                                        \
+        getFile_FileSystem(file_system, path) : NULL;                         \
+                                                                              \
+    if(file == NULL)                                                          \
+    {                                                                         \
+        return { covid##_FileIsNotRegisteredInFileSystem,                     \
+            covstr ", file is not registered in file system" };               \
+    }                                                                         \
+    else if(isTerminal_File(file))                                            \
+    {                                                                         \
+        TermIOS *termios = getTermIOS_Terminal(file->descriptor);             \
+                                                                              \
+        if(termios == NULL)                                                   \
+        {                                                                     \
+            return { covid##_TermIOSIsNULL,                                   \
+                covstr ", termios is NULL" };                                 \
+        }                                                                     \
+        else                                                                  \
+        {                                                                     \
+            if(termios->cflag->clocal)                                        \
+            {                                                                 \
+                TERM_OPEN_MODE_COVERAGE(covid##_CLOCAL,                       \
+                    covstr ", CLOCAL is set", oflag);                         \
+            }                                                                 \
+            else                                                              \
+            {                                                                 \
+                TERM_OPEN_MODE_COVERAGE(covid##_NotCLOCAL,                    \
+                    covstr ", CLOCAL is not set", oflag);                     \
+            }                                                                 \
+        }                                                                     \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        return { covid##_NotTerm,                                             \
+            covstr ", not a terminal" };                                      \
+    }                                                                         \
+}
+
+#define NOT_TERM_COVERAGE(covid, covstr, fildes)                              \
+{                                                                             \
+    if(isWrong_FileDescId(fildes))                                            \
+    {                                                                         \
+        return { covid##_WrongFileDescId,                                     \
+            covstr ", wrong file descriptor id" };                            \
+    }                                                                         \
+    else if(!isValid_FileDescId(fildes))                                      \
+    {                                                                         \
+        return { covid##_InvalidFileDescId,                                   \
+            covstr ", invalid file descriptor id" };                          \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == UnknownFileKind)                \
+    {                                                                         \
+        return { covid##_UnknownFileTypeDescId,                               \
+            covstr ", unknown file type descriptor id" };                     \
+    }                                                                         \
+    else if(!isTerminal_FileDescId(fildes))                                   \
+    {                                                                         \
+        return { covid##_NotTermDescId,                                       \
+            covstr ", not a terminal descriptor id" };                        \
+    }                                                                         \
+}
+
+#define NOT_TERM_DETAIL_COVERAGE(covid, covstr, fildes)                       \
+{                                                                             \
+    if(isWrong_FileDescId(fildes))                                            \
+    {                                                                         \
+        return { covid##_WrongFileDescId,                                     \
+            covstr ", wrong file descriptor id" };                            \
+    }                                                                         \
+    else if(!isValid_FileDescId(fildes))                                      \
+    {                                                                         \
+        return { covid##_InvalidFileDescId,                                   \
+            covstr ", invalid file descriptor id" };                          \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == UnknownFileKind)                \
+    {                                                                         \
+        return { covid##_UnknownFileTypeDescId,                               \
+            covstr ", unknown file type descriptor id" };                     \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == RegularFile)                    \
+    {                                                                         \
+        return { covid##_RegularFileDescId,                                   \
+            covstr ", regular file descriptor id" };                          \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == BlockFile)                      \
+    {                                                                         \
+        return { covid##_BlockFileDescId,                                     \
+            covstr ", block file descriptor id" };                            \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == CharacterFile &&                \
+        !isTerminal_FileDescId(fildes))                                       \
+    {                                                                         \
+        return { covid##_CharacterFileDescId,                                 \
+            covstr ", character file descriptor id" };                        \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == FIFOFile)                       \
+    {                                                                         \
+        return { covid##_FIFOFileDescId,                                      \
+            covstr ", FIFO file descriptor id" };                             \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == DirectoryFile)                  \
+    {                                                                         \
+        return { covid##_DirectoryFileDescId,                                 \
+            covstr ", directory file descriptor id" };                        \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == SymbolicLinkFile)               \
+    {                                                                         \
+        return { covid##_SymbolicLinkFileDescId,                              \
+            covstr ", symbolic link file descriptor id" };                    \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) == Socket)                         \
+    {                                                                         \
+        return { covid##_SocketFileDescId,                                    \
+            covstr ", socket file descriptor id" };                           \
+    }                                                                         \
+    else if(getFileKind_FileDescId(fildes) != CharacterFile)                  \
+    {                                                                         \
+        return { covid##_OtherFileDescId,                                     \
+            covstr ", other file descriptor id" };                            \
+    }                                                                         \
+}
+
+#define TERM_TYPE_COVERAGE(covid, covstr, fildes)                             \
+{                                                                             \
+    if(isRealTerminal_FileDescId(fildes))                                     \
+    {                                                                         \
+       return { covid##_RealTermDescId,                                       \
+            covstr ", real terminal descriptor id" };                         \
+    }                                                                         \
+    else if(isPTM_FileDescId(fildes))                                         \
+    {                                                                         \
+        return { covid##_PTMDescId,                                           \
+            covstr ", master pseudo-terminal descriptor id" };                \
+    }                                                                         \
+    else if(isPTS_FileDescId(fildes))                                         \
+    {                                                                         \
+        return { covid##_PTSDescId,                                           \
+            covstr ", slave pseudo-terminal descriptor id" };                 \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        return { covid##_UnknownTermTypeDescId,                               \
+            covstr ", unknown terminal type descriptor id" };                 \
+    }                                                                         \
+}
+
+#define FILE_TYPE_COVERAGE(covid, covstr, fildes)                             \
+{                                                                             \
+    NOT_TERM_COVERAGE(covid, covstr, fildes);                                 \
+    TERM_TYPE_COVERAGE(covid, covstr, fildes);                                \
+}
+
+#define FILE_TYPE_DETAIL_COVERAGE(covid, covstr, fildes)                      \
+{                                                                             \
+    NOT_TERM_DETAIL_COVERAGE(covid, covstr, fildes);                          \
+    TERM_TYPE_COVERAGE(covid, covstr, fildes);                                \
+}
+
+#define CTERM_COVERAGE(covid, covstr, processid)                              \
+{                                                                             \
+    if(!hasControllingTerminal_ProcessId(processid))                          \
+    {                                                                         \
+        return { covid##_DoesNotHaveCTerm,                                    \
+            covstr ", does not have controlling terminal" };                  \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        Terminal *cterm = getControllingTerminal_ProcessId(processid);        \
+                                                                              \
+        if(cterm == NULL)                                                     \
+        {                                                                     \
+            return { covid##_UnknownCTerm,                                    \
+                covstr ", controlling terminal is unknown" };                 \
+        }                                                                     \
+        else if(isLoginTTY_Terminal(cterm))                                   \
+        {                                                                     \
+            if(!equals(getLogin_Terminal(cterm), NULL))                       \
+            {                                                                 \
+                return { covid##_LoginCTerm,                                  \
+                    covstr ", controlling terminal is login terminal" };      \
+            }                                                                 \
+            else                                                              \
+            {                                                                 \
+                return { covid##_UnknownLoginCTerm,                           \
+                    covstr ", controlling terminal has unknown login name" }; \
+            }                                                                 \
+        }                                                                     \
+        else if(isNotLoginTTY_Terminal(cterm))                                \
+        {                                                                     \
+            return { covid##_NotLoginCTerm,                                   \
+                covstr ", controlling terminal is not login terminal" };      \
+        }                                                                     \
+        else                                                                  \
+        {                                                                     \
+            return { covid##_UnknownLoginStatusCTerm,                         \
+                covstr ", controlling terminal has unknown login status" };   \
+        }                                                                     \
+    }                                                                         \
+}
+
+#define CTERM_PGROUP_COVERAGE(covid, covstr, processid, fildes)               \
+{                                                                             \
+    if(!hasControllingTerminal_ProcessId(processid))                          \
+    {                                                                         \
+        return { covid##_ProcessDoesNotHaveCTerm,                             \
+            covstr ", process does not have controlling terminal" };          \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        NOT_TERM_COVERAGE(covid##_ProcessHasCTerm,                            \
+            covstr ", process has controlling terminal", fildes);             \
+                                                                              \
+        if(isNotControllingTerminal_FileDescId(fildes))                       \
+        {                                                                     \
+            return { covid##_ProcessHasCTerm_NotCTerm,                        \
+                covstr ", process has controlling terminal"                   \
+                       ", not a controlling terminal descriptor id" };        \
+        }                                                                     \
+        else if(!isControllingTerminal_FileDescId(fildes))                    \
+        {                                                                     \
+            return { covid##_ProcessHasCTerm_UnknownCTerm,                    \
+                covstr ", process has controlling terminal"                   \
+                       ", unknown controlling status" };                      \
+        }                                                                     \
+        else                                                                  \
+        {                                                                     \
+            ProcessIdObj *fpgroupid =                                         \
+                getForegroundPGroupId_FileDescId(fildes);                     \
+                                                                              \
+            if(fpgroupid == NULL)                                             \
+            {                                                                 \
+                return { covid##_UnknownForegroundGroup,                      \
+                    covstr ", foreground group of terminal is unknown" };     \
+            }                                                                 \
+            else if(isWrong_ProcessId(*fpgroupid))                            \
+            {                                                                 \
+                return { covid##_CTermDoesNotHaveForegroundGroup,             \
+                    covstr ", terminal does not have foreground group" };     \
+            }                                                                 \
+            else if(equals_ProcessId(*fpgroupid,                              \
+                    getProcessGroupId_ProcessId(processid)))                  \
+            {                                                                 \
+                return { covid##_ForegroundProcess,                           \
+                    covstr ", foreground process" };                          \
+            }                                                                 \
+            else                                                              \
+            {                                                                 \
+                return { covid##_BackgroundProcess,                           \
+                    covstr ", background process" };                          \
+            }                                                                 \
+        }                                                                     \
+    }                                                                         \
+}
+
+#define CTERM_PGROUP_DETAIL_COVERAGE(covid, covstr, processid, fildes)        \
+{                                                                             \
+    if(!hasControllingTerminal_ProcessId(processid))                          \
+    {                                                                         \
+        return { covid##_ProcessDoesNotHaveCTerm,                             \
+            covstr ", process does not have controlling terminal" };          \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        NOT_TERM_DETAIL_COVERAGE(covid##_ProcessHasCTerm,                     \
+            covstr ", process has controlling terminal", fildes);             \
+                                                                              \
+        if(isNotControllingTerminal_FileDescId(fildes))                       \
+        {                                                                     \
+            return { covid##_ProcessHasCTerm_NotCTerm,                        \
+                covstr ", process has controlling terminal"                   \
+                       ", not a controlling terminal descriptor id" };        \
+        }                                                                     \
+        else if(!isControllingTerminal_FileDescId(fildes))                    \
+        {                                                                     \
+            return { covid##_ProcessHasCTerm_UnknownCTerm,                    \
+                covstr ", process has controlling terminal"                   \
+                       ", unknown controlling status" };                      \
+        }                                                                     \
+        else                                                                  \
+        {                                                                     \
+            ProcessIdObj *fpgroupid =                                         \
+                getForegroundPGroupId_FileDescId(fildes);                     \
+                                                                              \
+            if(fpgroupid == NULL)                                             \
+            {                                                                 \
+                return { covid##_UnknownForegroundGroup,                      \
+                    covstr ", foreground group of terminal is unknown" };     \
+            }                                                                 \
+            else if(isWrong_ProcessId(*fpgroupid))                            \
+            {                                                                 \
+                return { covid##_CTermDoesNotHaveForegroundGroup,             \
+                    covstr ", terminal does not have foreground group" };     \
+            }                                                                 \
+            else if(equals_ProcessId(*fpgroupid,                              \
+                    getProcessGroupId_ProcessId(processid)))                  \
+            {                                                                 \
+                return { covid##_ForegroundProcess,                           \
+                    covstr ", foreground process" };                          \
+            }                                                                 \
+            else                                                              \
+            {                                                                 \
+                return { covid##_BackgroundProcess,                           \
+                    covstr ", background process" };                          \
+            }                                                                 \
+        }                                                                     \
+    }                                                                         \
+}
+
+#define NOT_PTM_TERM_TYPE_COVERAGE(covid, covstr, fildes)                     \
+{                                                                             \
+    if(isRealTerminal_FileDescId(fildes))                                     \
+        return { covid##_RealTermDescId,                                      \
+            covstr ", real terminal descriptor id" };                         \
+    else if(isPTS_FileDescId(fildes))                                         \
+        return { covid##_PTSDescId,                                           \
+            covstr ", slave pseudo-terminal descriptor id" };                 \
+    else if(!isPTM_FileDescId(fildes))                                        \
+        return { covid##_UnknownTermTypeDescId,                               \
+            covstr ", unknown terminal type descriptor id" };                 \
+}
+
+#define NOT_PTM_COVERAGE(covid, covstr, fildes)                               \
+{                                                                             \
+    NOT_TERM_COVERAGE(covid, covstr, fildes);                                 \
+    NOT_PTM_TERM_TYPE_COVERAGE(covid, covstr, fildes);                        \
+}                                                                             
+
+#define NOT_PTM_DETAIL_COVERAGE(covid, covstr, fildes)                        \
+{                                                                             \
+    NOT_TERM_DETAIL_COVERAGE(covid, covstr, fildes);                          \
+    NOT_PTM_TERM_TYPE_COVERAGE(covid, covstr, fildes);                        \
+}
+
+#define PTS_NAME_COVERAGE(covid, covstr, file_system, pts_name)               \
+{                                                                             \
+    Bool3 does_pts_exist = doesFileExist_FileSystem(file_system, pts_name);   \
+                                                                              \
+    if(pts_name == NULL)                                                      \
+    {                                                                         \
+        return { covid##_UnknownPTSName,                                      \
+            covstr ", unknown PTS name" };                                    \
+    }                                                                         \
+    else if(does_pts_exist == Unknown_Bool3)                                  \
+    {                                                                         \
+        return { covid##_UnknownFS ,                                          \
+            covstr ", Unknown file system" };                                 \
+    }                                                                         \
+    else if(does_pts_exist == True_Bool3)                                     \
+    {                                                                         \
+        return { covid##_PTSExistsInFS,                                       \
+            covstr ", PTS exists in file system" };                           \
+    }                                                                         \
+    else                                                                      \
+    {                                                                         \
+        return { covid##_PTSDoesNotExistInFS,                                 \
+            covstr ", PTS does not exist in file system" };                   \
+    }                                                                         \
+}
+
+#define PERM_COVERAGE(covid, covstr, perms)                                   \
+{                                                                             \
+    if(perms == NULL)                                                         \
+        return { covid##_UnknownPermissions,                                  \
+            covstr ", unknown permissions" };                                 \
+    switch                                                                    \
+    (                                                                         \
+        (perms->covid->read    ? 0x04 : 0x00) |                               \
+        (perms->covid->write   ? 0x02 : 0x00) |                               \
+        (perms->covid->execute ? 0x01 : 0x00)                                 \
+    )                                                                         \
+    {                                                                         \
+    case 0:  return { covid##____, covstr ": ---" };                          \
+    case 1:  return { covid##___x, covstr ": --x" };                          \
+    case 2:  return { covid##__w_, covstr ": -w-" };                          \
+    case 3:  return { covid##__wx, covstr ": -wx" };                          \
+    case 4:  return { covid##_r__, covstr ": r--" };                          \
+    case 5:  return { covid##_r_x, covstr ": r-x" };                          \
+    case 6:  return { covid##_rw_, covstr ": rw-" };                          \
+    default: return { covid##_rwx, covstr ": rwx" };                          \
+    }                                                                         \
+}
+
+#define NULL_COVERAGE(covid, covstr, expr)                                    \
+{                                                                             \
+    if((expr) == NULL)                                                        \
+        return { covid##_IsNull, covstr " is NULL" };                         \
+    else                                                                      \
+        return { covid##_IsNotNull, covstr " is not NULL" };                  \
+}
+
+#define NULL_VOIDT_PTR_COVERAGE(covid, covstr, expr)                          \
+{                                                                             \
+    if(isNULL_VoidTPtr(expr))                                                 \
+        return { covid##_IsNull, covstr " is NULL" };                         \
+    else                                                                      \
+        return { covid##_IsNotNull, covstr " is not NULL" };                  \
+}
+
+/* 
+ * This type represents speed_t type
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'termios.h'.
+ */
+typedef UIntT SpeedT;
+
+#define SUT_B0              0
+#define SUT_B50            50
+#define SUT_B75            75
+#define SUT_B110          110
+#define SUT_B134          134
+#define SUT_B150          150
+#define SUT_B200          200
+#define SUT_B300          300
+#define SUT_B600          600
+#define SUT_B1200        1200
+#define SUT_B1800        1800
+#define SUT_B2400        2400
+#define SUT_B4800        4800
+#define SUT_B9600        9600
+#define SUT_B19200      19200
+#define SUT_B38400      38400
+
+/*
+ * Returns true, iff speed value is equal to one of the values defined above.
+ */
+bool  isKnown_Speed(SpeedT speed);
+
+/*
+ * Implementation-defined checks of the input/output speed.
+ */
+Bool3 isValid_InputSpeed(SpeedT speed);
+Bool3 isValid_OutputSpeed(SpeedT speed);
+Bool3 isValid_Speed(SpeedT speed);
+
+/*
+ * This type represents input modes
+ *   The Open Group Base Specifications Issue 6
+ *   IEEE Std 1003.1, 2004 Edition
+ *   Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+ *   
+ *   See section 'Base Definitions / 11. General Terminal Interface /
+ *     11.2 Parameters that Can be Set / 11.2.2 Input Modes'.
+ */
+specification typedef struct IFlag
+{
+    bool brkint;        /* Signal interrupt on break */
+    bool icrnl;         /* Map CR to NL on input */
+    bool ignbrk;        /* Ignore break condition */
+    bool igncr;         /* Ignore CR */
+    bool ignpar;        /* Ignore characters with parity errors */
+    bool inlcr;         /* Map NL to CR on input */
+    bool inpck;         /* Enable input parity check */
+    bool istrip;        /* Strip character */
+    bool ixany;         /* Enable any character to restart output */
+    bool ixoff;         /* Enable start/stop input control */
+    bool ixon;          /* Enable start/stop output control */
+    bool parmrk;        /* Mark parity errors */
+} IFlag;
+
+IFlag* create_IFlag
+(
+    bool brkint,        /* Signal interrupt on break */
+    bool icrnl,         /* Map CR to NL on input */
+    bool ignbrk,        /* Ignore break condition */
+    bool igncr,         /* Ignore CR */
+    bool ignpar,        /* Ignore characters with parity errors */
+    bool inlcr,         /* Map NL to CR on input */
+    bool inpck,         /* Enable input parity check */
+    bool istrip,        /* Strip character */
+    bool ixany,         /* Enable any character to restart output */
+    bool ixoff,         /* Enable start/stop input control */
+    bool ixon,          /* Enable start/stop output control */
+    bool parmrk         /* Mark parity errors */
+);
+
+IFlag* default_IFlag(void);
+
+typedef enum NLDelay
+{
+    NL0       =  0,     /* Newline type 0 */
+    NL1       =  1,     /* Newline type 1 */
+    NL_OTHER  = -1
+} NLDelay;
+
+typedef enum CRDelay
+{
+    CR0       =  0,     /* Carriage-return delay type 0 */
+    CR1       =  1,     /* Carriage-return delay type 1 */
+    CR2       =  2,     /* Carriage-return delay type 2 */
+    CR3       =  3,     /* Carriage-return delay type 3 */
+    CR_OTHER  = -1
+} CRDelay;
+
+typedef enum TBDelay
+{
+    TAB0      =  0,     /* Horizontal-tab delay type 0 */
+    TAB1      =  1,     /* Horizontal-tab delay type 1 */
+    TAB2      =  2,     /* Horizontal-tab delay type 2 */
+    TAB3      =  3,     /* Expand tabs to spaces */
+    TAB_OTHER = -1
+} TBDelay;
+
+typedef enum BSDelay
+{
+    BS0       =  0,     /* Backspace-delay type 0 */
+    BS1       =  1,     /* Backspace-delay type 1 */
+    BS_OTHER  = -1
+} BSDelay;
+
+typedef enum VTDelay
+{
+    VT0       =  0,     /* Vertical-tab delay type 0 */
+    VT1       =  1,     /* Vertical-tab delay type 1 */
+    VT_OTHER  = -1
+} VTDelay;
+
+typedef enum FFDelay
+{
+    FF0       =  0,     /* Form-feed delay type 0 */
+    FF1       =  1,     /* Form-feed delay type 1 */
+    FF_OTHER  = -1
+} FFDelay;
+
+/*
+ * This type represents output modes
+ *   The Open Group Base Specifications Issue 6
+ *   IEEE Std 1003.1, 2004 Edition
+ *   Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+ *   
+ *   See section 'Base Definitions / 11. General Terminal Interface /
+ *     11.2 Parameters that Can be Set / 11.2.3 Output Modes'.
+ */
+specification typedef struct OFlag
+{
+    bool opost;         /* Post-process output */
+    bool onlcr;         /* Map NL to CR-NL on output */
+    bool ocrnl;         /* Map CR to NL on output */
+    bool onocr;         /* No CR output at column 0 */
+    bool onlret;        /* NL performs CR function */
+    bool ofill;         /* Use fill characters for delay */
+    bool ofdel;         /* Fill is DEL else NULL */
+    NLDelay nldly;      /* Select newline delays */
+    CRDelay crdly;      /* Select carriage-return delays */
+    TBDelay tbdly;      /* Select horizontal-tab delays */
+    BSDelay bsdly;      /* Select backspace delays */
+    VTDelay vtdly;      /* Select vertical-tab delays */
+    FFDelay ffdly;      /* Select form-feed delays */
+} OFlag;
+
+OFlag* create_OFlag
+(
+    bool opost,         /* Post-process output */
+    bool onlcr,         /* Map NL to CR-NL on output */
+    bool ocrnl,         /* Map CR to NL on output */
+    bool onocr,         /* No CR output at column 0 */
+    bool onlret,        /* NL performs CR function */
+    bool ofill,         /* Use fill characters for delay */
+    bool ofdel,         /* Fill is DEL else NULL */
+    NLDelay nldly,      /* Select newline delays */
+    CRDelay crdly,      /* Select carriage-return delays */
+    TBDelay tbdly,      /* Select horizontal-tab delays */
+    BSDelay bsdly,      /* Select backspace delays */
+    VTDelay vtdly,      /* Select vertical-tab delays */
+    FFDelay ffdly       /* Select form-feed delays */
+);
+
+OFlag* default_OFlag(void);
+
+typedef enum CSize
+{
+    CS5      =  5,      /* 5 bits */
+    CS6      =  6,      /* 6 bits */
+    CS7      =  7,      /* 7 bits */
+    CS8      =  8,      /* 8 bits */
+    CS_OTHER = -1
+} CSize;
+
+/*
+ * This type represents control modes
+ *   The Open Group Base Specifications Issue 6
+ *   IEEE Std 1003.1, 2004 Edition
+ *   Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+ *   
+ *   See section 'Base Definitions / 11. General Terminal Interface /
+ *     11.2 Parameters that Can be Set / 11.2.4 Control Modes'.
+ */
+specification typedef struct CFlag
+{
+    CSize csize;        /* Character size */
+    bool cstopb;        /* Send two stop bits, else one */
+    bool cread;         /* Enable receiver */
+    bool parenb;        /* Parity enable */
+    bool parodd;        /* Odd parity, else even */
+    bool hupcl;         /* Hang up on last close */
+    bool clocal;        /* Ignore modem status lines */
+} CFlag;
+
+CFlag* create_CFlag
+(
+    CSize csize,        /* Character size */
+    bool cstopb,        /* Send two stop bits, else one */
+    bool cread,         /* Enable receiver */
+    bool parenb,        /* Parity enable */
+    bool parodd,        /* Odd parity, else even */
+    bool hupcl,         /* Hang up on last close */
+    bool clocal         /* Ignore modem status lines */
+);
+
+CFlag* default_CFlag(void);
+
+/*
+ * This type represents local modes
+ *   The Open Group Base Specifications Issue 6
+ *   IEEE Std 1003.1, 2004 Edition
+ *   Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+ *   
+ *   See section 'Base Definitions / 11. General Terminal Interface /
+ *     11.2 Parameters that Can be Set / 11.2.5 Local Modes'.
+ */
+specification typedef struct LFlag
+{
+    bool echo;          /* Enable echo */
+    bool echoe;         /* Echo erase character as error-correcting backspace */
+    bool echok;         /* Echo KILL */
+    bool echonl;        /* Echo NL */
+    bool icanon;        /* Canonical input (erase and kill processing) */
+    bool iexten;        /* Enable extended input character processing */
+    bool isig;          /* Enable signals */
+    bool noflsh;        /* Disable flush after interrupt or quit */
+    bool tostop;        /* Send SIGTTOU for background output */
+} LFlag;
+
+LFlag* create_LFlag
+(
+    bool echo,          /* Enable echo */
+    bool echoe,         /* Echo erase character as error-correcting backspace */
+    bool echok,         /* Echo KILL */
+    bool echonl,        /* Echo NL */
+    bool icanon,        /* Canonical input (erase and kill processing) */
+    bool iexten,        /* Enable extended input character processing */
+    bool isig,          /* Enable signals */
+    bool noflsh,        /* Disable flush after interrupt or quit */
+    bool tostop         /* Send SIGTTOU for background output */
+);
+
+LFlag* default_LFlag(void);
+
+/*
+ * This type represents special characters subscripts
+ *   The Open Group Base Specifications Issue 6
+ *   IEEE Std 1003.1, 2004 Edition
+ *   Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+ *   
+ *   See section 'Base Definitions / 11. General Terminal Interface /
+ *     11.1 Interface Characteristics / 11.1.9 Special Characters'.
+ */
+typedef enum CC
+{
+    SUT_VEOF   =  0,    /* EOF   character */
+    SUT_VEOL   =  1,    /* EOL   character */
+    SUT_VERASE =  2,    /* ERASE character */
+    SUT_VINTR  =  3,    /* INTR  character */
+    SUT_VKILL  =  4,    /* KILL  character */
+    SUT_VMIN   =  5,    /* MIN   character */
+    SUT_VQUIT  =  6,    /* QUIT  character */
+    SUT_VSUSP  =  7,    /* SUSP  character */
+    SUT_VTIME  =  8,    /* TIME  character */
+    SUT_VSTART =  9,    /* START character */
+    SUT_VSTOP  = 10     /* STOP  character */
+} CC;
+
+/* 
+ * This define represents NCCS define
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'termios.h'.
+ */
+#define SUT_NCCS 32
+
+/* 
+ * This type represents cc_t type
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'termios.h'.
+ */
+typedef UCharT CCT;
+
+specification typedef CCT  CCTObj; 
+CCTObj*  create_CCTObj(CCT value);
+
+/*
+ * Returns true, iff cc value is equal to one of the CC values defined above.
+ */
+bool isKnown_CC(unsigned cc);
+
+typedef VoidTPtr TermIOSPtr;
+
+/* 
+ * This type represents struct termios
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'termios.h'.
+ */
+specification typedef struct TermIOS
+{
+    TermIOSPtr address;
+
+    SpeedT ispeed;      /* Input baud rate */
+    SpeedT ospeed;      /* Output baud rate */
+    IFlag *iflag;       /* Input modes */
+    OFlag *oflag;       /* Output modes */ 
+    CFlag *cflag;       /* Control modes */
+    LFlag *lflag;       /* Local modes */
+    List* cclist;           /* Control characters */
+} TermIOS;
+
+TermIOS* create_TermIOS
+(
+    TermIOSPtr address,
+    
+    SpeedT ispeed,      /* Input baud rate */      
+    SpeedT ospeed,      /* Output baud rate */
+    IFlag *iflag,       /* Input modes */
+    OFlag *oflag,       /* Output modes */
+    CFlag *cflag,       /* Control modes */
+    LFlag *lflag,       /* Local modes */
+    CCT   *cc           /* Control characters */
+);
+
+TermIOS* default_TermIOS(void);
+
+bool equals_TermIOS(TermIOS *lhs, TermIOS *rhs);
+
+CCT  getControlCharacter_TermIOS(TermIOS *termios, CC cc);
+void setControlCharacter_TermIOS(TermIOS *termios, CC cc, CCT value);
+
+bool isDiscardedControlCharacter_TermIOS(TermIOS *termios, CCT value);
+
+bool checkControlCharactersUniqueness_TermIOS(TermIOS *termios);
+
+TermIOS* getTermIOS(TermIOSPtr address);
+
+/* 
+ * This type represents struct winsize
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'sys/ioctl.h'.
+ */
+specification typedef struct WinSize
+{
+    UShortT row;        /* Number of rows */
+    UShortT col;        /* Number of columns */
+    UShortT xpixel;     
+    UShortT ypixel;
+} WinSize;
+
+WinSize* create_WinSize
+(
+    UShortT row,        /* Number of rows */
+    UShortT col,        /* Number of columns */
+    UShortT xpixel,
+    UShortT ypixel
+);
+
+WinSize* default_WinSize(void);
+
+/* 
+ * This type represents optional actions type defined implicitly in
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'termios.h'.
+ */
+typedef enum OptionalActions
+{
+    SUT_TCSANOW   = 0,
+    SUT_TCSADRAIN = 1,
+    SUT_TCSAFLUSH = 2
+} OptionalActions;
+
+/* 
+ * This type represents action type defined implicitly in
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'termios.h'.
+ */
+typedef enum Action
+{
+    SUT_TCOOFF    = 0,
+    SUT_TCOON     = 1,
+    SUT_TCIOFF    = 2,
+    SUT_TCION     = 3
+} Action;
+
+/* 
+ * This type represents queue selector type defined implicitly in
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'termios.h'.
+ */
+typedef enum QueueSelector
+{
+    SUT_TCIFLUSH  = 0,
+    SUT_TCOFLUSH  = 1,
+    SUT_TCIOFLUSH = 2
+} QueueSelector;
+
+/********************************************************************/
+/**                   Terminal descriptor model                    **/
+/********************************************************************/
+
+specification typedef struct TerminalDescriptor
+{
+    FileDescId cpart;
+} TerminalDescriptor;
+
+TerminalDescriptor* create_TerminalDescriptor(FileDescId cpart);
+
+TerminalDescriptor* default_TerminalDescriptor(void);
+
+FileDescId getCPart_TerminalDescriptor(TerminalDescriptor *term_desc);
+void setCPart_TerminalDescriptor(TerminalDescriptor *term_desc, FileDescId cpart);
+
+/********************************************************************/
+/**                   Terminal data item model                     **/
+/********************************************************************/
+
+specification typedef struct TerminalDataItem
+{
+    ByteT byte;
+    bool brk;
+    bool processed;
+    TimeInterval time;
+} TerminalDataItem;
+
+TerminalDataItem* create_TerminalDataItem(ByteT byte, bool brk, TimeInterval time);
+TerminalDataItem* create_Byte(ByteT byte, TimeInterval time);
+TerminalDataItem* create_BreakCondition(TimeInterval time);
+
+bool isBreakCondition_TerminalDataItem(TerminalDataItem *item);
+bool isByte_TerminalDataItem(TerminalDataItem *item);
+
+bool isProcessed_TerminalDataItem(TerminalDataItem *item);
+void setProcessStatus_TerminalDataItem(TerminalDataItem *item, bool processed);
+
+ByteT getByte_TerminalDataItem(TerminalDataItem *item);
+void setByte_TerminalDataItem(TerminalDataItem *item, ByteT byte);
+
+TimeInterval getTime_TerminalDataItem(TerminalDataItem *item);
+void setTime_TerminalDataItem(TerminalDataItem *item, TimeInterval time);
+
+/********************************************************************/
+/**                     Terminal queue model                       **/
+/********************************************************************/
+
+typedef List TerminalQueue;
+
+TerminalQueue* create_TerminalQueue(void);
+
+unsigned size_TerminalQueue(TerminalQueue *queue);
+bool isEmpty_TerminalQueue(TerminalQueue *queue);
+
+bool isBreakCondition_TerminalQueue(TerminalQueue *queue, unsigned i);
+bool isByte_TerminalQueue(TerminalQueue *queue, unsigned i);
+
+TerminalDataItem* getItem_TerminalQueue(TerminalQueue *queue, unsigned i);
+ByteT getByte_TerminalQueue(TerminalQueue *queue, unsigned i);
+void setByte_TerminalQueue(TerminalQueue *queue, unsigned i, ByteT byte);
+bool isProcessed_TerminalQueue(TerminalQueue *queue, unsigned i);
+void setProcessStatus_TerminalQueue(TerminalQueue *queue, unsigned i, bool processed);
+CByteArray* getByteArray_TerminalQueue(TerminalQueue *queue, unsigned i, unsigned j);
+
+TimeInterval getTime_TerminalQueue(TerminalQueue *queue, unsigned i);
+void setTime_TerminalQueue(TerminalQueue *queue, unsigned i, TimeInterval time);
+
+void appendAll_TerminalQueue(TerminalQueue *to, TerminalQueue *from);
+void appendItem_TerminalQueue(TerminalQueue *queue, TerminalDataItem *item);
+void appendBreakCondition_TerminalQueue(TerminalQueue *queue, TimeInterval time);
+void appendByte_TerminalQueue(TerminalQueue *queue, ByteT byte, TimeInterval time);
+void appendByteArray_TerminalQueue(TerminalQueue *queue, CByteArray *array, TimeInterval time);
+
+void insertItem_TerminalQueue(TerminalQueue *queue, unsigned i, TerminalDataItem *item);
+void insertBreakCondition_TerminalQueue(TerminalQueue *queue, unsigned i, TimeInterval time);
+void insertByte_TerminalQueue(TerminalQueue *queue, unsigned i, ByteT byte, TimeInterval time);
+
+void removeItems_TerminalQueue(TerminalQueue *queue, unsigned i, unsigned j);
+void removeItem_TerminalQueue(TerminalQueue *queue, unsigned i);
+
+void clear_TerminalQueue(TerminalQueue *queue);
+
+/********************************************************************/
+/**                  Terminal connection model                     **/
+/********************************************************************/
+
+specification typedef struct TerminalConnection
+{
+    Bool3 status;       /* Connection status */
+    Bool3 disconnect;   /* Supports disconnection function */
+    Object *remote;     /* Remote terminal */
+    TimeUnit time;      /* Transmission time */
+} TerminalConnection;
+
+TerminalConnection* create_TerminalConnection
+(
+    Bool3 status,       /* Connection status */
+    Bool3 disconnect,   /* Supports disconnection function */
+    Object *remote,     /* Remote terminal */
+    TimeUnit time       /* Transmission time */
+);
+
+TerminalConnection* default_TerminalConnection(void);
+
+/********************************************************************/
+/**                        Terminal model                          **/
+/********************************************************************/
+
+typedef enum TerminalType
+{
+    UnknownTerminalType = -1,   /* Terminal type is unknown */
+    TTY                 =  0,   /* Not a pseudo-terminal */
+    PTM                 =  1,   /* Master pseudo-terminal */
+    PTS                 =  2    /* Slave pseudo-terminal */
+} TerminalType;
+
+typedef enum TransmissionMode
+{
+    UnknownTransmissionMode  = -1,
+    AsynchronousTransmission =  0,
+    SynchronousTransmission  =  1
+} TransmissionMode;
+
+specification typedef struct Terminal
+{
+    TerminalType type;                  /* Terminal type */
+    TransmissionMode mode;              /* Transmission mode */
+    Bool3 split_io_status;              /* Split I/O status */
+    Bool3 control_status;               /* Controlling status */
+    Bool3 login_status;                 /* Login status */
+    CString *login;                     /* Login name */
+    ProcessIdObj *sessionid;            /* Session id */
+    ProcessIdObj *fpgroupid;            /* Foreground process group id */
+    List *termios_list;                 /* I/O attributes list */
+    WinSize *wsize;                     /* Window size */
+    FileDescId ptm_desc_id;             /* PTM descriptor id */
+    CString *pts_name;                  /* PTS name */
+    bool locked;                        /* Locked */
+    TerminalQueue *input_queue;         /* Input queue */
+    TerminalQueue *output_queue;        /* Output queue */
+    unsigned column;                    /* Column */
+    TimeInterval read_time;             /* Read time interval */
+    bool input_suspended;               /* Input suspension status */
+    bool output_suspended;              /* Output suspension status */
+    TerminalConnection *connection;     /* Terminal connection */
+} Terminal;
+
+Terminal* create_Terminal
+(
+    TerminalType type,                  /* Terminal type */
+    TransmissionMode mode,              /* Transmission mode */
+    Bool3 split_io_status,              /* Split I/O status */
+    Bool3 control_status,               /* Controlling status */
+    Bool3 login_status,                 /* Login status */
+    CString *login,                     /* Login name */
+    ProcessIdObj *sessionid,            /* Session id */
+    ProcessIdObj *fpgroupid,            /* Foreground process group id */
+    List *termios_list,                 /* I/O attributes list */
+    WinSize *wsize,                     /* Window size */
+    FileDescId ptm_desc_id,             /* PTM descriptor id */
+    CString *pts_name,                  /* PTS name */
+    bool locked,                        /* Locked */
+    TerminalQueue *input_queue,         /* Input queue */
+    TerminalQueue *output_queue,        /* Output queue */
+    unsigned column,                    /* Column */
+    TimeInterval read_time,             /* Read time interval */
+    bool input_suspended,               /* Input suspension status */
+    bool output_suspended,              /* Output suspension status */
+    TerminalConnection *connection      /* Terminal connection */
+);
+
+Terminal* default_Terminal(void);
+
+bool isReal_Terminal(Terminal *terminal);
+bool isPT_Terminal(Terminal *terminal);
+bool isPTM_Terminal(Terminal *terminal);
+bool isPTS_Terminal(Terminal *terminal);
+void setType_Terminal(Terminal *terminal, TerminalType type);
+
+Terminal* getControllingTerminal_ProcessId(ProcessId processid);
+
+Bool3 getSplitIOStatus_Terminal(Terminal *terminal);
+void setSplitIOStatus_Terminal(Terminal *terminal, Bool3 split_io_status);
+
+bool isSplittedIO_Terminal(Terminal *terminal);
+bool isNotSplittedIO_Terminal(Terminal *terminal);
+
+void splitIO_Terminal(Terminal *terminal);
+void mergeIO_Terminal(Terminal *terminal);
+
+Bool3 getConnectionStatus_Terminal(Terminal *terminal);
+void setConnectionStatus_Terminal(Terminal *terminal, Bool3 connect_status);
+
+bool isConnected_Terminal(Terminal *terminal);
+bool isDisconnected_Terminal(Terminal *terminal);
+
+Bool3 getDisconnectSupport_Terminal(Terminal *terminal);
+void setDisconnectSupport_Terminal(Terminal *terminal, Bool3 disconnect);
+
+TimeUnit getTransmissionTime_Terminal(Terminal *terminal);
+void setTransmissionTime_Terminal(Terminal *terminal, TimeUnit time);
+
+Terminal* getRemoteTerminal_Terminal(Terminal *terminal);
+void setRemoteTerminal_Terminal(Terminal *terminal, Terminal *remote);
+
+void connect_Terminals(Terminal *terminal1, Terminal *terminal2,
+                       TimeUnit time12, TimeUnit time21);
+void disconnect_Terminal(Terminal *terminal);
+
+Bool3 getControllingStatus_Terminal(Terminal *terminal);
+void setControllingStatus_Terminal(Terminal *terminal, Bool3 control_status);
+
+bool isControlling_Terminal(Terminal *terminal);
+bool isNotControlling_Terminal(Terminal *terminal);
+
+Bool3 getLoginStatus_Terminal(Terminal *terminal);
+void setLoginStatus_Terminal(Terminal *terminal, Bool3 login_status);
+
+bool isLoginTTY_Terminal(Terminal *terminal);
+bool isNotLoginTTY_Terminal(Terminal *terminal);
+
+void login_Terminal(Terminal *terminal, CString *login);
+void logout_Terminal(Terminal *terminal);
+
+CString *getLogin_Terminal(Terminal *terminal);
+void setLogin_Terminal(Terminal *terminal, CString *login);
+
+ProcessIdObj* getSessionId_Terminal(Terminal *terminal);
+void setSessionId_Terminal(Terminal *terminal, ProcessIdObj *sessionid);
+
+ProcessIdObj* getForegroundPGroupId_Terminal(Terminal *terminal);
+void setForegroundPGroupId_Terminal(Terminal *terminal, ProcessIdObj* fpgroupid);
+
+TermIOS* getTermIOS_Terminal(Terminal *terminal);
+TermIOS* getLastTermIOS_Terminal(Terminal *terminal);
+
+void setTermIOS_Terminal(Terminal *terminal, TermIOS *termios);
+void addTermIOS_Terminal(Terminal *terminal, TermIOS *termios);
+
+WinSize* getWinSize_Terminal(Terminal *terminal);
+void setWinSize_Terminal(Terminal *terminal, WinSize *wsize);
+
+CString* getPTSName_Terminal(Terminal *terminal);
+void setPTSName_Terminal(Terminal *terminal, CString *ptsname);
+
+bool isLocked_Terminal(Terminal *terminal);
+
+void lock_Terminal(Terminal *terminal);
+void unlock_Terminal(Terminal *terminal);
+
+TerminalQueue* getInputQueue_Terminal(Terminal *terminal);
+void setInputQueue_Terminal(Terminal *terminal, TerminalQueue *queue);
+
+bool isInputPrefix_TerminalQueue(Terminal *terminal, CByteArray *array);
+
+TerminalQueue* getOutputQueue_Terminal(Terminal *terminal);
+void setOutputQueue_Terminal(Terminal *terminal, TerminalQueue *queue);
+
+bool isInputSuspended_Terminal(Terminal *terminal);
+void suspendInput_Terminal(Terminal *terminal);
+void restartInput_Terminal(Terminal *terminal);
+
+bool isOutputSuspended_Terminal(Terminal *terminal);
+void suspendInput_Terminal(Terminal *terminal);
+void restartInput_Terminal(Terminal *terminal);
+
+int getLineSize_Terminal(Terminal *terminal);
+
+TimeInterval getReadTime_Terminal(Terminal *terminal);
+void setReadTime_Terminal(Terminal *terminal, TimeInterval read_time);
+
+/*
+ * The tcsetattr() function shall return successfully if it was able to perform
+ * any of the requested actions, even if some of the requested actions could
+ * not be performed. It shall set all the attributes that the implementation
+ * supports as requested and leave all the attributes not supported by the
+ * implementation unchanged.
+ */
+bool checkIOAttributes_TermIOS(TermIOS *termios, Terminal *terminal);
+
+void processInputQueue_Terminal(Terminal *terminal);
+void processOutputQueue_Terminal(Terminal *terminal);
+
+Bool3 containsLineAtTime_Terminal(Terminal *terminal, TimeMark time);
+Bool3 containsBytesAtTime_Terminal(Terminal *terminal, TimeMark time, unsigned n);
+
+void transmit_Terminal(Terminal *terminal, TimeMark time);
+
+void read_Terminal(Terminal *terminal, CByteArray *buf, unsigned nbyte);
+void write_Terminal(Terminal *terminal, CByteArray *buf, unsigned nbyte);
+void echo_Terminal(Terminal *terminal, CByteArray *buf, unsigned nbyte);
+
+bool checkParity_Terminal(Terminal *terminal, ByteT byte);
+
+bool isMaxCanonLimitExceeded(CallContext context, FileDescId fildes, Terminal *terminal);
+bool isMaxInputLimitExceeded(CallContext context, FileDescId fildes, Terminal *terminal);
+
+void setPTMDescId_Terminal(Terminal *terminal, FileDescId ptm_desc_id);
+
+void suspendOutput_Terminal(Terminal *terminal);
+void restartOutput_Terminal(Terminal *terminal);
+FileDescId getPTMDescId_Terminal(Terminal *terminal);
+
+/********************************************************************/
+/**                      Auxiliary Functions                       **/
+/********************************************************************/
+
+/** settermios_spec **/
+specification
+void settermios_spec(CallContext context, TermIOSPtr termios_p, TermIOS *termios);
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** cfgetispeed_spec **/
+specification
+SpeedT cfgetispeed_spec(CallContext context, TermIOSPtr termios_p);
+
+/** cfgetospeed_spec **/
+specification
+SpeedT cfgetospeed_spec(CallContext context, TermIOSPtr termios_p);
+
+/** cfmakeraw_spec **/
+specification
+void cfmakeraw_spec(CallContext context, TermIOSPtr termios_p);
+
+/** cfsetispeed_spec **/
+specification
+IntT cfsetispeed_spec(CallContext context, TermIOSPtr termios_p, SpeedT speed,
+                      ErrorCode *errno);
+
+/** cfsetospeed_spec **/
+specification
+IntT cfsetospeed_spec(CallContext context, TermIOSPtr termios_p, SpeedT speed,
+                      ErrorCode *errno);
+
+/** cfsetspeed_spec **/
+specification
+IntT cfsetspeed_spec(CallContext context, TermIOSPtr t, SpeedT speed,
+                     ErrorCode *errno);
+
+/** close_tty_spec **/
+specification typedef struct CloseTTYCall
+{
+    CallContext context;
+    FileDescId fildes;
+} CloseTTYCall;
+
+CloseTTYCall* create_CloseTTYCall(CallContext context, FileDescId fildes);
+
+specification
+void close_tty_spec(CallContext context, FileDescId fildes);
+
+void onCloseTTY(CallContext context, FileDescId fildes);
+
+/** close_tty_return **/
+specification typedef struct CloseTTYReturnType
+{
+    CallContext context;
+    IntT returned_value;
+    ErrorCode *errno;
+} CloseTTYReturnType;
+
+CloseTTYReturnType* create_CloseTTYReturnType
+(
+    CallContext context,
+    IntT returned_value,
+    ErrorCode *errno
+);
+
+reaction
+CloseTTYReturnType* close_tty_return(void);
+
+void onCloseTTYReturn(CallContext context, IntT close_tty_return,
+                      ErrorCode *errno);
+
+/** ctermid_spec **/
+specification
+CString* ctermid_spec(CallContext context, CString *s);
+
+/** getlogin_spec **/
+specification
+CString* getlogin_spec(CallContext context, ErrorCode *errno);
+
+void onGetLogin(CallContext context, ErrorCode *errno, CString *getlogin_spec);
+
+/** getlogin_r_spec **/
+specification
+IntT getlogin_r_spec(CallContext context, CString *name, SizeT namesize);
+
+void onGetLoginR(CallContext context, CString *name, SizeT namesize,
+                 IntT getlogin_r_spec);
+
+/** grantpt_spec **/
+specification
+IntT grantpt_spec(CallContext context, FileDescId fildes, ErrorCode *errno);
+
+void onGrantPT(CallContext context, FileDescId fildes, ErrorCode *errno,
+               IntT unlockpt_spec);
+
+/** isatty_spec **/
+specification
+IntT isatty_spec(CallContext context, FileDescId fildes, ErrorCode *errno);
+
+void onIsATTY(CallContext context, FileDescId fildes, ErrorCode *errno,
+              IntT isatty_spec);
+
+/** open_tty_spec **/
+specification typedef struct OpenTTYCall
+{
+    CallContext context;
+    CString *path;
+    OpenFlags oflag;
+} OpenTTYCall;
+
+OpenTTYCall* create_OpenTTYCall
+(
+    CallContext context,
+    CString *path,
+    OpenFlags oflag
+);
+
+specification
+void open_tty_spec(CallContext context, CString *path, OpenFlags oflag);
+
+void onOpenTTY(CallContext context, CString *path, OpenFlags oflag);
+
+/** open_tty_return **/
+specification typedef struct OpenTTYReturnType
+{
+    CallContext context;
+    FileDescId returned_value;
+    ErrorCode *errno;
+} OpenTTYReturnType;
+
+OpenTTYReturnType* create_OpenTTYReturnType
+(
+    CallContext context,
+    FileDescId fildes,
+    ErrorCode *errno
+);
+
+reaction
+OpenTTYReturnType* open_tty_return(void);
+
+void onOpenTTYReturn(CallContext context, FileDescId open_tty_return,
+                     ErrorCode *errno);
+
+/** openpty_spec **/
+specification
+IntT openpty_spec(CallContext context, FileDescId *amaster, FileDescId *aslave,
+                  CString *name, VoidTPtr termp, WinSize *winp, ErrorCode *errno);
+
+void onOpenPTY(CallContext context, FileDescId *amaster, FileDescId *aslave, CString *name,
+               VoidTPtr termp, WinSize *winp, ErrorCode *errno, IntT openpty_spec);
+
+/** posix_openpt_spec **/
+specification
+FileDescId posix_openpt_spec(CallContext context, OpenFlags oflag, ErrorCode *errno);
+
+void onPosixOpenPT(CallContext context, OpenFlags oflag, ErrorCode *errno,
+                   FileDescId posix_openpt_spec);
+
+/** ptsname_spec **/
+specification
+CString* ptsname_spec(CallContext context, FileDescId fildes);
+
+void onPTSName(CallContext context, FileDescId fildes, CString *ptsname_spec);
+
+/** read_tty_spec **/
+specification typedef struct ReadTTYCall
+{
+    CallContext context;
+    FileDescId fildes;
+    SizeT nbyte;
+} ReadTTYCall;
+
+ReadTTYCall* create_ReadTTYCall
+(
+    CallContext context,
+    FileDescId fildes,
+    SizeT nbyte
+);
+
+specification
+void read_tty_spec(CallContext context, FileDescId fildes, SizeT nbyte);
+
+void onReadTTY(CallContext context, FileDescId fildes, SizeT nbyte);
+
+/** read_tty_return **/
+specification typedef struct ReadTTYReturnType
+{
+    CallContext context;
+    SSizeT returned_value;
+    CByteArray *buf;
+    ErrorCode *errno;
+} ReadTTYReturnType;
+
+ReadTTYReturnType* create_ReadTTYReturnType
+(
+    CallContext context,
+    SSizeT returned_value,
+    CByteArray *buf,
+    ErrorCode *errno
+);
+
+reaction
+ReadTTYReturnType* read_tty_return(void);
+
+void onReadTTYReturn(CallContext context, SSizeT read_tty_return, CByteArray *buf,
+                     ErrorCode *errno, TimeInterval time);
+
+/** tcdrain_spec **/
+specification typedef struct TCDrainCall
+{
+    CallContext context;
+    FileDescId fildes;
+} TCDrainCall;
+
+TCDrainCall* create_TCDrainCall(CallContext context, FileDescId fildes);
+
+specification
+void tcdrain_spec(CallContext context, FileDescId fildes);
+
+void onTCDrain(CallContext context, FileDescId fildes);
+
+/** tcdrain_return **/
+specification typedef struct TCReturnType
+{
+    CallContext context;
+    IntT returned_value;
+    ErrorCode *errno;
+} TCReturnType;
+
+TCReturnType* create_TCReturnType
+(
+    CallContext context,
+    IntT returned_value,
+    ErrorCode *errno
+);
+
+reaction
+TCReturnType* tcdrain_return(void);
+
+void onTCDrainReturn(CallContext context, IntT tcdrain_return, ErrorCode *errno);
+
+/** tcflow_spec **/
+specification typedef struct TCFlowCall
+{
+    CallContext context;
+    FileDescId fildes;
+    Action action;
+} TCFlowCall;
+
+TCFlowCall* create_TCFlowCall
+(
+    CallContext context,
+    FileDescId fildes,
+    Action action
+);
+
+specification
+void tcflow_spec(CallContext context, FileDescId fildes, Action action);
+
+void onTCFlow(CallContext context, FileDescId fildes, Action action);
+
+/** tcflow_return **/
+reaction
+TCReturnType* tcflow_return(void);
+
+void onTCFlowReturn(CallContext context, IntT tcflow_return, ErrorCode *errno,
+                    TimeInterval time);
+
+/** tcflush_spec **/
+specification typedef struct TCFlushCall
+{
+    CallContext context;
+    FileDescId fildes;
+    QueueSelector queue_selector;
+} TCFlushCall;
+
+TCFlushCall* create_TCFlushCall
+(
+    CallContext context,
+    FileDescId fildes,
+    QueueSelector queue_selector
+);
+
+specification
+void tcflush_spec(CallContext context, FileDescId fildes, QueueSelector queue_selector);
+
+void onTCFlush(CallContext context, FileDescId fildes, QueueSelector queue_selector);
+
+/** tcflush_return **/
+reaction
+TCReturnType* tcflush_return(void);
+
+void onTCFlushReturn(CallContext context, IntT tcflush_return, ErrorCode *errno);
+
+/** tcgetattr_spec **/
+specification
+IntT tcgetattr_spec(CallContext context, FileDescId fildes, VoidTPtr termios_p,
+                    ErrorCode *errno);
+
+void onTCGetAttr(CallContext context, FileDescId fildes, VoidTPtr termios_p,
+                 ErrorCode *errno, IntT tcgetattr_spec);
+
+/** tcgetpgrp_spec **/
+specification
+ProcessId tcgetpgrp_spec(CallContext context, FileDescId fildes, ErrorCode *errno);
+
+void onTCGetPGrp(CallContext context, FileDescId fildes, ErrorCode *errno,
+                 ProcessId tcgetpgrp_spec);
+
+/** tcgetsid_spec **/
+specification
+ProcessId tcgetsid_spec(CallContext context, FileDescId fildes, ErrorCode *errno);
+
+void onTCGetSid(CallContext context, FileDescId fildes, ErrorCode *errno,
+                ProcessId tcgetsid_spec);
+
+/** tcsendbreak_spec **/
+specification typedef struct TCSendBreakCall
+{
+    CallContext context;
+    FileDescId fildes;
+    IntT duration;
+} TCSendBreakCall;
+
+TCSendBreakCall* create_TCSendBreakCall
+(
+    CallContext context,
+    FileDescId fildes,
+    IntT duration
+);
+
+specification
+void tcsendbreak_spec(CallContext context, FileDescId fildes, IntT duration);
+
+void onTCSendBreak(CallContext context, FileDescId fildes, IntT duration);
+
+/** tcsendbreak_return **/
+reaction
+TCReturnType* tcsendbreak_return(void);
+
+void onTCSendBreakReturn(CallContext context, IntT tcsendbreak_return,
+                         ErrorCode *errno, TimeInterval time);
+
+/** tcsetattr_spec **/
+specification typedef struct TCSetAttrCall
+{
+    CallContext context;
+    FileDescId fildes;
+    OptionalActions optional_actions;
+    TermIOSPtr termios_p;
+} TCSetAttrCall;
+
+TCSetAttrCall* create_TCSetAttrCall
+(
+    CallContext context,
+    FileDescId fildes,
+    OptionalActions optional_actions,
+    TermIOSPtr termios_p
+);
+
+specification
+void tcsetattr_spec(CallContext context, FileDescId fildes,
+                    OptionalActions optional_actions, TermIOSPtr termios_p);
+
+void onTCSetAttr(CallContext context, FileDescId fildes,
+                 OptionalActions optional_actions, TermIOSPtr termios_p);
+
+/** tcsetattr_return **/
+reaction
+TCReturnType* tcsetattr_return(void);
+
+void onTCSetAttrReturn(CallContext context, IntT tcsetattr_return, ErrorCode *errno);
+
+/** tcsetpgrp_spec **/
+specification typedef struct TCSetPGrpCall
+{
+    CallContext context;
+    FileDescId fildes;
+    ProcessId pgid_id;
+} TCSetPGrpCall;
+
+TCSetPGrpCall* create_TCSetPGrpCall
+(
+    CallContext context,
+    FileDescId fildes,
+    ProcessId pgid_id
+);
+
+specification
+void tcsetpgrp_spec(CallContext context, FileDescId fildes, ProcessId pgid_id);
+
+void onTCSetPGrp(CallContext context, FileDescId fildes, ProcessId pgid_id);
+
+/** tcsetpgrp_return **/
+reaction
+TCReturnType* tcsetpgrp_return(void);
+
+void onTCSetPGrpReturn(CallContext context, IntT tcsetpgrp_return, ErrorCode *errno);
+
+/** ttyio_TIOCGWINSZ_spec **/
+specification
+IntT ttyio_TIOCGWINSZ_spec(CallContext context, FileDescId fd, WinSize *argp,
+                           ErrorCode *errno);
+
+void onTTYIO_TIOCGWINSZ(CallContext context, FileDescId fd, WinSize *argp,
+                        ErrorCode *errno, IntT ttyio_TIOCGWINSZ_spec);
+
+/** ttyname_spec **/
+specification
+CString* ttyname_spec(CallContext context, FileDescId fildes, ErrorCode *errno);
+
+void onTTYName(CallContext context, FileDescId fildes, ErrorCode *errno,
+               CString *ttyname_spec);
+
+/** ttyname_r_spec **/
+specification
+IntT ttyname_r_spec(CallContext context, FileDescId fildes, CString *name, SizeT namesize);
+
+void onTTYNameR(CallContext context, FileDescId fildes, CString *name, SizeT namesize,
+                IntT ttyname_r_spec);
+
+/** unlockpt_spec **/
+specification
+IntT unlockpt_spec(CallContext context, FileDescId fildes, ErrorCode *errno);
+
+void onUnlockPT(CallContext context, FileDescId fildes, ErrorCode *errno,
+                IntT unlockpt_spec);
+
+/** write_tty_spec **/
+specification typedef struct WriteTTYCall
+{
+    CallContext context;
+    FileDescId fildes;
+    CByteArray *buf;
+    SizeT nbyte;
+} WriteTTYCall;
+
+WriteTTYCall* create_WriteTTYCall
+(
+    CallContext context,
+    FileDescId fildes,
+    CByteArray *buf,
+    SizeT nbyte
+);
+
+specification
+void write_tty_spec(CallContext context, FileDescId fildes, CByteArray *buf, SizeT nbyte);
+
+void onWriteTTY(CallContext context, FileDescId fildes, CByteArray *buf, SizeT nbyte);
+
+/** write_tty_return **/
+specification typedef struct WriteTTYReturnType
+{
+    CallContext context;
+    SSizeT returned_value;
+    ErrorCode *errno;
+} WriteTTYReturnType;
+
+WriteTTYReturnType* create_WriteTTYReturnType
+(
+    CallContext context,
+    SSizeT returned_value,
+    ErrorCode *errno
+);
+
+reaction
+WriteTTYReturnType* write_tty_return(void);
+
+void onWriteTTYReturn(CallContext context, SSizeT write_tty_return, ErrorCode *errno,
+                      TimeInterval time);
+
+/** login_tty **/
+specification
+IntT login_tty_spec(CallContext context, FileDescId fdr, ErrorCode* errno);
+
+void onLoginTTY(CallContext context, FileDescId fdr, IntT login_tty_spec);
+
+void login_tty_model(CallContext context, FileDescId fdr);
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+Map* getAllTerminals(void);
+Terminal* findTerminal(Map *terminals, FileDescId file_desc_id);
+
+Terminal* getTerminal_FileDescId(FileDescId file_desc_id);
+void setTerminal_FileDescId(FileDescId file_desc_id, Terminal *terminal);
+
+TerminalDescriptor* getTerminalDescriptor_FileDescId(FileDescId file_desc_id);
+void setTerminalDescriptor_FileDescId(FileDescId file_desc_id, TerminalDescriptor *term_desc);
+
+bool isTerminal_FileDescId(FileDescId file_desc_id);
+bool isRealTerminal_FileDescId(FileDescId file_desc_id);
+bool isPT_FileDescId(FileDescId file_desc_id);
+bool isPTM_FileDescId(FileDescId file_desc_id);
+bool isPTS_FileDescId(FileDescId file_desc_id);
+void setTerminalType_FileDescId(FileDescId file_desc_id, TerminalType type);
+
+TermIOS* getTermIOS_FileDescId(FileDescId file_desc_id);
+void setTermIOS_FileDescId(FileDescId file_desc_id, TermIOS *termios);
+void addTermIOS_FileDescId(FileDescId file_desc_id, TermIOS *termios);
+
+FileDescId getCPart_FileDescId(FileDescId file_desc_id);
+void setCPart_FileDescId(FileDescId file_desc_id, FileDescId cpart);
+
+CString* getPTSName_FileDescId(FileDescId file_desc_id);
+void setPTSName_FileDescId(FileDescId file_desc_id, CString *ptsname);
+
+Bool3 getControllingStatus_FileDescId(FileDescId file_desc_id);
+void setControllingStatus_FileDescId(FileDescId file_desc_id, Bool3 control_status);
+bool isControllingTerminal_FileDescId(FileDescId file_desc_id);
+bool isNotControllingTerminal_FileDescId(FileDescId file_desc_id);
+
+ProcessIdObj* getSessionId_FileDescId(FileDescId file_desc_id);
+void setSessionId_FileDescId(FileDescId file_desc_id, ProcessIdObj *sessionid);
+
+ProcessIdObj* getForegroundPGroupId_FileDescId(FileDescId file_desc_id);
+void setForegroundPGroupId_FileDescId(FileDescId file_desc_id, ProcessIdObj *fpgroupid);
+
+WinSize* getTerminalWinSize_FileDescId(FileDescId file_desc_id);
+void setTerminalWinSize_FileDescId(FileDescId file_desc_id, WinSize *wsize);
+
+bool isTerminalLocked_FileDescId(FileDescId file_desc_id);
+void lockTerminal_FileDescId(FileDescId file_desc_id);
+void unlockTerminal_FileDescId(FileDescId file_desc_id);
+
+bool isTerminalInputSuspended_FileDescId(FileDescId file_desc_id);
+void suspendTerminalInput_FileDescId(FileDescId file_desc_id);
+void restartTerminalInput_FileDescId(FileDescId file_desc_id);
+
+bool isTerminalOutputSuspended_FileDescId(FileDescId file_desc_id);
+void suspendTerminalOutput_FileDescId(FileDescId file_desc_id);
+void restartTerminalOutput_FileDescId(FileDescId file_desc_id);
+
+bool isTerminal_FileDescriptor(FileDescriptor *file_descriptor);
+bool isTerminal_File(File *file);
+
+Bool3 isCorrectTerminalName(CallContext context, CString *name);
+Bool3 isCorrectTerminalNameSize(CallContext context, FileDescId fildes, SizeT namesize);
+
+Bool3 isCorrectLoginName(CallContext context, CString *name);
+Bool3 isCorrectLoginNameSize(CallContext context, SizeT namesize);
+
+/*
+ * Returns true iff the process identified by the processid
+ * is a controlling process. 
+ *
+ * IEEE Std 1003.1, 2004 Edition defines controlling process as follows:
+ *   Section 3. Definitions
+ *    3.113 Controlling Process
+ *    The session leader that established the connection to the controlling
+ *    terminal. If the terminal subsequently ceases to be a controlling terminal
+ *    for this session, the session leader ceases to be the controlling process.
+ *
+ * Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+ */
+Bool3 isControllingProcess_ProcessId(ProcessId processid);
+
+/*
+ * Disassociate the controlling terminal from the session containing the
+ * process identified by the processid.
+ */
+void disassociateControllingTerminal(ProcessId processid);
+
+void setCPart_FileDescId(FileDescId file_desc_id, FileDescId cpart);
+bool isInputPrefix_Terminal(Terminal *terminal, CByteArray *array);
+
+#endif
+

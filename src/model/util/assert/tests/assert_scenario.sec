@@ -1,0 +1,416 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "util/assert/tests/assert_scenario.seh"
+
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "util/assert/assert_model.seh"
+#include "util/assert/assert_media.seh"
+
+#include "util/format/tests/format_sheafs.seh"
+#include "util/format/tests/printf_scenario_data.seh"
+#include "process/process/process_common.seh"
+#include "config/test_system_config.h"
+#include "fs/dir/dir_model.seh"
+
+#define SERIALIZATION_TIME_BRAKING 400
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static bool needOnlyFirstPriority;
+static bool needConformanceTestQuality;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+static List /* NULL */ * functionData;
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+static List * createFunctionDataForEvalSheaf( void ) {
+    List * result = create_List( & type_Map );
+    List * contexts;
+    int evalI, sheafI, contextI;
+    for ( evalI = 1; evalI <= 3; evalI++ ) {
+        int maxPrintedSheafI = ( needConformanceTestQuality ? 2 : size_List( printedSheafs ) - 1 );
+        for ( sheafI = 0; sheafI <= maxPrintedSheafI; sheafI++ ) {
+            if ( ( contexts = createProcesses( evalI == 1 ) ) == NULL ) { return NULL; }
+            for ( contextI = 0; contextI < size_List( contexts ); contextI++ ) {
+                Map * pars = create_Map( & type_String, NULL );
+                ThreadIdObj * contextObj = get_List( contexts, contextI );
+                put_Map( pars, create_String( "context" ), contextObj );
+                switch ( evalI ) {
+                    case 1: put_Map( pars, create_String( "eval" ), create_IntTObj( -1 ) ); break;
+                    case 2: put_Map( pars, create_String( "eval" ), create_IntTObj(  0 ) ); break;
+                    case 3: put_Map( pars, create_String( "eval" ), create_IntTObj(  1 ) ); break;
+                }
+                put_Map( pars, create_String( "sheaf" ), create_IntTObj( sheafI ) );
+                dotPrint( 10, 100 );
+                append_List( result, pars );
+            } // for contextI
+        } // for sheafI
+    } // for evalI
+    return result;
+} // createFunctionDataForEvalSheaf
+
+static List * createFunctionDataForExitstatusErrnumSheaf( void ) {
+    List * result = create_List( & type_Map );
+    List * contexts;
+    int exitstatusI, errnumI, sheafI, contextI;
+    for ( exitstatusI = 1; exitstatusI <= 3; exitstatusI++ ) {
+        // for ( errnumI = 1; errnumI <= 3; errnumI++ ) { // система не тянет больше 54 процессов
+        for ( errnumI = exitstatusI; errnumI <= exitstatusI; errnumI++ ) {
+            int maxPrintedSheafI = ( needConformanceTestQuality ? 0 : size_List( printedSheafs ) - 1 );
+            for ( sheafI = 0; sheafI <= maxPrintedSheafI; sheafI++ ) {
+                if ( ( contexts = createProcesses( exitstatusI == 1 ) ) == NULL ) { return NULL; }
+                for ( contextI = 0; contextI < size_List( contexts ); contextI++ ) {
+                    Map * pars = create_Map( & type_String, NULL );
+                    ThreadIdObj * contextObj = get_List( contexts, contextI );
+                    put_Map( pars, create_String( "context" ), contextObj );
+                    switch ( exitstatusI ) {
+                        case 1: put_Map( pars, create_String( "exitstatus" ), create_IntTObj( -1 ) ); break;
+                        case 2: put_Map( pars, create_String( "exitstatus" ), create_IntTObj(  0 ) ); break;
+                        case 3: put_Map( pars, create_String( "exitstatus" ), create_IntTObj(  1 ) ); break;
+                    }
+                    switch ( errnumI ) {
+                        case 1: put_Map( pars, create_String( "errnum" ), create_IntTObj( -1 ) ); break;
+                        case 2: put_Map( pars, create_String( "errnum" ), create_IntTObj(  0 ) ); break;
+                        case 3: put_Map( pars, create_String( "errnum" ), create_IntTObj(  1 ) ); break;
+                    }
+                    put_Map( pars, create_String( "sheaf" ), create_IntTObj( sheafI ) );
+                    dotPrint( 10, 100 );
+                    append_List( result, pars );
+                } // for contextI
+            } // for sheafI
+        } // for errnumI
+    } // for exitstatusI
+    return result;
+} // createFunctionDataForExitstatusErrnumSheaf
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+bool init_simple_assert_scenario(int argc, char** argv)
+{
+    context = getContext();
+
+    return true;
+}
+
+void finish_simple_assert_scenario(void)
+{
+    /**/
+}
+
+static String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    //needOnlyFirstPriority = false;
+    needOnlyFirstPriority = true;
+    //needConformanceTestQuality = false;
+    needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    DISABLE_DEFERRED_REACTIONS
+        FilePermission * perm = create_FilePermission( true, true, true );
+        FilePermissions * mode = create_FilePermissions( perm, perm, perm, True_Bool3, True_Bool3, True_Bool3 );
+        if ( ! createTestScenarioSandboxDir( getContext() ) ) { return false; }
+        if ( ( printedSheafs = createPrintedSheafs() ) == NULL ) { return false; }
+        if ( equals( create_String( "err"   ), testingFuncName ) ||
+             equals( create_String( "errx"  ), testingFuncName ) ||
+             equals( create_String( "verrx" ), testingFuncName )
+           ) {
+            verbose( "prepare\n" );
+            if ( ( functionData = createFunctionDataForEvalSheaf() ) == NULL ) { return false; }
+            verbose( "\ntesting\n" );
+            dotPrint( 0, 0 );
+        } else if ( equals( create_String( "error" ), testingFuncName ) ) {
+            verbose( "prepare\n" );
+            if ( ( functionData = createFunctionDataForExitstatusErrnumSheaf() ) == NULL ) { return false; }
+            verbose( "\ntesting\n" );
+            dotPrint( 0, 0 );
+        } else {
+            if ( ( functionData = createContexts() ) == NULL ) { return false; }
+        }
+        setFinishMode( UNTIL_END );
+    ENABLE_DEFERRED_REACTIONS
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME*20);
+
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    removeTestScenarioSandboxDir( getContext() ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+    terminateProcesses( functionData ); \
+}
+
+static bool init_err_scenario  ( int argc, char ** argv ) { return init_scenario( "err"   ); }
+static bool init_error_scenario( int argc, char ** argv ) { return init_scenario( "error" ); }
+static bool init_errx_scenario ( int argc, char ** argv ) { return init_scenario( "errx"  ); }
+static bool init_verrx_scenario( int argc, char ** argv ) { return init_scenario( "verrx" ); }
+static bool init_warn_scenario ( int argc, char ** argv ) { return init_scenario( "warn"  ); }
+static bool init_warnx_scenario( int argc, char ** argv ) { return init_scenario( "warnx" ); }
+
+static void finish_err_scenario  ( void ) finish_scenario( err   )
+static void finish_error_scenario( void ) finish_scenario( error )
+static void finish_errx_scenario ( void ) finish_scenario( errx  )
+static void finish_verrx_scenario( void ) finish_scenario( verrx )
+static void finish_warn_scenario ( void ) finish_scenario( warn  )
+static void finish_warnx_scenario( void ) finish_scenario( warnx )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool simple___assert_fail_scen(void)
+{
+    CallContext proc;
+    CString * assertion_str = create_CString("Test assertion");
+    CString * file_str = create_CString("<File name here>");
+    UIntT line = 999;
+    CString * function_str = create_CString("simple___assert_fail_scen");
+
+    proc = createProcess();
+    __assert_fail_spec(proc, assertion_str, file_str, line, NULL);
+
+    proc = createProcess();
+    __assert_fail_spec(proc, assertion_str, file_str, line, function_str);
+
+    return true;
+}
+
+scenario
+bool err_scen()
+{
+    int stepParI = ( needOnlyFirstPriority || needConformanceTestQuality ? 9 : 1 );
+    iterate ( int parI = 0; parI < size_List( functionData ); parI += stepParI; )
+    // iterate ( int parI = 0; parI <= 0; parI += stepParI; )
+    {
+        Map * pars = get_List( functionData, parI );
+        ThreadIdObj * contextObj = get_Map( pars, create_String( "context" ) );
+        IntTObj     * evalObj    = get_Map( pars, create_String( "eval"    ) );
+        IntTObj     * sheafObj   = get_Map( pars, create_String( "sheaf"   ) );
+        PrintedSheaf * sheaf = get_List( printedSheafs, * sheafObj );
+        bool callErr   = equals( create_String( "err"   ), testingFuncName );
+        bool callErrx  = equals( create_String( "errx"  ), testingFuncName );
+        bool callVerrx = equals( create_String( "verrx" ), testingFuncName );
+        CString * stderrAsFile = getTestScenarioSandboxPathCh( "stderrAsFile.txt" );
+        CString * expectedResult = concat_CString( create_CString( "[^:]*: " ), sheaf->result );
+        if      ( callErr   ) { expectedResult = concat_CString( expectedResult, create_CString( ": Success\n" ) ); }
+        else if ( callErrx  ) { expectedResult = concat_CString( expectedResult, create_CString( ": \n"        ) ); }
+        else if ( callVerrx ) { expectedResult = concat_CString( expectedResult, create_CString( ": \n"        ) ); }
+        setExpectedResultAndReqIds( toCharArray_String( testingFuncName ), expectedResult, sheaf->reqIds );
+        dotPrint( 10, 100 );
+        // verbose( "\nerr_scen : parI is %d\n", parI );
+        // verbose( "err_scen : eval is %d, ", * evalObj );
+        // printC_String( "fmt is ", sheaf->format );
+        // printC_String( "err_scen : stderrAsFile is ", stderrAsFile );
+        if      ( callErr   ) { err_spec  ( * contextObj, * evalObj, sheaf->format, sheaf->data, stderrAsFile ); }
+        else if ( callErrx  ) { errx_spec ( * contextObj, * evalObj, sheaf->format, sheaf->data, stderrAsFile ); }
+        else if ( callVerrx ) { verrx_spec( * contextObj, * evalObj, sheaf->format, sheaf->data, stderrAsFile ); }
+        else {
+            assertion( false, "err_scen : unknown testingFuncName" );
+        }
+    } // iterate parI
+    return true;
+}
+
+scenario
+bool error_scen()
+{
+    int stepParI = ( needOnlyFirstPriority || needConformanceTestQuality ? 9 : 1 );
+    iterate ( int parI = 0; parI < size_List( functionData ); parI += stepParI; )
+    {
+        Map * pars = get_List( functionData, parI );
+        ThreadIdObj * contextObj    = get_Map( pars, create_String( "context"    ) );
+        IntTObj     * exitstatusObj = get_Map( pars, create_String( "exitstatus" ) );
+        IntTObj     * errnumObj     = get_Map( pars, create_String( "errnum"     ) );
+        IntTObj     * sheafObj      = get_Map( pars, create_String( "sheaf"      ) );
+        PrintedSheaf * sheaf = get_List( printedSheafs, * sheafObj );
+        CString * stderrAsFile = getTestScenarioSandboxPathCh( "stderrAsFile.txt" );
+        CString * expectedResult = concat_CString( create_CString( "[^:]*: " ), sheaf->result );
+        CString * errnumTail;
+        switch ( * errnumObj ) {
+            case -1:
+                if(sizeof_LongT==4)
+                {
+                    errnumTail = create_CString( ": Unknown error 4294967295\n" );
+                }
+                else
+                {
+                    errnumTail = create_CString( ": Unknown error 18446744073709551615\n" );
+                }
+                break;
+            case  0: errnumTail = create_CString( "\n"                           ); break;
+            case  1: errnumTail = create_CString( ": Operation not permitted\n"  ); break;
+        }
+        expectedResult = concat_CString( expectedResult, errnumTail );
+        setExpectedResultAndReqIds( "error", expectedResult, sheaf->reqIds );
+        dotPrint( 10, 100 );
+        error_spec( * contextObj, * exitstatusObj, * errnumObj, sheaf->format, sheaf->data, stderrAsFile );
+    } // iterate parI
+    return true;
+}
+
+scenario
+bool warn_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        int maxPrintedSheafI = ( needConformanceTestQuality ? 199 : size_List( printedSheafs ) - 1 );
+        iterate ( int sheafI = 0; sheafI <= maxPrintedSheafI; sheafI++; )
+        //iterate ( int sheafI = 0; sheafI <= 199; sheafI++; )
+        //iterate ( int sheafI = 2598; sheafI <= 2598; sheafI++; )
+        {
+            PrintedSheaf * sheaf = get_List( printedSheafs, sheafI );
+            bool callWarn  = equals( create_String( "warn"  ), testingFuncName );
+            bool callWarnx = equals( create_String( "warnx" ), testingFuncName );
+            CString * errput = create_CString( "" );
+            CString * stderrAsFile = getTestScenarioSandboxPathCh( "stderrAsFile.txt" );
+            CString * expectedResult = concat_CString( create_CString( "[^:]*: " ), sheaf->result );
+            if      ( callWarn  ) { expectedResult = concat_CString( expectedResult, create_CString( ": Success\n" ) ); }
+            else if ( callWarnx ) { expectedResult = concat_CString( expectedResult, create_CString( ": \n"        ) ); }
+            setExpectedResultAndReqIds( toCharArray_String( testingFuncName ), expectedResult, sheaf->reqIds );
+            dotPrint( 10, 100 );
+            if      ( callWarn  ) { warn_spec ( * contextObj, sheaf->format, sheaf->data, errput, stderrAsFile ); }
+            else if ( callWarnx ) { warnx_spec( * contextObj, sheaf->format, sheaf->data, errput, stderrAsFile ); }
+            else {
+                assertion( false, "warn_scen : unknown testingFuncName" );
+            }
+        } // iterate sheafI
+    } // iterate contextI
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+static Map * saveModelState( void ) { return NULL; }
+
+static void restoreModelState( Map * saved_state ) { /**/ }
+
+static bool isModelStateStationary( void )
+{
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm simple_assert_scenario =
+{
+    .init = init_simple_assert_scenario,
+    .finish = finish_simple_assert_scenario,
+    .saveModelState    = (PtrSaveModelState)saveModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isModelStateStationary,
+    .actions =
+    {
+        simple___assert_fail_scen,
+        NULL
+    }
+};
+
+scenario dfsm err_scenario =
+{
+    .init              = init_err_scenario                           ,
+    .finish            = finish_err_scenario                         ,
+    .saveModelState    = (PtrSaveModelState   )saveModelState        ,
+    .restoreModelState = (PtrRestoreModelState)restoreModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isModelStateStationary,
+    .actions           = { err_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm error_scenario =
+{
+    .init              = init_error_scenario                         ,
+    .finish            = finish_error_scenario                       ,
+    .saveModelState    = (PtrSaveModelState   )saveModelState        ,
+    .restoreModelState = (PtrRestoreModelState)restoreModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isModelStateStationary,
+    .actions           = { error_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm errx_scenario =
+{
+    .init              = init_errx_scenario                          ,
+    .finish            = finish_errx_scenario                        ,
+    .saveModelState    = (PtrSaveModelState   )saveModelState        ,
+    .restoreModelState = (PtrRestoreModelState)restoreModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isModelStateStationary,
+    .actions           = { err_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm verrx_scenario =
+{
+    .init              = init_verrx_scenario                         ,
+    .finish            = finish_verrx_scenario                       ,
+    .saveModelState    = (PtrSaveModelState   )saveModelState        ,
+    .restoreModelState = (PtrRestoreModelState)restoreModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isModelStateStationary,
+    .actions           = { err_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm warn_scenario =
+{
+    .init              = init_warn_scenario  ,
+    .finish            = finish_warn_scenario,
+    .actions           = { warn_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm warnx_scenario =
+{
+    .init              = init_warnx_scenario  ,
+    .finish            = finish_warnx_scenario,
+    .actions           = { warn_scen,
+                           NULL
+                         }
+};

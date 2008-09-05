@@ -1,0 +1,328 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/crypt/tests/crypt_scenario.seh"
+
+
+#include "util/crypt/crypt_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static CharT* crypt_optionp[]=
+{
+    (CharT *)"a1s2d3f4",
+    (CharT *)"",
+    (CharT *)"qwertyuiop",
+    (CharT *)"zaqwsxcderfvbgtyhnmjuiklop",
+    (CharT *)"newline\n;tab\t;slash\\;space other:~!@#$%^&*()_+\"|}?><:{"
+};
+
+static CharT* crypt_valuep[]=
+{
+    (CharT *)"asdf",
+    (CharT *)"4321",
+    (CharT *)"1",
+    (CharT *)"mnbvc",
+    (CharT *)"",
+    (CharT *)" ",
+    (CharT *)"\n",
+    (CharT *)"\t",
+    (CharT *)"\\",
+    (CharT *)"\"",
+    (CharT *)"%",
+    (CharT *)"a1s2d3f4",
+    (CharT *)"qwertyuiop",
+    (CharT *)"zaqwsxcderfvbgtyhnmjuiklop",
+    (CharT *)"newline\n;tab\t;slash\\;space other:~!@#$%^&*()_+\"|}?><:{"
+};
+
+static ULLongT setkey_arr[]=
+{
+    0L,
+    1L,
+    2L,
+    128L
+};
+
+static ULLongT encrypt_arr[]=
+{
+    0L,
+    1L,
+    2L,
+    127L,
+    128L,
+    255L,
+    256L,
+    65535L,
+    65536L,
+    4294967295L,
+    4294967296L
+};
+
+static int crypt_optionp_size=sizeof(crypt_optionp)/sizeof(CharT*);
+static int crypt_valuep_size=sizeof(crypt_valuep)/sizeof(CharT*);
+
+static int setkey_arr_size=sizeof(setkey_arr)/sizeof(ULLongT);
+static int encrypt_arr_size=sizeof(encrypt_arr)/sizeof(ULLongT);
+
+static const int maxSize=1024;
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static VoidTPtr setkey_key;
+static VoidTPtr encrypt_block;
+static VoidTPtr valuep;
+static VoidTPtr buffer;
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_crypt_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    context = getContext();
+
+    setkey_key = allocateMemoryBlock(context, maxSize);
+    encrypt_block = allocateMemoryBlock(context, maxSize);
+
+    return true;
+}
+static void finish_crypt_scenario(void)
+{
+    if(!isNULL_VoidTPtr(setkey_key))
+        deallocateMemoryBlock(context, setkey_key);
+
+    if(!isNULL_VoidTPtr(encrypt_block))
+        deallocateMemoryBlock(context, encrypt_block);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(crypt_scenario);
+}
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool crypt_scen()
+{
+    CString* key=create_CString("Key"), *salt=create_CString(""), *res;
+
+    res = crypt_spec(context, key, salt, requestErrorCode());
+
+    DUMP("res == $(obj)\n", res);
+
+    return true;
+}
+scenario
+bool encrypt_scen()
+{
+    IntT j;
+    CByteArray* block=create_CByteArray((ByteT*)
+//   ...05...10...15...20...25...30...35...40...45...50...55...60...65
+    "                                                                ", 64);
+    iterate(int i=0;i<encrypt_arr_size;i++;)
+        iterate(int k=0;k<2;k++;)
+        {
+            for(j=0;j<64;j++)
+                setByteAt_CByteArray(block, j,
+                (ByteT)(encrypt_arr[i]&((ULLongT)(1<<(ULLongT)j)) ? 1 : 0));
+
+            writeCByteArray_VoidTPtr(encrypt_block, block);
+
+            encrypt_spec(context, &encrypt_block, k, requestErrorCode());
+        }
+
+
+    return true;
+}
+scenario
+bool setkey_scen()
+{
+    IntT j;
+    CByteArray* key=create_CByteArray((ByteT*)
+//   ...05...10...15...20...25...30...35...40...45...50...55...60...65
+    "                                                                ", 64);
+    iterate(int i=0;i<setkey_arr_size;i++;)
+    {
+        for(j=0;j<64;j++)
+            setByteAt_CByteArray(key, j,
+                (ByteT)(setkey_arr[i]&((ULLongT)(1<<(ULLongT)j)) ? 1 : 0));
+
+        writeCByteArray_VoidTPtr(setkey_key, key);
+
+        setkey_spec(context, setkey_key, requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool setkey_encrypt_scen()
+{
+    IntT j;
+    CByteArray* block=create_CByteArray((ByteT*)
+//   ...05...10...15...20...25...30...35...40...45...50...55...60...65
+    "                                                                ", 64);
+    CByteArray* key=create_CByteArray((ByteT*)
+//   ...05...10...15...20...25...30...35...40...45...50...55...60...65
+    "                                                                ", 64);
+    CByteArray* tmp;
+
+    iterate(int i=0;i<encrypt_arr_size;i++;)
+        iterate(int k=0;k<setkey_arr_size;k++;)
+        {
+            for(j=0;j<64;j++)
+                setByteAt_CByteArray(key, j,
+                    (ByteT)(setkey_arr[k]&((ULLongT)(1<<(ULLongT)j)) ? 1 : 0));
+
+            writeCByteArray_VoidTPtr(setkey_key, key);
+
+            setkey_spec(context, setkey_key, requestErrorCode());
+
+            for(j=0;j<64;j++)
+                setByteAt_CByteArray(block, j,
+                (ByteT)(encrypt_arr[i]&((ULLongT)(1<<(ULLongT)j)) ? 1 : 0));
+   
+            writeCByteArray_VoidTPtr(encrypt_block, block);
+
+            encrypt_spec(context, &encrypt_block, 0, requestErrorCode());
+            encrypt_spec(context, &encrypt_block, 1, requestErrorCode());
+
+            tmp=readCByteArray_VoidTPtr(encrypt_block, 64);
+            
+            if(equals(tmp, block))
+                DUMP("Equals\n");
+            else
+            {
+                DUMP("Not equals:\n");
+                for(j=0;j<64;j++)
+                    DUMP("%d ", byteAt_CByteArray(block, j));
+                DUMP("\n");
+                for(j=0;j<64;j++)
+                    DUMP("%d ", byteAt_CByteArray(tmp, j));
+                DUMP("\n");
+            }
+
+            encrypt_spec(context, &encrypt_block, 0, requestErrorCode());
+
+            for(j=0;j<64;j++)
+                setByteAt_CByteArray(key, j,
+                    (ByteT)(setkey_arr[(k+1)%setkey_arr_size]
+                            &
+                            ((ULLongT)(1<<(ULLongT)j)) ? 1 : 0));
+       
+            writeCByteArray_VoidTPtr(setkey_key, key);
+
+            setkey_spec(context, setkey_key, requestErrorCode());
+                        encrypt_spec(context, &encrypt_block, 1, requestErrorCode());
+
+            tmp=readCByteArray_VoidTPtr(encrypt_block, 64);
+            
+            if(equals(tmp, block))
+                DUMP("Equals with different keys\n");
+            else
+                DUMP("Not equals with different keys\n");
+        }
+
+    
+    return true;
+}
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm crypt_scenario =
+{
+    .init = init_crypt_scenario,
+    .finish = finish_crypt_scenario,
+    .actions = { 
+                    crypt_scen,
+                    setkey_encrypt_scen,
+                    setkey_scen,
+                    encrypt_scen,
+                    NULL 
+                }
+};
+
+bool main_util_crypt(int argc, char** argv)
+{
+    crypt_scenario(argc,argv);
+    return true;
+}
+
+#include "util/crypt/tests/crypt_scenario.seh"
+
+
+#ifdef UTIL_CRYPT_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/crypt/crypt_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initUtilCryptSubsystem();
+}
+
+
+
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    addTraceToFile("trace.xml");
+    main_util_crypt(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+#endif
+

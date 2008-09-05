@@ -1,0 +1,391 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "locale/wcollate/wcollate_media.seh"
+#include "util/assert/assert_media.seh"
+#include "common/common_media.seh"
+#include "process/process/process_common.seh"
+#include "common/control_center.seh"
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void assertFail_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        assertFail_return,
+        create_AssertFailReturnType( threadId ),
+        meta->timestamp
+    );
+}
+
+/*
+static void assertFail_processTerminated_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        assertFail_processTerminated,
+        create( & type_AssertFailReturnType, threadId ),
+        meta->timestamp
+    );
+}
+*/
+
+CString * getStderr(void)
+{
+    TSCommand command = create_TSCommand();
+    CallContext temp_proc;
+    CString * result_stderr = NULL;
+
+    temp_proc = createProcess();
+    format_TSCommand( &command, "get_stderr");
+    executeCommandInContext( temp_proc, &command );
+    if (!isBadVerdict())
+    {
+        result_stderr = readCString_TSStream(&command.response);
+    }
+    else
+    {
+        setBadVerdict("Failed to get stderr content.");
+    }
+
+    return result_stderr;
+}
+
+static void errCalledProcess_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        errCalledProcess_return,
+        create_ExitReturnType( readString_TSStream( stream ), threadId ),
+        meta->timestamp
+    );
+}
+
+static void err_processTerminated_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        err_processTerminated,
+        create_ExitReturnType( readString_TSStream( stream ), threadId ),
+        meta->timestamp
+    );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilAssertSubsystem(void)
+{
+    // Set up mediators
+    set_mediator___assert_fail_spec(__assert_fail_media);
+    set_mediator_assertFail_return( assertFail_return_media );
+
+    set_mediator_errCalledProcess_return( errCalledProcess_return_media );
+    set_mediator_err_processTerminated  ( err_processTerminated_media   );
+
+    set_mediator_err_spec  ( err_media   );
+    set_mediator_error_spec( error_media );
+    set_mediator_errx_spec ( errx_media  );
+    set_mediator_verrx_spec( verrx_media );
+    set_mediator_warn_spec ( warn_media  );
+    set_mediator_warnx_spec( warnx_media );
+
+    // Set up dr processors
+    registerDRProcessor( "assertFail_return", assertFail_return_processor );
+
+    registerDRProcessor( "errCalledProcess_return", errCalledProcess_return_processor );
+    registerDRProcessor( "err_processTerminated"  , err_processTerminated_processor   );
+
+    // Set up formatters
+    registerTSFormatter( "typedlist"    , (TSFormatterFuncType)typedlist_formatter     );
+    registerTSFormatter( "dotsarguments", (TSFormatterFuncType)dotsarguments_formatter );
+    registerTSFormatter( "wstr"         , (TSFormatterFuncType)wstring_formatter       );
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** __assert_fail_spec **/
+
+mediator __assert_fail_media for specification
+void __assert_fail_spec( CallContext context, CString * assertion_str, CString * file, UIntT line, CString * function_str)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        ChannelID channel;
+        TestAgentDesc* agent;
+
+        if (function_str != NULL)
+            format_TSCommand( &command, "__assert_fail:$(str)$(str)$(uint)$(int)$(str)", assertion_str, file, create_UIntTObj(line), create_IntTObj(1), function_str );
+        else
+            format_TSCommand( &command, "__assert_fail:$(str)$(str)$(uint)$(int)", assertion_str, file, create_UIntTObj(line), create_IntTObj(0));
+
+        channel = getThreadChannelID( context );
+        setStimulusChannel( channel );
+        agent = get_Map( taMap, create_Long(channel) );
+        if (agent == NULL)
+        {
+            setBadVerdict( "Invalid call context" );
+        }
+        else
+        {
+            ConnectionStatus status;
+            if (!sendTSMessage( agent->socket, command.command.buffer.data, command.command.buffer.length ))
+            {
+                return;
+            }
+            for(;;)
+            {
+                status = receiveTAResponse( agent, &command.response.buffer, &command.meta );
+                if (status != Available_ConnectionStatus)
+                {
+                    if (status == Closed_ConnectionStatus)
+                    {
+                        return;
+                    }
+                }
+                if (!processDeferredReactionMessage( agent->threadid, &command.response.buffer, &command.meta ))
+                    break;
+                destroy_TSBuffer(&command.response.buffer);
+                command.response.buffer.data = NULL;
+                command.response.buffer.memory_available = 0;
+                command.response.buffer.length = 0;
+                command.meta.timestamp = overallTimeInterval;
+            }
+        }
+
+        if (isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            clearBadVerdict();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onAssertFail( context );
+    }
+}
+
+mediator assertFail_return_media for reaction
+AssertFailReturnType * assertFail_return( void )
+{
+    state
+    {
+        /**/
+    }
+}
+
+/** common for err group and error **/
+mediator errCalledProcess_return_media for reaction
+ExitReturnType * errCalledProcess_return( void )
+{
+    state
+    {
+        onExitCalledProcessReturn( errCalledProcess_return->context );
+    }
+}
+
+mediator err_processTerminated_media for reaction
+ExitReturnType * err_processTerminated  ( void )
+{
+    state
+    {
+        onExitProcessTerminated( err_processTerminated->context );
+    }
+}
+
+/** err_spec **/
+mediator err_media for specification
+void err_spec( CallContext context, IntT eval, CString * fmt, List /* NULL */ * arguments, CString * stderrAsFile )
+{
+    call
+    {
+        List /* LongTObj */ * longArguments;
+        TSCommand command;
+        add_List( arguments, 0, create_IntTObj( eval ) );
+        add_List( arguments, 1, fmt                    );
+        longArguments = createAndWrite_DotsArguments( context, arguments, false );
+        command = create_TSCommand();
+        format_TSCommand( & command, "err:$(dotsarguments)$(str)", longArguments, stderrAsFile );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() )
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+        destroy_TSCommand(&command);
+        // no readAndFree_DotsArguments( context, ... ) - context not valid now
+        // assertion( readAndFree_DotsArguments( context, intArguments, arguments, false ),
+        //            "err_media : readAndFree_DotsArguments return false"
+        //          );
+                                                  remove_List( arguments, 0 );
+        copy( get_List( arguments, 0 ), fmt );    remove_List( arguments, 0 );
+    }
+    state
+    {
+        onExit( context, eval );
+    }
+}
+
+/** error_spec **/
+mediator error_media for specification
+void error_spec( CallContext context,
+                 IntT exitstatus, IntT errnum, CString * format, List /* NULL */ * arguments, CString * stderrAsFile
+               )
+{
+    call
+    {
+        List /* LongTObj */ * longArguments;
+        TSCommand command;
+        add_List( arguments, 0, create_IntTObj( exitstatus ) );
+        add_List( arguments, 1, create_IntTObj( errnum     ) );
+        add_List( arguments, 2, format                       );
+        longArguments = createAndWrite_DotsArguments( context, arguments, false );
+        command = create_TSCommand();
+        format_TSCommand( & command, "error:$(dotsarguments)$(str)", longArguments, stderrAsFile );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() )
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+        destroy_TSCommand(&command);
+        // no readAndFree_DotsArguments( context, ... ) - context not valid now
+        // assertion( readAndFree_DotsArguments( context, intArguments, arguments, false ),
+        //            "err_media : readAndFree_DotsArguments return false"
+        //          );
+                                                     remove_List( arguments, 0 );
+                                                     remove_List( arguments, 0 );
+        copy( get_List( arguments, 0 ), format );    remove_List( arguments, 0 );
+    }
+    state
+    {
+        onExit( context, exitstatus );
+    }
+}
+
+/** errx_spec **/
+mediator errx_media for specification
+void errx_spec( CallContext context, IntT eval, CString * fmt, List /* NULL */ * arguments, CString * stderrAsFile )
+{
+    call
+    {
+        List /* LongTObj */ * longArguments;
+        TSCommand command;
+        add_List( arguments, 0, create_IntTObj( eval ) );
+        add_List( arguments, 1, fmt                    );
+        longArguments = createAndWrite_DotsArguments( context, arguments, false );
+        command = create_TSCommand();
+        format_TSCommand( & command, "errx:$(dotsarguments)$(str)", longArguments, stderrAsFile );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() )
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+        destroy_TSCommand(&command);
+        // no readAndFree_DotsArguments( context, ... ) - context not valid now
+        // assertion( readAndFree_DotsArguments( context, intArguments, arguments, false ),
+        //            "err_media : readAndFree_DotsArguments return false"
+        //          );
+                                                  remove_List( arguments, 0 );
+        copy( get_List( arguments, 0 ), fmt );    remove_List( arguments, 0 );
+    }
+    state
+    {
+        onExit( context, eval );
+    }
+}
+
+/** verrx_spec **/
+mediator verrx_media for specification
+void verrx_spec( CallContext context, IntT eval, CString * fmt, List /* NULL */ * arguments, CString * stderrAsFile )
+{
+    call
+    {
+        List /* LongTObj */ * longArguments;
+        TSCommand command;
+        add_List( arguments, 0, create_IntTObj( eval ) );
+        add_List( arguments, 1, fmt                    );
+        longArguments = createAndWrite_DotsArguments( context, arguments, false );
+        command = create_TSCommand();
+        format_TSCommand( & command, "verrx:$(dotsarguments)$(str)", longArguments, stderrAsFile );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() )
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+        destroy_TSCommand(&command);
+        // no readAndFree_DotsArguments( context, ... ) - context not valid now
+        // assertion( readAndFree_DotsArguments( context, intArguments, arguments, false ),
+        //            "err_media : readAndFree_DotsArguments return false"
+        //          );
+                                                  remove_List( arguments, 0 );
+        copy( get_List( arguments, 0 ), fmt );    remove_List( arguments, 0 );
+    }
+    state
+    {
+        onExit( context, eval );
+    }
+}
+
+/** warn_spec **/
+mediator warn_media for specification
+void warn_spec( CallContext context, CString * fmt, List /* NULL */ * arguments, CString * errput, CString * stderrAsFile )
+{
+    call
+    {
+        add_List( arguments, 0, fmt );
+        append_List( arguments, stderrAsFile );
+
+        functionWithDotsCall( context, "warn", arguments, false, NULL, NULL, NULL, NULL, NULL, errput, & timestamp );
+
+        copy( get_List( arguments, 0 ), fmt );    remove_List( arguments, 0 );
+        remove_List( arguments, size_List( arguments ) - 1 );
+    }
+}
+
+/** warnx_spec **/
+mediator warnx_media for specification
+void warnx_spec
+         ( CallContext context, CString * fmt, List /* NULL */ * arguments, CString * errput, CString * stderrAsFile )
+{
+    call
+    {
+        add_List( arguments, 0, fmt );
+        append_List( arguments, stderrAsFile );
+
+        functionWithDotsCall( context, "warnx", arguments, false, NULL, NULL, NULL, NULL, NULL, errput, & timestamp );
+
+        copy( get_List( arguments, 0 ), fmt );    remove_List( arguments, 0 );
+        remove_List( arguments, size_List( arguments ) - 1 );
+    }
+}

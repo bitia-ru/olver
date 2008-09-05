@@ -1,0 +1,405 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "config/system_config.seh"
+#include "system/user/system_user_config.h"
+#include "system/user/group_config.h"
+#include "system/user/tests/group_scenario.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "system/user/group_model.seh"
+#include "system/user/group_media.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "atl/integer.h"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+#define SMALL_BUF_SIZE 3
+
+static const int maxSize = 30000;
+static const int numItems = 10;
+
+
+static char* names[]={"root", "notfound", "daemon", "ftp", "bad", "games"};
+static int numNames=sizeof(names)/sizeof(char*);
+
+static int gids[]={0, 2, 380, 13, 32, 69, 1000};
+static int numGids=sizeof(gids)/sizeof(int);
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static UsersGroupTPtr result;
+static long maxBuffSize;
+static VoidTPtr structBuffer;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static void init_sysconf_data()
+{
+
+    /*
+    * The maximum size needed for this buffer can be determined with the
+    * {_SC_GETGR_R_SIZE_MAX} sysconf() parameter.
+    */
+    IMPLEMENT_REQ("getgrnam_r.04");
+
+    /*
+    * The maximum size needed for this buffer can be determined with 
+    * the {_SC_GETGR_R_SIZE_MAX} sysconf() parameter.
+    */
+    IMPLEMENT_REQ("getgrgid_r.04");
+
+    sysconf_spec( context, SUT_SC_GETGR_R_SIZE_MAX, requestErrorCode() );
+
+}
+
+
+static bool init_group_scenario(int argc, char** argv)
+{
+    context = getContext();
+    
+    structBuffer = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(structBuffer))
+        return false;
+
+    init_sysconf_data();
+
+    return true;
+}
+
+static void finish_group_scenario(void)
+{
+    deallocateMemoryBlock(context, structBuffer);
+}
+
+
+static bool init_group_cancel_scenario(int argc, char** argv)
+{
+    context = getContext();
+    
+    structBuffer = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(structBuffer))
+        return false;
+    
+    init_sysconf_data();
+    
+    return true;
+}
+
+static void finish_group_cancel_scenario(void)
+{
+    deallocateMemoryBlock(context, structBuffer);
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+scenario
+bool group_scen()
+{
+    int i;
+    IntT ngroups;
+    Set* groups=create_Set(&type_Integer);
+   
+
+    for(i=0; i<numNames; i++)
+    {
+        ngroups=10;
+        getgrouplist_spec(context, create_CString(names[i]), 10000, 
+            groups, &ngroups);
+    }
+
+    for(i=0; i<numGids; i++)
+    {
+        getgrgid_spec(context, gids[i], errno_model, cancel_status);
+
+        getgrgid_r_spec(context, gids[i], structBuffer, maxSize, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrgid_r_spec(context, gids[i], structBuffer, SMALL_BUF_SIZE, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrgid_r_spec(context, gids[i], structBuffer, maxBuffSize,
+                                             &result, 
+                                             errno_model, cancel_status);
+    }
+
+    for(i=0; i<numNames; i++)
+    {
+        getgrnam_spec(context, create_CString(names[i]), errno_model, 
+                      cancel_status);
+
+        getgrnam_r_spec(context, create_CString(names[i]), structBuffer, 
+                                             maxSize, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrnam_r_spec(context, create_CString(names[i]), structBuffer, 
+                                             SMALL_BUF_SIZE, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrnam_r_spec(context, create_CString(names[i]), structBuffer, 
+                                             maxBuffSize,
+                                             &result, 
+                                             errno_model, cancel_status);
+    }
+    for(i=0;i<10;i++)
+        getgrent_spec(context, errno_model, cancel_status);
+    setgrent_spec(context, errno_model, cancel_status); 
+    for(i=0;i<50;i++)
+        getgrent_spec(context, errno_model, cancel_status);
+    endgrent_spec(context, errno_model, cancel_status);
+    setgrent_spec(context, errno_model, cancel_status); 
+    setgrent_spec(context, errno_model, cancel_status); 
+    for(i=0;i<50;i++)
+        getgrent_spec(context, errno_model, cancel_status);
+    endgrent_spec(context, errno_model, cancel_status);
+    endgrent_spec(context, errno_model, cancel_status);
+    endgrent_spec(context, errno_model, cancel_status);
+
+    for(i=0; i<numNames; i++)
+    {
+        ngroups=10;
+        getgrouplist_spec(context, create_CString(names[i]), 10000, 
+                           groups, &ngroups);
+        ngroups=3;
+        getgrouplist_spec(context, create_CString(names[i]), 10000, 
+                           groups, &ngroups);
+
+    }
+
+
+    for(i=0; i<numGids; i++)
+    {
+        getgrgid_spec(context, gids[i], errno_model, cancel_status);
+
+        getgrgid_r_spec(context, gids[i], structBuffer, maxSize, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrgid_r_spec(context, gids[i], structBuffer, SMALL_BUF_SIZE, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrgid_r_spec(context, gids[i], structBuffer, maxBuffSize,
+                                             &result, 
+                                             errno_model, cancel_status);
+    }
+
+    for(i=0; i<numNames; i++)
+    {
+        getgrnam_spec(context, create_CString(names[i]), errno_model, 
+            cancel_status);
+
+        getgrnam_r_spec(context, create_CString(names[i]), structBuffer, 
+                                             maxSize, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrnam_r_spec(context, create_CString(names[i]), structBuffer, 
+                                             SMALL_BUF_SIZE, 
+                                             &result, 
+                                             errno_model, cancel_status);
+        getgrnam_r_spec(context, create_CString(names[i]), structBuffer, 
+                                             maxBuffSize,
+                                             &result, 
+                                             errno_model, cancel_status);
+    }
+    return true;
+    
+}
+
+
+scenario
+bool group_cancel_scen()
+{
+    ThreadId curTh=createThread();
+    IntT i;
+    
+    
+    pthread_setcancelstate_spec(curTh, SUT_PTHREAD_CANCEL_DISABLE);
+    pthread_cancel_spec(context, curTh);
+    
+   
+    for (i=0;i<numGids && i<numNames; i++)
+    {
+        getgrent_spec(curTh, errno_model, cancel_status);
+        setgrent_spec(curTh, errno_model, cancel_status); 
+        endgrent_spec(curTh, errno_model, cancel_status);
+        getgrgid_spec(curTh, gids[i], errno_model, cancel_status);
+        getgrgid_r_spec(curTh, gids[i], structBuffer, maxSize, 
+            &result, 
+            errno_model, cancel_status);
+        getgrnam_spec(curTh, create_CString(names[i]), errno_model, 
+            cancel_status);
+        getgrnam_r_spec(curTh, create_CString(names[i]), structBuffer, 
+            maxSize, 
+            &result, 
+            errno_model, cancel_status);
+    }
+}
+
+
+scenario
+bool group_cancel_scen2()
+{
+    ThreadId curTh;
+    IntT i=0;
+    
+    for (i=0;i<numGids && i<numNames;i++)
+    {
+        if(!USER_FUNCTIONS_HALT_AFTER_CANCEL)
+        {
+            curTh=createThread();
+            pthread_cancel_spec(context, curTh);
+            endgrent_spec(curTh, errno_model, cancel_status);
+
+            curTh=createThread();
+            pthread_cancel_spec(context, curTh);
+            getgrent_spec(curTh, errno_model, cancel_status);
+
+
+            curTh=createThread();
+            pthread_cancel_spec(context, curTh);
+            setgrent_spec(curTh, errno_model, cancel_status); 
+
+        
+        
+            curTh=createThread();
+            pthread_cancel_spec(context, curTh);
+            getgrgid_spec(curTh, gids[i], errno_model, cancel_status);
+
+            curTh=createThread();
+            pthread_cancel_spec(context, curTh);
+            getgrnam_spec(curTh, create_CString(names[i]), errno_model, 
+                cancel_status);
+        }
+
+        curTh=createThread();
+        pthread_cancel_spec(context, curTh);
+        getgrgid_r_spec(curTh, gids[i], structBuffer, maxSize, 
+            &result, 
+            errno_model, cancel_status);
+        
+        curTh=createThread();
+        pthread_cancel_spec(context, curTh);
+        getgrnam_r_spec(curTh, create_CString(names[i]), structBuffer, 
+            maxSize, 
+            &result, 
+            errno_model, cancel_status);
+    }
+    
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm group_scenario =
+{
+    .init = init_group_scenario,
+    .finish = finish_group_scenario,
+    .actions = {
+        group_scen,
+        NULL
+    },
+};
+
+
+scenario dfsm system_group_cancel_scenario =
+{
+    .init = init_group_cancel_scenario,
+        .finish = finish_group_cancel_scenario,
+        .actions = {
+            group_cancel_scen2,
+            group_cancel_scen,
+            NULL
+    },
+};
+
+
+#ifdef SYSTEM_USER_GROUP_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/search/hash_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+  reinitControlCenter();
+  initCommonModel();
+  initCommonMedia();
+  initCommonScenarioState();
+
+  initSystemConfiguration();
+  initSystemModel();
+  initProcessModel();
+  initPThreadModel();
+
+  initSystemUserGroupSubsystem();
+  initPthreadPthreadSubsystem();
+  initSystemSysconfSubsystem();
+}
+
+
+
+bool main_system_user_group( int argc, char** argv )
+{
+    system_group_cancel_scenario(argc, argv);
+    group_scenario(argc, argv);
+    return true;
+}
+
+int main(int argc, char** argv)
+{
+  //
+  initTestSystem();
+  loadSUT();
+
+  // Set up tracer
+  //setTraceEncoding("windows-1251");
+  addTraceToFile("trace.xml");
+  // Run test scenario
+  main_system_user_group(argc, argv);
+
+//  unloadSUT();
+  return 0;
+}
+#endif

@@ -1,0 +1,173 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/meta/nice_media.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "data/sys/resource_model.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initProcessMetaNiceSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_getpriority_spec( getpriority_media );
+    set_mediator_nice_spec       ( nice_media        );
+    set_mediator_setpriority_spec( setpriority_media );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** getpriority_spec **/
+mediator getpriority_media for specification
+IntT getpriority_spec( CallContext context, IntT which, ProcessId who, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getpriority:$(int)$(int)", create_IntTObj( which ), create_IntTObj( who.process ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ErrorCode( readInt_TSStream( & command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** nice_spec **/
+mediator nice_media for specification
+IntT nice_spec( CallContext context, IntT incr, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "nice:$(int)", create_IntTObj( incr ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ErrorCode( readInt_TSStream( & command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        //verbose( "nice_media\n" );
+        //verbose( "nice_media : incr                      is %d\n", incr                            );
+        //verbose( "nice_media : nice_spec                 is %d\n", nice_spec                       );
+        if ( nice_spec != -1 || * errno == SUT_EOK ) {
+            ProcessState * process_state = getProcessState_CallContext( context );
+            UIntT low  = 0                                ;
+            UIntT high = 2 * process_state->meta.NZero - 1;
+            //verbose( "nice_media : process_state->meta.NZero is %d\n", (IntT)process_state->meta.NZero );
+            //verbose( "nice_media : process_state->meta.nice  is %d\n", (IntT)process_state->meta.nice  );
+            if ( process_state->meta.nice == (UIntT)-1 ) {
+                process_state->meta.nice = (UIntT)nice_spec + process_state->meta.NZero;
+            } else {
+                IntT newNice = process_state->meta.nice + incr;
+                //verbose( "nice_media : newNice                   is %d\n", newNice                         );
+                if      ( newNice < (IntT)low  ) { process_state->meta.nice = low    ; }
+                else if ( (IntT)high < newNice ) { process_state->meta.nice = high   ; }
+                                            else { process_state->meta.nice = newNice; }
+            }
+            //verbose( "nice_media : process_state->meta.nice  is %d\n", (IntT)process_state->meta.nice  );
+        }
+    }
+}
+
+/** setpriority_spec **/
+mediator setpriority_media for specification
+IntT setpriority_spec( CallContext context, IntT which, ProcessId who, IntT value, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "setpriority:$(int)$(int)$(int)",
+                                    create_IntTObj( which ), create_IntTObj( who.process ), create_IntTObj( value )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ErrorCode( readInt_TSStream( & command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( setpriority_spec != -1 ) {
+            ProcessState * process_state = getProcessState_CallContext( context );
+            SystemState * systemState = getSystemState( context.system );
+            IntT correctValue;
+            ProcessId pGroup   ;
+            ProcessId processId;
+            UidT      UserId   ;
+            int i;
+            if      ( value < - (IntT)process_state->meta.NZero   ) { correctValue = - (IntT)process_state->meta.NZero  ; }
+            else if ( (IntT)process_state->meta.NZero - 1 < value ) { correctValue = (IntT)process_state->meta.NZero - 1; }
+                                                               else { correctValue = value                              ; }
+            if ( who.process == 0 ) {
+                pGroup    = process_state->meta.pgroup     ;
+                processId = process_state->processid       ;
+                UserId    = process_state->meta.real_userid;
+            } else {
+                pGroup    = who        ;
+                processId = who        ;
+                UserId    = who.process;
+            }
+            for ( i = 0; i < size_Map( systemState->processes ); i++ ) {
+                ProcessIdObj * key = key_Map( systemState->processes, i );
+                ProcessState * processState = get_Map( systemState->processes, key );
+                if ( ( which == SUT_PRIO_PGRP    && equals_ProcessId( processState->meta.pgroup, pGroup    ) ) ||
+                     ( which == SUT_PRIO_PROCESS && equals_ProcessId( processState->processid  , processId ) ) ||
+                     ( which == SUT_PRIO_USER    && processState->meta.effective_userid == UserId            )
+                   ) {
+                    processState->meta.nice = correctValue + (IntT)process_state->meta.NZero;
+                }
+            }
+        }
+    }
+}

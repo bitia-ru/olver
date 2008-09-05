@@ -1,0 +1,137 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "locale/iconv/iconv_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initLocaleIconvSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_iconv_spec(iconv_media);
+    set_mediator_iconv_close_spec(iconv_close_media);
+    set_mediator_iconv_open_spec(iconv_open_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** iconv_spec **/
+mediator iconv_media for specification
+SizeT iconv_spec(CallContext context, IconvTObj* cd,
+                 StringTPtr* inbuf, SizeT* inbytesleft,
+                 StringTPtr* outbuf, SizeT* outbytesleft,
+                 ErrorCode* errno)
+{
+    call
+    {
+        SizeT res = 0;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "iconv:$(ptr)$(ptr)$(size)$(ptr)$(size)",
+                                    create_VoidTPtrObj(cd->iconvtValue),
+                                    create_VoidTPtrObj(*inbuf),
+                                    create_SizeTObj(*inbytesleft),
+                                    create_VoidTPtrObj(*outbuf),
+                                    create_SizeTObj(*outbytesleft)
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readSize_TSStream(&command.response);
+            *inbuf = readPointer_TSStream(context, &command.response);
+            *inbytesleft = readSize_TSStream(&command.response);
+            *outbuf = readPointer_TSStream(context, &command.response);
+            *outbytesleft = readSize_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+
+/** iconv_close_spec **/
+mediator iconv_close_media for specification
+IntT iconv_close_spec(CallContext context, IconvTObj* cd, ErrorCode* errno)
+{
+    call
+    {
+        IntT res = 0;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "iconv_close:$(ptr)",
+                                    create_VoidTPtrObj(cd->iconvtValue)
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onIconvClose(cd);
+    }
+}
+
+
+/** iconv_open_spec **/
+mediator iconv_open_media for specification
+IconvTObj* iconv_open_spec(CallContext context, CString* tocode, CString* fromcode,
+                           ErrorCode* errno)
+{
+    call
+    {
+        IconvT res = NULL_VoidTPtr;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "iconv_open:$(str)$(str)",
+                                    tocode,
+                                    fromcode
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+		if(!isInvalid_VoidTPtr(res))
+        	return create_IconvTObj(res, true);
+        else
+        	return create_IconvTObj(res, false);
+    }
+}

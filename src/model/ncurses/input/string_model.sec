@@ -1,0 +1,419 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/input/string_model.seh"
+
+
+#pragma SEC subsystem input "ncurses.input"
+
+
+
+/*
+   The group of functions 'ncurses.input.string' consists of:
+       getnstr [1]
+       getstr [1]
+       mvgetnstr [1]
+       mvgetstr [1]
+       mvwgetnstr [1]
+       mvwgetstr [1]
+       wgetnstr [1]
+       wgetstr [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    getnstr, getstr, mvgetnstr, mvgetstr, mvwgetnstr, mvwgetstr, wgetstr,
+    wgetnstr - get a multi-byte character string from the terminal
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int getnstr(char *str, int n);
+
+    int getstr(char *str);
+
+    int mvgetnstr(int y, int x, char *str, int n);
+
+    int mvgetstr(int y, int x, char *str);
+
+    int mvwgetnstr(WINDOW *win, int y, int x, char *str, int n);
+
+    int mvwgetstr(WINDOW *win, int y, int x, char *str);
+
+    int wgetnstr(WINDOW *win, char *str, int n);
+
+    int wgetstr(WINDOW *win, char *str);
+
+DESCRIPTION
+
+    The effect of getstr() is as though a series of calls to getch() were made,
+    until a newline, carriage return or end-of-file is received. The resulting
+    value is placed in the area pointed to by str.The string is then terminated
+    with a null byte.  The getnstr(), mvgetnstr(), mvwgetnstr() and wgetnstr()
+    functions read at most n bytes, thus preventing a possible overflow of the
+    input buffer. The user's erase and kill characters are interpreted, as well
+    as any special keys (such as function keys, home key, clear key, and so
+    on).
+
+    The mvgetstr() function is identical to getstr() except that it is as
+    though it is a call to move() and then a series of calls to getch(). The
+    mvwgetstr() function is identical to getstr() except it is as though a call
+    to wmove() is made and then a series of calls to wgetch().  The mvgetnstr()
+    function is identical to getnstr() except that it is as though it is a call
+    to move() and then a series of calls to getch().The mvwgetnstr() function
+    is identical to getnstr() except it is as though a call to wmove() is made
+    and then a series of calls to wgetch().
+
+    The getnstr(), wgetnstr(), mvgetnstr() and mvwgetnstr() functions will
+    only return the entire multi-byte sequence associated with a character. If
+    the array is large enough to contain at least one character, the functions
+    fill the array with complete characters. If the array is not large enough
+    to contain any complete characters, the function fails.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK.Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: mvwgetnstr, wgetnstr, mvgetnstr, getnstr
+specification
+IntT getnstr_spec( CallContext context, WindowTPtr* win, NCursesPosition* pos,
+                   StringTPtr str, IntT n)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst_pre = clone(term->inserted_character_buffer);
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    getnstr_model(context, local, str, pos, n);
+
+    if(win)
+    {
+        if(pos) {   FILTER("mvwgetnstr");  }
+        else    {   FILTER("wgetnstr");    }
+    }
+    else
+    {
+        if(pos) {   FILTER("mvgetnstr");   }
+        else    {   FILTER("getnstr");     }
+    }
+
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        IntTObj* chObj;
+        List* tmp = create_List(&type_IntTObj);
+        CString* s = readCString_VoidTPtr(str);
+        IntT is_correct = 1, ind = -1, size = size_List(lst_pre), k = -1;
+
+        if(!size)
+        {
+            //All checks possible only if we push elements using
+            //ncursesInputChar or ungetch
+            return true;
+        }
+
+        if(getnstr_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("getnstr.06.02;wgetnstr.06.02;mvgetnstr.06.02;"
+                "mvwgetnstr.06.02", "", TODO_REQ());
+
+            /*
+             * If the array is not large enough to contain any complete
+             * characters, the function fails.
+             */
+            REQ("getnstr.05;wgetnstr.05;mvgetnstr.05;mvwgetnstr.05",
+                "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("getnstr.06.01;wgetnstr.06.01;mvgetnstr.06.01;mvwgetnstr.06.01",
+            "Upon successful completion return OK",
+            getnstr_spec == SUT_OK);
+
+        while(size>0)
+        {
+            chObj = get_List(lst_pre, --size);
+
+            if(readStrStop(*chObj))
+                break;
+
+            if(++ind < length_CString(s))
+                if(charAt_CString(s, ind) != *chObj)
+                {
+                    is_correct = 0;
+                }
+        }
+        if(n < length_CString(s))
+        {
+             is_correct = 0;
+        }
+
+        /*
+         * The getnstr(), mvgetnstr(), mvwgetnstr() and wgetnstr()
+         * functions read at most n bytes, thus preventing a possible
+         * overflow of the input buffer.
+         */
+        REQ("getnstr.01;wgetnstr.01;mvgetnstr.01;mvwgetnstr.01",
+            "Read at most n bytes",
+            is_correct);
+
+        /*
+         * The getnstr(), wgetnstr(), mvgetnstr() and mvwgetnstr() functions
+         * will only return the entire multi-byte sequence associated with a
+         * character.
+         */
+        REQ("getnstr.03;wgetnstr.03;mvgetnstr.03;mvwgetnstr.03",
+            "", TODO_REQ());
+
+        /*
+         * If the array is large enough to contain at least one character, the
+         * functions fill the array with complete characters.
+         */
+        REQ("getnstr.04;wgetnstr.04;mvgetnstr.04;mvwgetnstr.04",
+            "", TODO_REQ());
+
+        REQ("", "Screen check", compareScreens_Context(context));
+        REQ("", "Check all", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+void getnstr_model(CallContext context, NCursesWindow* local, StringTPtr str,
+                   NCursesPosition* pos, IntT n)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst_pre = clone(term->inserted_character_buffer);
+    IntT  i = size_List(lst_pre);
+    ChTypeT ch = create_emptyChTypeT();
+    IntTObj* chObj;
+
+    if(!size_List(lst_pre))
+        return;
+
+    if(pos)
+        local->cursorPos = clone(pos);
+
+    while(i>0 && n--)
+    {
+        chObj = get_List(lst_pre, --i);
+
+        if(readStrStop(*chObj))
+            break;
+
+        ch.letter = *chObj;
+
+        if(!(ch.letter & SUT_UNGETCH))
+        {
+            if(isSpecChar(ch))
+            {
+                addSpecChar(local, local->cursorPos, ch, true, false);
+            }
+            else
+            {
+                setElement_NCursesWindow(local, local->cursorPos, ch);
+                incrementCursorPos(local, local->cursorPos);
+            }
+        }
+    }
+
+    newlineCursorPos(local, local->cursorPos);
+
+    pushNCursesWindow(local);
+}
+
+
+void onGetnstr( CallContext context, WindowTPtr* win, NCursesPosition* pos,
+                   StringTPtr str, IntT n, IntT getnstr_spec)
+{
+    if(getnstr_spec != SUT_ERR)
+    {
+        NCursesWindow* curWnd = getWindowMayNULL(context, win);
+        NCursesTerminal* term = getNCursesStdTerminal(context);
+        List* lst = term->inserted_character_buffer;
+        IntTObj* chObj;
+
+        //Erasing part of buffer...
+        while(size_List(lst))
+        {
+            chObj = get_List(lst, size_List(lst)-1);
+
+            remove_List(lst, size_List(lst)-1);
+
+            if(readStrStop(*chObj))
+                break;
+        }
+
+        updateNCursesWindow(context, curWnd->address);
+        refresh_WindowTPtr(context, win, 1);
+    }
+}
+
+//This specification refers to: mvwgetstr, wgetstr, mvgetstr, getstr
+specification
+IntT getstr_spec( CallContext context, WindowTPtr* win, NCursesPosition* pos,
+                   StringTPtr str)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst_pre = clone(term->inserted_character_buffer);
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    getnstr_model(context, local, str, pos, -1);
+
+    if(win)
+    {
+        if(pos) {   FILTER("mvwgetstr");  }
+        else    {   FILTER("wgetstr");    }
+    }
+    else
+    {
+        if(pos) {   FILTER("mvgetstr");   }
+        else    {   FILTER("getstr");     }
+    }
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        IntTObj* chObj;
+        List* tmp = create_List(&type_IntTObj);
+        CString* s = readCString_VoidTPtr(str);
+        IntT is_correct = 1, ind = -1, size = size_List(lst_pre);
+
+        if(!size)
+        {
+            //All checks possible only if we push elements using
+            //ncursesInputChar or ungetch
+
+            return true;
+        }
+
+        if(getstr_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("getstr.06.02", "", TODO_REQ());
+
+            return true;
+        }
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("getstr.06.01;wgetstr.06.01;mvgetstr.06.01;mvwgetstr.06.01",
+            "Upon successful completion return OK",
+            getstr_spec == SUT_OK);
+
+        while(size>0)
+        {
+            chObj = get_List(lst_pre, --size);
+
+            if(readStrStop(*chObj))
+                break;
+
+            if(++ind < length_CString(s))
+                if(charAt_CString(s, ind) != *chObj)
+                    is_correct = 0;
+        }
+        /*
+         * The effect of getstr() is as though a series of calls to getch()
+         * were made, until a newline, carriage return or end-of-file is
+         * received.
+         */
+        REQ("getstr.01;wgetstr.01;mvgetstr.01;mvwgetstr.01",
+            "Is as though a series of calls to getch()",
+            is_correct);
+
+        /*
+         * The user's erase and kill characters are interpreted, as well as
+         * any special keys (such as function keys, home key, clear key, and
+         * so on).
+         */
+        REQ("getstr.04;wgetstr.04;mvgetstr.04;mvwgetstr.04", "", TODO_REQ());
+
+        REQ("", "Screen check", compareScreens_Context(context));
+        REQ("", "Check all", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+void onGetstr( CallContext context, WindowTPtr* win, NCursesPosition* pos,
+                   StringTPtr str, IntT getstr_spec)
+{
+    onGetnstr(context, win, pos, str, -1, getstr_spec);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+void dmpInsList(List* lst)
+{
+    IntT i;
+
+    DUMP("List:\n");
+    for(i=0;i<size_List(lst);i++)
+        DUMP("%d: %d(%c),   ", i, *((IntTObj*)get_List(lst, i)), *((IntTObj*)get_List(lst, i)));
+    DUMP("\n\n");
+}

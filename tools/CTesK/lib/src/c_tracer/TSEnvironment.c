@@ -1,0 +1,325 @@
+/*
+ * File: TSEnvironment.c
+ * Description:
+ *       This file contains an implementation of TSEnvironment.
+ *
+ * Copyright (c) 2002-2004 ISP RAS.
+ * B.Communisticheskaya,25, Moscow, Russia.
+ * All rights reserved.
+ *
+ */
+
+#include <malloc.h>
+#include "TSEnvironment.h"
+#include "TraceList.h"
+#include "s_StringBuffer.h"
+
+
+
+/* CTesK Source Start */
+
+/********************************************************************/
+/**                        Win TS Environment                      **/
+/********************************************************************/
+#ifdef WIN32
+
+#include <windows.h>
+#include <tchar.h>
+
+
+static char* trim( TCHAR* str )
+{
+    int start, end, len;
+    struct s_StringBuffer ss;
+
+    if( str == NULL || *str == 0 ) return NULL;
+    if( s_StringBuffer_init(&ss) ) return NULL;
+
+    for( start = 0; str[start] != 0; start++ )
+    {
+        if( str[start] != (_TCHAR)(' ') ) break;
+    }
+
+    for( end = strlen(str)-1; end >= 0; end-- )
+    {
+        if( str[end] != (_TCHAR)(' ') ) break;
+    }
+
+    if( start > end  ) return NULL;
+
+    len = end - start + 1;
+
+    s_StringBuffer_addstr( &ss, str+start, len );
+
+    return ss.data;
+}
+
+char * WinTSEnvironment_getOSInfo()
+{
+OSVERSIONINFO osInfo;
+struct s_StringBuffer ss;
+char *tmpptr;
+
+
+  osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+  if (!GetVersionEx(&osInfo)) return NULL;
+
+  if (s_StringBuffer_init(&ss)) return NULL;
+
+  // OS Name
+  switch (osInfo.dwPlatformId) {
+    case VER_PLATFORM_WIN32s:
+//    ss << "Windows " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
+      if( !s_StringBuffer_addstr(&ss,"Windows ",-1) ) {
+        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
+          if( !s_StringBuffer_addstr(&ss,".",-1) )
+            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
+      }
+      break;
+    case VER_PLATFORM_WIN32_WINDOWS:
+      if (osInfo.dwMajorVersion == 4) {
+        if (osInfo.dwMinorVersion == 0)
+//        ss << "Windows 95";
+          s_StringBuffer_addstr(&ss,"Windows 95",-1);
+	else if (osInfo.dwMinorVersion < 90)
+//	  ss << "Windows 98";
+          s_StringBuffer_addstr(&ss,"Windows 98",-1);
+	else
+//	  ss << "Windows ME";
+          s_StringBuffer_addstr(&ss,"Windows ME",-1);
+	break;
+      }
+//    ss << "Windows " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
+      if( !s_StringBuffer_addstr(&ss,"Windows ",-1) ) {
+        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
+          if( !s_StringBuffer_addstr(&ss,".",-1) )
+            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
+      }
+      break;
+    case VER_PLATFORM_WIN32_NT:
+      if (osInfo.dwMajorVersion == 5) {
+        if (osInfo.dwMinorVersion == 0)
+//        ss << "Windows 2000";
+          s_StringBuffer_addstr(&ss,"Windows 2000",-1);
+	else if (osInfo.dwMinorVersion == 1)
+//	  ss << "Windows XP";
+          s_StringBuffer_addstr(&ss,"Windows XP",-1);
+	else
+//	  ss << "Windows NT";
+          s_StringBuffer_addstr(&ss,"Windows NT",-1);
+	break;
+      }
+//    ss << "Windows NT " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
+      if( !s_StringBuffer_addstr(&ss,"Windows NT ",-1) ) {
+        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
+          if( !s_StringBuffer_addstr(&ss,".",-1) )
+            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
+      }
+      break;
+    default:
+//    ss << "Unknown Windows " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
+      if( !s_StringBuffer_addstr(&ss,"Unknown Windows ",-1) ) {
+        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
+          if( !s_StringBuffer_addstr(&ss,".",-1) )
+            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
+      }
+      break;
+  }
+  // OS Build
+  // if (osInfo.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS)
+  //   ss << "(build " << LOWORD(osInfo.dwPlatformId) << ")";
+  // else
+  //   ss << "(build " << osInfo.dwPlatformId << ")";
+  // OS Service Pack
+  if (strlen(osInfo.szCSDVersion) > 0)
+//  ss << " " << trim( osInfo.szCSDVersion );
+    if ( !s_StringBuffer_addstr(&ss," ",-1) )
+      if ( NULL != (tmpptr = trim(osInfo.szCSDVersion)) ) {
+        s_StringBuffer_addstr(&ss,tmpptr,-1);
+        free(tmpptr);
+      }
+
+  return ss.data;
+}
+
+char * WinTSEnvironment_getHostInfo()
+{
+DWORD size = MAX_COMPUTERNAME_LENGTH + 1;
+char *buff = NULL;
+
+  buff = (char *) malloc(MAX_COMPUTERNAME_LENGTH + 1);
+  if(NULL != buff)
+    if (!GetComputerName(buff,&size)) { free(buff); return NULL; }
+
+  return buff;
+}
+
+#endif /* WIN32 */
+/* CTesK Source End */
+
+
+/********************************************************************/
+/**                       Linux TS Environment                     **/
+/********************************************************************/
+#ifdef linux
+
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/param.h>
+
+static char * read_file(const char* filename)
+{
+int fd;
+char buffer[256];
+size_t len;
+struct s_StringBuffer res;
+
+  if (s_StringBuffer_init(&res)) return NULL;
+
+  if (filename != NULL) {
+    fd = open( filename, O_RDONLY );
+    if (fd != -1) {
+       for(;;)
+       {
+        len = read( fd, buffer, 256 );
+        if ( len <= 0 )
+           break;
+        if(s_StringBuffer_addstr(&res,buffer,len))
+           break;
+       }
+       close(fd);
+    }
+  }
+  return res.data;
+}
+
+static char* trim( char* str )
+{
+    size_t start, end, len;
+    char* buf = NULL;
+
+    if( str == NULL || *str == 0 ) return NULL;
+
+	for( start = 0; str[start] != 0; start++ )
+	{
+	    if( !isspace(str[start]) && !iscntrl(str[start]) ) break;
+	}
+
+	for( end = strlen(str)-1; end > 0; end-- )
+	{
+	    if( !isspace(str[end]) && !iscntrl(str[end]) ) break;
+	}
+
+	if( start > end ) return NULL;
+
+    len = end-start+1;
+    buf = (char*)malloc(len+1);
+    if( NULL != buf )
+    {
+        memcpy( buf, str+start, len );
+        buf[len] = 0;
+    }
+
+    return buf;                 // str.substr(i,j+1);
+}
+
+
+
+#define KERNEL_OSTYPE      "/proc/sys/kernel/ostype"
+#define KERNEL_OSRELEASE   "/proc/sys/kernel/osrelease"
+
+char * LinuxTSEnvironment_getOSInfo()
+{
+struct s_StringBuffer ss;
+char *ptr1, *ptr2;
+
+  if (s_StringBuffer_init(&ss)) return NULL;
+
+//  ss << trim( read_file( KERNEL_OSTYPE ) ) << " " << trim( read_file( KERNEL_OSRELEASE ) );
+  ptr1 = read_file( KERNEL_OSTYPE );
+  if(NULL != ptr1) { ptr2 = trim(ptr1); free(ptr1); }
+  if(NULL != ptr2) { s_StringBuffer_addstr(&ss,ptr2,-1); free(ptr2); }
+
+  s_StringBuffer_addstr(&ss," ",-1);
+
+  ptr1 = read_file( KERNEL_OSRELEASE );
+  if(NULL != ptr1) { ptr2 = trim(ptr1); free(ptr1); }
+  if(NULL != ptr2) { s_StringBuffer_addstr(&ss,ptr2,-1); free(ptr2); }
+
+
+  return ss.data;
+}
+
+// Linux has problems with dynamic determination of MAXHOSTNAMELEN (HOST_NAME_MAX).
+// So we use our own maximum value.
+#define LINUX_HOST_NAME_MAX 1024
+
+char * LinuxTSEnvironment_getHostInfo()
+{
+char *hostname = NULL;
+
+  hostname = (char *) malloc(LINUX_HOST_NAME_MAX+1);
+
+  if(NULL != hostname)
+    if (gethostname(hostname,LINUX_HOST_NAME_MAX) != 0) {
+      free(hostname); return NULL;
+    }
+
+  return hostname;
+}
+
+#endif /* linux */
+
+
+/********************************************************************/
+/**                     Default TS Environment                     **/
+/********************************************************************/
+
+char* DefaultTSEnvironment_getOSInfo()
+{
+  char* res;
+
+  res = (char*)getenv("OSTYPE");
+  if( res == NULL ) res = (char*)getenv("OS"); // cygwin
+  if( res == NULL ) res = "";
+  return tracer_cloneString(res);
+}
+
+char* DefaultTSEnvironment_getHostInfo()
+{
+  char* res;
+
+  res = (char *)getenv("HOSTNAME");
+  if( res == NULL ) res = (char*)getenv("COMPUTERNAME"); // cygwin
+  if( res == NULL ) res = "";
+  return tracer_cloneString(res);
+}
+
+
+/********************************************************************/
+/**                    TS Environment Factory                      **/
+/********************************************************************/
+TSEnvironment* TSEnvironment_createTSEnvironment()
+{
+  static TSEnvironment tsEnv;
+
+#if defined (linux)
+  tsEnv.getOSInfo   = LinuxTSEnvironment_getOSInfo;
+  tsEnv.getHostInfo = LinuxTSEnvironment_getHostInfo;
+  return &tsEnv;
+/* CTesK Source Start */
+#elif defined (WIN32)
+  tsEnv.getOSInfo   = WinTSEnvironment_getOSInfo;
+  tsEnv.getHostInfo = WinTSEnvironment_getHostInfo;
+  return &tsEnv;
+/* CTesK Source End */
+#else
+  tsEnv.getOSInfo   = DefaultTSEnvironment_getOSInfo;
+  tsEnv.getHostInfo = DefaultTSEnvironment_getHostInfo;
+  return &tsEnv;
+#endif
+}
+
+
+
+

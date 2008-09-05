@@ -1,0 +1,1141 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "process/pgroup/pgroup_config.h"
+#include "process/pgroup/pgroup_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+#pragma SEC subsystem pgroup "process.pgroup"
+
+/*
+    The group of functions 'process.pgroup' consists of:
+       __getpgid [1]
+       getpgid [2]
+       getpgrp [2]
+       getsid [2]
+       setpgid [2]
+       setpgrp [2]
+       setsid [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    __getpgid -- get the process group id
+
+SYNOPSIS
+
+    pid_t __getpgid(pid_t pid);
+
+DESCRIPTION
+
+    __getpgid() has the same specification as getpgid().
+    __getpgid() is not in the source standard; it is only in the binary
+    standard.
+*/
+specification
+ProcessId __getpgid_spec( CallContext context, ProcessId pid, ErrorCode * errno )
+    writes * errno
+{
+/* The __getpgid() function shall be equivalent to getpgid(). */
+/* START EQUIVALENT SPECIFICATION: getpgid_spec */
+    ProcessState * process_state, * pid_process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"         , process_state != NULL                         );
+        REQ( "", "ProcessId for the same system", pid.system == process_state->processid.system );
+
+        return true;
+    }
+    coverage C
+    {
+        if ( pid.process == 0 )
+        {
+            return { RequestForCallingProcessByZero, "Request by zero for process group ID of the calling process" };
+        }
+        else if ( pid.process == process_state->processid.process )
+        {
+            return { RequestForCallingProcessByPid, "Request by pid for process group ID of the calling process" };
+        }
+
+        pid_process_state = getProcessState( pid );
+
+        if ( pid_process_state != NULL && equals_ProcessId( pid_process_state->meta.session, process_state->meta.session ) )
+        {
+            return { RequestForSameSessionProcess, "Request for process group ID of the process from the same session" };
+        }
+        else
+        {
+            return { RequestForSomeProcess, "Request for process group ID for a process" };
+        }
+    }
+    post
+    {
+        bool checkResult = false;
+
+        if ( C == C.RequestForSomeProcess )
+        {
+            if(PROCESS_PGROUP_IMPLEMENTATION_DOES_NOT_ALLOW_ACCESS_TO_PROCESS_THAT_IS_NOT_IN_THE_SAME_SESSION)
+            {
+                checkResult = true;
+            }else{
+                checkResult = ( __getpgid_spec.process == -1 || getProcessState( pid ) == NULL );
+            }
+        }
+
+        /*
+         * [Upon successful completion, getpgid() shall return a process group ID.]
+         * Otherwise, it shall return (pid_t)-1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN( LSB___GETPGID, "__getpgid.03.02", __getpgid_spec.process == -1, * errno )
+            /*
+             * The getpgid() function shall fail if:
+             *
+             * [EPERM]
+             *
+             * The process whose process ID is equal to pid is not in the same session as the
+             * calling process, and the implementation does not allow access to the process
+             * group ID of that process from the calling process.
+             */
+            ERROR_SHALL( LSB___GETPGID, EPERM, "__getpgid.04.01", checkResult )
+
+            /*
+             * The getpgid() function shall fail if:
+             *
+             * [ESRCH]
+             *
+             * There is no process with a process ID equal to pid.
+             */
+            ERROR_SHALL( LSB___GETPGID, ESRCH, "__getpgid.04.02", checkResult )
+
+            /*
+             * The getpgid() function may fail if:
+             *
+             * [EINVAL]
+             *
+             * The value of the pid argument is invalid.
+             */
+            ERROR_MAY( LSB___GETPGID, EINVAL, "__getpgid.05.01", checkResult )
+        ERROR_END()
+
+        checkResult = false;
+
+        if ( C == C.RequestForCallingProcessByZero || C == C.RequestForCallingProcessByPid )
+        {
+            process_state = getProcessState_CallContext( context );
+            checkResult = equals_ProcessId( __getpgid_spec, process_state->meta.pgroup );
+        }
+        else if ( C == C.RequestForSameSessionProcess )
+        {
+            pid_process_state = getProcessState( pid );
+            checkResult = equals_ProcessId( __getpgid_spec, pid_process_state->meta.pgroup );
+        }
+        else // coverage( C ) == RequestForSomeProcess
+        {
+            if(!PROCESS_PGROUP_IMPLEMENTATION_DOES_NOT_ALLOW_ACCESS_TO_PROCESS_THAT_IS_NOT_IN_THE_SAME_SESSION)
+            {
+                pid_process_state = getProcessState( pid );
+                checkResult = ( pid_process_state != NULL                                          &&
+                                equals_ProcessId( __getpgid_spec, pid_process_state->meta.pgroup )
+                              );
+            }
+        }
+
+        if ( C != C.RequestForCallingProcessByZero )
+        {
+            /*
+             * The getpgid() function shall return the process group ID of the process whose
+             * process ID is equal to pid.
+             */
+            REQ( "__getpgid.01", "the process group ID of the process whose process ID is equal to pid", checkResult );
+        }
+        else
+        {
+            /*
+             * If pid is equal to 0, getpgid() shall return the process group ID of the
+             * calling process.
+             */
+            REQ( "__getpgid.02", "the process group ID of the calling process", checkResult );
+        }
+
+        /*
+         * Upon successful completion, getpgid() shall return a process group ID.
+         */
+        REQ( "__getpgid.03.01", "Upon successful completion, getpgid() shall return a process group ID", checkResult );
+
+        /*
+         * __getpgid() has the same specification as getpgid().
+         */
+        REQ( "__getpgid.30", "__getpgid() has the same specification as getpgid()", GENERAL_REQ( "__getpgid.*" ) );
+
+        return true;
+    }
+/* END EQUIVALENT SPECIFICATION: getpgid_spec */
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getpgid - get the process group ID for a process
+
+SYNOPSIS
+
+    #include <unistd.h>
+    pid_t getpgid(pid_t pid);
+
+DESCRIPTION
+
+    The getpgid() function shall return the process group ID of the process
+    whose process ID is equal to pid. If pid is equal to 0, getpgid() shall
+    return the process group ID of the calling process.
+
+RETURN VALUE
+
+    Upon successful completion, getpgid() shall return a process group ID.
+    Otherwise, it shall return (pid_t)-1 and set errno to indicate the error.
+
+ERRORS
+
+    The getpgid() function shall fail if:
+
+    [EPERM]
+        The process whose process ID is equal to pid is not in the same session
+        as the calling process, and the implementation does not allow access to
+        the process group ID of that process from the calling process.
+    [ESRCH]
+        There is no process with a process ID equal to pid.
+
+    The getpgid() function may fail if:
+
+    [EINVAL]
+        The value of the pid argument is invalid.
+*/
+/* REFERENCES: __getpgid_spec() refers the getpgid_spec() */
+specification
+ProcessId getpgid_spec( CallContext context, ProcessId pid, ErrorCode * errno )
+    writes * errno
+{
+    ProcessState * process_state, * pid_process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"         , process_state != NULL                         );
+        REQ( "", "ProcessId for the same system", pid.system == process_state->processid.system );
+
+        return true;
+    }
+    coverage C
+    {
+        if ( pid.process == 0 )
+        {
+            return { RequestForCallingProcessByZero, "Request by zero for process group ID of the calling process" };
+        }
+        else if ( pid.process == process_state->processid.process )
+        {
+            return { RequestForCallingProcessByPid, "Request by pid for process group ID of the calling process" };
+        }
+
+        pid_process_state = getProcessState( pid );
+
+        if ( pid_process_state != NULL && equals_ProcessId( pid_process_state->meta.session, process_state->meta.session ) )
+        {
+            return { RequestForSameSessionProcess, "Request for process group ID of the process from the same session" };
+        }
+        else
+        {
+            return { RequestForSomeProcess, "Request for process group ID for a process" };
+        }
+    }
+    post
+    {
+        bool checkResult = false;
+
+        if ( C == C.RequestForSomeProcess )
+        {
+            if(PROCESS_PGROUP_IMPLEMENTATION_DOES_NOT_ALLOW_ACCESS_TO_PROCESS_THAT_IS_NOT_IN_THE_SAME_SESSION)
+            {
+                checkResult = true;
+            }else{
+                checkResult = ( getpgid_spec.process == -1 || getProcessState( pid ) == NULL );
+            }
+        }
+
+        /*
+         * [Upon successful completion, getpgid() shall return a process group ID.]
+         * Otherwise, it shall return (pid_t)-1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_GETPGID, "getpgid.03.02", getpgid_spec.process == -1, * errno )
+            /*
+             * The getpgid() function shall fail if:
+             *
+             * [EPERM]
+             *
+             * The process whose process ID is equal to pid is not in the same session as the
+             * calling process, and the implementation does not allow access to the process
+             * group ID of that process from the calling process.
+             */
+            ERROR_SHALL( POSIX_GETPGID, EPERM, "getpgid.04.01", checkResult )
+
+            /*
+             * The getpgid() function shall fail if:
+             *
+             * [ESRCH]
+             *
+             * There is no process with a process ID equal to pid.
+             */
+            ERROR_SHALL( POSIX_GETPGID, ESRCH, "getpgid.04.02", checkResult )
+
+            /*
+             * The getpgid() function may fail if:
+             *
+             * [EINVAL]
+             *
+             * The value of the pid argument is invalid.
+             */
+            ERROR_MAY( POSIX_GETPGID, EINVAL, "getpgid.05.01", checkResult )
+        ERROR_END()
+
+        checkResult = false;
+
+        if ( C == C.RequestForCallingProcessByZero || C == C.RequestForCallingProcessByPid )
+        {
+            process_state = getProcessState_CallContext( context );
+            checkResult = equals_ProcessId( getpgid_spec, process_state->meta.pgroup );
+        }
+        else if ( C == C.RequestForSameSessionProcess )
+        {
+            pid_process_state = getProcessState( pid );
+            checkResult = equals_ProcessId( getpgid_spec, pid_process_state->meta.pgroup );
+        }
+        else // coverage( C ) == RequestForSomeProcess
+        {
+            if(!PROCESS_PGROUP_IMPLEMENTATION_DOES_NOT_ALLOW_ACCESS_TO_PROCESS_THAT_IS_NOT_IN_THE_SAME_SESSION)
+            {
+                pid_process_state = getProcessState( pid );
+                checkResult = ( pid_process_state != NULL                                        &&
+                                equals_ProcessId( getpgid_spec, pid_process_state->meta.pgroup )
+                              );
+            }
+        }
+
+        if ( C != C.RequestForCallingProcessByZero )
+        {
+            /*
+             * The getpgid() function shall return the process group ID of the process whose
+             * process ID is equal to pid.
+             */
+            REQ( "getpgid.01", "the process group ID of the process whose process ID is equal to pid", checkResult );
+        }
+        else
+        {
+            /*
+             * If pid is equal to 0, getpgid() shall return the process group ID of the
+             * calling process.
+             */
+            REQ( "getpgid.02", "the process group ID of the calling process", checkResult );
+        }
+
+        /*
+         * Upon successful completion, getpgid() shall return a process group ID.
+         */
+        REQ( "getpgid.03.01", "Upon successful completion, getpgid() shall return a process group ID", checkResult );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getpgrp - get the process group ID of the calling process
+
+SYNOPSIS
+
+    #include <unistd.h>
+
+    pid_t getpgrp(void);
+
+DESCRIPTION
+
+    The getpgrp() function shall return the process group ID of the calling
+    process.
+
+RETURN VALUE
+
+    The getpgrp() function shall always be successful and no return value is
+    reserved to indicate an error.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+ProcessId getpgrp_spec( CallContext context )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    post
+    {
+        ProcessState * process_state = getProcessState_CallContext( context );
+
+        /*
+         * The getpgrp() function shall return the process group ID of the calling process.
+         *
+         * The getpgrp() function shall always be successful and no return value is
+         * reserved to indicate an error.
+         */
+        REQ( "getpgrp.01", "The getpgrp() function shall return the process group ID of the calling process",
+                           equals_ProcessId( getpgrp_spec, process_state->meta.pgroup )
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getsid - get the process group ID of a session leader
+
+SYNOPSIS
+
+    #include <unistd.h>
+    pid_t getsid(pid_t pid);
+
+DESCRIPTION
+
+    The getsid() function shall obtain the process group ID of the process that
+    is the session leader of the process specified by pid. If pid is (pid_t)0,
+    it specifies the calling process.
+
+RETURN VALUE
+
+    Upon successful completion, getsid() shall return the process group ID of
+    the session leader of the specified process. Otherwise, it shall return
+    (pid_t)-1 and set errno to indicate the error.
+
+ERRORS
+
+    The getsid() function shall fail if:
+
+    [EPERM]
+        The process specified by pid is not in the same session as the calling
+        process, and the implementation does not allow access to the process
+        group ID of the session leader of that process from the calling
+        process.
+    [ESRCH]
+        There is no process with a process ID equal to pid.
+*/
+specification
+ProcessId getsid_spec( CallContext context, ProcessId pid, ErrorCode * errno )
+    writes * errno
+{
+    ProcessState * process_state, * pid_process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"         , process_state != NULL                         );
+        REQ( "", "ProcessId for the same system", pid.system == process_state->processid.system );
+
+        return true;
+    }
+    coverage C
+    {
+        if ( pid.process == 0 )
+        {
+            return { RequestForCallingProcessByZero                                                      ,
+                     "Request by zero for the process group ID of the session leader for calling process"
+                   };
+        }
+        else if ( pid.process == process_state->processid.process )
+        {
+            return { RequestForCallingProcessByPid                                                      ,
+                     "Request by pid for the process group ID of the session leader for calling process"
+                   };
+        }
+
+        pid_process_state = getProcessState( pid );
+
+        if ( pid_process_state != NULL && equals_ProcessId( pid_process_state->meta.session, process_state->meta.session ) )
+        {
+            return { RequestForSameSessionProcess                                                              ,
+                     "Request for the process group ID of the session leader for process from the same session"
+                   };
+        }
+        else
+        {
+            return { RequestForSomeProcess, "Request for the process group ID of the session leader for a process" };
+        }
+    }
+    post
+    {
+        bool checkResult = false;
+
+        if ( C == C.RequestForSomeProcess )
+        {
+            if(PROCESS_PGROUP_IMPLEMENTATION_DOES_NOT_ALLOW_ACCESS_TO_PROCESS_THAT_IS_NOT_IN_THE_SAME_SESSION)
+            {
+                checkResult = true;
+            }else{
+                checkResult = ( getsid_spec.process == -1 || getProcessState( pid ) == NULL );
+            }
+        }
+
+        /*
+         * [Upon successful completion, getsid() shall return the process group ID of the
+         * session leader of the specified process.]
+         * Otherwise, it shall return (pid_t)-1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_GETSID, "getsid.03.02", getsid_spec.process == -1, * errno )
+            /*
+             * The getsid() function shall fail if:
+             *
+             * [EPERM]
+             * The process specified by pid is not in the same session as the calling process,
+             * and the implementation does not allow access to the process group ID of the
+             * session leader of that process from the calling process.
+             */
+            ERROR_SHALL(POSIX_GETSID, EPERM, "getsid.04.01", checkResult )
+
+            /*
+             * The getsid() function shall fail if:
+             *
+             * [ESRCH]
+             * There is no process with a process ID equal to pid.
+             */
+            ERROR_SHALL(POSIX_GETSID, ESRCH, "getsid.04.02", checkResult )
+        ERROR_END()
+
+        checkResult = false;
+
+        if ( C == C.RequestForCallingProcessByZero || C == C.RequestForCallingProcessByPid )
+        {
+            process_state = getProcessState_CallContext( context );
+            checkResult = equals_ProcessId( getsid_spec, process_state->meta.session );
+        }
+        else if ( C == C.RequestForSameSessionProcess )
+        {
+            pid_process_state = getProcessState( pid );
+            checkResult = equals_ProcessId( getsid_spec, pid_process_state->meta.session );
+        }
+        else // coverage( C ) == RequestForSomeProcess
+        {
+            if(!PROCESS_PGROUP_IMPLEMENTATION_DOES_NOT_ALLOW_ACCESS_TO_PROCESS_THAT_IS_NOT_IN_THE_SAME_SESSION)
+            {
+                pid_process_state = getProcessState( pid );
+                checkResult = ( pid_process_state != NULL                                        &&
+                                equals_ProcessId( getsid_spec, pid_process_state->meta.session )
+                              );
+            }
+        }
+
+        if ( C != C.RequestForCallingProcessByZero )
+        {
+            /*
+             * The getsid() function shall obtain the process group ID of the process that is
+             * the session leader of the process specified by pid.
+             */
+            REQ( "getsid.01", "the process specified by pid", checkResult );
+        }
+        else
+        {
+            /*
+             * If pid is (pid_t)0, it specifies the calling process.
+             */
+            REQ( "getsid.02", "the calling process", checkResult );
+        }
+
+        /*
+         * Upon successful completion, getsid() shall return the process group ID of the
+         * session leader of the specified process.
+         */
+        REQ( "getsid.03.01", "the process group ID of the session leader of the specified process", checkResult );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    setpgid - set process group ID for job control
+
+SYNOPSIS
+
+    #include <unistd.h>
+    int setpgid(pid_t pid, pid_t pgid);
+
+DESCRIPTION
+
+    The setpgid() function shall either join an existing process group or
+    create a new process group within the session of the calling process. The
+    process group ID of a session leader shall not change. Upon successful
+    completion, the process group ID of the process with a process ID that
+    matches pid shall be set to pgid. As a special case, if pid is 0, the
+    process ID of the calling process shall be used. Also, if pgid is 0, the
+    process ID of the indicated process shall be used.
+
+RETURN VALUE
+
+    Upon successful completion, setpgid() shall return 0; otherwise, -1 shall
+    be returned and errno shall be set to indicate the error.
+
+ERRORS
+
+    The setpgid() function shall fail if:
+
+    [EACCES]
+        The value of the pid argument matches the process ID of a child process
+        of the calling process and the child process has successfully executed
+        one of the exec functions.
+    [EINVAL]
+        The value of the pgid argument is less than 0, or is not a value
+        supported by the implementation.
+    [EPERM]
+        The process indicated by the pid argument is a session leader.
+    [EPERM]
+        The value of the pid argument matches the process ID of a child process
+        of the calling process and the child process is not in the same session
+        as the calling process.
+    [EPERM]
+        The value of the pgid argument is valid but does not match the process
+        ID of the process indicated by the pid argument and there is no process
+        with a process group ID that matches the value of the pgid argument in
+        the same session as the calling process.
+    [ESRCH]
+        The value of the pid argument does not match the process ID of the
+        calling process or of a child process of the calling process.
+*/
+specification
+IntT setpgid_spec( CallContext context, ProcessId pid, ProcessId pgid, ErrorCode * errno )
+    writes * errno
+{
+    ProcessState * process_state, * pre_session_leader_state, * pid_process_state, * session_leader_state;
+
+    ProcessId pre_session_leader_pgroup, not_zero_pgid;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"                , process_state != NULL                          );
+        REQ( "", "Process id for the same system"      , pid.system  == process_state->processid.system );
+        REQ( "", "Process group id for the same system", pgid.system == process_state->processid.system );
+
+        pre_session_leader_state = getProcessState( process_state->meta.session );
+
+        if ( pre_session_leader_state != NULL ) { pre_session_leader_pgroup = pre_session_leader_state->meta.pgroup; }
+
+        return true;
+    }
+    coverage C
+    {
+        if ( pid.process == 0 ) { pid_process_state = process_state         ; }
+                           else { pid_process_state = getProcessState( pid ); }
+
+        if      ( pgid.process != 0         ) { not_zero_pgid = pgid                        ; }
+        else if ( pid_process_state != NULL ) { not_zero_pgid = pid_process_state->processid; }
+
+        if ( pid_process_state == NULL )
+        {
+            return { UnknownProcess, "Work with unknown process" };
+        }
+        else
+        {
+            if ( pid.process == 0 )
+            {
+                return { CallingProcessByZero, "Work by zero with calling process" };
+            }
+            else if ( pid.process == process_state->processid.process ) // ! process_state
+            {
+                return { CallingProcessByPid, "Work by pid with calling process" };
+            }
+            else
+            {
+                return { KnownProcess, "Work with known process" };
+            }
+        }
+    }
+    post
+    {
+        bool checkResult, checkResult1, checkResult2, checkResult3;
+
+        /*
+         * [Upon successful completion, setpgid() shall return 0]
+         * otherwise, -1 shall be returned and errno shall be set to indicate the error
+         */
+        ERROR_BEGIN( POSIX_SETPGID, "setpgid.06.02", setpgid_spec == -1, * errno )
+            /*
+             * The setpgid() function shall fail if:
+             *
+             * [EACCES]
+             * The value of the pid argument matches the process ID of a child process of the
+             * calling process and the child process has successfully executed one of the
+             * exec functions.
+             */
+            if ( C != C.UnknownProcess && pre_session_leader_state != NULL ) {
+                checkResult = ( equals_ProcessId( pid_process_state->meta.parent, process_state->processid ) &&
+                                pid_process_state->wasSuccessfulExecCall
+                              );
+            } else {
+                checkResult = ( setpgid_spec == -1 );// && * errno == SUT_EACCES
+            }
+            ERROR_SHALL( POSIX_SETPGID, EACCES, "setpgid.07.01", checkResult )
+
+            /*
+             * The setpgid() function shall fail if:
+             *
+             * [EINVAL]
+             * The value of the pgid argument is less than 0, or is not a value supported by
+             * the implementation.
+             */
+            checkResult = ( pgid.process < 0 || setpgid_spec == -1 );
+            ERROR_SHALL( POSIX_SETPGID, EINVAL, "setpgid.07.02", checkResult )
+
+            /*
+             * The setpgid() function shall fail if:
+             *
+             * [EPERM]
+             * The process indicated by the pid argument is a session leader.
+             */
+            /*
+             * The setpgid() function shall fail if:
+             *
+             * [EPERM]
+             * The value of the pid argument matches the process ID of a child process of the
+             * calling process and the child process is not in the same session as the
+             * calling process.
+             */
+            /*
+             * The setpgid() function shall fail if:
+             *
+             * [EPERM]
+             * The value of the pgid argument is valid but does not match the process ID of
+             * the process indicated by the pid argument and there is no process with a
+             * process group ID that matches the value of the pgid argument in the same
+             * session as the calling process.
+             */
+            if ( C != C.UnknownProcess && pre_session_leader_state != NULL ) {
+                // setpgid.07.03
+                checkResult1 = equals_ProcessId( pid_process_state->meta.session, pid_process_state->processid );
+                // setpgid.07.04
+                checkResult2 = ( equals_ProcessId( pid_process_state->meta.parent, process_state->processid )       &&
+                                 ! equals_ProcessId( pid_process_state->meta.session, process_state->meta.session )
+                               );
+                // setpgid.07.05
+                checkResult3 = ( pgid.process >= 0 && ! equals_ProcessId( pid_process_state->processid, pgid ) );
+                if ( checkResult3 ) {
+                    Set /* ProcessState */ * processesInSession = getProcessesInSession_CallContext( context );
+                    int i;
+                    for ( i = 0; i < size_Set( processesInSession ); i++ ) {
+                        ProcessState * process = get_Set( processesInSession, i );
+                        if ( equals_ProcessId( process->meta.session, not_zero_pgid ) ) { checkResult3 = false; break; }
+                    }
+                }
+            } else {
+                checkResult1 = checkResult2 = checkResult3 = ( setpgid_spec == -1 );// && * errno == SUT_EPERM
+            }
+            ERROR_SHALL( POSIX_SETPGID, EPERM, "setpgid.07.03;setpgid.07.04;setpgid.07.05",
+                                               T( checkResult1 ) || T( checkResult2 ) || T( checkResult3 )
+                       )
+
+            /*
+             * The setpgid() function shall fail if:
+             *
+             * [ESRCH]
+             * The value of the pid argument does not match the process ID of the calling
+             * process or of a child process of the calling process.
+             */
+            if ( C != C.UnknownProcess && pre_session_leader_state != NULL ) {
+                checkResult = ( pid.process != 0 && ! equals_ProcessId( process_state->processid, pid ) );
+                if ( checkResult ) {
+                    Set /* ProcessState */ * children = getChildren_CallContext( context );
+                    int i;
+                    for ( i = 0; i < size_Set( children ); i++ ) {
+                        ProcessState * process = get_Set( children, i );
+                        if ( equals_ProcessId( process->processid, pid ) ) { checkResult = false; break; }
+                    }
+                }
+            } else {
+                checkResult = ( setpgid_spec == -1 );// && * errno == SUT_ESRCH
+            }
+            ERROR_SHALL( POSIX_SETPGID, ESRCH, "setpgid.07.06", checkResult )
+        ERROR_END()
+
+        /*
+         * The process group ID of a session leader shall not change.
+         */
+        session_leader_state = getProcessState( process_state->meta.session );
+        if ( pre_session_leader_state != NULL && session_leader_state != NULL )
+        {
+            REQ( "setpgid.02", "The process group ID of a session leader shall not change",
+                               equals_ProcessId( pre_session_leader_pgroup, session_leader_state->meta.pgroup )
+               );
+        }
+
+        if ( C != C.UnknownProcess )
+        {
+            checkResult = equals_ProcessId( pid_process_state->meta.pgroup, not_zero_pgid );
+
+            /*
+             * The setpgid() function shall either join an existing process group or create a
+             * new process group within the session of the calling process.
+             */
+            REQ("setpgid.01", "join an existing process group or create a new process group", checkResult );
+
+            /*
+             * Upon successful completion, the process group ID of the process with a process
+             * ID that matches pid shall be set to pgid.
+             */
+            REQ( "setpgid.03", "the process group ID of the process with pid shall be set to pgid", checkResult );
+        }
+
+        if ( pid.process == 0 )
+        {
+            /*
+             * As a special case, if pid is 0, the process ID of the calling process shall be
+             * used.
+             */
+            REQ( "setpgid.04", "if pid is 0, the process ID of the calling process shall be used", true );
+        }
+
+        if ( pgid.process == 0 )
+        {
+            /*
+             * Also, if pgid is 0, the process ID of the indicated process shall be used.
+             */
+            REQ( "setpgid.05", "if pgid is 0, the process ID of the indicated process shall be used", true );
+        }
+
+        /*
+         * Upon successful completion, setpgid() shall return 0
+         */
+        REQ( "setpgid.06.01", "Upon successful completion, setpgid() shall return 0", setpgid_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+SYNOPSIS
+
+    #include <unistd.h>
+    pid_t setpgrp(void);
+
+DESCRIPTION
+
+    If the calling process is not already a session leader, setpgrp() sets the
+    process group ID of the calling process to the process ID of the calling
+    process. If setpgrp() creates a new session, then the new session has no
+    controlling terminal.
+
+    The setpgrp() function has no effect when the calling process is a session
+    leader.
+
+RETURN VALUE
+
+    Upon completion, setpgrp() shall return the process group ID.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+ProcessId setpgrp_spec( CallContext context )
+{
+    ProcessState * process_state;
+
+    ProcessId pre_session;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", process_state != NULL );
+
+        pre_session = process_state->meta.session;
+
+        return true;
+    }
+    post
+    {
+        if ( equals_ProcessId( pre_session, process_state->meta.session ) )
+        {
+            /*
+             * The setpgrp() function has no effect when the calling process is a session
+             * leader.
+             */
+            REQ( "setpgrp.03", "The setpgrp() function has no effect when the calling process is a session leader", true );
+        }
+        else
+        {
+            /*
+             * If the calling process is not already a session leader, setpgrp() sets the
+             * process group ID of the calling process to the process ID of the calling
+             * process.
+             */
+            REQ( "setpgrp.01", "sets the process group ID of the calling process to the process ID of the calling process",
+                               equals_ProcessId( process_state->meta.pgroup, process_state->processid )
+               );
+
+            /*
+             * If setpgrp() creates a new session, then the new session has no controlling
+             * terminal.
+             */
+            REQ( "setpgrp.02", "the new session has no controlling terminal", process_state->meta.cterm == NULL );
+        }
+
+        /*
+         * Upon completion, setpgrp() shall return the process group ID.
+         */
+        REQ( "setpgrp.04", "Upon completion, setpgrp() shall return the process group ID",
+             equals_ProcessId( setpgrp_spec, process_state->meta.pgroup )
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    setsid - create session and set process group ID
+
+SYNOPSIS
+
+    #include <unistd.h>
+    pid_t setsid(void);
+
+DESCRIPTION
+
+    The setsid() function shall create a new session, if the calling process is
+    not a process group leader. Upon return the calling process shall be the
+    session leader of this new session, shall be the process group leader of a
+    new process group, and shall have no controlling terminal. The process
+    group ID of the calling process shall be set equal to the process ID of the
+    calling process. The calling process shall be the only process in the new
+    process group and the only process in the new session.
+
+RETURN VALUE
+
+    Upon successful completion, setsid() shall return the value of the new
+    process group ID of the calling process. Otherwise, it shall return
+    (pid_t)-1 and set errno to indicate the error.
+
+ERRORS
+
+    The setsid() function shall fail if:
+
+    [EPERM]
+        The calling process is already a process group leader, or the process
+        group ID of a process other than the calling process matches the
+        process ID of the calling process.
+*/
+specification
+ProcessId setsid_spec( CallContext context, ErrorCode * errno )
+    writes * errno
+{
+    ProcessState * process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", process_state != NULL );
+
+        return true;
+    }
+    post
+    {
+        ProcessId processId = process_state->processid;
+        bool checkResult;
+
+        /*
+         * [Upon successful completion, setsid() shall return the value of the new process
+         * group ID of the calling process.]
+         * Otherwise, it shall return (pid_t)-1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_SETSID, "setsid.05.02", setsid_spec.process == -1, * errno )
+            /*
+             * The setsid() function shall fail if:
+             *
+             * [EPERM]
+             * The calling process is already a process group leader, or the process group ID
+             * of a process other than the calling process matches the process ID of the
+             * calling process.
+             */
+            checkResult = equals_ProcessId( processId, process_state->meta.pgroup );
+            if ( ! checkResult ) {
+                SystemState * systemState = getSystemState( context.system );
+                int i;
+                for ( i = 0; i < size_Map( systemState->processes ); i++ ) {
+                    ProcessIdObj * key = key_Map( systemState->processes, i );
+                    ProcessState * process = get_Map( systemState->processes, key );
+                    if ( equals_ProcessId( process->meta.pgroup, processId ) ) { checkResult = true; break; }
+                }
+            }
+            checkResult = ( checkResult || setsid_spec.process == -1 );
+            ERROR_SHALL( POSIX_SETSID, EPERM, "setsid.06.01", checkResult )
+        ERROR_END()
+
+        /*
+         * The setsid() function shall create a new session, if the calling process is not
+         * a process group leader.
+         *
+         * Upon return the calling process
+         *
+         * shall be the session leader of this new session
+         */
+        checkResult = equals_ProcessId( process_state->meta.session, processId );
+        REQ( "setsid.01"   , "setsid() function shall create a new session"   , checkResult );
+        REQ( "setsid.02.01", "shall be the session leader of this new session", checkResult );
+
+        /*
+         * Upon return the calling process
+         *
+         * shall be the process group leader of a new process group
+         *
+         * The process group ID of the calling process shall be set equal to the process
+         * ID of the calling process.
+         */
+        checkResult = equals_ProcessId( process_state->meta.pgroup, processId );
+        REQ( "setsid.02.02", "shall be the process group leader of a new process group" , checkResult );
+        REQ( "setsid.03"   , "The process group ID shall be set equal to the process ID", checkResult );
+
+        /*
+         * Upon return the calling process
+         *
+         * shall have no controlling terminal
+         */
+        REQ( "setsid.02.03", "shall have no controlling terminal", process_state->meta.cterm == NULL );
+
+        /*
+         * The calling process shall be the only process in the new process group and the
+         * only process in the new session.
+         */
+        REQ( "setsid.04", "shall be the only process in the new process group and the only process in the new session",
+                          T( size_Set( getProcessesInGroup_CallContext  ( context ) ) == 1 ) &&
+                          T( size_Set( getProcessesInSession_CallContext( context ) ) == 1 )
+           );
+
+        /*
+         * Upon successful completion, setsid() shall return the value of the new process
+         * group ID of the calling process.
+         */
+        REQ( "setsid.05.01", "the value of the new process group ID", equals_ProcessId( setsid_spec, processId ) );
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/

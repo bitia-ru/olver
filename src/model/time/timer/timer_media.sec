@@ -1,0 +1,458 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/fenv/fenv_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/meta/user_model.seh"
+#include "fs/meta/access_model.seh"
+#include "config/system_config.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "time/timer/timer_model.seh"
+#include "time/timer/timer_media.seh"
+#include "common/common_media.seh"
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void signal_receive_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    String         * funcName       = readString_TSStream( stream );
+    IntT             returned_value = readInt_TSStream   ( stream );
+    // setitimer, timer_settime, ualarm
+    String         * stage                                         ;
+    // setitimer
+    ITimerValTObj  * v_ovalue                                      ;
+    // timer_settime
+    ITimerSpecTObj * s_ovalue                                      ;
+    // setitimer, timer_settime
+    ErrorCode      * error_code                                    ;
+
+    if ( equals( create_String( "setitimer"     ), funcName ) ||
+         equals( create_String( "timer_settime" ), funcName ) ||
+         equals( create_String( "ualarm"        ), funcName ) ) { stage      = readString_TSStream    ( stream ); }
+                                                           else { stage      = NULL                             ; }
+
+    if ( equals( create_String( "setitimer"     ), funcName ) ) { v_ovalue   = readITimerVal_TSStream ( stream ); }
+                                                           else { v_ovalue   = NULL                             ; }
+
+    if ( equals( create_String( "timer_settime" ), funcName ) ) { s_ovalue   = readITimerSpec_TSStream( stream ); }
+                                                           else { s_ovalue   = NULL                             ; }
+
+    if ( equals( create_String( "setitimer"     ), funcName ) ||
+         equals( create_String( "timer_settime" ), funcName ) ) { error_code = readErrorCode_TSStream ( stream ); }
+                                                           else { error_code = NULL                             ; }
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        signal_receive,
+        create_SignalReceiveType( funcName, threadId, returned_value, stage, v_ovalue, s_ovalue, error_code ),
+        meta->timestamp
+    );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initTimeTimerSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_signal_receive       ( signal_receive_media   );
+    set_mediator_alarm_spec           ( alarm_media            );
+    set_mediator_getitimer_spec       ( getitimer_media        );
+    set_mediator_nanosleep_spec       ( nanosleep_media        );
+    set_mediator_setitimer_spec       ( setitimer_media        );
+    set_mediator_sleep_spec           ( sleep_media            );
+    set_mediator_timer_create_spec    ( timer_create_media     );
+    set_mediator_timer_delete_spec    ( timer_delete_media     );
+    set_mediator_timer_getoverrun_spec( timer_getoverrun_media );
+    set_mediator_timer_gettime_spec   ( timer_gettime_media    );
+    set_mediator_timer_settime_spec   ( timer_settime_media    );
+    set_mediator_ualarm_spec          ( ualarm_media           );
+    set_mediator_usleep_spec          ( usleep_media           );
+
+    // Set up dr processors
+    registerDRProcessor( "signal_receive", signal_receive_processor );
+
+    // Set up formatters
+    registerTSFormatter( "itimerval" , (TSFormatterFuncType)itimerval_formatter  );
+    registerTSFormatter( "itimerspec", (TSFormatterFuncType)itimerspec_formatter );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** common for alarm, setitimer, timer_settime and ualarm **/
+mediator signal_receive_media for reaction
+SignalReceiveType * signal_receive( void )
+{
+    state
+    {
+        onSignalReceive( signal_receive->context, signal_receive->funcName );
+    }
+}
+
+/** alarm_spec **/
+mediator alarm_media for specification
+void alarm_spec( CallContext context, UIntT seconds )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "alarm:$(uint)", create_UIntTObj( seconds ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onAlarm( context, seconds, timestamp );
+    }
+}
+
+/** getitimer_spec **/
+mediator getitimer_media for specification
+IntT getitimer_spec( CallContext context, IntT which, ITimerValTObj * value, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getitimer:$(int)", create_IntTObj( which ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( readITimerVal_TSStream( & command.response ), value );
+            copy( readErrorCode_TSStream( & command.response ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** nanosleep_spec **/
+mediator nanosleep_media for specification
+void nanosleep_spec( CallContext context, TimeSpecTObj * rqtp, TimeSpecTObj * rmtp )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "nanosleep:$(int)$(int)$(int)$(int)$(int)",
+                                    create_IntTObj( (IntT)rqtp->sec ), create_IntTObj( (IntT)rqtp->nsec ),
+                                    create_IntTObj( rmtp == NULL ), create_IntTObj( rmtp == NULL ? 0 : (IntT)rmtp->sec ),
+                                                                    create_IntTObj( rmtp == NULL ? 0 : (IntT)rmtp->nsec )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onNanosleep( context, rqtp, rmtp, timestamp );
+    }
+}
+
+/** setitimer_spec **/
+mediator setitimer_media for specification
+void setitimer_spec( CallContext context, IntT which, ITimerValTObj * value, ITimerValTObj * ovalue )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "setitimer:$(int)$(itimerval)$(int)",
+                                    create_IntTObj( which ), value, create_IntTObj( ovalue == NULL )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onSetitimer( context, which, value, timestamp );
+    }
+}
+
+/** sleep_spec **/
+mediator sleep_media for specification
+void sleep_spec( CallContext context, UIntT seconds )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "sleep:$(uint)", create_UIntTObj( seconds ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onSleep( context, seconds, timestamp );
+    }
+}
+
+/** timer_create_spec **/
+mediator timer_create_media for specification
+IntT timer_create_spec
+         ( CallContext context, ClockidTObj * clock_id, Signal * evp, TimerTObj * timerid, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "timer_create:$(int)$(int)$(int)",
+                                    clock_id,
+                                    create_IntTObj( evp == NULL ), create_IntTObj( evp == NULL ? 0 : * evp )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_TimerTObj( readInt_TSStream      ( & command.response ) ), timerid );
+            copy(                   readErrorCode_TSStream( & command.response )  , errno   );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( timer_create_spec == 0 ) {
+            SystemState  * systemState  = getSystemState_CallContext ( context );
+            ProcessState * processState = getProcessState_CallContext( context );
+            if ( ! containsKey_Map( systemState->clocks, clock_id ) ) {
+                put_Map( systemState->clocks, clock_id, create_ClockState( NULL ) );
+            }
+            // SUT_SIGALRM - as default signal
+            // verbose( "timer_create_media, state : timerid is [%ld], evp is %sNULL\n", * timerid, evp == NULL ? "" : "not " );
+            put_Map( processState->meta.timersToSignals, timerid,
+                                                         create_SignalObj( evp == NULL ? SUT_SIGALRM : *evp )
+                   );
+        }
+    }
+}
+
+/** timer_delete_spec **/
+mediator timer_delete_media for specification
+IntT timer_delete_spec( CallContext context, TimerTObj * timerid, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "timer_delete:$(int)", timerid );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( readErrorCode_TSStream( & command.response ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( timer_delete_spec == 0 ) {
+            ProcessState * processState = getProcessState_CallContext( context );
+            int i;
+            remove_Map( processState->meta.timersToSignals, timerid );
+            for ( i = size_List( processState->meta.waitedSignals ) - 1; i >= 0 ; i-- ) {
+                WaitedSignal * waitedSignal = get_List( processState->meta.waitedSignals, i );
+                if ( equals( waitedSignal->timer, timerid ) ) { remove_List( processState->meta.waitedSignals, i ); }
+            }
+        }
+    }
+}
+
+/** timer_getoverrun_spec **/
+mediator timer_getoverrun_media for specification
+IntT timer_getoverrun_spec( CallContext context, TimerTObj * timerid, ErrorCode * errno )
+{
+    call
+    {
+        IntT res=-10;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "timer_getoverrun:$(int)", timerid );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( readErrorCode_TSStream( & command.response ), errno );
+        }
+
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** timer_gettime_spec **/
+mediator timer_gettime_media for specification
+IntT timer_gettime_spec( CallContext context, TimerTObj * timerid, ITimerSpecTObj * value, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "timer_gettime:$(int)", timerid );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( readITimerSpec_TSStream( & command.response ), value );
+            copy( readErrorCode_TSStream ( & command.response ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** timer_settime_spec **/
+mediator timer_settime_media for specification
+void timer_settime_spec
+         ( CallContext context, TimerTObj * timerid, IntT flags, ITimerSpecTObj * value, ITimerSpecTObj * ovalue )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        ProcessState * processState = getProcessState_CallContext( context );
+        SignalObj * signal = get_Map( processState->meta.timersToSignals, timerid );
+
+        // verbose( "timer_settime_media, call\n" );
+        format_TSCommand( &command, "timer_settime:$(int)$(int)$(itimerspec)$(int)$(int)",
+                                    timerid, create_IntTObj( flags ), value, create_IntTObj( ovalue == NULL ),
+                                    signal
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        // verbose( "timer_settime_media, state\n" );
+        onTimerSettime( context, timerid, flags, value, timestamp );
+    }
+}
+
+/** ualarm_spec **/
+mediator ualarm_media for specification
+void ualarm_spec( CallContext context, USecondsT useconds, USecondsT interval )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "ualarm:$(uint)$(uint)", create_UIntTObj( useconds ), create_UIntTObj( interval ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onUalarm( context, useconds, interval, timestamp );
+    }
+}
+
+/** usleep_spec **/
+mediator usleep_media for specification
+void usleep_spec( CallContext context, USecondsT useconds )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "usleep:$(uint)", create_UIntTObj( useconds ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onUsleep( context, useconds, timestamp );
+    }
+}

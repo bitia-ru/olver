@@ -1,0 +1,322 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_media.seh"
+#include "process/meta/user_media.seh"
+#include "io/fstream/fstream_media.seh"
+#include "io/fstream/wstream_media.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "fs/dir/dir_media.seh"
+#include "process/process/process_media.seh"
+#include "process/meta/fs_media.seh"
+#include "util/format/tests/scanf_scenario.seh"
+#include "util/format/tests/format_sheafs.seh"
+#include "util/format/tests/scanf_scenario_data.seh"
+#include "util/format/scanf_model.seh"
+#include "util/format/scanf_media.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static bool needOnlyFirstPriority;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static List /* NULL */ * functionData;
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+static void bindPointers( CallContext context, ScanedSheaf * sheaf ) {
+    int i;
+    assertion( size_List( sheaf->result ) == size_List( sheaf->place ),
+               "enrichPointers : size_List( sheaf->result ) != size_List( sheaf->place )"
+             );
+    for ( i = 0; i < size_List( sheaf->result ); i++ ) {
+        if ( type( get_List( sheaf->result, i ) ) == & type_VoidTPtrObj ) {
+            VoidTPtrObj * resultFragment;                     VoidTPtrObj * placeFragment ;
+            assertion( type( get_List( sheaf->place, i ) ) == & type_VoidTPtrObj,
+                       "enrichPointers : type( get_List( sheaf->place, i ) ) != & type_VoidTPtrObj"
+                     );
+            resultFragment = get_List( sheaf->result, i );    placeFragment = get_List( sheaf->place, i );
+            resultFragment->system  = context.system ;        placeFragment->system  = context.system ;
+            resultFragment->process = context.process;        placeFragment->process = context.process;
+            set_List( sheaf->result, i, resultFragment );     set_List( sheaf->place, i, placeFragment );
+        }
+    }
+}
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+static String * testingFuncName;
+
+enum CallSpecCode { fscanfCode, scanfCode, sscanfCode, vfscanfCode, vscanfCode, vsscanfCode };
+
+static void callSpec( CallContext context, ScanedSheaf * sheaf ) {
+    enum CallSpecCode callSpecCode;
+    ErrorCode * errno = requestErrorCode();
+    CString * fn;
+    FILETPtr stream;
+    if      ( equals( create_String( "fscanf"  ), testingFuncName ) ) { callSpecCode = fscanfCode ; }
+    else if ( equals( create_String( "scanf"   ), testingFuncName ) ) { callSpecCode = scanfCode  ; }
+    else if ( equals( create_String( "sscanf"  ), testingFuncName ) ) { callSpecCode = sscanfCode ; }
+    else if ( equals( create_String( "vfscanf" ), testingFuncName ) ) { callSpecCode = vfscanfCode; }
+    else if ( equals( create_String( "vscanf"  ), testingFuncName ) ) { callSpecCode = vscanfCode ; }
+    else if ( equals( create_String( "vsscanf" ), testingFuncName ) ) { callSpecCode = vsscanfCode; }
+    else {
+        assertion( false, "callSpec : unknown testingFuncName" );
+    }
+    // pre-call
+    switch ( callSpecCode ) {
+        case fscanfCode :
+        case vfscanfCode:
+            fn = getTestScenarioSandboxPathCh( "fscanf_vfscanfInput.txt" );
+            stream = fopen_spec( context, fn, create_CString( "w" ), errno, false );
+            fputs_spec( context, sheaf->data, stream, errno );
+            fclose_spec( context, stream, errno );
+            stream = fopen_spec( context, fn, create_CString( "r" ), errno, false );
+            break;
+        case scanfCode :
+        case vscanfCode:
+            break;
+        case sscanfCode  :
+        case vsscanfCode :
+            break;
+    }
+    setExpectedResultAndReqIds( toCharArray_String( testingFuncName ), sheaf->result, sheaf->reqIds );
+    // call
+    dotPrint( 10, 100 );
+    switch ( callSpecCode ) {
+        case fscanfCode : fscanf_spec ( context, & stream,    sheaf->format, sheaf->place,              errno, fn ); break;
+        case scanfCode  : scanf_spec  ( context,              sheaf->format, sheaf->place, sheaf->data, errno     ); break;
+        case sscanfCode : sscanf_spec ( context, sheaf->data, sheaf->format, sheaf->place,              errno     ); break;
+        case vfscanfCode: vfscanf_spec( context, & stream,    sheaf->format, sheaf->place,              errno, fn ); break;
+        case vscanfCode : vscanf_spec ( context,              sheaf->format, sheaf->place, sheaf->data, errno     ); break;
+        case vsscanfCode: vsscanf_spec( context, sheaf->data, sheaf->format, sheaf->place,              errno     ); break;
+    }
+    // post-call
+    switch ( callSpecCode ) {
+        case fscanfCode: case vfscanfCode: fclose_spec( context, stream, errno ); break;
+        case scanfCode : case vscanfCode :                                        break;
+        case sscanfCode: case vsscanfCode:                                        break;
+    }
+} // callSpec
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_scenario( char * name )
+{
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir( getContext() ) );
+
+    //needOnlyFirstPriority = false;
+    needOnlyFirstPriority = true;
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    if ( ( functionData = createContexts() ) == NULL ) { return false; }
+    if ( ( scanedSheafs = createScanedSheafs() ) == NULL ) { return false; }
+    setFinishMode( UNTIL_END );
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    removeTestScenarioSandboxDir( getContext() ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init_fscanf_scenario ( int argc, char ** argv ) { return init_scenario( "fscanf"  ); }
+static bool init_scanf_scenario  ( int argc, char ** argv ) { return init_scenario( "scanf"   ); }
+static bool init_sscanf_scenario ( int argc, char ** argv ) { return init_scenario( "sscanf"  ); }
+static bool init_vfscanf_scenario( int argc, char ** argv ) { return init_scenario( "vfscanf" ); }
+static bool init_vscanf_scenario ( int argc, char ** argv ) { return init_scenario( "vscanf"  ); }
+static bool init_vsscanf_scenario( int argc, char ** argv ) { return init_scenario( "vsscanf" ); }
+
+static void finish_fscanf_scenario ( void ) finish_scenario( fscanf  )
+static void finish_scanf_scenario  ( void ) finish_scenario( scanf   )
+static void finish_sscanf_scenario ( void ) finish_scenario( sscanf  )
+static void finish_vfscanf_scenario( void ) finish_scenario( vfscanf )
+static void finish_vscanf_scenario ( void ) finish_scenario( vscanf  )
+static void finish_vsscanf_scenario( void ) finish_scenario( vsscanf )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool scan_scen()
+{
+    iterate ( int contextI = 0; contextI < ( needOnlyFirstPriority ? 1 : size_List( functionData ) ); contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int scanedSheafI = 0; scanedSheafI < size_List( scanedSheafs ); scanedSheafI++; )
+        // iterate ( int scanedSheafI = 0; scanedSheafI <= 0; scanedSheafI++; )
+        {
+            ScanedSheaf * scanedSheaf = get_List( scanedSheafs, scanedSheafI );
+            bindPointers( * contextObj, scanedSheaf );
+            callSpec( * contextObj, scanedSheaf );
+        } // iterate scanedSheafI
+    } // iterate contextI
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm fscanf_scenario =
+{
+    .init              = init_fscanf_scenario  ,
+    .finish            = finish_fscanf_scenario,
+    .actions           = { scan_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm scanf_scenario =
+{
+    .init              = init_scanf_scenario  ,
+    .finish            = finish_scanf_scenario,
+    .actions           = { scan_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm sscanf_scenario =
+{
+    .init              = init_sscanf_scenario  ,
+    .finish            = finish_sscanf_scenario,
+    .actions           = { scan_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vfscanf_scenario =
+{
+    .init              = init_vfscanf_scenario  ,
+    .finish            = finish_vfscanf_scenario,
+    .actions           = { scan_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vscanf_scenario =
+{
+    .init              = init_vscanf_scenario  ,
+    .finish            = finish_vscanf_scenario,
+    .actions           = { scan_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vsscanf_scenario =
+{
+    .init              = init_vsscanf_scenario  ,
+    .finish            = finish_vsscanf_scenario,
+    .actions           = { scan_scen,
+                           NULL
+                         }
+};
+
+#ifdef UTIL_FORMAT_SCANF_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initIoFileSubsystem();
+    initProcessMetaFsSubsystem();
+    initFsDirSubsystem();
+    initProcessProcessSubsystem();
+    initIoFstreamSubsystem();
+
+    initUtilFormatScanfSubsystem();
+}
+
+bool util_format_scanf_local( int argc, char ** argv )
+{/**/
+    fscanf_scenario ( argc, argv );
+    scanf_scenario  ( argc, argv );
+    sscanf_scenario ( argc, argv );
+    vfscanf_scenario( argc, argv );
+    vscanf_scenario ( argc, argv );
+    vsscanf_scenario( argc, argv );/**/
+    return true;
+}
+
+int main( int argc, char ** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    util_format_scanf_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

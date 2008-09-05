@@ -1,0 +1,3463 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "atl/long.h"
+
+#include "config/pthread_config.seh"
+#include "pthread/pthread/pthread_pthread_config.h"
+#include "pthread/pthread/pthread_model.seh"
+#include "pthread/tls/tls_model.seh"
+#include "process/process/process_model.seh"
+#include "config/system_config.seh"
+#include "atl/integer.h"
+#include "data/errno_model.seh"
+#include "config/interpretation.seh"
+
+#pragma SEC subsystem pthread "pthread.pthread"
+
+
+
+/*
+   The group of functions 'pthread.pthread' consists of:
+       __errno_location [2]         +
+       _pthread_cleanup_pop [1]     +
+       _pthread_cleanup_push [1]    +
+       pthread_cancel [2]           +
+       pthread_create [2]           +
+       pthread_detach [2]           +
+       pthread_equal [2]            +
+       pthread_exit [2]             +
+       pthread_join [2]             +
+       pthread_once [2]             +
+       pthread_self [2]             +
+       pthread_setcancelstate [2]   +
+       pthread_setcanceltype [2]    +
+       pthread_testcancel [2]       +
+*/
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  __errno_location -- address of errno variable
+
+SYNOPSIS
+
+  int * __errno_location(void);
+
+DESCRIPTION
+
+  The __errno_location() function shall return the address of the errno
+  variable for the current thread.
+
+  __errno_location() is not in the source standard; it is only in the binary
+  standard.
+
+*/
+
+specification
+VoidTPtr __errno_location_spec(CallContext context)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Process state is not NULL", ps!=NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if (size_Map(ps->threads)>1)
+        {
+            return { SeveralThreads, "Several threads in the process" };
+        }
+        else /* if (size_Map(ps->threads)==1) */
+        {
+            return { OneThread, "The only one thread in the process" };
+        }
+    }
+    post
+    {
+        /*
+        * The __errno_location() function shall return
+        * the address of the errno variable for the current
+        * thread.
+        */
+        REQ_UNCHECKABLE("__errno_location.01",
+            "Do not know address of the errno variable");
+
+        /* [Implicit postcondition] */
+        REQ("", "The return value is not NULL",
+            !isNULL_VoidTPtr(__errno_location_spec));
+
+        /* [Implicit postcondition] */
+        REQ("", "Memory pointed to by return value is available in the context",
+            isValidPointer(context, __errno_location_spec));
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    _pthread_cleanup_pop
+
+NAME
+
+    _pthread_cleanup_pop -- establish cancellation handlers
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    void _pthread_cleanup_pop(struct _pthread_cleanup_buffer *, int);
+
+DESCRIPTION
+
+    The _pthread_cleanup_pop() function provides an implementation of the
+    pthread_cleanup_pop() macro described in ISO POSIX (2003).
+
+    The _pthread_cleanup_pop() function is not in the source standard; it is
+    only in the binary standard.
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_cleanup_pop, pthread_cleanup_push - establish cancellation handlers
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    void pthread_cleanup_pop(int execute);
+    void pthread_cleanup_push(void (*routine)(void*), void *arg);
+
+DESCRIPTION
+
+    The pthread_cleanup_pop() function shall remove the routine at the top of
+    the calling thread's cancellation cleanup stack and optionally invoke it
+    (if execute is non-zero).
+
+    The pthread_cleanup_push() function shall push the specified cancellation
+    cleanup handler routine onto the calling thread's cancellation cleanup
+    stack.
+
+    The cancellation cleanup handler shall be popped from the
+    cancellation cleanup stack and invoked with the argument arg when:
+
+        The thread exits (that is, calls pthread_exit()).
+
+        The thread acts upon a cancellation request.
+
+        The thread calls pthread_cleanup_pop() with a non-zero execute argument.
+
+    These functions may be implemented as macros. The application shall ensure
+    that they appear as statements, and in pairs within the same lexical scope
+    (that is, the pthread_cleanup_push() macro may be thought to expand to a
+    token list whose first token is '{' with pthread_cleanup_pop() expanding
+    to a token list whose last token is the corresponding '}' ).
+
+    The effect of calling longjmp() or siglongjmp() is undefined if there have
+    been any calls to pthread_cleanup_push() or pthread_cleanup_pop() made
+    without the matching call since the jump buffer was filled. The effect of
+    calling longjmp() or siglongjmp() from inside a cancellation cleanup
+    handler is also undefined unless the jump buffer was also filled in the
+    cancellation cleanup handler.
+
+    The effect of the use of return, break, continue, and goto to prematurely
+    leave a code block described by a pair of pthread_cleanup_push() and
+    pthread_cleanup_pop() functions calls is undefined.
+
+RETURN VALUE
+
+    The pthread_cleanup_push() and pthread_cleanup_pop() functions shall not
+    return a value.
+
+ERRORS
+
+    No errors are defined.
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification typedef struct PThreadCleanupArg PThreadCleanupArg = {};
+
+PThreadCleanupArg *create_PThreadCleanupArg(
+        VoidTPtr arg
+        )
+{
+    PThreadCleanupArg *res = create(&type_PThreadCleanupArg, arg);
+    return res;
+}
+
+specification
+void _pthread_cleanup_pop_spec(CallContext context, IntT execute)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        if(execute==0)
+            return { Pop0, "Popping without executing" };
+        else
+            return { Popn0, "Popping with executing" };
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onPThreadCleanupPop(CallContext context, IntT execute)
+{
+    ThreadState* curr = getThreadState_CallContext(context);
+    startBlockedCall(context, clone(curr->cleanupArgs));
+    curr->numberOfPopPushBraces--;
+
+    if(execute!=0)
+        curr->numberOfExecutableFunctions++;
+    else
+        remove_List(curr->cleanupArgs, 0);
+
+    VERBOSE("pop_state: brac==%d, exec==%d\n", curr->numberOfPopPushBraces,
+                        curr->numberOfExecutableFunctions);
+}
+
+specification typedef struct PThreadCleanupPopReturnType
+                        PThreadCleanupPopReturnType = {};
+
+PThreadCleanupPopReturnType *create_PThreadCleanupPopReturnType(
+        CallContext context,
+        IntT arg
+        )
+{
+    PThreadCleanupPopReturnType *res = create(&type_PThreadCleanupPopReturnType,
+        context, arg);
+    return res;
+}
+
+
+reaction PThreadCleanupPopReturnType* _pthread_cleanup_pop_return(void)
+{
+    post
+    {
+        CallContext context = _pthread_cleanup_pop_return->context;
+        ThreadState* curr = getThreadState_CallContext(context);
+        List* prev_stack=finishBlockedCall(context);
+
+        remove_List(prev_stack, 0);
+
+        if(curr->terminating==PTHREAD_TERMINATING)
+        {
+        /*
+         * The cancellation cleanup handler shall be popped from the
+         * cancellation cleanup stack and invoked with the argument arg when:
+         *
+         * The thread exits (that is, calls pthread_exit()).
+         */
+        /*
+         * The cancellation cleanup handler shall be popped from the
+         * cancellation cleanup stack and invoked with the argument arg when:
+         *
+         * The thread acts upon a cancellation request.
+         */
+        REQ("pthread_cleanup.01.01;pthread_cleanup.01.02",
+            "Cleanup function popped",
+            equals(prev_stack, curr->cleanupArgs));
+        }
+
+        /*
+         * The pthread_cleanup_pop() function shall remove the routine at the
+         * top of the calling thread's cancellation cleanup stack
+         * and optionally invoke it (if execute is non-zero).
+         */
+        /*
+         * The cancellation cleanup handler shall be popped from the
+         * cancellation cleanup stack and invoked with the argument arg when:
+         *
+         * The thread calls pthread_cleanup_pop() with a non-zero execute
+         * argument.
+         */
+        REQ("_pthread_cleanup_pop.pthread_cleanup_pop.01;pthread_cleanup.01.03",
+            "Cleanup function popped",
+            equals(prev_stack, curr->cleanupArgs));
+
+        /*
+         * The _pthread_cleanup_pop() function provides an implementation of the
+         * pthread_cleanup_pop() macro described in ISO POSIX (2003).
+         */
+        REQ( "__pthread_cleanup_pop.30",
+             "The _pthread_cleanup_pop() function provides an implementation of the pthread_cleanup_pop() macro",
+             GENERAL_REQ( "__pthread_cleanup_pop.pthread_cleanup_pop.*" )
+           );
+
+        return true;
+    }
+}
+void onPThreadCleanupPopReturn(CallContext context, IntT execute)
+{
+
+}
+
+specification typedef struct PThreadCleanupReturnType
+                        PThreadCleanupReturnType = {};
+
+PThreadCleanupReturnType *create_PThreadCleanupReturnType(
+        CallContext context,
+        VoidTPtr arg
+        )
+{
+    PThreadCleanupReturnType *res = create(&type_PThreadCleanupReturnType,
+        context, arg);
+    return res;
+}
+
+
+reaction PThreadCleanupReturnType* _pthread_cleanup_return(void)
+{
+    post
+    {
+        return true;
+    }
+}
+
+void onPThreadCleanupReturn(CallContext context, VoidTPtr arg)
+{
+    ThreadState* curr = getThreadState_CallContext(context);
+
+    VERBOSE("cleanup_ret_state: exec==%d   thread==%d\n",
+        curr->numberOfExecutableFunctions, context.thread);
+
+    if(
+        equals_VoidTPtr( arg,
+        ((PThreadCleanupArg*)get_List(curr->cleanupArgs, 0))->arg
+                        )
+      )
+        remove_List(curr->cleanupArgs, 0);
+    else
+        setBadVerdict("Error: bad order of executing cleanup functions");
+
+    curr->numberOfExecutableFunctions--;
+    checkThreadDelete(curr);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    _pthread_cleanup_push -- establish cancellation handlers
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    void _pthread_cleanup_push(struct _pthread_cleanup_buffer *,
+    void (*) (void *), void *);
+
+DESCRIPTION
+
+    The _pthread_cleanup_push() function provides an implementation of the
+    pthread_cleanup_push() macro described in ISO POSIX (2003).
+
+    The _pthread_cleanup_push() function is not in the source standard; it is
+    only in the binary standard.
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_cleanup_pop, pthread_cleanup_push - establish cancellation handlers
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    void pthread_cleanup_pop(int execute);
+    void pthread_cleanup_push(void (*routine)(void*), void *arg);
+
+DESCRIPTION
+
+    The pthread_cleanup_pop() function shall remove the routine at the top of
+    the calling thread's cancellation cleanup stack and optionally invoke it
+    (if execute is non-zero).
+
+    The pthread_cleanup_push() function shall push the specified cancellation
+    cleanup handler routine onto the calling thread's cancellation cleanup
+    stack.
+
+    The cancellation cleanup handler shall be popped from the
+    cancellation cleanup stack and invoked with the argument arg when:
+
+        The thread exits (that is, calls pthread_exit()).
+
+        The thread acts upon a cancellation request.
+
+        The thread calls pthread_cleanup_pop() with a non-zero execute argument.
+
+    These functions may be implemented as macros. The application shall ensure
+    that they appear as statements, and in pairs within the same lexical scope
+    (that is, the pthread_cleanup_push() macro may be thought to expand to a
+    token list whose first token is '{' with pthread_cleanup_pop() expanding
+    to a token list whose last token is the corresponding '}' ).
+
+    The effect of calling longjmp() or siglongjmp() is undefined if there have
+    been any calls to pthread_cleanup_push() or pthread_cleanup_pop() made
+    without the matching call since the jump buffer was filled. The effect of
+    calling longjmp() or siglongjmp() from inside a cancellation cleanup
+    handler is also undefined unless the jump buffer was also filled in the
+    cancellation cleanup handler.
+
+    The effect of the use of return, break, continue, and goto to prematurely
+    leave a code block described by a pair of pthread_cleanup_push() and
+    pthread_cleanup_pop() functions calls is undefined.
+
+RETURN VALUE
+
+    The pthread_cleanup_push() and pthread_cleanup_pop() functions shall not
+    return a value.
+
+ERRORS
+
+    No errors are defined.
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification
+void _pthread_cleanup_push_spec(CallContext context, VoidTPtr arg)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        ThreadState* curr, *prev;
+        curr=getThreadState_CallContext(context);
+        prev=@clone(getThreadState_CallContext(context));
+        add_List(prev->cleanupArgs, 0, create_PThreadCleanupArg(arg));
+
+        /*
+         * The pthread_cleanup_push() function shall push the specified
+         * cancellation cleanup handler routine onto the calling
+         * thread's cancellation cleanup stack.
+         */
+
+        REQ("_pthread_cleanup_push.pthread_cleanup_push.01",
+            "Function shall be pushed onto cancellation stack",
+                equals(prev->cleanupArgs, curr->cleanupArgs));
+
+        /*
+         * The _pthread_cleanup_push() function provides an implementation of the
+         * pthread_cleanup_push() macro described in ISO POSIX (2003).
+         */
+        REQ( "__pthread_cleanup_push.30",
+             "The _pthread_cleanup_push() function provides an implementation of the pthread_cleanup_push() macro",
+             GENERAL_REQ( "__pthread_cleanup_push.pthread_cleanup_push.*" )
+           );
+
+        return true;
+    }
+}
+
+void onPThreadCleanupPush(CallContext context, VoidTPtr arg)
+{
+    ThreadState* curr = getThreadState_CallContext(context);
+    curr->numberOfPopPushBraces++;
+    add_List(curr->cleanupArgs, 0, create_PThreadCleanupArg(arg));
+
+    VERBOSE("push_state: brac==%d, exec==%d\n", curr->numberOfPopPushBraces,
+                    curr->numberOfExecutableFunctions);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_cancel - cancel execution of a thread
+
+SYNOPSIS
+
+  #include <pthread.h>
+  int pthread_cancel(pthread_t thread);
+
+DESCRIPTION
+
+  The pthread_cancel() function shall request that thread be canceled. The
+  target thread's cancelability state and type determines when the cancellation
+  takes effect. When the cancellation is acted on, the cancellation cleanup
+  handlers for thread shall be called. When the last cancellation cleanup
+  handler returns, the thread-specific data destructor functions shall be
+  called for thread. When the last destructor function returns, thread shall be
+  terminated.
+
+  The cancellation processing in the target thread shall run asynchronously
+  with respect to the calling thread returning from pthread_cancel().
+
+RETURN VALUE
+
+  If successful, the pthread_cancel() function shall return zero; otherwise,
+  an error number shall be returned to indicate the error.
+
+ERRORS
+  The pthread_cancel() function may fail if:
+
+    [ESRCH]
+    No thread could be found corresponding to that specified by the given
+    thread ID.
+
+  The pthread_cancel() function shall not return an error code of [EINTR].
+*/
+
+specification
+IntT pthread_cancel_spec(CallContext context, ThreadId thread)
+{
+    ProcessState*  ps=getProcessState_CallContext(context);
+    ThreadState*   thState=getThread(thread);
+
+    pre
+    {
+        if (thState!=NULL)
+        {
+            thState=clone(thState);
+        }
+        return true;
+    }
+    coverage C_Running
+    {
+        if (thState!=NULL)
+        {
+            return { ThreadFound, "The thread is found" };
+        }
+        else
+        {
+            return { ThreadNotFound, "The thread is not found" };
+        }
+    }
+    coverage C_Cancelstate
+    {
+        if (thState!=NULL)
+        {
+            if (thState->cancelstate == SUT_PTHREAD_CANCEL_ENABLE)
+            {
+                return { CancelEnable,
+                    "Cancel state of the thread is PTHREAD_CANCEL_ENABLE" };
+            }
+            else /* if (thState->cancelstate == SUT_PTHREAD_CANCEL_DISABLE) */
+            {
+                return { CancelDisable,
+                    "Cancel state of the thread is PTHREAD_CANCEL_DISABLE" };
+            }
+        }
+        else
+        {
+            return { ThreadNotFoundState, "The thread is not found" };
+        }
+    }
+    coverage C_Canceltype
+    {
+        if (thState!=NULL)
+        {
+            if (thState->canceltype == SUT_PTHREAD_CANCEL_DEFERRED)
+            {
+                return { CancelDeffered,
+                    "Cancel type of the thread is PTHREAD_CANCEL_DEFERRED" };
+            }
+            else /* if (thState->cancelstate == SUT_PTHREAD_CANCEL_ASYNCHRONOUS) */
+            {
+                return { CancelAsync,
+                    "Cancel type of the thread is PTHREAD_CANCEL_ASYNCHRONOUS" };
+            }
+        }
+        else
+        {
+            return { ThreadNotFoundType, "The thread is not found" };
+        }
+    }
+
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate
+        * the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_CANCEL, "pthread_cancel.07.02",
+            pthread_cancel_spec!=0, pthread_cancel_spec)
+            /*
+            * The pthread_cancel() function may fail if:
+            * [ESRCH]
+            *
+            * No thread could be found corresponding to that specified by the given
+            * thread ID.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_CANCEL, ESRCH,"pthread_cancel.08.01", thState==NULL)
+
+            /*
+            * The pthread_cancel() function shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_CANCEL, EINTR,"pthread_cancel.09")
+
+        ERROR_END()
+
+
+        /*
+        * If successful, the pthread_cancel() function shall return zero;
+        */
+        REQ("pthread_cancel.07.01", "Function shall return zero",
+        pthread_cancel_spec==0);
+
+        /*
+        * The pthread_cancel() function shall request that thread be canceled.
+        */
+        IMPLEMENT_REQ("pthread_cancel.01");
+
+        /*
+        * The target thread's cancelability state and type determines when the
+        * cancellation takes effect.
+        */
+        REQ("pthread_cancel.02", "", TODO_REQ());
+
+        /*
+        * When the last destructor function returns, thread shall be terminated.
+        */
+        REQ("pthread_cancel.05", "", TODO_REQ());
+
+        /*
+        * The cancellation processing in the target thread shall run
+        * asynchronously with respect to the calling thread returning from
+        * pthread_cancel().
+        */
+        REQ_UNCHECKABLE("pthread_cancel.06",
+            "Can not get into threads scheduling");
+
+
+        return true;
+    }
+}
+
+
+void onPThreadCancel(CallContext context, ThreadId thread,
+                     IntT pthread_cancel_spec)
+{
+    ThreadState*   thState=getThreadState_CallContext(thread);
+    ProcessState* ps=getProcessState_CallContext(context);
+    Set* startedThreads=ps->startedThreads;
+    StartedThread* foundThread=searchThreadsSet(ps->startedThreads, thread);
+
+
+    if (pthread_cancel_spec==0)
+    {
+        if (foundThread!=NULL)
+        {
+            remove_Set(startedThreads, foundThread);
+        }
+        if (thState!=NULL)
+        {
+            thState->terminating=PTHREAD_CANCELLING;
+        }
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_create - thread creation
+
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_create(pthread_t *restrict thread,
+           const pthread_attr_t *restrict attr,
+           void *(*start_routine)(void*), void *restrict arg);
+
+DESCRIPTION
+
+    The pthread_create() function shall create a new thread, with attributes
+    specified by attr, within a process. If attr is NULL, the default
+    attributes shall be used. If the attributes specified by attr are modified
+    later, the thread's attributes shall not be affected. Upon successful
+    completion, pthread_create() shall store the ID of the created thread in
+    the location referenced by thread.
+
+    The thread is created executing start_routine with arg as its sole
+    argument. If the start_routine returns, the effect shall be as if there
+    was an implicit call to pthread_exit() using the return value of
+    start_routine as the exit status. Note that the thread in which main() was
+    originally invoked differs from this. When it returns from main(), the
+    effect shall be as if there was an implicit call to exit() using the return
+    value of main() as the exit status.
+
+    The signal state of the new thread shall be initialized as follows:
+
+        * The signal mask shall be inherited from the creating thread.
+        * The set of signals pending for the new thread shall be empty.
+
+    The alternate stack shall not be inherited.
+
+    The floating-point environment shall be inherited from the creating thread.
+
+    If pthread_create() fails, no new thread is created and the contents of the
+    location referenced by thread are undefined.
+
+    If _POSIX_THREAD_CPUTIME is defined, the new thread shall have a CPU-time
+    clock accessible, and the initial value of this clock shall be set to zero.
+
+RETURN VALUE
+
+    If successful, the pthread_create() function shall return zero; otherwise,
+    an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_create() function shall fail if:
+
+    [EAGAIN]
+        The system lacked the necessary resources to create another thread, or
+        the system-imposed limit on the total number of threads in a process
+        {PTHREAD_THREADS_MAX} would be exceeded.
+
+    [EPERM]
+        The caller does not have appropriate permission to set the required
+        scheduling parameters or scheduling policy.
+
+    The pthread_create() function may fail if:
+
+    [EINVAL]
+        The attributes specified by attr are invalid.
+
+    The pthread_create() function shall not return an error code of [EINTR].
+*/
+
+specification
+IntT  pthread_create_spec(CallContext context, ThreadId* thread, 
+                                PThreadAttrTPtr attr, VoidTPtr arg)
+{
+    PThreadAttr* pattr=NULL;
+    SizeT minSize = getSystemConfigurationValue(context, 
+                                                SUT_SC_THREAD_STACK_MIN);
+    ProcessState* ps=getProcessState_CallContext(context);
+    IntT oldSizeThreads=size_Map(ps->threads);
+
+    pre
+    {
+        /* [Consistency of test site] */
+        REQ("", "Pointer to thread shall not be NULL",thread!=NULL);
+        
+        if(!isNULL_VoidTPtr(attr))
+        {
+            /* [Consistency of test suite] */
+            REQ("", "Memory pointed to by attr is available in the context", 
+                isValidPointer(context, attr) );
+            
+            /* [Implicit precondition] */
+            REQ("", "Memory pointed to by attr is enough", 
+                sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+            
+            pattr=getPThreadAttr(attr);
+        }
+        
+        return true;
+    }
+    coverage C_NULL
+    {
+        if (isNULL_VoidTPtr(attr))
+        {
+            return { NullAttr, "Parameter is NULL" };
+        }
+        else
+        {
+            return { NotNullAttr, "Parameter is not NULL" };
+            
+        }
+    }
+    coverage C_DetachState
+    {
+        if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+            create_Integer(DETACHSTATE)), create_Integer(true)))
+        {
+            if(pattr->detachstate==SUT_PTHREAD_CREATE_DETACHED) 
+                return {ValidParamDetached, 
+                "Detachstate parameter is PTHREAD_CREATE_DETACHED"};
+            else /* if(pattr->detachstate==SUT_PTHREAD_CREATE_JOINABLE) */
+                return {ValidParamJoinable, 
+                "Detachstate parameter is PTHREAD_CREATE_JOINABLE"};
+        }
+        else
+        {
+            return {NotDefinedDet, "Detachstate parameter is not defined"};
+        }
+    }
+    coverage C_GuardSize
+    {
+        if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+            create_Integer(GUARDSIZE)), create_Integer(true)))
+        {
+            if(pattr->guardsize==0)
+                return {GuardZero, "Guard size is zero"};
+            else /* if(pattr->guardsize!=0) */
+                return {NotZeroGuard, "Guard size is not zero"};
+        }
+        else
+        {
+            return {NotDefinedGuard, "Guard size parameter is not defined"};
+        }
+    }
+    coverage C_InheritedSched
+    {
+        if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+            create_Integer(INHERITSCHED)), create_Integer(true)))
+        {
+            if(pattr->inheritsched==SUT_PTHREAD_INHERIT_SCHED)
+                return {ValidParamInh, 
+                "Inheritsched parameter is PTHREAD_INHERIT_SCHED"};
+            else /* if(pattr->inheritsched==SUT_PTHREAD_EXPLICIT_SCHED) */
+                return {ValidParamExpl, 
+                "Inheritsched parameter is PTHREAD_EXPLICIT_SCHED"};
+        }
+        else
+        {
+            return {NotDefinedInh, "Inheritsched parameter is not defined"};
+        }
+    }
+
+    coverage C_SchedParam
+    {
+        if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+            create_Integer(SHEDPAR)), create_Integer(true)))
+        {
+            return {DefinedSched, "Scheduling parameter is defined"};
+        }
+        else
+        {
+            return {NotDefinedSched, "Scheduling parameter is not defined"};
+        }
+    }
+
+// Test system halts on pthread_create() if uncommented
+/*
+    coverage C_Policy
+    {
+      if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+        create_Integer(POLICY)), create_Integer(true)))
+      {
+        if(pattr->policy==SUT_SCHED_FIFO)
+          return {ValidParamFifo, 
+          "Policy parameter is SCHED_FIFO"};
+        else if(pattr->policy==SUT_SCHED_RR)
+          return {ValidParamRR, 
+          "Policy parameter is SCHED_RR"};
+        else if(pattr->policy==SUT_SCHED_OTHER)
+          return {ValidParamOther, 
+          "Policy parameter is SCHED_OTHER"}; */
+//        else /* if(pattr->policy==SUT_SCHED_SPORADIC) */
+/*          return {ValidParamSporadic, 
+          "Policy parameter is SCHED_SPORADIC"};
+      }
+      else
+      {
+        return {NotDefinedPolicy, "Inheritsched parameter is not defined"};
+      }
+    } */
+    coverage C_Scope
+    {
+        if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+            create_Integer(CONTENTIONSCOPE)), create_Integer(true)))
+        {
+            if(pattr->contentionscope==SUT_PTHREAD_SCOPE_SYSTEM)
+                return {ValidParamSys, 
+                "Scope parameter is PTHREAD_SCOPE_SYSTEM"}; 
+            // Unsupported value under Fedora
+            //        else /* if(pattr->contentionscope==SUT_PTHREAD_SCOPE_PROCESS) */
+            /*          return {ValidParamProc, 
+            "Scope parameter is PTHREAD_SCOPE_PROCESS"}; */
+        } 
+        else
+        {
+            return {NotDefinedScope, "Scope parameter is not defined"};
+        }
+    }
+    coverage C_Stackaddr
+    {
+        if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+            create_Integer(STACKADDR)), create_Integer(true)))
+        {
+            return { StackAddrDefined, 
+                "Stack address parameter is defined" };
+        }
+        else
+        {
+            return {NotDefinedStackAddr, "Stack address parameter is not defined"};
+        }
+        
+    }
+    coverage C_Stacksize
+    {
+        if (pattr!=NULL && equals(get_Map(pattr->isInitialized, 
+            create_Integer(STACKSIZE)), create_Integer(true)))
+        {
+            return { StackSizeDefined, 
+                "The value of stacksize is set" };
+        }
+        else
+        {
+            return {NotDefinedStackSize, "Stack size parameter is not defined"};
+        }
+    }
+    
+    post
+    {
+        ps=getProcessState_CallContext(context);
+
+        if (pthread_create_spec!=0)
+        {
+            /*
+             * If pthread_create() fails, no new thread is created and the 
+             * contents of the location referenced by thread are undefined.
+             */
+            REQ("pthread_create.11", 
+                "If fails, no new thread is created", 
+                size_Map(ps->threads)==oldSizeThreads);
+        }
+
+        /*
+        * otherwise, an error number shall be returned to indicate
+        * the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_CREATE, "pthread_create.13.02", 
+          pthread_create_spec!=0, pthread_create_spec)
+
+            /*
+             * The pthread_create() function shall fail if:
+             *
+             * [EAGAIN]
+             *
+             * The system lacked the necessary resources to create another thread, 
+             * or the system-imposed limit on the total number of threads
+             * in a process {PTHREAD_THREADS_MAX} would be exceeded.
+             *
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_CREATE, EAGAIN,
+              "pthread_create.14.01", "Can not check necessary resources")
+
+            /*
+             * The pthread_create() function shall fail if:
+             *
+             * [EPERM]
+             *
+             * The caller does not have appropriate permission to set the required 
+             * scheduling parameters or scheduling policy.
+             *
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_CREATE, EPERM,
+              "pthread_create.14.02", "Can not check permisions")
+            /*
+             *
+             * The pthread_create() function may fail if:
+             *
+             *
+             * [EINVAL]
+             *
+             * The attributes specified by attr are invalid.
+             *
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_CREATE, EINVAL,
+                "pthread_create.15.01", "Impossible to validate attributes")
+
+            /*
+             * The pthread_create() function shall not return an error code 
+             * of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_CREATE, EINTR,"pthread_create.16")
+
+        ERROR_END()
+
+        /*
+        * If successful, the pthread_create() function shall return zero;
+        */
+        REQ("pthread_create.13.01", "Function shall return zero",
+            pthread_create_spec==0);
+
+        /*
+         * If the attributes specified by attr are modified later, the
+         * thread's attributes shall not be affected.
+         */
+        REQ_UNCHECKABLE("pthread_create.03", 
+            "Can not retrieve thread attributes");
+
+
+        /*
+         * If the start_routine returns,
+         * the effect shall be as if there was an implicit call to 
+         * pthread_exit() using the return value of start_routine as the exit 
+         * status.
+         */
+        REQ("pthread_create.06", "", TODO_REQ());
+
+        /*
+         *
+         * The alternate stack shall not be inherited.
+         */
+        REQ("pthread_create.09", "", TODO_REQ());
+
+        /*
+         * The floating-point environment shall be inherited from the creating 
+         * thread.
+         */
+        REQ("pthread_create.10", "", TODO_REQ());
+
+
+        /*
+         * If _POSIX_THREAD_CPUTIME is defined, the new thread shall have a 
+         * CPU-time clock accessible, and the initial value of this clock
+         * shall be set to zero.
+         */
+        REQ("pthread_create.12", "", TODO_REQ());
+
+        {
+          ThreadState* curThState=getThreadState_CallContext(context);
+          StartedThread* foundThread=searchThreadsSet(ps->startedThreads, *thread);
+       
+            if (pattr!=NULL)
+            {
+              /*
+               * The pthread_create() function shall create a new thread, with 
+               * attributes specified by attr, within a process.
+               */
+              REQ("?pthread_create.01", 
+                  "Attribute of the created thread shall be valid", 
+                  equals(foundThread->attr, pattr));
+            }
+            else
+            {
+              /*
+               * If
+               * attr is NULL, the default attributes shall be used.
+               */
+              REQ("?pthread_create.02", 
+                  "Attribute of the created thread shall be NULL", 
+                  equals(foundThread->attr, create_PThreadAttrPattr(context, 
+                  NULL_VoidTPtr)));
+            }
+
+            {
+                bool allSpecNull = true;
+                int i;
+                
+                /* [thread specifics]
+                 * Upon thread creation, the value NULL shall be associated with all defined keys 
+                 * in the new thread.
+                 */
+                for(i=0;i<size_Map(curThState->key_specific);i++)
+                {
+                    ThreadSpecific * thr_spec = get_Map(curThState->key_specific,key_Map(curThState->key_specific, i));
+                    if( !equals_VoidTPtr(thr_spec->address, NULL_VoidTPtr) )
+                    {
+                        allSpecNull = false;
+                        break;
+                    }
+                }
+                REQ("?pthread_create.pthread_key_create.03", 
+                    "NULL shall be associated with all defined keys", 
+                    allSpecNull);
+            }
+        }
+
+        return true;
+    }
+}
+
+bool isSignalMaskInherited(ProcessState* ps, ThreadState* thState);
+
+specification typedef struct StartedThread StartedThread = {};
+
+StartedThread *create_StartedThread(
+            VoidTPtr arg,
+            PThreadAttr* attr,
+            ThreadId thid)
+{
+    StartedThread *res = create(&type_StartedThread, arg, attr, thid);
+    return res;
+}
+
+void onPThreadCreate(CallContext context, ThreadId* thread, 
+                     PThreadAttrTPtr attr, VoidTPtr arg, 
+                     IntT pthread_create_spec)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    Set* startedThreads=ps->startedThreads;
+    
+    if (pthread_create_spec==0)
+    {
+        if (!isNULL_VoidTPtr(attr))
+        {
+            add_Set(startedThreads, create_StartedThread( arg, 
+                getPThreadAttr(attr), *thread));
+        }
+        else
+        {
+            add_Set(startedThreads, create_StartedThread( arg, 
+                create_PThreadAttrPattr(context, NULL_VoidTPtr), *thread));
+        }
+    }
+}
+
+specification typedef struct PThreadStartedEventType 
+                      PThreadStartedEventType = {};
+
+PThreadStartedEventType *create_PThreadStartedEventType(
+            CallContext      context,
+            VoidTPtr         arg
+        )
+{
+    PThreadStartedEventType *res = 
+        create(&type_PThreadStartedEventType, context, arg);
+    return res;
+}
+
+
+reaction PThreadStartedEventType* pthread_started_event(void)
+{
+    post
+    {
+        CallContext    context=pthread_started_event->context;
+        ThreadState*   thState=getThreadState_CallContext(context);
+        ProcessState*  ps=getProcessState_CallContext(context);
+        StartedThread* foundThread=searchThreadsSet(ps->startedThreads, context);
+        
+        /*
+        * Upon successful completion, pthread_create() shall store the ID of 
+        * the created thread in the location referenced by thread.
+        */
+        REQ("pthread_create.04", "ID of the created thread shall be valid",
+            foundThread!=NULL);
+        
+        /*
+        * The thread is created executing start_routine with arg as its sole 
+        * argument.
+        */
+        REQ("pthread_create.05", "Thread argument shall be valid", 
+            equals_VoidTPtr(foundThread->arg, pthread_started_event->arg));
+        
+        /*
+        * The signal mask shall be inherited from the creating thread.
+        */
+        REQ("pthread_create.07", "Signal mask shall be inherited", 
+            isSignalMaskInherited(ps, thState));
+        
+        /*
+        * The set of signals pending for the new thread shall be empty.
+        */
+        REQ("pthread_create.08", "Set with signals shall be empty", 
+        size_Map(thState->signal_queue)==0);
+    }
+}
+
+
+void onPThreadStartedEventReturn(CallContext context)
+{
+    ProcessState*  ps= getProcessState_ThreadId(context);
+    ThreadState*   thState=create_DefaultThreadState(context);
+    StartedThread* sthread;
+    
+    if (ps==NULL)
+    {
+        setBadVerdict("Process state is NULL");
+        return;
+    }
+    
+    sthread=searchThreadsSet(ps->startedThreads, context);
+    
+    if (sthread==NULL)
+    {
+        setBadVerdict("Wrong thread started");
+        return;
+    }
+    
+    if (sthread->attr != NULL)
+    {
+        thState->attr=clone(sthread->attr);
+    }
+    else
+    {
+        thState->attr=create_PThreadAttrPattr(context, NULL_VoidTPtr);
+    }
+    put_Map(ps->threads,  create_ThreadIdObj(context), thState);
+    
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_detach - detach a thread
+
+SYNOPSIS
+
+  #include <pthread.h>
+  int pthread_detach(pthread_t thread);
+
+DESCRIPTION
+
+  The pthread_detach() function shall indicate to the implementation that 
+  storage for the thread thread can be reclaimed when that thread terminates. 
+  If thread has not terminated, pthread_detach() shall not cause it to 
+  terminate. The effect of multiple pthread_detach() calls on the same target 
+  thread is unspecified.
+
+RETURN VALUE
+
+  If the call succeeds, pthread_detach() shall return 0; otherwise, an error 
+  number shall be returned to indicate the error.
+
+ERRORS
+
+  The pthread_detach() function may fail if:
+
+  [EINVAL]
+  The implementation has detected that the value specified by thread does not 
+  refer to a joinable thread.
+
+  [ESRCH]
+  No thread could be found corresponding to that specified by the given thread 
+  ID.
+
+  The pthread_detach() function shall not return an error code of [EINTR].
+*/
+
+specification
+IntT pthread_detach_spec(CallContext context, ThreadId thread)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    ThreadId thid=thread;
+    ThreadState*   thState=getThread(thid);
+    bool active = isThreadActive(thid);
+    
+    pre
+    {
+        if (thState!=NULL)
+        {
+            /*
+            * The effect of multiple pthread_detach() calls on the same target 
+            * thread is unspecified.
+            */
+            REQ("app.pthread_detach.05", "Detach shall not be called for thread", 
+                thState->detach_called==false);
+        }
+        
+        return true;
+    }
+    coverage C_Joinable
+    {
+        if (thState==NULL)
+        {
+            return { NoThread, "Thread is not found" };
+        }
+        else /* if (thState!=NULL) */
+        {
+            if(thState->attr->detachstate==SUT_PTHREAD_CREATE_JOINABLE)
+            {
+                return {ThreadJoinable, "Thread is joinable"};
+            }
+            else /* if(thState->attr->detachstate==SUT_PTHREAD_CREATE_DETACHED)*/
+            {
+                return {ThreadDetached, "Thread is detached"};
+            }
+        }
+    }
+    post
+    {
+        
+        /*
+        * otherwise, an error number shall be returned to indicate the
+        * error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_DETACH,"pthread_detach.03.02", 
+            pthread_detach_spec!=0, pthread_detach_spec)
+            /*
+            * The pthread_detach() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The implementation has detected that the value specified by thread does 
+            * not refer to a joinable thread.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_DETACH, EINVAL,"pthread_detach.06.1", 
+            thState!=NULL && thState->attr->detachstate!=SUT_PTHREAD_CREATE_JOINABLE)
+            
+            /*
+            * The pthread_detach() function may fail if:
+            *
+            * [ESRCH]
+            *
+            * No thread could be found corresponding to that specified by the given 
+            * thread ID.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_DETACH, ESRCH,"pthread_detach.06.2", thState==NULL)
+            
+            /*
+            * The pthread_detach() function shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_ONCE, EINTR,"pthread_detach.04")
+            
+        ERROR_END()
+        
+        /*
+        * If the call succeeds, pthread_detach() shall return 0;
+        */
+        REQ("pthread_detach.03.01", "Function shall return zero",
+        pthread_detach_spec==0);
+        
+        /*
+        * The pthread_detach() function shall indicate to the implementation that 
+        * storage for the thread thread can be reclaimed when that thread 
+        * terminates.
+        */
+        IMPLEMENT_REQ("pthread_detach.01");
+        
+        /*
+        * If thread has not terminated, pthread_detach() shall not cause it to
+        * terminate.
+        */
+        REQ("pthread_detach.02", "Thread state shall be the same", 
+            active==isThreadActive(thid));
+        
+        return true;
+    }
+}
+
+void onPThreadDetach(CallContext context, ThreadId thread, 
+                     IntT pthread_detach_spec)
+{
+    ThreadState*   thState=getThread(thread);
+    if (thState!=NULL && pthread_detach_spec==0)
+    {
+        DUMP("***Detaching:$(obj)\n", create_ThreadIdObj(thState->id));
+        thState->detach_called=true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_equal - compare thread IDs
+
+SYNOPSIS
+
+  #include <pthread.h>
+  int pthread_equal(pthread_t t1, pthread_t t2); 
+
+DESCRIPTION
+
+  This function shall compare the thread IDs t1 and t2.
+
+RETURN VALUE
+
+  The pthread_equal() function shall return a non-zero value if t1 and t2 are 
+  equal; otherwise, zero shall be returned.
+
+  If either t1 or t2 are not valid thread IDs, the behavior is undefined.
+
+ERRORS
+
+  No errors are defined.
+
+  The pthread_equal() function shall not return an error code of [EINTR].
+*/
+
+specification
+IntT pthread_equal_spec(CallContext context, ThreadId t1, ThreadId t2)
+{
+    pre
+    {
+        
+        /*
+        * If either t1 or t2 are not valid thread IDs, the behavior is undefined.
+        */
+        REQ("app.pthread_equal.03", "Thread identifiers shall be valid", 
+            getThread(t1) != NULL && getThread(t2) != NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        if (t1.thread==t2.thread)
+        {
+            return { threadsEqual, "Threads are equal" };
+        }
+        else /* if (t1.thread!=t2.thread) */
+        {
+            return { threadsNotEqual, "Threads are not equal" };
+        }
+    }
+    post
+    {
+        /*
+        * The pthread_equal() function shall not return an error code of [EINTR].
+        */
+        REQ("pthread_equal.04", "Function shall not return EINTR", 
+            pthread_equal_spec!=SUT_EINTR);
+        
+        
+        if (t1.thread==t2.thread)
+        {
+            /*
+            * The pthread_equal() function shall return a non-zero value if t1 and 
+            * t2 are equal;
+            */
+            REQ("pthread_equal.01", "Return value shall be non zero", 
+                pthread_equal_spec!=0);
+        }
+        else
+        {
+            
+            /*
+            * otherwise, zero shall be returned.
+            */
+            REQ("pthread_equal.02", "Return value shall be zero", 
+                pthread_equal_spec==0);
+        }
+        
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_exit - thread termination
+
+SYNOPSIS
+
+  #include <pthread.h>
+  void pthread_exit(void *value_ptr); 
+
+DESCRIPTION
+
+  The pthread_exit() function shall terminate the calling thread and make the 
+  value value_ptr available to any successful join with the terminating thread.
+  Any cancellation cleanup handlers that have been pushed and not yet popped 
+  shall be popped in the reverse order that they were pushed and then executed.
+  After all cancellation cleanup handlers have been executed, if the thread has
+  any thread-specific data, appropriate destructor functions shall be called in
+  an unspecified order. 
+  
+  Thread termination does not release any application visible process 
+  resources, including, but not limited to, mutexes and file descriptors, 
+  nor does it perform any process-level cleanup actions, including, but not 
+  limited to, calling any atexit() routines that may exist.
+
+  An implicit call to pthread_exit() is made when a thread other than the 
+  thread in which main() was first invoked returns from the start routine that 
+  was used to create it. The function's return value shall serve as the 
+  thread's exit status.
+
+  The behavior of pthread_exit() is undefined if called from a cancellation 
+  cleanup handler or destructor function that was invoked as a result of either
+  an implicit or explicit call to pthread_exit().
+
+  After a thread has terminated, the result of access to local (auto) variables
+  of the thread is undefined. Thus, references to local variables of the 
+  exiting thread should not be used for the pthread_exit() value_ptr parameter 
+  value.
+
+  The process shall exit with an exit status of 0 after the last thread has 
+  been terminated. The behavior shall be as if the implementation called 
+  exit() with a zero argument at thread termination time.
+
+RETURN VALUE
+
+  The pthread_exit() function cannot return to its caller.
+
+ERRORS
+
+  No errors are defined.
+*/
+
+specification
+void pthread_exit_spec(CallContext context, VoidTPtr value_ptr)
+{
+    ProcessState*  ps=getProcessState_CallContext(context);
+    ThreadState*   thState=getThreadState_CallContext(context);
+    PThreadAttr*   attr;
+    
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Thread state shall be not NULL", thState!=NULL);
+        
+        attr=thState->attr;
+        
+        /* [Implicit precondition] */
+        REQ("", "Thread attribute shall be not NULL", thState->attr!=NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        if (attr->detachstate==SUT_PTHREAD_CREATE_DETACHED)
+        {
+            return { ExitDetached, "Thread has PTHREAD_CREATE_DETACHED attribute" };
+        }
+        else /* if(attr->detachstate==SUT_PTHREAD_CREATE_JOINABLE) */
+        {
+            return { ExitJoinable, "Thread has PTHREAD_CREATE_JOINABLE attribute" };
+        }
+    }
+    post
+    {
+       
+        
+        /*
+        * Thread termination does not release any application visible process 
+        * resources, including, but not limited to, mutexes and file 
+        * descriptors, nor does it perform any process-level cleanup actions, 
+        * including, but not limited to, calling any atexit() routines 
+        * that may exist.
+        */
+        REQ_UNCHECKABLE("pthread_exit.04", "Can not check all these resources");
+        
+        /*
+        * An implicit call to pthread_exit() is made when a thread other than 
+        * the thread in which main() was first invoked returns from the start 
+        * routine that was used to create it.
+        */
+        REQ("pthread_exit.05", "", TODO_REQ());
+        
+        /*
+        * The function's return value shall serve as the thread's exit status.
+        */
+        IMPLEMENT_REQ("pthread_exit.06");
+        
+        /*
+        * The process shall exit with an exit status of 0 after the last 
+        * thread has been terminated. The behavior shall be as if the 
+        * implementation called exit() with a zero argument at thread 
+        * termination time.
+        */
+        REQ("pthread_exit.07", "", TODO_REQ());
+        
+        /*
+        * The pthread_exit() function cannot return to its caller.
+        */
+        IMPLEMENT_REQ("pthread_exit.08");
+        
+        return true;
+    }
+}
+
+
+void onPThreadExit(CallContext context, VoidTPtr value_ptr)
+{
+    ThreadState*   thState=getThreadState_CallContext(context);
+    ProcessState*  ps=getProcessState_CallContext(context);
+    StartedThread* foundThread=searchThreadsSet(ps->startedThreads, context);
+    
+    if (thState==NULL)
+    {
+        setBadVerdict("Thread state is NULL");
+        return;
+    }
+    thState->terminating=PTHREAD_TERMINATING;
+    thState->exit_value=value_ptr;
+    if (foundThread!=NULL)
+    {
+        DUMP("Exit Remove thread:$(obj)\n", create_ThreadIdObj(foundThread->thid));
+        remove_Set(ps->startedThreads, foundThread);
+    }
+    checkThreadDelete(thState);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_join - wait for thread termination
+
+SYNOPSIS
+
+  #include <pthread.h>
+  int pthread_join(pthread_t thread, void **value_ptr); 
+
+DESCRIPTION
+
+  The pthread_join() function shall suspend execution of the calling thread 
+  until the target thread terminates, unless the target thread has already 
+  terminated. On return from a successful pthread_join() call with a non-NULL 
+  value_ptr argument, the value passed to pthread_exit() by the terminating 
+  thread shall be made available in the location referenced by value_ptr. 
+  
+  When a pthread_join() returns successfully, the target thread has been 
+  terminated.The results of multiple simultaneous calls to pthread_join() 
+  specifying the same target thread are undefined. 
+  
+  If the thread calling pthread_join() is canceled, then the target thread 
+  shall not be detached.
+
+  It is unspecified whether a thread that has exited but remains unjoined 
+  counts against {PTHREAD_THREADS_MAX}.
+
+RETURN VALUE
+
+  If successful, the pthread_join() function shall return zero; otherwise, an 
+  error number shall be returned to indicate the error.
+
+ERRORS
+
+  The pthread_join() function shall fail if:
+
+    [ESRCH] 
+    No thread could be found corresponding to that specified by the given 
+    thread ID. 
+
+  The pthread_join() function may fail if:
+
+    [EDEADLK] 
+    A deadlock was detected or the value of thread specifies the calling thread. 
+
+    [EINVAL] 
+    The value specified by thread does not refer to a joinable thread. 
+
+  The pthread_join() function shall not return an error code of [EINTR].
+*/
+
+specification typedef struct PThreadJoinCall PThreadJoinCall = {};
+
+PThreadJoinCall *create_PThreadJoinCall( ThreadIdObj* id )
+{
+    PThreadJoinCall *res = create(&type_PThreadJoinCall, id, getThread(*id) );
+    return res;
+}
+
+specification
+void pthread_join_spec(CallContext context, ThreadId thread, 
+                       VoidTPtr* value_ptr)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    ThreadState*   thState=getThread(thread);
+    
+    pre
+    {
+        if (thState!=NULL)
+        {
+            /*
+            * The results of multiple simultaneous calls to pthread_join() 
+            * specifying the same target thread are undefined.
+            */
+            REQ("app.pthread_join.01", "Join shall not be yet called for thread", 
+                thState->join_called==false);
+        }
+        
+        return true;
+    }
+    coverage C_Null
+    {
+        if (value_ptr==NULL)
+        {
+            return { NullPointer, "Function argument is NULL" };
+        }
+        else /* if (value_ptr!=NULL) */
+        {
+            return { NotNullPointer, "Function argument is not NULL" };
+        }
+    }
+    coverage C_Joinable
+    {
+        if (thState==NULL)
+        {
+            return { NoThread, "Thread is not found" };
+        }
+        else 
+        {
+            if(thState->attr->detachstate==SUT_PTHREAD_CREATE_JOINABLE )
+            {
+                if(thState->detach_called)
+                    return {ThreadJoinableDetached, "Thread is joinable, detach was called"};
+                else
+                    return {ThreadJoinable, "Thread is joinable"};
+            }
+            else /* if(foundThread->attr->detachstate==SUT_PTHREAD_CREATE_DETACHED)*/
+            {
+                return {ThreadDetached, "Thread is detached"};
+            }
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {
+        return true;
+    }
+}
+void onPThreadJoin(CallContext context, ThreadId thread)
+{
+    ThreadState*   thState=getThread(thread);
+    startBlockedCall(context, create_PThreadJoinCall(create_ThreadIdObj(getThreadId_CallContext(thread))));
+
+    DUMP("onPThreadJoin: $(obj) joins to $(obj)\n", create_ThreadIdObj(context), create_ThreadIdObj(thread));
+
+    if (thState!=NULL)
+    {
+        VERBOSE("detach:%d join:%d ", thState->detach_called, thState->join_called);
+        DUMP("Join. Start blocked call: $(obj)\n", create_ThreadIdObj(thState->id));
+        {
+            thState->join_called=true;
+        }
+    }
+
+}
+
+void onPThreadJoinReturn(PThreadJoinReturnType* pthread_join_return)
+{
+    PThreadJoinCall *joinCall;
+    ThreadIdObj *joinToThreadId;
+    ThreadState *joinToThreadState;
+    ThreadState *joinFromThreadState;
+
+    joinCall = findBlockedCall( getBlockedCalls(), pthread_join_return->context );
+    if(NULL==joinCall)
+    {
+        setBadVerdict("onPThreadJoinReturn: Reaction without blocked call");
+        return;
+    }
+
+    joinToThreadId = joinCall->threadId;
+    joinToThreadState = getThread(*joinToThreadId);
+
+    if(pthread_join_return->functionResult==0 && joinToThreadState==NULL)
+    {
+        setBadVerdict("onPThreadJoinReturn: joinToThreadState should be not NULL when join return no error");
+        return;
+    }
+    
+    if(joinToThreadState)
+    {
+        joinToThreadState->join_called=false;
+        if(pthread_join_return->functionResult==0)
+        {
+            joinToThreadState->join_done = true;
+        }
+        pthread_join_return->finalJoinToThreadState = joinToThreadState;
+        checkThreadDelete(joinToThreadState);
+    }
+
+    joinFromThreadState = getThread( getThreadId_CallContext( pthread_join_return->context ) );
+    if(pthread_join_return->cancel)
+    {
+        joinFromThreadState->terminating = PTHREAD_TERMINATING;
+        checkThreadDelete(joinFromThreadState);
+    }
+
+    pthread_join_return->finalJoinFromThreadState = joinFromThreadState;
+
+
+    finishBlockedCall(pthread_join_return->context);
+}
+
+specification typedef struct PThreadJoinReturnType PThreadJoinReturnType = {};
+
+PThreadJoinReturnType *create_PThreadJoinReturnType(
+                                            CallContext context, 
+                                            bool cancel,
+                                            IntT functionResult, 
+                                            VoidTPtr value_ptr,
+                                            ThreadId thread,
+                                            ThreadState *finalJoinFromThreadState,
+                                            ThreadState *finalJoinToThreadState,
+                                            bool notZeroPointer)
+{
+    PThreadJoinReturnType *res = 
+        create(&type_PThreadJoinReturnType, context, cancel, 
+            functionResult, 
+            value_ptr, 
+            thread,
+            finalJoinFromThreadState,
+            finalJoinToThreadState,
+            notZeroPointer);
+    return res;
+}
+
+
+reaction PThreadJoinReturnType* pthread_join_return(void)
+{
+    CallContext context;
+    ProcessState* ps;
+    ThreadId thid;
+    ThreadState* oldState;
+    PThreadJoinCall* jcall;
+    
+    post
+    { 
+        context=pthread_join_return->context;
+        ps=getProcessState_CallContext(context);
+        thid=pthread_join_return->thread;
+        jcall = findBlockedCall( @getBlockedCalls(), context );
+        
+        oldState=jcall->oldState;
+
+        if ( (getThreadStateCancelState(pthread_join_return->finalJoinFromThreadState) == SUT_PTHREAD_CANCEL_ENABLE) &&
+               isCancellationRequestThreadState(pthread_join_return->finalJoinFromThreadState)
+           )
+        {
+            /*
+             * Cancellation points shall occur when a thread is executing the function.
+             *
+             * Whenever a thread has cancelability enabled and
+             * a cancellation request has been made with that thread as the target,
+             * and the thread then calls any function that is a cancellation point,
+             * the cancellation request shall be acted upon before the function returns.
+             */
+            REQ( "", "Cancellation request shall be acted upon before the function returns", pthread_join_return->cancel);
+
+            return true;
+        } 
+        
+        
+
+        DUMP("join_return. thid:$(obj) notZero:%d fresult:%d\n", 
+            create_ThreadIdObj(thid),
+            (int)pthread_join_return->notZeroPointer, 
+            (int)pthread_join_return->functionResult);
+        
+        /*[Implicit requirement: thread exists before call]*/
+        REQ("", "Thread exists", jcall!=NULL);
+        REQ("", "If there is no error, previous thread state should be defined", 
+            pthread_join_return->functionResult!=0 || oldState!=NULL);
+               
+        /*
+        * otherwise, an error number shall be returned to indicate
+        * the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_JOIN, "pthread_join.07.02", 
+            pthread_join_return->functionResult!=0, 
+            pthread_join_return->functionResult)
+            
+            /*
+            * The pthread_join() function shall fail if:
+            *
+            * [ESRCH]
+            *
+            * No thread could be found corresponding to that specified by the given 
+            * thread ID.
+            *
+            */
+            ERROR_SHALL(POSIX_PTHREAD_JOIN, ESRCH,"pthread_join.08.01", 
+                oldState==NULL)
+            
+            /*
+            * The pthread_join() function may fail if:
+            *
+            * [EDEADLK]
+            *
+            * A deadlock was detected or the value of thread specifies the calling 
+            * thread.
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_JOIN, EDEADLK,"pthread_join.09.01",
+                "Can not check the deadlock")
+            
+            /*
+            * The pthread_join() function may fail if:
+            *
+            * [EINVAL] 
+            *
+            * The value specified by thread does not refer to a joinable thread.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_JOIN, EINVAL,"pthread_join.09.02", 
+                (oldState!=NULL &&  
+                (oldState->attr->detachstate==SUT_PTHREAD_CREATE_DETACHED 
+                || oldState->detach_called)) )
+            
+            /*
+            * The pthread_join() function shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_ONCE, EINTR,"pthread_join.10")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_join() function shall return zero;
+        */
+        REQ("pthread_join.07.01", "Function shall return zero", 
+            pthread_join_return->functionResult==0);
+    
+        /*
+        * The pthread_join() function shall suspend execution of the calling 
+        * thread until the target thread terminates,
+        * unless the target thread has already terminated.
+        */
+        REQ("pthread_join.01", "Target thread shall be terminated",
+            !isThreadActive(thid));
+        
+        if (pthread_join_return->notZeroPointer)
+        {
+            /* [Implicit precondition] */
+            REQ("", "finalJoinToThreadState should be not NULL", pthread_join_return->finalJoinToThreadState);
+            /*
+            * On return from a successful pthread_join() call with a non-NULL
+            * value_ptr argument, the value passed to pthread_exit() by the
+            * terminating thread shall be made available in the location 
+            * referenced by value_ptr.
+            */
+            REQ("pthread_join.02", "Return value shall be valid", 
+                equals_VoidTPtr(pthread_join_return->value_ptr, pthread_join_return->finalJoinToThreadState->exit_value));
+            
+                /*
+                * The pthread_exit() function shall terminate the calling thread 
+                * and make the value value_ptr available to any successful join with 
+                * the terminating thread.
+            */
+            REQ("pthread_exit.01", "Return value shall be valid", 
+                equals_VoidTPtr(pthread_join_return->value_ptr, pthread_join_return->finalJoinToThreadState->exit_value));
+            
+        }    
+        
+        /*
+        * When a pthread_join() returns
+        * successfully, the target thread has been terminated.
+        */
+        REQ("pthread_join.03", "Thread shall be terminated",!isThreadActive(thid));
+        
+        /*
+        * If the thread calling pthread_join() is canceled, then the target thread 
+        * shall not be detached.
+        */
+        REQ("pthread_join.05", "", TODO_REQ());
+        
+        /*
+        * It is unspecified whether a thread that has exited but remains unjoined 
+        * counts against {PTHREAD_THREADS_MAX}.
+        */
+        REQ_UNCHECKABLE("pthread_join.06", "Can not reach this case");
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_once - dynamic package initialization
+
+SYNOPSIS
+
+  #include <pthread.h>
+
+  int pthread_once(pthread_once_t *once_control,
+  void (*init_routine)(void));
+  pthread_once_t once_control = PTHREAD_ONCE_INIT; 
+
+
+DESCRIPTION
+
+  The first call to pthread_once() by any thread in a process, with a given 
+  once_control, shall call the init_routine with no arguments. Subsequent calls
+  of pthread_once() with the same once_control shall not call the init_routine.
+  On return from pthread_once(), init_routine shall have completed. The 
+  once_control parameter shall determine whether the associated initialization 
+  routine has been called.
+
+  The pthread_once() function is not a cancellation point. However, if 
+  init_routine is a cancellation point and is canceled, the effect on 
+  once_control shall be as if pthread_once() was never called.
+
+  The constant PTHREAD_ONCE_INIT is defined in the <pthread.h> header.
+
+  The behavior of pthread_once() is undefined if once_control has automatic 
+  storage duration or is not initialized by PTHREAD_ONCE_INIT.
+
+RETURN VALUE
+
+  Upon successful completion, pthread_once() shall return zero; otherwise, an 
+  error number shall be returned to indicate the error.
+
+ERRORS
+
+  The pthread_once() function may fail if:
+
+  [EINVAL] 
+    If either once_control or init_routine is invalid. 
+
+  The pthread_once() function shall not return an error code of [EINTR].
+
+*/
+
+
+bool isFirstPThreadOnceCall(ProcessState* ps, CallContext context, 
+                            PThreadOnceTPtr once_control)
+{
+    /*
+     * The once_control parameter shall determine whether the associated 
+     * initialization routine has been called.
+     */
+    REQ("pthread_once.04", 
+        "once_control shall determine initialization routine has been called", 
+        true);
+
+    return (!equals_VoidTPtr(ps->pthread_once_parameter, once_control) || 
+            isZeroArray(once_control, sizeof_Type(context, "int")));
+}
+
+specification typedef struct PThreadOnceInitReturnType 
+PThreadOnceInitReturnType = {};
+
+PThreadOnceInitReturnType *create_PThreadOnceInitReturnType(
+    IntT result,
+    IntT routineCalled
+        )
+{
+    PThreadOnceInitReturnType *res = create(&type_PThreadOnceInitReturnType,
+        result, routineCalled);
+    return res;
+}
+
+specification
+PThreadOnceInitReturnType* pthread_once_spec(CallContext context, 
+                                             PThreadOnceTPtr once_control)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    bool firstCall;
+    
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "once_control is not NULL", !isNULL_VoidTPtr(once_control));
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by once_control is available in the context", 
+            isValidPointer(context, once_control));
+        
+        firstCall=isFirstPThreadOnceCall(ps, context, once_control);
+        return true;
+    }
+    coverage C
+    {
+        if (firstCall)
+        {
+            return { FirstCall, "First function calls" };
+        }
+        else /* if (!firstCall) */
+        {
+            return { SuccCall, "Successive function calls" };
+        }
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate
+        * the error.
+        */
+        ERROR_BEGIN(POSIX_ONCE,"pthread_once.07.02", pthread_once_spec->result!=0, 
+            pthread_once_spec->result)
+            /*
+            * The pthread_once() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * If either once_control or init_routine is invalid.
+            *
+            */
+            ERROR_UNCHECKABLE(POSIX_ONCE, EINVAL,"pthread_once.08.01", 
+            "Can not validate once_control")
+            
+            /*
+            * The pthread_once() function shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_ONCE, EINTR,"pthread_once.09")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_once() shall return zero;
+        */
+        REQ("pthread_once.07.01", "Function shall return zero", 
+        pthread_once_spec->result==0);
+        
+        if (firstCall)
+        {
+            /*
+            *  The first call to pthread_once() by any thread in a process, with a 
+            *  given once_control, shall call the init_routine with no arguments
+            */
+            REQ("pthread_once.01", "Routine shall be called", 
+                pthread_once_spec->routineCalled==true);
+            
+                /*
+                * On return from pthread_once(), init_routine shall have completed.
+            */
+            REQ("pthread_once.03", "", TODO_REQ());
+        }
+        else
+        {
+            /*
+            * Subsequent calls of pthread_once() with the same once_control shall 
+            * not call the init_routine.
+            */
+            REQ("pthread_once.02", "The init_routine shall not be called", 
+                pthread_once_spec->routineCalled==false);
+        }
+        
+        
+        /*
+        * The pthread_once() function is not a cancellation point. However, if 
+        * init_routine is a cancellation point and is canceled, the effect on 
+        * once_control shall be as if pthread_once() was never called.
+        */
+        REQ("pthread_once.05", "", TODO_REQ());
+        
+        
+        return true;
+    }
+}
+
+
+void onPThreadOnce(CallContext context, PThreadOnceTPtr once_control, 
+                   IntT pthread_once_spec)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    if (pthread_once_spec==0 && isFirstPThreadOnceCall(ps, context, 
+        once_control))
+    {
+        ps->pthread_once_parameter=once_control;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_self - get the calling thread ID
+
+SYNOPSIS
+
+  #include <pthread.h>
+  pthread_t pthread_self(void); 
+
+DESCRIPTION
+
+  The pthread_self() function shall return the thread ID of the calling thread.
+
+RETURN VALUE
+
+  Refer to the DESCRIPTION.
+
+ERRORS
+
+  No errors are defined.
+
+  The pthread_self() function shall not return an error code of [EINTR].
+
+*/
+specification
+ThreadId pthread_self_spec(CallContext context)
+{
+    ThreadState* thstate=getThreadState_CallContext(context);
+    ProcessState* ps=getProcessState_CallContext(context);
+    Map* threads=ps->threads;
+    
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Thread state is not NULL", thstate!=NULL );
+        
+        return true;
+    }
+    coverage C
+    {
+        if (size_Map(threads)==1)
+        {
+            return { OnlyOneThread, "The only one thread in the process" };
+        }
+        else
+        {
+            return { MoreOneThread, "Several threads in the process" };
+        }
+    }
+    post
+    {
+        
+        /*
+        * The pthread_self() function shall return the thread ID of the calling 
+        * thread.
+        */
+        REQ("pthread_self.01", "Return value shall be valid", 
+            pthread_self_spec.thread==thstate->id.thread);
+        
+        /*
+        * The pthread_self() function shall not return an error code of [EINTR].
+        */
+        REQ("pthread_self.02", 
+            "Shall not return an error code of [EINTR]", 
+            pthread_self_spec.thread!=SUT_EINTR);
+        
+        
+        return true;
+    }
+}
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  pthread_setcancelstate, pthread_setcanceltype, pthread_testcancel - set 
+    cancelability state
+
+SYNOPSIS
+
+  #include <pthread.h>
+  int pthread_setcancelstate(int state, int *oldstate);
+  int pthread_setcanceltype(int type, int *oldtype);
+  void pthread_testcancel(void); 
+
+
+DESCRIPTION
+
+  The pthread_setcancelstate() function shall atomically both set the calling 
+  thread's cancelability state to the indicated state and return the previous 
+  cancelability state at the location referenced by oldstate. Legal values for 
+  state are PTHREAD_CANCEL_ENABLE and PTHREAD_CANCEL_DISABLE.
+
+  The pthread_setcanceltype() function shall atomically both set the calling 
+  thread's cancelability type to the indicated type and return the previous 
+  cancelability type at the location referenced by oldtype. Legal values for 
+  type are PTHREAD_CANCEL_DEFERRED and PTHREAD_CANCEL_ASYNCHRONOUS.
+
+  The cancelability state and type of any newly created threads, including the 
+  thread in which main() was first invoked, shall be PTHREAD_CANCEL_ENABLE and 
+  PTHREAD_CANCEL_DEFERRED respectively.
+
+  The pthread_testcancel() function shall create a cancellation point in the 
+  calling thread. The pthread_testcancel() function shall have no effect if 
+  cancelability is disabled.
+
+RETURN VALUE
+
+  If successful, the pthread_setcancelstate() and pthread_setcanceltype() 
+  functions shall return zero; otherwise, an error number shall be returned to 
+  indicate the error.
+
+ERRORS
+
+  The pthread_setcancelstate() function may fail if:
+
+    [EINVAL] 
+    The specified state is not PTHREAD_CANCEL_ENABLE or PTHREAD_CANCEL_DISABLE. 
+
+  The pthread_setcanceltype() function may fail if:
+
+    [EINVAL] 
+    The specified type is not PTHREAD_CANCEL_DEFERRED or 
+    PTHREAD_CANCEL_ASYNCHRONOUS. 
+
+  These functions shall not return an error code of [EINTR].
+*/
+
+ 
+specification typedef struct SetCancelStateReturnType 
+    SetCancelStateReturnType = {};
+
+SetCancelStateReturnType *create_SetCancelStateReturnType(
+        IntT returnValue,
+        IntT oldState
+        )
+{
+    SetCancelStateReturnType *res = create(&type_SetCancelStateReturnType, 
+        returnValue, oldState);
+    return res;
+}
+
+specification
+SetCancelStateReturnType* pthread_setcancelstate_spec(CallContext context, 
+                                                      IntT pstate)
+{
+    ThreadState*   thState=getThread(context);
+    IntT           oldValue;
+    
+    pre
+    {
+        
+        /* [Implicit precondition] */
+        REQ("", "Thread state shall not be NULL", thState!=NULL);
+        
+        oldValue=thState->cancelstate;
+        
+        return true;
+    }
+    coverage C
+    {
+        if (pstate==SUT_PTHREAD_CANCEL_ENABLE)
+        {
+            return { CancelEnable, "Cancel state is set to PTHREAD_CANCEL_ENABLE" };
+        }
+        else if(pstate==SUT_PTHREAD_CANCEL_DISABLE)
+        {
+            return { CancelDisable, "Cancel state is set to PTHREAD_CANCEL_DISABLE"};
+        }
+        else /* if value is invalid */
+        {
+            return { CancelInvalid, "Cancel state is set to invalid value"};
+        }
+    }
+    post
+    {
+        /*
+        * otherwise, an
+        * error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_SETCANCELSTATE, "pthread_setcancelstate.04.02", 
+            pthread_setcancelstate_spec->returnValue!=0, 
+            pthread_setcancelstate_spec->returnValue)
+            /*
+            * The pthread_setcancelstate() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The specified state is not PTHREAD_CANCEL_ENABLE or 
+            * PTHREAD_CANCEL_DISABLE.
+            *
+            */
+            ERROR_MAY(POSIX_SETCANCELSTATE, EINVAL, "pthread_setcancelstate.05.01", 
+            pstate != SUT_PTHREAD_CANCEL_ENABLE && 
+            pstate != SUT_PTHREAD_CANCEL_DISABLE)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_SETCANCELSTATE, EINTR,"pthread_setcancelstate.07")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_setcancelstate() and pthread_setcanceltype() 
+        * functions shall return zero
+        */
+        REQ("pthread_setcancelstate.04.01", "Function shall return zero", 
+        pthread_setcancelstate_spec->returnValue==0);
+        
+        if(POSIX_SETCANCELSTATE_FAILS_WITH_EINVAL)
+        {
+            /*
+            * Legal values for
+            * state are PTHREAD_CANCEL_ENABLE and PTHREAD_CANCEL_DISABLE.
+            */
+            REQ("pthread_setcancelstate.02", "State shall be valid",
+                pstate == SUT_PTHREAD_CANCEL_ENABLE || 
+                pstate == SUT_PTHREAD_CANCEL_DISABLE);
+        }
+        
+        
+        thState=getThread(context);
+        
+        /*
+        * The pthread_setcancelstate() function shall atomically both set the 
+        * calling thread's cancelability state to the indicated state and return 
+        * the previous cancelability state at the location referenced by 
+        * oldstate. 
+        */
+        REQ("pthread_setcancelstate.01", 
+            "Function shall return old cancel state", 
+            pthread_setcancelstate_spec->oldState == oldValue);
+        
+        REQ("","New cancel state shall be valid", 
+            thState->cancelstate == pstate);
+        
+        return true;
+    }
+}
+
+void onPThreadSetCancelState(CallContext context, IntT pstate, 
+                             SetCancelStateReturnType* pthread_setcancelstate_spec)
+{
+    if (pthread_setcancelstate_spec->returnValue==0)
+    {
+        ThreadState*   thState=getThread(context);
+        if (thState==NULL)
+        {
+            setBadVerdict("Thread state shall not be NULL");
+            return;
+        }
+        thState->cancelstate=pstate;
+    }
+}
+
+
+specification typedef struct SetCancelTypeReturnType 
+        SetCancelTypeReturnType = {};
+
+SetCancelTypeReturnType *create_SetCancelTypeReturnType(
+        IntT returnValue,
+        IntT oldType
+        )
+{
+    SetCancelTypeReturnType *res = create(&type_SetCancelTypeReturnType, 
+        returnValue, oldType);
+    return res;
+}
+
+specification
+SetCancelTypeReturnType* pthread_setcanceltype_spec(CallContext context, 
+                                                    IntT canceltype)
+{
+    ThreadState*   thState=getThread(context);
+    IntT           oldValue;
+    
+    pre
+    {
+        
+        /* [Implicit precondition] */
+        REQ("", "Thread state shall not be NULL", thState!=NULL);
+        
+        oldValue=thState->canceltype;
+        
+        return true;
+    }
+    coverage C
+    {
+        if (canceltype==SUT_PTHREAD_CANCEL_DEFERRED)
+        {
+            return { CancelDeff, "Cancel type is set to PTHREAD_CANCEL_DEFERRED" };
+        }
+        else if(canceltype==SUT_PTHREAD_CANCEL_ASYNCHRONOUS)
+        {
+            return { CancelAsync, 
+                "Cancel type is set to PTHREAD_CANCEL_ASYNCHRONOUS"};
+        }
+        else /* if value is invalid */
+        {
+            return { CancelInvalid, "Cancel type is set to invalid value"};
+        }
+    }
+    post
+    {
+        
+        /*
+        * otherwise, an
+        * error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_SETCANCELTYPE, "pthread_setcanceltype.04.02", 
+            pthread_setcanceltype_spec->returnValue!=0, 
+            pthread_setcanceltype_spec->returnValue)
+            
+            /*
+            * The pthread_setcanceltype() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The specified type is not PTHREAD_CANCEL_DEFERRED or 
+            * PTHREAD_CANCEL_ASYNCHRONOUS.
+            *
+            */
+            ERROR_MAY(POSIX_SETCANCELTYPE, EINVAL,"pthread_setcanceltype.06.01",  
+            canceltype!=SUT_PTHREAD_CANCEL_DEFERRED && 
+            canceltype!=SUT_PTHREAD_CANCEL_ASYNCHRONOUS)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_SETCANCELTYPE, EINTR,"pthread_setcanceltype.07")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_setcancelstate() and pthread_setcanceltype() 
+        * functions shall return zero
+        */
+        REQ("pthread_setcanceltype.04.01", "If successful, shall return zero", 
+        pthread_setcanceltype_spec->returnValue==0);
+        
+        if (POSIX_SETCANCELTYPE_FAILS_WITH_EINVAL)
+        {
+            /*
+            * Legal values for type
+            * are PTHREAD_CANCEL_DEFERRED and PTHREAD_CANCEL_ASYNCHRONOUS.
+            */
+            REQ("pthread_setcanceltype.02", "Type shall be valid", 
+                canceltype==SUT_PTHREAD_CANCEL_DEFERRED ||
+                canceltype==SUT_PTHREAD_CANCEL_ASYNCHRONOUS);
+        }
+        
+        
+        thState=getThread(context);
+        /*
+        * The pthread_setcanceltype() function shall atomically both set the 
+        * calling thread's cancelability type to the indicated type and return the
+        * previous cancelability type at the location referenced by oldtype.
+        */
+        REQ("pthread_setcanceltype.01", 
+            "Function shall return old cancel type", 
+            pthread_setcanceltype_spec->oldType == oldValue);
+        
+        REQ("","New cancel type shall be valid", thState->canceltype == 
+            canceltype);
+        
+        return true;
+    }
+}
+
+
+void onPThreadSetCancelType( CallContext context, IntT ptype, 
+   SetCancelTypeReturnType* 
+   pthread_setcanceltype_spec)
+{
+   if (pthread_setcanceltype_spec->returnValue==0)
+   {
+       ThreadState*   thState=getThread(context);
+       if (thState==NULL)
+       {
+           setBadVerdict("Thread state shall not be NULL");
+           return;
+       }
+       thState->canceltype=ptype;
+   }
+}
+
+
+specification
+void pthread_testcancel_spec(CallContext context, CancelStatus status)
+{
+    ThreadState*   thState=getThread(context);
+    
+    pre
+    {
+        
+        /* [Implicit precondition] */
+        REQ("", "Thread state shall not be NULL", thState!=NULL);
+        
+        return true;
+    }
+    coverage C_State
+    {
+        if (thState->cancelstate == SUT_PTHREAD_CANCEL_ENABLE)
+        {
+            return { CancelEnabled, 
+                "Cancel state of the thread is SUT_PTHREAD_CANCEL_ENABLE" };
+        }
+        else /* if (thState->cancelstate == SUT_PTHREAD_CANCEL_DISABLE) */
+        {
+            return { CancelDisabled, 
+                "Cancel state of the thread is SUT_PTHREAD_CANCEL_DISABLE" };
+        }
+    }
+    coverage C_Type
+    {
+        if (thState->canceltype==SUT_PTHREAD_CANCEL_DEFERRED)
+        {
+            return { CancelDeff, 
+                "Cancel type of the thread is PTHREAD_CANCEL_DEFERRED" };
+        }
+        else /* if(thState->canceltype==SUT_PTHREAD_CANCEL_ASYNCHRONOUS) */
+        {
+            return { CancelAsync, 
+                "Cancel type of the thread is  PTHREAD_CANCEL_ASYNCHRONOUS"};
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        return true;
+    }
+}
+
+
+void onPThreadTestCancel(CallContext context)
+{
+    ThreadState *thState = getThread(context);
+    startBlockedCall(context, create_ThreadIdObj(context));
+
+}
+
+void onPThreadTestCancelReturn(PThreadTestCancelReturnType *test_cancel_return)
+{
+    ThreadState *thState = getThreadState_CallContext(test_cancel_return->context);
+
+    if(NULL==thState)
+    {
+        setBadVerdict("onPThreadTestCancelReturn: thread should be alive if this reaction has been caught");
+        return;
+    }
+
+    test_cancel_return->oldState = clone(thState);
+
+    finishBlockedCall(test_cancel_return->context);
+
+    if( test_cancel_return->cancel )
+    {
+        thState->terminating = PTHREAD_TERMINATING;
+    }
+
+    checkThreadDelete(thState);
+}
+
+specification typedef struct PThreadTestCancelReturnType PThreadTestCancelReturnType = {};
+
+PThreadTestCancelReturnType* create_PThreadTestCancelReturnType(
+    CallContext context,
+    bool cancel,
+    ThreadState *oldState
+    )
+{
+    PThreadTestCancelReturnType *res = 
+        create(&type_PThreadTestCancelReturnType,
+            context, cancel, oldState
+            );
+
+    return res;
+}
+
+reaction PThreadTestCancelReturnType* pthread_testcancel_return(void)
+{
+    CallContext context;
+    
+    post
+    {
+        ThreadState *oldState = pthread_testcancel_return->oldState;
+        context=pthread_testcancel_return->context;
+   
+        /*
+         * The pthread_testcancel() function shall create a cancellation point in 
+         * the calling thread.
+         */
+        IMPLEMENT_REQ("pthread_testcancel.01");
+    
+        if (
+            getThreadStateCancelState(oldState) == SUT_PTHREAD_CANCEL_DISABLE
+            )
+        {
+            /*
+             * The pthread_testcancel() function shall have no effect if 
+             * cancelability is disabled.
+             */
+            REQ("pthread_testcancel.02", "Thread shall not be canceled", 
+                pthread_testcancel_return->cancel==false);
+        }
+
+        if(pthread_testcancel_return->cancel==true)
+        {
+            /* [Thread should be cancelled iff cancel request is present]*/
+            REQ("", "Thread should be cancelled iff cancel request is present",
+                oldState->terminating==PTHREAD_CANCELLING)
+        }
+
+        return true;
+  }
+}
+
+
+
+/** pthread_finish is a fake function, it just do return from the thread **/
+specification
+void pthread_finish_spec(CallContext context, VoidTPtr value_ptr)
+{
+    ProcessState*  ps=getProcessState_CallContext(context);
+    ThreadState*   thState=getThreadState_CallContext(context);
+    PThreadAttr*   attr;
+    
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Thread state shall be not NULL", thState!=NULL);
+        
+        attr=thState->attr;
+        
+        /* [Implicit precondition] */
+        REQ("", "Thread attribute shall be not NULL", thState->attr!=NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        if (attr->detachstate==SUT_PTHREAD_CREATE_DETACHED)
+        {
+            return { FinishDetached, "Thread has PTHREAD_CREATE_DETACHED attribute" };
+        }
+        else /* if(attr->detachstate==SUT_PTHREAD_CREATE_JOINABLE) */
+        {
+            return { FinishJoinable, "Thread has PTHREAD_CREATE_JOINABLE attribute" };
+        }
+    }
+    post
+    {
+        /* TODO: Add checks here */
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                    Signal Helper Functions                     **/
+/********************************************************************/
+/*
+ * Returns new unique identificator of called function
+ */
+int MakeFunctionCallUID(ThreadState* thSt)
+{
+    thSt->current_unique_id_of_function++;
+    return thSt->current_unique_id_of_function;
+}
+
+void PrintfStack(ThreadState* thSt)
+{
+    CalledFunctionDescription* func;
+    int size, i;
+
+    size = size_List(thSt->stack_of_calls);
+
+    verbose("Stack of called functions of thread size %d\n", size);
+    for (i = 0; i < size; i++)
+    {
+        func = get_List(thSt->stack_of_calls, i);
+        verbose("function_called %d, function_nested %d, uid %d\n", 
+               func->function_called, func->function_nested, func->uid);
+    }
+}
+
+/********************************************************************/
+/**                           Helper Functions                     **/
+/********************************************************************/
+bool isNoDestructors_ThreadState(ThreadState* thstate)
+{
+    bool res = true;
+    Map * m = thstate->key_specific;
+    int i;
+
+    for(i=0;i<size_Map(m);i++)
+    {
+        if( !equals_VoidTPtr( ((ThreadSpecific* )get_Map(m,key_Map(m,i)))->address, NULL_VoidTPtr) )
+        {
+            res = false;
+            break;
+        }
+    }
+    return res;
+}
+
+void checkThreadDelete(ThreadState* thstate)
+{
+    ProcessState* ps;
+
+    if(thstate==NULL)
+        return;
+    
+    ps=getProcessState_ThreadId(thstate->id);
+    if (thstate==NULL || ps==NULL)
+    {
+        return;
+    }
+    if (thstate->terminating!=PTHREAD_TERMINATING&&thstate->terminating!=PTHREAD_TERMINATED)
+    {
+        return;
+    }
+    if (size_List(thstate->cleanupArgs)==0 && isNoDestructors_ThreadState(thstate) )
+    {
+        if (thstate->attr==NULL)
+        {
+            return;
+        }
+        if (thstate->attr->detachstate==SUT_PTHREAD_CREATE_DETACHED ||
+            thstate->detach_called
+            )
+        {
+            if(!thstate->join_called)
+            {
+                DUMP("remove_thread0: thread removed: $(obj)\n", create_ThreadIdObj(thstate->id));
+                remove_Map(ps->threads, create_ThreadIdObj(thstate->id));
+            }
+        } else {
+            // have no reasons to be alive anymore
+            if(thstate->join_done)
+            {
+                DUMP("remove_thread1: thread removed: $(obj)\n", create_ThreadIdObj(thstate->id));
+                remove_Map(ps->threads, create_ThreadIdObj(thstate->id));
+            } else {
+                thstate->terminating=PTHREAD_TERMINATED;
+            }
+        }
+    }
+}
+ 
+ThreadState* getMainThreadState(ProcessState* ps)
+{
+Set* startedThreads = ps->startedThreads;
+Map* threads = ps->threads;
+IntT i = 0;
+  
+    for (i=0; i<size_Map(threads); i++)
+    {
+        ThreadId* id=key_Map(threads, i);
+        if (!contains_Set(startedThreads, id))
+        {
+            ThreadState* st=getThread(*id);
+            return st;
+        }
+    }
+    return NULL;
+}
+
+bool isSignalMaskInherited(ProcessState* ps, ThreadState* thState)
+{
+ThreadState* st=getMainThreadState(ps);
+  
+    if (st==NULL)
+    {
+        return false;
+    }
+    return equals(thState->signal_masks_stack, st->signal_masks_stack);
+}
+
+StartedThread* searchThreadsSet(Set* startedThreads, ThreadId id)
+{
+int i=0;
+ProcessState* ps = getProcessState_ThreadId(id);
+ThreadState*  mainState = getMainThreadState(ps);
+  
+    for (i=0;i<size_Set(startedThreads);i++)
+    {
+        StartedThread* started = get_Set(startedThreads, i);
+        ThreadId sid = started->thid;
+        if (sid.thread == id.thread)
+        {
+            return started;
+        }
+    }
+    if (mainState->id.thread == id.thread)
+    {
+        return create_StartedThread( NULL_VoidTPtr, 
+                       create_PThreadAttrPattr(id, NULL_VoidTPtr), id
+                     );
+    }
+    return NULL;
+}
+
+
+/********************************************************************/
+/**                            ProcessKey                          **/
+/********************************************************************/
+
+
+static int compare_PThreadKey(void* o1, void* o2)
+{
+    PThreadKey *k1 = (PThreadKey*)o1;
+    PThreadKey *k2 = (PThreadKey*)o2;
+    bool eqRes = 
+        ((k1->address.system == k2->address.system)
+    	&&
+        (k1->address.process == k2->address.process)
+        &&
+        (k1->address.address == k2->address.address)
+        &&
+        (k1->destruct == k2->destruct));
+    
+    return eqRes?0:1;
+
+}
+
+
+specification typedef struct PThreadKey PThreadKey = {
+    .compare = compare_PThreadKey
+};
+	
+PThreadKey *create_PThreadKey(VoidTPtr address, PThreadKeyDestructor destruct)
+{
+    PThreadKey *res = create(&type_PThreadKey, address, destruct);
+    return res;
+}
+
+PThreadKey* registerPThreadKey(VoidTPtr address, PThreadKeyDestructor destruct)
+{
+PThreadKey *resPThreadKey = create_PThreadKey(
+                                   address,
+                                   destruct);
+
+    ProcessId processId = {address.system, address.process};
+    Map *threads = getThreads_ProcessId(processId); //ThreadId -m-> ThreadState
+    int mapSize, ind;
+
+    registerObjectInMemory(address, 0, resPThreadKey);
+    VERBOSE("registering object:%p\n", address.address);
+
+    // Iterate through the threads of the given process
+    mapSize = size_Map(threads);
+
+    for(ind = 0; ind<mapSize; ind++)
+    {
+        ThreadIdObj *mapKey = key_Map(threads, ind);
+        ThreadState *thread = (ThreadState*)get_Map(threads, mapKey);
+
+        /*
+         * {pthread_create.pthread_key_create.03} Upon key creation, the value NULL shall be 
+         * associated with the new key in all active threads. 
+         */
+        if(isThreadActive(*mapKey))
+        {
+            ThreadSpecific *ts = create_ThreadSpecific(
+                    resPThreadKey,
+                    NULL_VoidTPtr
+                 );
+
+            put_Map(thread->key_specific, resPThreadKey, ts);
+        }
+
+    }
+
+    return resPThreadKey;
+}
+
+void unregisterPThreadKey(PThreadKey* key)
+{
+    ProcessId processId = {key->address.system, key->address.process};
+    Map *threads = getThreads_ProcessId(processId); //ThreadId -m-> ThreadState
+    int mapSize, ind;
+
+    unregisterObjectInMemory(key->address);
+
+    mapSize = size_Map(threads);
+    for(ind = 0; ind<mapSize; ind++)
+    {
+        Object *mapKey = key_Map(threads, ind);
+        ThreadState *thread = (ThreadState*)get_Map(threads, mapKey);
+
+        remove_Map(thread->key_specific, key);
+    }
+
+}
+
+
+/********************************************************************/
+/**                          Thread Specific                       **/
+/********************************************************************/
+static int compare_ThreadSpecific(void* o1, void* o2)
+{
+    ThreadSpecific *k1 = (ThreadSpecific*)o1;
+    ThreadSpecific *k2 = (ThreadSpecific*)o2;
+    bool eqRes = 
+        equals(k1->key, k2->key)
+        &&
+        equals_VoidTPtr(k1->address, k2->address);
+
+    return eqRes?0:1;
+}
+
+specification typedef struct ThreadSpecific ThreadSpecific = 
+{
+    .compare = compare_ThreadSpecific
+};
+
+ThreadSpecific* create_ThreadSpecific(PThreadKey* key, VoidTPtr address)
+{
+    return create(&type_ThreadSpecific, key, address);
+}
+
+
+/********************************************************************/
+/**                             Threads                            **/
+/********************************************************************/
+specification typedef struct ThreadState ThreadState = {};
+
+static void init_ThreadSpecifics( ThreadState *threadState )
+{
+    ObjectsInMemory *allKeys = getAllTypedObjectsInMemory(&type_PThreadKey);
+    int mapSize = size_Map(allKeys);
+    int i;
+    
+    /* Upon thread creation, the value NULL shall be associated with all 
+       defined keys in the new thread.
+     */
+   
+    for( i = 0 ; i<mapSize; i++)
+    {
+        PThreadKey *key = get_Map(allKeys, key_Map(allKeys, i));
+
+        if(threadState->id.process==key->address.process)
+        {
+            ThreadSpecific *ts = create_ThreadSpecific(
+                    key,
+                    NULL_VoidTPtr
+                    );
+
+            
+            put_Map(threadState->key_specific, key, ts);
+
+            traceFormattedUserInfo("adding key on thread init:%p", 
+              threadState->id.thread);
+        }
+    }
+}
+
+static ThreadState* create_ThreadState(ThreadId threadid, 
+                                       ThreadPriority priority)
+{
+    Set* signal_mask = create_Set(&type_SignalObj);
+    PThreadAttr* attr = create_PThreadAttrPattr(threadid, NULL_VoidTPtr);
+    ThreadState *res;
+    CalledFunctionDescription* temp_func_desc;
+
+    res = create( &type_ThreadState,
+                    threadid,
+                    priority,
+                    /* Stack of calls */
+                    create_List(NULL),
+                    false,
+                    /* Thread local storage */
+                    create_Map(&type_PThreadKey, &type_ThreadSpecific),
+                    PTHREAD_DESTROY_NONE,
+
+                    create_List(&type_Set),
+                    create_List(&type_CalledFunctionDescription),
+                    1,                                //start uid value
+                    create_Map( &type_SignalObj, &type_List ),
+                    0, //thread is not wait for any signal in the begining
+                    /* Thread attributes */
+                    attr,
+                    SUT_PTHREAD_CANCEL_ENABLE,
+                    SUT_PTHREAD_CANCEL_DEFERRED,
+                    0,
+                    0,
+                    create_List(&type_PThreadCleanupArg),
+                    PTHREAD_RUNNING,
+                    NULL_VoidTPtr,
+                    false, // join_called
+                    false, // join_done
+                    false,
+                    Invalid_VoidTPtr
+                  );    
+    add_List(res->signal_masks_stack,0 , signal_mask);
+
+    temp_func_desc = create_CalledFunctionDescription(0, CALLED_NONE, CALLED_NONE);
+    add_List(res->stack_of_calls, 0, temp_func_desc);
+
+    init_ThreadSpecifics(res);
+    return res;
+}
+
+ThreadState* create_DefaultThreadState(ThreadId threadid)
+{
+ThreadState *res = create_ThreadState(
+                     threadid,
+                     getDefaultThreadPriority(threadid.system)
+                                     );
+    /*
+     * The cancelability state and type of any newly created threads, 
+     * including the thread in which main() was first invoked, shall be 
+     * PTHREAD_CANCEL_ENABLE and PTHREAD_CANCEL_DEFERRED respectively.
+     */
+    IMPLEMENT_REQ("pthread_setcancelstate.03");
+
+    res->cancelstate = SUT_PTHREAD_CANCEL_ENABLE;
+    res->canceltype  = SUT_PTHREAD_CANCEL_DEFERRED;
+    res->numberOfPopPushBraces = 0;
+    res->numberOfExecutableFunctions = 0;
+    res->cleanupArgs = create_List(&type_PThreadCleanupArg);
+    init_ThreadSpecifics(res);
+    return res;
+}
+
+ThreadState* registerDefaultThread(ThreadId threadid)
+{
+ProcessState* process;
+ThreadState* thread;
+
+    process = getProcessState_ThreadId(threadid);
+    if (process == NULL)
+    {
+        return NULL;
+    }
+    thread = create_DefaultThreadState(threadid);
+    put_Map(process->threads, create_ThreadIdObj(threadid), thread);
+    return thread;
+}
+
+
+
+/********************************************************************/
+/**                           Thread Storage                       **/
+/********************************************************************/
+ThreadState* getThread(ThreadId threadid)
+{
+    ProcessState* processState = getProcessState(getProcessId_ThreadId(threadid));
+    ThreadState*  res;
+    
+    if (processState == NULL)
+    {
+        return NULL;
+    }
+    res = get_Map(processState->threads, create_ThreadIdObj(threadid));
+    return res;
+}
+
+ThreadState* findThread(Map* threads, ThreadId threadid)
+{
+    return get_Map(threads, create_ThreadIdObj(threadid));
+}
+
+
+/********************************************************************/
+/**                        Thread Status                           **/
+/********************************************************************/
+bool isThreadActive(ThreadId threadId)
+{
+    ThreadState* threadState = getThread(threadId);
+    if (threadState == NULL)
+    {
+        return false;
+    }
+    if (threadState->terminating == PTHREAD_TERMINATED)
+    {
+        return false;
+    }
+    return true;
+}
+
+
+ThreadState* getThreadState_CallContext(CallContext context)
+{
+    return getThread(context);
+}
+
+ThreadState* findThreadState_CallContext(Map* threads, CallContext context)
+{
+    return findThread(threads, context);
+}
+
+ThreadId getCallContext_ThreadId( CallContext context )
+{
+    return context;
+}
+
+CallContext getThreadId_CallContext( ThreadId threadId )
+{
+    return threadId;
+}
+
+
+/********************************************************************/
+/**                       Thread Attributes                        **/
+/********************************************************************/
+bool isCancellationRequestThreadState(ThreadState *thState)
+{
+    if (thState==NULL)
+    {
+        return true;
+    }
+    if (thState->terminating!=PTHREAD_RUNNING)
+    {
+        return true;
+    }
+    return false;
+}
+
+bool isCancellationRequest(CallContext context)
+{
+    ThreadState* thst=getThreadState_CallContext(context);
+    return isCancellationRequestThreadState(thst);
+}
+
+IntT getThreadStateCancelState(ThreadState *thState)
+{
+    if (thState==NULL)
+    {
+        return -1;
+    }
+    return thState->cancelstate;
+}
+
+IntT getThreadCancelState(CallContext context)
+{
+    ThreadState* thst=getThreadState_CallContext(context);
+    return getThreadStateCancelState(thst);
+}
+
+
+/********************************************************************/
+/**                       Thread Id Lists                          **/
+/********************************************************************/
+void insert_ThreadIdList(List* list, ThreadId threadid)
+{
+    append_List(list,create_ThreadIdObj(threadid));
+}
+
+void remove_ThreadIdList(List* list, ThreadId threadid)
+{
+    int i;
+    
+    i = indexOf_List(list,create_ThreadIdObj(threadid));
+    if (i != -1)
+        remove_List(list,i);
+}
+
+ThreadState* getThread_ThreadIdList(Map* threads,List* list, int i)
+{
+    return get_Map(threads, get_List(list,i));
+}
+
+bool isAdded_ThreadIdList(List* pre_list, ThreadId threadid, List* post_list)
+{
+    return isRemoved_ThreadIdList(post_list, threadid, pre_list);
+}
+
+bool isRemoved_ThreadIdList(List* pre_list, ThreadId threadid, List* post_list)
+{
+    int i,j,pre_size,post_size;
+    int indx;
+    
+    pre_size = size_List(pre_list);
+    post_size = size_List(post_list);
+    if (post_size != pre_size - 1)
+    {
+        TRACE_OBJECT(pre_list);
+        TRACE_OBJECT(post_list);
+        return false;
+    }
+    indx = indexOf_List(pre_list,create_ThreadIdObj(threadid));
+    if (indx == -1)
+    {
+        TRACE_OBJECT(pre_list);
+        TRACE_OBJECT(post_list);
+        return false;
+    }
+    i = 0; j = 0;
+    for(; i < post_size; i++,j++)
+    {
+        if (i == indx) i++;
+        if (!equals(get_List(pre_list,i),get_List(post_list,j)))
+        {
+            TRACE_OBJECT(pre_list);
+            TRACE_OBJECT(post_list);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isHighestPriorityThread(Map* pre_threads,List* pre_list,ThreadId threadid)
+{
+    ThreadState *thread,*thread2;
+    int i,indx,size;
+    
+    size = size_List(pre_list);
+    indx = indexOf_List(pre_list,create_ThreadIdObj(threadid));
+    if (indx < 0)
+    {
+        traceUserInfo("Thread not found");
+        TRACE_OBJECT(pre_list);
+        return false;
+    }
+    thread = findThread(pre_threads,threadid);
+    if (thread == NULL)
+        return false;
+    for(i = 0; i < size; i++)
+    {
+        thread2 = getThread_ThreadIdList(pre_threads,pre_list,i);
+        if (thread->priority < thread2->priority)
+        {
+            traceUserInfo("Thread is not highest priority");
+            TRACE_OBJECT(pre_list);
+            TRACE_OBJECT(thread);
+            TRACE_OBJECT(thread2);
+            return false;
+        }
+        if ((thread->priority == thread2->priority) && (i < indx))
+        {
+            traceUserInfo("Thread has highest priority, but it was inserted later");
+            TRACE_OBJECT(pre_list);
+            TRACE_OBJECT(thread);
+            TRACE_OBJECT(thread2);
+            return false;
+        }
+    }
+    return true;
+}
+
+ThreadId getNextThread_SchedulingPolicy(Map* threads, List* list)
+{
+    ThreadState *thread,*thread2;
+    int i,size;
+    
+    thread = getThread_ThreadIdList(threads,list,0);
+    size = size_List(list);
+    for(i = 1; i < size; i++)
+    {
+        thread2 = getThread_ThreadIdList(threads,list,i);
+        if (thread->priority < thread2->priority)
+            thread = thread2;
+    }
+    return thread->id;
+}
+
+
+void remove_ThreadIdSet(Set* set, ThreadId threadid)
+{
+    remove_Set(set,create_ThreadIdObj(threadid));
+}
+
+bool isThreadIdRemovedSet(Set* pre_set, ThreadId threadid, Set* post_set)
+{
+    Set* pre_clone = clone(pre_set);
+    if (!contains_Set(pre_set, create_ThreadIdObj(threadid))) 
+        return false;
+    remove_Set(pre_clone, create_ThreadIdObj(threadid));
+    return equals(pre_clone, post_set);
+}
+
+bool isThreadIdRemovedMultiSet(MultiSet* pre_set, ThreadId threadid, MultiSet* post_set)
+{
+    MultiSet *pre_clone = clone(pre_set);
+    if (!contains_MultiSet(pre_set, create_ThreadIdObj(threadid))) 
+        return false;
+    remove_MultiSet(pre_clone, create_ThreadIdObj(threadid));
+    return equals(pre_clone, post_set);
+}
+
+

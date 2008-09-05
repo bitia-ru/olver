@@ -1,0 +1,188 @@
+/* 
+ * File: memory/mman/tests/mman_errors_scenario.sec
+ * 
+ * Author:
+ * Version:  $Id: mman_b1_scenario.sec,v 1.3 2006/11/03 09:40:26 ches Exp $
+ * 
+ * Copyright (c) 2005 ISP RAS.
+ * 25, B.Communisticheskaya, Moscow, Russia.
+ * All rights reserved.
+ */
+
+#include "memory/mman/tests/mman_scenario.seh"
+#include "memory/mman/mman_model.seh"
+#include "memory/mman/mman_media.seh"
+#include "memory/mman/tests/mman_main.seh"
+#include "common/common_scenario.seh"
+#include "fs/meta/meta_model.seh"
+#include "fs/fs/fs_model.seh"
+#include "system/system/system_model.seh"
+
+// context of process
+static CallContext context_pr1;
+
+/*
+ * parameters of good maps for file and shm object and of testing map 
+ * (addr - returned addr)
+ */
+static VoidTPtr b1_file_addr;
+static VoidTPtr b1_test_addr;
+static VoidTPtr b1_shm_addr;
+static SizeT b1_file_size;
+static SizeT b1_test_size;
+static SizeT b1_shm_size;
+static OffT b1_file_off;
+static OffT b1_test_off;
+static OffT b1_shm_off;
+static MmanProtFlags b1_file_prot;
+static MmanProtFlags b1_test_prot;
+static MmanProtFlags b1_shm_prot;
+
+// names and descriptors of testing file and shared memory object 
+static CString* b1_filename;
+static CString* b1_shared_object_name;
+static CString* b1_test_filename;
+static CString* b1_test_shared_object_name;
+static FileDescId b1_shared_desc_id; 
+static FileDescId b1_test_shared_desc_id;
+static FileDescId b1_file_desc_id; 
+static FileDescId b1_test_file_desc_id;
+
+// permissions for file and shm_object when open
+static FilePermissions* b1_file_mode;
+static FilePermissions* b1_shm_mode;
+static FilePermissions* b1_test_mode;
+
+static Shm_openOflags b1_shm_oflags;
+static Shm_openOflags b1_test_shm_oflags;
+
+static VoidTPtr test_maps[16];
+static MmanProtFlags test_maps_flags[16];
+// size of page for process with context context_pr1
+static LongT pagesize;
+
+static bool init_memory_mman_usual_scenario(int argc, char** argv)
+{
+    ProcessId pid;
+    VoidTPtr temp_addr;
+
+    FilePermission* full_control1;
+    FilePermission* full_control2;
+    FilePermission* full_control3;
+    ErrorCode* errno;
+    
+    MmapFlags flags; //flags for map shm object and file
+
+    ProcessState* prSt;
+
+    initReqFilters();
+    setFinishMode(UNTIL_END); 
+
+    errno = requestErrorCode();
+    //init global variables context_pr1 and pagesize
+    context_pr1 = getContext(); 
+    prSt = getProcessState_CallContext(context_pr1);
+    put_Map(prSt->sysconf, create_IntTObj(SUT_SC_XOPEN_UNIX), create_LongTObj(1));
+    pagesize = sysconf_spec( context_pr1, SUT_SC_PAGE_SIZE, requestErrorCode() );
+    if ( pagesize == -1) 
+    {
+      return false;
+    }
+    else 
+    {
+        setSystemConfigurationValue( context_pr1, SUT_SC_PAGE_SIZE, pagesize);
+    }
+    pagesize = getSystemConfigurationValue(context_pr1, SUT_SC_PAGE_SIZE);
+    //verbose("page_size %d \n", pagesize);
+
+    //init temp variables
+    pid = getProcessId_CallContext(context_pr1);
+    temp_addr.address = (sut_ptr_t) 0;
+    temp_addr.process = pid.process;
+    temp_addr.system = pid.system;
+    
+    full_control1 = create_FilePermission(true, true, true);
+    full_control2 = create_FilePermission(true, true, true);
+    full_control3 = create_FilePermission(true, true, true);
+
+    flags.MAP_FIXED_Flag = false;
+    flags.MAP_PRIVATE_Flag = false;
+    flags.MAP_SHARED_Flag = true;
+
+    //init global variables file_* and shm_*
+    //init of protection flags
+    b1_file_prot.PROT_EXEC_Flag = false;
+    b1_file_prot.PROT_NONE_Flag = false;
+    b1_file_prot.PROT_READ_Flag = true;
+    b1_file_prot.PROT_WRITE_Flag = true;
+    b1_shm_prot = b1_file_prot;
+    
+    //init size
+    b1_file_size = (SizeT) pagesize * 19;
+    b1_shm_size = b1_file_size;
+    //verbose("b1_shm_size %d\n", b1_shm_size);
+
+    //init offset
+    b1_file_off = (OffT) 0;
+    b1_shm_off = b1_file_off;
+
+    //init mode
+    b1_file_mode = create_FilePermissions(full_control1, full_control2, full_control3,
+                                        False_Bool3, False_Bool3, False_Bool3);
+    b1_shm_mode = create_FilePermissions(full_control1, full_control2, full_control3,
+                                       False_Bool3, False_Bool3, False_Bool3);
+    
+    //init names of files
+    b1_filename = create_CString("/b1_filename");
+    b1_shared_object_name = create_CString("/shared_object_b1");
+
+    //init flags for shm_open
+    b1_shm_oflags.O_CREAT_Flag = true;
+    b1_shm_oflags.O_EXCL_Flag = false;
+    b1_shm_oflags.O_RDONLY_Flag = false;
+    b1_shm_oflags.O_RDWR_Flag = true;
+    b1_shm_oflags.O_TRUNC_Flag = false;
+    
+    //create shm object and base map for it
+    b1_shared_desc_id = shm_open_spec(context_pr1, b1_shared_object_name, b1_shm_oflags, 
+                                   b1_shm_mode, requestErrorCode());
+    if (b1_shared_desc_id.filedesc == -1)
+    {
+        traceUserInfo("Can't create basic shared memory object");
+        return false;
+    }
+    
+    b1_shm_addr = mmap_spec(context_pr1, temp_addr, b1_shm_size, b1_shm_prot, flags, 
+                         b1_shared_desc_id, b1_shm_off, false, errno);
+    if (isInvalid_VoidTPtr(b1_shm_addr))
+    {
+        traceUserInfo("Can't create basic map to shared memory object");
+        return false;
+    }
+    return true;
+}
+
+
+
+static void finish_memory_mman_usual_scenario(void)
+{
+    shm_unlink_spec(context_pr1, b1_shared_object_name, requestErrorCode());
+    return;
+}
+
+scenario bool mman_b1_functions_scen()
+{
+    
+    return true;
+}
+
+scenario dfsm memory_mman_b1_scenario = 
+{
+    .init = init_memory_mman_usual_scenario,
+    .finish = finish_memory_mman_usual_scenario,
+    .actions = {
+        mman_b1_functions_scen,
+        NULL
+    }
+};
+

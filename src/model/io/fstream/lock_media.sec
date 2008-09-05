@@ -1,0 +1,120 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "io/fstream/lock_media.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+/*
+ * wait <= millisec for response from stream
+ * return NULL if no response
+ */
+CString * readCStringTimeout_TSStream( TSStream * stream, unsigned long millisec ) {
+    // just stuff while
+    return readCString_TSStream( stream );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initIoFstreamLockSubsystem( void ) {
+    // Set up mediators
+    set_mediator_flockfile_spec(flockfile_media);
+    set_mediator_ftrylockfile_spec(ftrylockfile_media);
+    set_mediator_funlockfile_spec(funlockfile_media);
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** flockfile_spec **/
+mediator flockfile_media for specification
+void flockfile_spec( CallContext context, FILETPtr file, bool * threadWasBlocked ) {
+    call {
+        TSCommand command = create_TSCommand();
+        CString * response;
+        format_TSCommand( & command, "flockfile:$(ptr)", create_VoidTPtrObj( file ) );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            response = readCStringTimeout_TSStream( & command.response, 1000 );
+            assertion
+                ( response == NULL || equals( response, create_CString( "Ok" ) ), "flockfile_media : bad response\n" );
+            * threadWasBlocked = ( response == NULL );
+        }
+        destroy_TSCommand( & command );
+        return;
+    }
+    state {
+        if ( ! * threadWasBlocked ) {
+            SystemState * systemState = getSystemState_CallContext( context );
+            StreamState * streamState = get_Map( systemState->streams, create_FILETPtrObj( file ) );
+            lock_StreamState( streamState, & context );
+        }
+    }
+}
+
+/** ftrylockfile_spec **/
+mediator ftrylockfile_media for specification
+IntT ftrylockfile_spec( CallContext context, FILETPtr file ) {
+    call {
+        TSCommand command = create_TSCommand();
+        IntT res = -1;
+        format_TSCommand( & command, "ftrylockfile:$(ptr)", create_VoidTPtrObj( file )  );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+        }
+        destroy_TSCommand( & command );
+        return res;
+    }
+    state {
+        if ( ftrylockfile_spec == 0 ) {
+            SystemState * systemState = getSystemState_CallContext( context );
+            StreamState * streamState = get_Map( systemState->streams, create_FILETPtrObj( file ) );
+            lock_StreamState( streamState, & context );
+        }
+    }
+}
+
+/** funlockfile_spec **/
+mediator funlockfile_media for specification
+void funlockfile_spec( CallContext context, FILETPtr file ) {
+    call {
+        TSCommand command = create_TSCommand();
+        format_TSCommand( & command, "funlockfile:$(ptr)", create_VoidTPtrObj( file ) );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+        }
+        destroy_TSCommand( & command );
+        return;
+    }
+    state {
+        SystemState * systemState = getSystemState_CallContext( context );
+        StreamState * streamState = get_Map( systemState->streams, create_FILETPtrObj( file ) );
+        unlock_StreamState( streamState, & context );
+    }
+}

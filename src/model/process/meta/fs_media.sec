@@ -1,0 +1,284 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "process/fenv/fenv_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/meta/user_model.seh"
+#include "fs/meta/access_model.seh"
+#include "config/system_config.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "process/meta/fs_model.seh"
+#include "process/meta/fs_media.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initProcessMetaFsSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_chdir_spec ( chdir_media  );
+    set_mediator_chroot_spec( chroot_media );
+    set_mediator_fchdir_spec( fchdir_media );
+    set_mediator_getcwd_spec( getcwd_media );
+    set_mediator_getwd_spec ( getwd_media  );
+    set_mediator_umask_spec ( umask_media  );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** chdir_spec **/
+mediator chdir_media for specification
+IntT chdir_spec( CallContext context, CString * path, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "chdir:$(str)", path );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( chdir_spec != -1 ) {
+            ProcessState * process_state = getProcessState_CallContext( context );
+            FileSystem * fs = getFileSystem( context );
+            File * file = fileExist_FileSystem( fs, path, DirectoryFile );
+            process_state->meta.workdir = file->fileid;
+        }
+    }
+}
+
+/** chroot_spec **/
+mediator chroot_media for specification
+IntT chroot_spec( CallContext context, CString * path, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "chroot:$(str)", path );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( chroot_spec != -1 ) {
+            ProcessState * process_state = getProcessState_CallContext( context );
+            FileSystem * fs = getFileSystem( context );
+            File * file = fileExist_FileSystem( fs, path, DirectoryFile );
+            process_state->meta.root = file->fileid;
+        }
+    }
+}
+
+/** fchdir_spec **/
+mediator fchdir_media for specification
+IntT fchdir_spec( CallContext context, FileDescId fildes, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "fchdir:$(int)", create_IntTObj( fildes.filedesc ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( fchdir_spec != -1 ) {
+            ProcessState * process_state = getProcessState_CallContext( context );
+            FileId fileId = create_FileId( context.system, fildes.filedesc );
+            process_state->meta.workdir = fileId;
+        }
+    }
+}
+
+/** getcwd_spec **/
+
+mediator getcwd_media for specification
+StringTPtr getcwd_spec( CallContext context, StringTPtr buf, SizeT size, ErrorCode *errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        StringTPtr res;
+         
+        format_TSCommand( &command, "getcwd:$(ptr)$(size)",
+            create_VoidTPtrObj(buf),
+            create_SizeTObj(size));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context,&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;  
+    }
+    state
+    {
+        onGetcwd(context, getcwd_spec);
+    }
+}
+
+/** getwd_spec **/
+mediator getwd_media for specification
+StringTPtr getwd_spec( CallContext context, StringTPtr path_name, ErrorCode * errno )
+{
+    call
+    {
+        StringTPtr res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getwd:$(ptr)", create_VoidTPtrObj( path_name ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream( context, & command.response );
+            copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onGetcwd( context, getwd_spec ); // ! onGetcwd !
+    }
+}
+
+/** umask_spec **/
+mediator umask_media for specification
+FilePermissions * umask_spec( CallContext context, FilePermissions * cmask )
+{
+    call
+    {
+        FilePermissions * res;
+
+        TSCommand command = create_TSCommand();
+
+        int irusr = ( cmask->owner->read    ? 1 : 0 );
+        int iwusr = ( cmask->owner->write   ? 1 : 0 );
+        int ixusr = ( cmask->owner->execute ? 1 : 0 );
+
+        int irgrp = ( cmask->group->read    ? 1 : 0 );
+        int iwgrp = ( cmask->group->write   ? 1 : 0 );
+        int ixgrp = ( cmask->group->execute ? 1 : 0 );
+
+        int iroth = ( cmask->other->read    ? 1 : 0 );
+        int iwoth = ( cmask->other->write   ? 1 : 0 );
+        int ixoth = ( cmask->other->execute ? 1 : 0 );
+
+        int isuid = ( cmask->set_uid ? 1 : 0 );
+        int isgid = ( cmask->set_gid ? 1 : 0 );
+        int isvtx = ( cmask->set_vtx ? 1 : 0 );
+
+         
+        format_TSCommand( &command, "umask:$(int)$(int)$(int)$(int)$(int)$(int)$(int)$(int)$(int)$(int)$(int)$(int)",
+                                    create_IntTObj( irusr ), create_IntTObj( iwusr ), create_IntTObj( ixusr ),
+                                    create_IntTObj( irgrp ), create_IntTObj( iwgrp ), create_IntTObj( ixgrp ),
+                                    create_IntTObj( iroth ), create_IntTObj( iwoth ), create_IntTObj( ixoth ),
+                                    create_IntTObj( isuid ), create_IntTObj( isgid ), create_IntTObj( isvtx )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            irusr = readInt_TSStream( & command.response );
+            iwusr = readInt_TSStream( & command.response );
+            ixusr = readInt_TSStream( & command.response );
+
+            irgrp = readInt_TSStream( & command.response );
+            iwgrp = readInt_TSStream( & command.response );
+            ixgrp = readInt_TSStream( & command.response );
+
+            iroth = readInt_TSStream( & command.response );
+            iwoth = readInt_TSStream( & command.response );
+            ixoth = readInt_TSStream( & command.response );
+
+            isuid = readInt_TSStream( & command.response );
+            isgid = readInt_TSStream( & command.response );
+            isvtx = readInt_TSStream( & command.response );
+
+            res = create_FilePermissions( create_FilePermission( irusr != 0, iwusr != 0, ixusr != 0 ),
+                                          create_FilePermission( irgrp != 0, iwgrp != 0, ixgrp != 0 ),
+                                          create_FilePermission( iroth != 0, iwoth != 0, ixoth != 0 ),
+                                          ( isuid != 0 ? True_Bool3 : False_Bool3 ),
+                                          ( isgid != 0 ? True_Bool3 : False_Bool3 ),
+                                          ( isvtx != 0 ? True_Bool3 : False_Bool3 )
+                                        );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        ProcessState * process_state = getProcessState_CallContext( context );
+        process_state->meta.umask = cmask;
+    }
+}

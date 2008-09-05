@@ -1,0 +1,349 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/meta/tests/access_scenario.seh"
+#include "fs/fs/tests/fs_scenario.seh"
+
+
+CallContext context;
+
+static char * pathsChr[]={
+
+    "",
+    "/tester",
+    "/tester/test_system1",
+    "/tester/test_system1/Dir_Not_Exist"
+};
+
+static int paths_num=sizeof(pathsChr)/sizeof(char*);
+
+static CString * paths[sizeof(pathsChr)/sizeof(char*)];
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_fs_meta_access_scenario(int argc, char** argv)
+{
+    int i;
+
+    context=getContext();
+    initPathSystemConfiguration();
+
+    // make sure process has appropriate priviledges
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    for(i=0;i<paths_num;i++)
+        paths[i] = getTestScenarioSandboxPathCh(pathsChr[i]);
+
+    return true;
+}
+
+
+static void finish_fs_meta_access_scenario(void)
+{
+    removeTestScenarioSandboxDir(context);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(fs_meta_access_scenario);
+}
+
+scenario
+bool fs_meta_access_creat_scenario_scen()
+{
+    FilePermission* perm=create_FilePermission(true, true, true);
+    FilePermissions* mode=create_FilePermissions(perm, perm, perm,
+                            Unknown_Bool3,Unknown_Bool3,Unknown_Bool3);
+    struct OpenFlags flags={ReadWrite, Nonblocking, false, true, false, false,
+                                                                false, false};
+    FileStatus* fstat=create_emptyFileStatus();
+
+    mkdir_spec(context, SANDBOX_FILE("/tester"), mode, requestErrorCode());
+
+    __lxstat_spec(context, 3, SANDBOX_FILE(""), fstat, requestErrorCode());
+    __lxstat_spec(context, 3, SANDBOX_FILE("/tester"), fstat,
+                                                        requestErrorCode());
+
+    mkdir_spec(context, SANDBOX_FILE("/tester/test_system1"),
+                                                    mode, requestErrorCode());
+
+    __lxstat_spec(context, 3, SANDBOX_FILE("/tester/test_system1"), fstat,
+                                                        requestErrorCode());
+    return true;
+}
+scenario
+bool fs_meta_access_remove_scenario_scen()
+{
+    rmdir_spec(context, SANDBOX_FILE("/tester/test_system1"), requestErrorCode());
+    return true;
+}
+
+scenario
+bool fs_meta_access_init_scenario_scen()
+{
+    CString* path, *tmp;
+    File* file;
+    FileSystem* fs=getFileSystem(context);
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        path=paths[i];
+        tmp = registerFileFileSystem_Ext2(context, fs, path);
+        DUMP("Registered: $(obj)\n", path, tmp);
+    }
+
+    return true;
+}
+
+scenario
+bool fs_access_scen()
+{
+    AccessModeAccess* amode=create_AccessModeAccess(false, false, false,
+                                                                    false);
+    CString* str;
+
+    iterate(int i=0;i<paths_num;i++;)
+        iterate(int r=0;r<2;r++;)
+        iterate(int w=0;w<2;w++;)
+        iterate(int x=0;x<2;x++;)
+    {
+        str=paths[i];
+
+        amode->isR_OK = r==1;
+        amode->isW_OK = w==1;
+        amode->isX_OK = x==1;
+        amode->isF_OK = !amode->isR_OK && !amode->isW_OK && !amode->isX_OK;
+
+        access_spec(context, str, amode, requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool fs_chmod_scen()
+{
+    FilePermission* owner=create_FilePermission(true, true, true);
+    FilePermission* group=create_FilePermission(true, true, true);
+    FilePermission* other=create_FilePermission(true, false, true);
+
+    FilePermissions* fp=create_FilePermissions(owner, group, other,
+                                Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+    CString* str;
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        str=paths[0];
+        chmod_spec(context, str, fp, requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool fs_chown_scen()
+{
+    CString* str;
+    ProcessState* ps=getProcessState_CallContext(context);
+
+    iterate(int i=0;i<paths_num;i++;)
+        iterate(int j=-1;j<2;j++;)
+            iterate(int k=-1;k<2;k++;)
+    {
+        str=paths[i];
+        pathconf_spec(context, str, SUT_PC_CHOWN_RESTRICTED,
+                                                        requestErrorCode());
+        chown_spec(context, str, (unsigned int)j, (unsigned int)k,
+                                                        requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool fs_fchmod_scen()
+{
+    FilePermission* owner=create_FilePermission(true, true, true);
+    FilePermission* group=create_FilePermission(true, true, true);
+    FilePermission* other=create_FilePermission(true, false, true);
+    FilePermissions* fp=create_FilePermissions(owner, group, other,
+                                Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+    struct OpenFlags fl={ReadOnly, Blocking, false, false, false, false,
+                                                                false, false};
+    FileSystem* fs=getFileSystem(context);
+    FileStatus *buff;
+    CString* str, *resolved;
+    FileDescId fildes;
+
+    iterate(int i=0;i<paths_num;i++;)
+    {
+        str=paths[i];
+        buff=create_emptyFileStatus();
+        if(__xstat_spec(context, 3, str, buff, requestErrorCode())!=-1)
+        {
+            fildes=open_spec(context, str, fl, buff->permissions,
+                                                    requestErrorCode(), false);
+            VERBOSE("file descriptor==%d\n", fildes.filedesc);
+            if(fildes.filedesc!=-1)
+                fchmod_spec(context, fildes, fp, requestErrorCode());
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool fs_fchown_scen()
+{
+    struct OpenFlags fl={ReadOnly, Blocking, false, false, false, false,
+                                                                false, false};
+    FileSystem* fs=getFileSystem(context);
+    FileDescId fildes;
+    FileStatus *buff;
+    CString* str, *resolved;
+
+    iterate(int i=0;i<paths_num;i++;)
+        iterate(int j=-1;j<2;j++;)
+            iterate(int k=-1;k<2;k++;)
+    {
+        str=paths[i];
+        buff=create_emptyFileStatus();
+        if(__xstat_spec(context, 3, str, buff, requestErrorCode())!=-1)
+        {
+         fildes=open_spec(context, str, fl, buff->permissions,
+                                                    requestErrorCode(), false);
+            VERBOSE("file descriptor==%d\n", fildes.filedesc);
+            if(fildes.filedesc!=-1)
+            {
+                pathconf_spec(context, str, SUT_PC_CHOWN_RESTRICTED,
+                                                        requestErrorCode());
+                fchown_spec(context, fildes, (unsigned int)j, (unsigned int)k,
+                                                        requestErrorCode());
+            }
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool fs_lchown_scen()
+{
+    CString* str;
+
+    iterate(int i=0;i<paths_num;i++;)
+        iterate(int j=-1;j<2;j++;)
+            iterate(int k=-1;k<2;k++;)
+    {
+        str=paths[i];
+        pathconf_spec(context, str, SUT_PC_CHOWN_RESTRICTED,
+                                                        requestErrorCode());
+
+        DUMP("i == %d, j == %d, k == %d\n", i, j, k);
+
+        lchown_spec(context, str, (unsigned int)j, (unsigned int)k,
+                                                        requestErrorCode());
+    }
+
+
+    return true;
+}
+
+scenario dfsm fs_meta_access_scenario =
+{
+    .init = init_fs_meta_access_scenario,
+    .finish = finish_fs_meta_access_scenario,
+    .actions = {
+                fs_meta_access_creat_scenario_scen,
+
+                fs_meta_access_init_scenario_scen,
+
+                fs_lchown_scen,
+                fs_chmod_scen,
+                fs_fchown_scen,
+                fs_access_scen,
+                fs_fchmod_scen,
+                fs_chown_scen,
+
+                fs_meta_access_remove_scenario_scen,
+                NULL
+               }
+};
+
+#ifdef FS_META_ACCESS_LOCAL_MAIN
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initPathSystemConfiguration();
+    initFsFsSubsystem();
+    initIoFileSubsystem();
+    initFsMetaSubsystem();
+    initSystemSysconfSubsystem();
+    initFsSymlinkSubsystem();
+    initFsDirSubsystem();
+    initFsMetaAccessSubsystem();
+    initProcessMetaUserSubsystem();
+}
+
+
+bool main_fs_meta_access(int argc, char** argv)
+{
+    int ind =0;
+    addTraceToFile("trace.xml");
+
+    fs_meta_access_scenario(argc, argv);
+
+    return true;
+}
+
+
+
+int main(int argc, char** argv)
+{
+
+  initTestSystem();
+  loadSUT();
+
+  // Set up tracer
+  //setTraceEncoding("windows-1251");
+
+  // Run test scenario
+  main_fs_meta_access(argc, argv);
+
+  //  unloadSUT();
+  return 0;
+}
+
+#endif

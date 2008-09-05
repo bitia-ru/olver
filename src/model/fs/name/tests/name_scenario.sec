@@ -1,0 +1,403 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/name/tests/name_scenario.seh"
+
+#include "fs/name/name_media.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "io/file/file_model.seh"
+#include "fs/meta/meta_model.seh"
+#include "fs/meta/meta_media.seh"
+#include "fs/symlink/symlink_media.seh"
+#include "fs/dir/dir_model.seh"
+#include "fs/dir/dir_media.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "fs/meta/tests/fs_meta_common_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static char* arr_basename[]=
+{
+    "err//",
+    NULL,
+    "",
+    "/",
+    "//",
+    "////",
+    "/users/lib///",
+    "/live/users/lib",
+    "/a///s///d/f//g////h/j",
+    "my docs/percent% and \\///",    
+    "//Humanum/Errare/Est",
+    "dogma"    
+};
+static char* arr_dirname[]=
+{
+    "",
+    "/",
+    "//",
+    "////",
+    "/users/lib///",
+    "/live/users/lib",
+    "/a///s///d/f//g////h/j",
+    "my docs/percent% and \\///",
+    "ererere////",
+    "//Humanum/Errare/Est", 
+    "users",
+    "/users/lib/",
+    "users/lib/",
+    "/users/lib",
+    "users/lib",
+    "/usr/local/",
+    "/usr/local",
+    "/bin/cp",
+    "/bin/cp/",
+    "//foo",
+    "lib//user",
+    "bin/cp",
+    NULL    
+};
+static char* paths[]={    
+
+    //Symlink paths...
+
+    "Dir_Link_Deep/abs_dir_link/file2.c",
+
+    "Dir_Link/file.c",
+        
+    "",
+    "Dir_Link/Dir_Link2",
+    "Dir_Link/Dir_Link2/file2.c",
+
+    "Link_Test/Link_Test2/abs_dir_link",     
+    "Dir_Link/Dir_Link2",
+
+    "Dir_Link/Dir_Link2",
+    "Dir_Link_Deep/abs_dir_link",
+    "Link_Test/file.c",
+    "Link_Test/abs_link",
+    "Link_Test/rel_link",
+
+    "Dir_Link/file.c",
+    "Dir_Link/abs_link",
+    "Dir_Link/rel_link",
+
+    "Link_Test/Link_Test2/file2.c",
+    "Link_Test/Link_Test2/abs_link2",
+    "Link_Test/Link_Test2/rel_link2",
+
+    "Link_Test/Dir_Link2/file2.c",
+    "Link_Test/Dir_Link2/abs_link2",
+    "Link_Test/Dir_Link2/rel_link2",
+
+    "Dir_Link/Link_Test2/file2.c",
+    "Dir_Link/Link_Test2/abs_link2",
+    "Dir_Link/Link_Test2/rel_link2",
+
+    "Dir_Link/Dir_Link2/file2.c",
+    "Dir_Link/Dir_Link2/abs_link2",
+    "Dir_Link/Dir_Link2/rel_link2",
+
+    //Name_max, path_max
+    "/name_max/qwertyuiopqwertyuiop",
+    "/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui"
+    "/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui"
+    "/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui"
+    "/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui/qwertyui"
+};
+
+static char* relative_paths[]={    
+    //Relative paths
+    ".",
+    "..",
+    "../..",
+    "../../.."
+};
+
+static int arr_basename_size=sizeof(arr_basename)/sizeof(char*);
+static int arr_dirname_size=sizeof(arr_dirname)/sizeof(char*);
+static int paths_size=sizeof(paths)/sizeof(char*);
+static int relative_paths_size=sizeof(relative_paths)/sizeof(char*);
+static CallContext context;
+static StringTPtr resolved_path;
+static int maxSize = 1024;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_name_scenario(int argc, char** argv)
+{
+    context = getContext();
+    resolved_path = allocateMemoryBlock(context, maxSize);
+    initPathSystemConfiguration();
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    return true;
+}
+
+static void finish_name_scenario(void)
+{
+    removeTestScenarioSandboxDir(context);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(name_scenario);    
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool fs_name_creat_scenario_scen()
+{
+    FilePermission* perm=create_FilePermission(true, true, true);
+    FilePermissions* mode=create_FilePermissions(perm, perm, perm,
+                            Unknown_Bool3,Unknown_Bool3,Unknown_Bool3);
+    struct OpenFlags flags={ReadWrite, Nonblocking, false, true, false, false,
+                                                                false, false};   
+    FileStatus* fstat=create_emptyFileStatus();
+
+    registerFileFileSystem_Ext2(context,    getFileSystem(context),
+                                            getTestDirectoryPath());
+
+
+    //__lxstat_spec(context, getRelativeTextPathCh(""), fstat, requestErrorCode());
+    //__lxstat_spec(context, getRelativeTextPathCh("/tester"), fstat, requestErrorCode());
+  
+    mkdir_spec(context, SANDBOX_FILE("Link_Test"), mode, requestErrorCode());
+    mkdir_spec(context, SANDBOX_FILE("Link_Test/Link_Test2"), mode, requestErrorCode());
+
+    open_spec(context, SANDBOX_FILE("Link_Test/file.c"),
+                    flags, mode, requestErrorCode(), false);
+
+    open_spec(context, SANDBOX_FILE("Link_Test/Link_Test2/file2.c"),
+                    flags, mode, requestErrorCode(), false);
+
+    symlink_spec(context, SANDBOX_FILE("Link_Test"), SANDBOX_FILE("Dir_Link"),
+                    requestErrorCode(), cancel_status);
+
+    symlink_spec(context,
+        create_CString("Link_Test2"),
+        SANDBOX_FILE("Dir_Link/Dir_Link2"),
+        requestErrorCode(), cancel_status);
+
+    symlink_spec(context,
+        SANDBOX_FILE("Dir_Link/Dir_Link2"),
+        SANDBOX_FILE("Dir_Link_Deep"),
+        requestErrorCode(), cancel_status);
+
+    symlink_spec(context,
+        SANDBOX_FILE("Link_Test/file.c"),
+        SANDBOX_FILE("Link_Test/abs_link"),
+        requestErrorCode(), cancel_status);
+
+    symlink_spec(context,
+        create_CString("file.c"),
+        SANDBOX_FILE("Link_Test/rel_link"),
+        requestErrorCode(), cancel_status);
+
+    symlink_spec(context,
+        SANDBOX_FILE("Link_Test/Link_Test2/file2.c"),
+        SANDBOX_FILE("Link_Test/Link_Test2/abs_link2"),
+        requestErrorCode(), cancel_status);
+
+    symlink_spec(context,
+        create_CString("file2.c"),
+        SANDBOX_FILE("Link_Test/Link_Test2/rel_link2"),
+        requestErrorCode(), cancel_status);
+
+    symlink_spec(context,
+        SANDBOX_FILE("Dir_Link/Dir_Link2"),
+        SANDBOX_FILE("Dir_Link/Dir_Link2/abs_dir_link"),
+        requestErrorCode(), cancel_status);
+
+    return true;
+}
+
+scenario
+bool fs_init_working_directory()
+{
+    File *file;
+    CString *path;
+    FileSystem *fs = getFileSystem(context);
+    ProcessState *pstate = getProcessState_CallContext(context);
+
+    //Need to improve: i don't know how get working path without
+    //calling realpath:)
+    //path = getRelativeTextPathCh("/tester/TestSuite/src/agent");
+
+    //file = fileExist_FileSystem(fs, path, DirectoryFile);
+
+    //pstate->meta.workdir = file->fileid;
+
+    return true;
+}
+
+scenario
+bool basename_scen(void)
+{
+    CString* tmp, *ret;
+    iterate(int i=0;i<arr_basename_size;i++;)
+    {
+        if(arr_basename[i]!=NULL)
+        {
+            tmp=create_CString(arr_basename[i]);
+            ret=basename_spec(context, tmp);
+        }
+        else        
+            basename_spec(context, NULL);
+    }
+    return true;
+}
+
+scenario
+bool dirname_scen(void)
+{
+    iterate(int i=0;i<arr_dirname_size;i++;)
+    {
+        if(arr_dirname[i]!=NULL)
+            dirname_spec(context, create_CString(arr_dirname[i]));
+        else
+            dirname_spec(context, NULL);
+    }
+    return true;
+}
+
+scenario
+bool realpath_scen(void)
+{
+    iterate(int i=0;i<paths_size;i++;)
+    {
+        realpath_spec(context,
+            SANDBOX_FILE(paths[i]),
+            resolved_path, requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool realpath_relative_scen(void)
+{
+    iterate(int i=0;i<relative_paths_size;i++;)
+    {
+        realpath_spec(context,create_CString(relative_paths[i]),
+            resolved_path, requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario dfsm name_scenario =
+{
+    .init=init_name_scenario,
+    .actions=
+    {
+        //Realpath scenarios
+        fs_name_creat_scenario_scen,
+        fs_init_working_directory,
+        
+        realpath_scen,
+        //realpath_relative_scen,
+        
+        dirname_scen,
+        basename_scen,
+        
+        NULL
+    },
+    .finish=finish_name_scenario
+};
+
+#ifdef FS_NAME_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "fs/name/name_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "process/process/process_media.seh"
+#include "io/file/file_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    
+    initFsMetaSubsystem();
+    initFsSymlinkSubsystem();
+    initFsDirSubsystem();
+    initFsFsSubsystem();
+    initProcessProcessSubsystem();
+    initIoFileSubsystem();
+
+    initFsNameSubsystem();
+}
+
+
+bool main_fs_name(int argc, char** argv)
+{
+    addTraceToFile("trace.xml");
+    name_scenario(argc,argv);
+    return true;
+}
+
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    main_fs_name(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+#endif

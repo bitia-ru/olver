@@ -1,0 +1,483 @@
+  /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "io/pipe/pipe_media.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+#include "fs/dir/dir_model.seh"
+
+#include "process/meta/fs_model.seh"
+
+#include "io/pipe/tests/pipe_scenario.seh"
+
+#include "fs/fifo/fifo_model.seh"
+
+#include "fs/fs/fs_model.seh"
+#include "process/meta/fs_media.seh"
+
+
+static CallContext context;
+static CString *fifoPath;
+static bool isInit=false;
+static bool noBlockingReads=true;
+
+static FileDescId readFIFO, writeFIFO;
+
+static CallContext newProcess;
+static IntT        curFIFOVar=0, curFIFOVarW=0;
+static char* baseDir;
+
+
+// makes full path string from local path
+#define FP(path) (concat_Path(getTestDirectoryPath(), create_CString(path)))
+
+// makes full path string
+#define P(path)  (create_CString(path))
+
+#define MKDIR_A(path, perms)\
+mkdir_spec(context, path, create_FilePermissions_String(perms), requestErrorCode())
+
+
+#define NUM_VARS 3
+#define   MAX_SIZE 30
+
+static SSizeT   nsize=30;
+static VoidTPtr buf, readBuf;
+
+static List* readIov, *writeIov;
+
+FileDescId getFileDescId_FIFOFile(CallContext context, File* file, bool write)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    Map* descriptors=ps->file_descriptors;
+    IntT i=0;
+    
+    for (i=0;i<size_Map(descriptors);i++)
+    {
+        FileDescIdObj* descID=key_Map(descriptors, i);
+        FileDescriptor* fdesc=get_Map(descriptors, descID);
+        if (fdesc->file.file==file->fileid.file
+            && fdesc->file.system==file->fileid.system && fdesc->description->access_mode==write)
+        {
+            return fdesc->file_desc_id;
+        }
+    }
+    return create_FileDescId(-1, -1, -1);
+}
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+
+specification typedef struct PipeState
+{
+    IntT curFIFOVar;
+    IntT curFIFOVarW;
+} PipeState;
+
+specification typedef struct PipeState PipeState = {};
+
+PipeState * create_PipeState(IntT curFIFOVar, IntT curFIFOVarW)
+{
+    return create(&type_PipeState, curFIFOVar, curFIFOVarW);
+}
+
+static Object* getPipeState(void)
+{
+    return create_PipeState( curFIFOVar, curFIFOVarW);
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+void initFunction(BlockMode blocking)
+{
+    FileDescIdObj* fd1=create_FileDescIdObj(create_FileDescId( 0, 0, 0));
+    FileDescIdObj* fd2=create_FileDescIdObj(create_FileDescId( 0, 0, 0));
+    
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(true, true, false);
+    FilePermission* other = create_FilePermission(true, true, false);
+    FilePermissions *perms = create_FilePermissions(owner, group, other, 
+        Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+    
+    OpenFlags oflag = { ReadWrite, Nonblocking, false, false, false, false, false,
+        false };
+    
+    UCharT xBuff[MAX_SIZE];
+    LongT pipe_buf;
+    
+    UCharT refBuff[MAX_SIZE];
+    SizeT i;
+    
+    oflag.block_mode=blocking;
+    
+    if (!isInit)
+    {
+        DISABLE_DEFERRED_REACTIONS
+            
+        // update the current working directory of the process
+        updateProcessWorkDirectory(context);
+        
+        if (blocking==Nonblocking)
+        {
+            // create test root
+            MKDIR_A(FP("pipe"),"rwxrwxrwx");    
+            setUptodate_Directory(getFile_FileSystem(getFileSystem(context), FP("pipe")), true);
+
+            fifoPath=FP("pipe/fifo_file");
+
+            baseDir = "pipe";
+
+
+        }
+        else
+        {
+            // create test root
+            MKDIR_A(FP("pipe1"),"rwxrwxrwx");    
+            setUptodate_Directory(getFile_FileSystem(getFileSystem(context), FP("pipe1")), true);
+
+
+            fifoPath=FP("pipe1/fifo_file");
+
+            baseDir = "pipe1";
+
+        }
+
+        newProcess=createProcess();
+        
+        pipe_spec(context, fd1, fd2, requestErrorCode());
+        
+        mkfifo_spec(context, fifoPath, perms, requestErrorCode());
+        
+        buf=allocateMemoryBlock(newProcess, nsize);
+        readBuf=allocateMemoryBlock(context, nsize);
+        for(i=0;i<MAX_SIZE;i++)
+        {
+            refBuff[i] = (CharT)i;
+        }
+        
+        writeCByteArray_VoidTPtr(buf, create_CByteArray(refBuff, nsize) );
+        writeCByteArray_VoidTPtr(readBuf, create_CByteArray(refBuff, nsize) );
+        
+        pipe_buf = sysconf_spec( context, SUT_PC_PIPE_BUF, requestErrorCode() );
+        setSystemConfigurationValue( context, SUT_PC_PIPE_BUF, pipe_buf);
+        setSystemConfigurationValue( newProcess, SUT_PC_PIPE_BUF, pipe_buf);
+        
+        {
+            VoidTPtr buf1=allocateMemoryBlock(newProcess, nsize);
+            VoidTPtr buf2=allocateMemoryBlock(newProcess, nsize);
+            readIov=create_List(&type_IOvec);
+            append_List(readIov, create_IOvec( allocateMemoryBlock(context, 5), (SizeT)5));
+            append_List(readIov, create_IOvec( allocateMemoryBlock(context, 20), (SizeT)20));
+            writeIov=create_List(&type_IOvec);
+            writeCByteArray_VoidTPtr(buf1, create_CByteArray(refBuff, nsize));
+            writeCByteArray_VoidTPtr(buf2, create_CByteArray(refBuff, nsize));
+            append_List(writeIov, create_IOvec( buf1, (SizeT)5));
+            append_List(writeIov, create_IOvec( buf2, (SizeT)20));
+        }
+        
+        ENABLE_DEFERRED_REACTIONS
+           
+        oflag.access_mode=ReadOnly;
+        open_fifo_spec(context, fifoPath, oflag, perms, requestErrorCode(), false);
+        
+        ts_sleep_msec(300);
+
+        oflag.access_mode=WriteOnly;
+        open_fifo_spec(newProcess, fifoPath, oflag, perms, requestErrorCode(), false);
+
+        noBlockingReads=true;
+
+    }
+}
+
+
+static bool init_io_pipe_scenario(int argc,char** argv)
+{
+    context = getContext();
+    initPathSystemConfiguration();
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(false);
+    setWTimeMSec(100);
+   
+    isInit=false; 
+
+    curFIFOVar=0;
+    curFIFOVarW=0;
+
+    initFunction(Nonblocking);
+    
+    return true;
+     
+}
+
+static bool init_io_blocked_pipe_scenario(int argc,char** argv)
+{
+    context = getContext();
+    initPathSystemConfiguration();
+    
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(false);
+    setWTimeMSec(100);
+    
+    isInit=false; 
+    
+    curFIFOVar=0;
+    curFIFOVarW=0;
+ 
+    initFunction(Blocking);
+    
+    return true;
+    
+}
+
+
+static void finish_io_pipe_scenario(void)
+{
+    close_fifo_spec(context, readFIFO, requestErrorCode());
+    close_fifo_spec(newProcess, writeFIFO, requestErrorCode());
+
+    recursive_remove(context, FP(baseDir));
+
+}
+
+
+
+scenario
+bool io_readv_fifo_scen()
+{
+    FIFOFileDescriptor* fdesc=getDescriptor_FileDescId(readFIFO);
+   
+    if (noBlockingReads || size_CByteArray(fdesc->data) > 0)
+    {
+        if (size_CByteArray(fdesc->data)==0)
+        {
+            noBlockingReads=false;
+        }
+
+        readv_fifo_spec(context, readFIFO, readIov, requestErrorCode());
+
+    }
+
+    curFIFOVarW--;
+    if (curFIFOVarW<0)
+    {
+        curFIFOVarW=0;
+    }
+
+    return true;
+}
+
+
+
+scenario
+bool io_read_fifo_scen()
+{
+    FIFOFileDescriptor* fdesc=getDescriptor_FileDescId(readFIFO);
+    if (noBlockingReads || size_CByteArray(fdesc->data) > 0)
+    {
+        if (size_CByteArray(fdesc->data)==0 )
+        {
+            noBlockingReads=false;
+        }
+
+        read_fifo_spec(context, readFIFO, readBuf, nsize, requestErrorCode());
+    }
+
+    curFIFOVar--;
+    if (curFIFOVar<0)
+    {
+        curFIFOVar=0;
+    }
+
+    return true;
+}
+
+
+scenario
+bool io_writev_fifo_scen()
+{
+    writev_fifo_spec(newProcess, writeFIFO, writeIov, requestErrorCode());
+
+    curFIFOVarW++;
+    if (curFIFOVarW>=NUM_VARS)
+    {
+        curFIFOVarW=NUM_VARS-1;
+    }
+    
+    return true;
+}
+
+
+scenario
+bool io_write_fifo_scen()
+{
+    if (!isInit)
+    {
+        File* fFIFO=getFile_FileSystem(getFileSystem(newProcess), fifoPath);
+        readFIFO=getFileDescId_FIFOFile(context, fFIFO, false);
+        writeFIFO=getFileDescId_FIFOFile(newProcess, fFIFO, true);
+
+        isInit=true;
+    }
+
+    write_fifo_spec(newProcess, writeFIFO, buf, nsize/(curFIFOVar+1), requestErrorCode());
+
+    curFIFOVar++;
+    if (curFIFOVar>=NUM_VARS)
+    {
+        curFIFOVar=NUM_VARS-1;
+    }
+
+    return true;
+}
+
+
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+Map* savePipeModelState(void)
+{
+    return clone(systems);
+}
+
+void restorePipeModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+static bool isPipeModelStateStationary(void)
+{
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm io_pipe_scenario =
+{
+        .init = init_io_pipe_scenario,
+        .finish = finish_io_pipe_scenario,
+        .getState = getPipeState,
+        .saveModelState = (PtrSaveModelState)savePipeModelState,
+        .restoreModelState = (PtrRestoreModelState)restorePipeModelState,
+        .isStationaryState=(PtrIsStationaryState)isPipeModelStateStationary,
+        .actions = {
+            io_write_fifo_scen,
+            io_read_fifo_scen,
+            io_writev_fifo_scen,
+            io_readv_fifo_scen,
+            NULL
+    }
+};
+
+
+scenario dfsm io_blocked_pipe_scenario =
+{
+        .init = init_io_blocked_pipe_scenario,
+        .finish = finish_io_pipe_scenario,
+        .getState = getPipeState,
+        .saveModelState = (PtrSaveModelState)savePipeModelState,
+        .restoreModelState = (PtrRestoreModelState)restorePipeModelState,
+        .isStationaryState=(PtrIsStationaryState)isPipeModelStateStationary,
+        .actions = {
+            io_write_fifo_scen,
+            io_read_fifo_scen,
+            io_writev_fifo_scen,
+            io_readv_fifo_scen,
+            NULL
+    }
+};
+
+#ifdef IO_PIPE_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "io/file/file_media.seh"
+#include "fs/fifo/fifo_media.seh"
+#include "fs/dir/dir_media.seh"
+#include "process/process/process_media.seh"
+#include "system/sysconf/sysconf_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+    
+    initIoFileSubsystem();
+    initIoPipeSubsystem();
+    initFsFifoSubsystem();
+    initProcessMetaFsSubsystem();
+    initFsDirSubsystem();
+    initProcessProcessSubsystem();
+    initSystemSysconfSubsystem();
+
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+    
+    addTraceToFile("trace.xml");
+    
+    // Run test scenario
+    io_pipe_scenario(argc,argv);
+    io_blocked_pipe_scenario(argc,argv);
+    
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

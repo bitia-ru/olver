@@ -1,0 +1,645 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "atl/long.h"
+#include "ts/system.h"
+#include "common/init.seh"
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "common/common_model.seh"
+
+#ifndef WIN32
+    #include <unistd.h>
+    #include <signal.h>
+    #include <stdio.h>
+#endif
+
+
+#define TEST_SYSTEM_PORT     2795
+//#define MASTER_AGENT_ADDRESS "192.168.127.128:1859"
+
+
+/********************************************************************/
+/**                      Control Center Data                       **/
+/********************************************************************/
+static TSSocket tsSocket;
+Map* taMap;  // ThreadId -m-> TestAgentDesc
+
+
+/********************************************************************/
+/**                     Control Center Properties                  **/
+/********************************************************************/
+bool ts_debug_mode = false;
+
+void setDebugMode(bool dbgMode)
+{
+    ts_debug_mode = dbgMode;
+}
+
+bool isDebugMode(void)
+{
+    return ts_debug_mode;
+}
+
+bool waitAgentInfinitely = true;
+
+bool isWaitAgentInfinitely(void)
+{
+    return waitAgentInfinitely;
+}
+
+void setWaitAgentInfinitely(bool waitAgent)
+{
+    waitAgentInfinitely = waitAgent;
+}
+
+
+/********************************************************************/
+/**                      Test Agent Starter                        **/
+/********************************************************************/
+ThreadId startAgentByMaster(void);
+
+static TestAgentStarter test_agent_starter = startAgentByMaster;
+
+TestAgentStarter setTestAgentStarter(TestAgentStarter starter)
+{
+TestAgentStarter old_starter;
+
+    old_starter = test_agent_starter;
+    test_agent_starter = starter;
+    return old_starter;
+}
+
+
+/********************************************************************/
+/**                   Control Center Initialization                **/
+/********************************************************************/
+void protectCommunicationChannel()
+{
+#ifndef WIN32
+    sigset_t set;
+    sigset_t oset;
+
+    sigaddset(&set,SIGPIPE);
+    sigemptyset(&oset);
+    pthread_sigmask(SIG_SETMASK, &set, &oset);
+#endif
+}
+
+static void initControlCenter(void)
+{
+    tsSocket = WrongTSSocket;
+    reinitControlCenter();
+    protectCommunicationChannel();
+}
+
+void reinitControlCenter(void)
+{
+    taMap = create_Map( NULL, NULL );
+}
+
+void cleanupControlCenter(void)
+{
+    closeTSSocket(tsSocket);
+    tsSocket = WrongTSSocket;
+}
+
+
+/********************************************************************/
+/**                  Test System Exception Handlers                **/
+/********************************************************************/
+extern char *ts_program_path;
+
+void test_system_exception_handler(void)
+{
+    VERBOSE("\n*****************EXCEPTION!*****************\n");
+    // clean up control center
+    if(ts_debug_mode)
+    {
+#ifndef WIN32
+        int gdb_pid;
+        char spid[20];
+        snprintf(spid, 19, "%i", getpid());
+        spid[19] = 0;
+        VERBOSE("Forking...\n");
+        gdb_pid = fork();
+        VERBOSE("Forked...\n");
+
+        if (gdb_pid == 0) { // We are the child
+            char spath[256];
+            snprintf(spath, sizeof(spath)-1, "%s.gdb", ts_program_path);
+            if (execl("/usr/bin/gdb", "gdb", "--command", spath, ts_program_path, spid, NULL) == -1)
+                VERBOSE("Couldn't start gdb\n");
+
+            exit(0);
+        } else if (gdb_pid < 0) {
+            VERBOSE("Couldn't fork\n");
+        } else {
+            // Wait for any signal from GDB
+            sigset_t wsig;
+            int ressig=0;
+            sigfillset( &wsig );
+            sigwait(&wsig, &ressig);
+        }
+#endif
+    } else {
+        cleanupControlCenter();
+    }
+}
+
+void test_system_assert_function(const char* format, va_list arg_list)
+{
+    char buff[1024];
+
+    // clean up control center
+    cleanupControlCenter();
+    
+    // output error to console
+    vsprintf(buff, format, arg_list);
+    VERBOSE("error: %s\n", buff);
+    
+    // call default CTesK assert function
+    ts_assert_function(format,arg_list);
+}
+
+
+/********************************************************************/
+/**                    Test System Initialization                  **/
+/********************************************************************/
+void initTestSystem(void)
+{
+    // init debug printing system
+    VERBOSE_OUTPUT(stdout);
+
+    // init control center
+    initControlCenter();
+
+    // set up test system event handlers
+    ts_set_exception_event_handler(test_system_exception_handler);
+    atAssertion(test_system_assert_function);
+
+    // one time registrations
+    registerReactionCatcher(registerDeferredReactions,NULL);
+
+    reinitTestSystem();
+}
+
+void cleanupTestSystem(void)
+{
+    cleanupControlCenter();
+}
+
+
+/********************************************************************/
+/**                     System Under Test Loading                  **/
+/********************************************************************/
+long first_accepting_time_msecs   = 400;
+long maximum_accepting_times = 10;
+
+ThreadId acceptTestAgent(bool blocking)
+{
+    ThreadId res;
+    TSSocket taSocket;
+    TSBuffer buffer;
+
+    if (tsSocket == WrongTSSocket)
+    {
+        tsSocket = createWellKnownTSSocket( TEST_SYSTEM_PORT );
+    }
+    if (blocking)
+    {
+        taSocket = acceptTSSocket(tsSocket);
+    }
+    else
+    {
+        setNonblockingMode(tsSocket,true);
+        taSocket = acceptTSSocket(tsSocket);
+        if (taSocket == WrongTSSocket)
+        {// Wait for some time
+            long accepting_iterations_left = maximum_accepting_times;
+            ts_sleep_msec( first_accepting_time_msecs );
+            taSocket = acceptTSSocket(tsSocket);
+            while (taSocket == WrongTSSocket && accepting_iterations_left--)
+            {// Wait for some time again
+                ts_sleep_msec( first_accepting_time_msecs );
+                taSocket = acceptTSSocket(tsSocket);
+            }
+            if (taSocket == WrongTSSocket)
+            {
+                setNonblockingMode(tsSocket,false);
+                return WrongThreadId;
+            }
+        }
+        // Well Known Socket
+        setNonblockingMode(tsSocket,false);
+        // Test Agent Socket
+        setNonblockingMode(taSocket,false);
+        setNoDelayMode(taSocket,true);
+    }
+    if (receiveTSMessage(taSocket,&buffer) != Available_ConnectionStatus)
+        return WrongThreadId;
+    res = registerTestAgent( taSocket, &buffer );
+    free(buffer.data);
+    return res;
+}
+
+bool loadSUT(void)
+{
+ThreadId agent;
+
+    if (test_agent_starter != NULL)
+     {
+        agent = test_agent_starter();
+        if (!isWrong_ThreadId(agent))
+         {
+            verbose("TestAgent started\n");
+            return true;
+         }
+     }
+
+    if (isWaitAgentInfinitely())
+    {
+        verbose("Load SUT and run TestAgent, please\n");
+        agent = acceptTestAgent(true);
+
+        if (!isWrong_ThreadId(agent))
+         {
+            verbose("Ok\n");
+            return true;
+         }
+    }
+    return false;
+}
+
+/**
+bool unloadSUT(void)
+{
+    ThreadState* thread;
+    TestAgentDesc* agent;
+    TSBuffer command;
+    TSBuffer response;
+    TSStream stream;
+    int i,size;
+
+    // TO DO: Don't wait for answer
+    size = size_Map(taMap);
+    for( i = 0; i < size; i++ )
+    {
+        Long* id = key_Map( taMap, i );
+        thread = findThread(threads,*id);
+        if (thread != NULL)
+        {
+            if (thread->status == Running_ThreadStatus)
+            {
+                allocateTSStream(&stream,&command);
+                writeStringTSStream( &stream, "finish" );
+                agent = get_Map( taMap, id );
+
+                sendCommand_TestAgent( agent, &command, &response );
+
+                destroy_TSBuffer(&command);
+                destroy_TSBuffer(&response);
+            }
+        }
+
+    }
+    clear_Map(taMap);
+    return true;
+}
+
+bool reloadSUT(void)
+{
+    char* code;
+    TestAgentDesc* agent;
+    TSBuffer command;
+    TSBuffer response;
+    TSStream stream;
+    int size;
+    bool success = false;
+
+    VERBOSE("Trying to reload SUT...\n");
+    size = size_Map(taMap);
+    if (size > 0)
+    {
+        allocateTSStream(&stream,&command);
+        writeStringTSStream( &stream, "reboot" );
+
+        clearBadVerdict();
+        executeCommandInContext( getContext(), &command, &response );
+
+        if (!isBadVerdict())
+        {
+            initTSStream( &stream, &response );
+            code = readStringAsCharArray_TSStream(&stream);
+            if (strcmp(code,"Ok") == 0)
+            {
+                reinitTestSystem();
+                acceptTestAgent(true);
+                VERBOSE("Reload finish\n");
+                VERBOSE("\n");
+                success = true;
+            }
+            else
+            {
+                VERBOSE("Fail: %s\n",code);
+            }
+        }
+
+        destroy_TSBuffer(&command);
+        destroy_TSBuffer(&response);
+    }
+    // Otherwise reload manually
+    if (!success)
+    {reinitTestSystem();
+     loadSUT();
+    }
+}
+**/
+
+/********************************************************************/
+/**                        Auxiliary Functions                     **/
+/********************************************************************/
+ThreadId startAgentByMaster(void)
+{
+    bool verdict;
+    TestAgentDesc* agent;
+    TSSocket socket;
+    const char* master;
+    TSCommand command;
+    ThreadId res = WrongThreadId;
+
+    // Find target system address
+    master = getenv("MASTER_AGENT");
+    if (master == NULL)
+    {
+#if defined(MASTER_AGENT_ADDRESS)
+        master = MASTER_AGENT_ADDRESS;
+#else
+        return WrongThreadId;
+#endif
+    }
+
+    // Initialize ControlCenter socket
+    if (tsSocket == WrongTSSocket)
+    {
+        tsSocket = createWellKnownTSSocket( TEST_SYSTEM_PORT );
+        if (tsSocket == WrongTSSocket)
+        {
+            return WrongThreadId;
+        }
+    }
+
+    // Connect to master agent
+    socket = createTSSocket(master);
+    if (socket == WrongTSSocket)
+    {
+        return WrongThreadId;
+    }
+
+    command = create_TSCommand();
+    format_TSCommand( &command, "start_agent:$(int)$(int)", create_IntTObj(TEST_SYSTEM_PORT),
+        create_IntTObj(1)
+        );
+
+    verdict = sendTSMessage( socket, command.command.buffer.data, command.command.buffer.length );
+    if (verdict)
+    {
+        agent = create_TestAgentDesc( socket, WrongThreadId );
+        if (receiveTAResponse( agent, &command.response.buffer, &command.meta ) == Available_ConnectionStatus)
+        {
+            String* code = readString_TSStream(&command.response);
+            verdict = equals( code, create_String("Ok") );
+        }
+    }
+
+    if (verdict)
+    {
+        res = acceptTestAgent(true);
+    }
+
+    closeTSSocket(socket);
+    destroy_TSCommand(&command);
+    return res;
+}
+
+void destroyFolder(CallContext context, CString *path)
+{
+    bool verdict;
+    TSCommand command = create_TSCommand();
+    bool mode = setDeferredReactionsMode(false);
+
+
+    format_TSCommand( &command, "remove_dir_recursive:$(str)", path );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+
+    setDeferredReactionsMode(mode);
+    destroy_TSCommand(&command);
+}
+
+ThreadId createProcess(void)
+{
+    bool verdict;
+    TestAgentDesc* agent;
+    TSCommand command = create_TSCommand();
+    ThreadId res = WrongThreadId;
+
+
+    format_TSCommand( &command, "create_process" );
+    agent = get_Map( taMap, key_Map( taMap, 0 ) );
+    verdict = executeCommandInContext( agent->threadid, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+
+    if (verdict)
+    {
+        bool mode = setDeferredReactionsMode(false);
+        res = acceptTestAgent(true);
+        setDeferredReactionsMode(mode);
+    }
+
+    destroy_TSCommand(&command);
+    return res;
+}
+
+#include "process/process/process_model.seh"
+
+ThreadId forkProcess(CallContext context)
+{
+    bool verdict;
+    TSCommand command = create_TSCommand();
+    ThreadId res = WrongThreadId;
+
+    format_TSCommand( &command, "fork_process" );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+
+    if (verdict)
+    {
+        bool mode = setDeferredReactionsMode(false);
+        res = acceptTestAgent(true);
+        setDeferredReactionsMode(mode);
+    }
+
+    // Temporary solution: update state here
+    if (!isWrong_ThreadId(res))
+    {
+        ProcessState* parentState = getProcessState_CallContext( context );
+        ProcessState* childState = getProcessState_ThreadId( res );
+        ThreadState* parentThread = getThreadState_CallContext(context);
+        ThreadState* childThread = clone(parentThread); // need to correct all VoidTPtrs and re-register objectsInMemory.
+        int keysnum,i;
+        copy( parentState, childState );
+        childState->processid = getProcessId_ThreadId(res);
+        childState->meta.parent = parentState->processid;
+        childState->threads = create_Map( &type_ThreadIdObj, &type_ThreadState );
+
+        childThread->id = res;
+        // re
+        childThread->key_specific = create_Map(&type_PThreadKey, &type_ThreadSpecific);
+        keysnum=size_Map(parentThread->key_specific);
+        for(i=0;i<keysnum;i++)
+        {
+            PThreadKey * parent_key = (PThreadKey*)key_Map(parentThread->key_specific,i);
+            ThreadSpecific * parent_specific = (ThreadSpecific *)get_Map(parentThread->key_specific, parent_key);
+            PThreadKey * child_key = clone(parent_key);
+            ThreadSpecific * child_specific = clone(parent_specific);
+            child_key->address.process = res.process;
+            child_specific->address.process = res.process;
+            child_specific->key = child_key;
+
+            //unregisterObjectInMemory( parent_key->address );
+            removeMemoryBlock( childState->memory_blocks, parent_key->address );
+
+            registerObjectInMemory( child_key->address , 0, child_key);
+
+            put_Map(childThread->key_specific,child_key, child_specific);
+        }
+
+        put_Map(childState->threads,create_ThreadIdObj(res), childThread);
+    }
+
+    destroy_TSCommand(&command);
+    return res;
+}
+
+ThreadId createThread(void)
+{
+    TestAgentDesc* agent;
+
+    agent = get_Map( taMap, key_Map( taMap, 0 ) );
+    return createThreadInContext(agent->threadid);
+}
+
+ThreadId createThreadInContext(CallContext context)
+{
+    bool verdict;
+    TestAgentDesc* agent;
+    TSCommand command = create_TSCommand();
+    ThreadId res = WrongThreadId;
+
+
+    format_TSCommand( &command, "create_thread" );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+
+    if (verdict)
+    {
+        bool mode = setDeferredReactionsMode(false);
+        res = acceptTestAgent(true);
+        setDeferredReactionsMode(mode);
+    }
+
+    assertion( res.system  == context.system, "createThread: invalid system identifier of the thread created" );
+    assertion( res.process == context.process,"createThread: invalid process identifier of the thread created" );
+    assertion( res.thread  != context.thread, "createThread: invalid thread identifier of the thread created" );
+
+    destroy_TSCommand(&command);
+    return res;
+}
+
+#include <system/system/system_model.seh>
+
+void terminateProcess(CallContext context)
+{
+    bool verdict;
+    SystemState* system;
+    TestAgentDesc* agent;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand( &command, "terminate_process" );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+
+    // Update Model state
+    system = getSystemState( context.system );
+    if (system != NULL)
+    {
+        remove_Map( system->processes, create_ProcessIdObj(create_ProcessId(context.system, context.process)) );
+    }
+
+    destroy_TSCommand(&command);
+}
+
+void agentLog(CallContext context, CString* message)
+{
+bool verdict;
+TSCommand command = create_TSCommand();
+
+    format_TSCommand( &command, "agent_log:$(str)", message );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceFormattedUserInfo( "agentLog failed: $(obj)", code );
+    }
+    destroy_TSCommand(&command);
+}
+

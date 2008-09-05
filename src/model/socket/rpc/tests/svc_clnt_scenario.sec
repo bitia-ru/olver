@@ -1,0 +1,437 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "socket/rpc/tests/svc_clnt_scenario.seh"
+
+#include "socket/rpc/svc_model.seh"
+#include "socket/rpc/clnt_model.seh"
+// #include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "config/type_config.seh"
+#include "socket/rpc/pmap_model.seh"
+
+static VoidTPtr getFunctionAddress(CallContext context, const char* func_name);
+static SizeT getSizeofProgvers(CallContext context);
+static void initProgvers(CallContext context, VoidTPtr buf, ULongT low_vers, ULongT high_vers);
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static const ULongT ProgNum = 12;
+static const ULongT ProgNum_Fail = 65535;
+static const ULongT VersNum = 3;
+
+enum {
+    PROC_NULL,          // input/ouput: none; does nothing.
+    PROC_ADD_NUM,       // input: int, output: int; adds 123 to the input value.
+    PROC_REPLACE_STR,   // input: string, output: string; replaces the last 3 chars in the input string with "xyz" (if possible).
+    PROC_ERR_AUTH,      // input: int; outout: none; calls svcerr_auth function with auth_stat passed.
+    PROC_ERR_DECODE,    // input/ouput: none; calls svcerr_decode function
+    PROC_ERR_NOPROC,    // input/ouput: none; calls svcerr_noproc function
+    PROC_ERR_NOPROG,    // input/ouput: none; calls svcerr_noprog function
+    PROC_ERR_PROGVERS,  // input: 2 u_long, ouput: none; calls svcerr_progvers function with version number passed.
+    PROC_ERR_SYSTEMERR, // input/ouput: none; calls svcerr_systemerr function
+    PROC_ERR_WEAKAUTH   // input/ouput: none; calls svcerr_weakauth function
+};
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static CallContext context_svctcp, context_svcudp;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_rpc_svc_clnt_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    context = getContext();
+    context_svctcp = createThread();
+    context_svcudp = createThread();
+
+    return true;
+}
+
+static void finish_rpc_svc_clnt_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(rpc_svc_clnt_scenario);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+/*  The following functions are not called inside this scenario:
+    1. svc_getreqset_spec:
+       it should be called only when implementing your own server procedure
+       instead of using svc_run(); for now it's too large a task.
+
+    The following functions are not tested thoroughly:
+    1. clnt_control_spec:
+       not all possible commands are tested.
+
+    The following functions are not called directly ('cause they cannot be called
+    outside of the server dispatch routine!):
+     1. svcerr_auth_spec
+     2. svcerr_decode_spec
+     3. svcerr_noproc_spec
+     4. svcerr_noprog_spec
+     5. svcerr_progvers_spec
+     6. svcerr_systemerr_spec
+     7. svcerr_weakauth_spec
+     8. svc_freeargs_spec
+     9. svc_getargs_spec
+    10. svc_sendreply_spec
+ */
+
+scenario
+bool rpc_svc_clnt_scen()
+{
+    SvcXprtTPtr svctcp_ptr, svcudp_ptr;
+    AuthTPtr auth_ptr;
+    RpcErrTPtr err_ptr;
+    ClientTPtr clnt_ptr;
+    enum ClntStatT call_stat;
+    DispatchFnTPtr func_ptr;
+    VoidTPtr xdr_void_addr, xdr_int_addr,xdr_wrapstring_addr, xdr_progvers_addr;
+    TimeValTObj* timeout;
+    VoidTPtr in_arg, out_arg, vers_arg;
+    VoidTPtr in_str, in_str_arg, out_str, out_str_arg;
+    IntT out_res;
+    CString* str_res;
+    int i;
+    BoolT res;
+
+    // Preparations
+    xdr_void_addr = getFunctionAddress(context, "xdr_void");
+    xdr_int_addr = getFunctionAddress(context, "xdr_int");
+    xdr_wrapstring_addr = getFunctionAddress(context, "xdr_wrapstring");
+    xdr_progvers_addr = getFunctionAddress(context, "xdr_progvers");
+    timeout = create_TimeValTObj(5, 0);
+    in_arg = allocateMemoryBlock(context, sizeof_IntT);
+    out_arg = allocateMemoryBlock(context, sizeof_IntT);
+    vers_arg = allocateMemoryBlock(context, getSizeofProgvers(context));
+    err_ptr = allocateMemoryBlock(context, getSizeOfType(context, "struct rpc_err"));
+    in_str = allocateMemoryBlock(context, 1024);
+    in_str_arg = allocateMemoryBlock(context, getSizeOfType(context, "void*"));
+    out_str_arg = allocateMemoryBlock(context, getSizeOfType(context, "void*"));
+
+    auth_ptr = authnone_create_spec(context);
+
+    // Testing normal behaviour: RPC/TCP server+client
+    writeInt_VoidTPtr(in_arg, 456);
+    svctcp_ptr = svctcp_create_spec(context_svctcp, SUT_RPC_ANYSOCK, 0, 0);
+    res = pmap_unset_spec(context_svctcp, ProgNum, VersNum);
+    func_ptr = getFunctionAddress(context_svctcp, "test_svc_proc");
+    res = svc_register_spec(context_svctcp, svctcp_ptr, ProgNum, VersNum, func_ptr, SUT_IPPROTO_TCP);
+    svc_run_spec(context_svctcp);
+    ts_sleep_msec(300);
+
+    clnt_ptr = clnt_create_spec(context, create_CString("127.0.0.1"), ProgNum, VersNum, create_CString("tcp"));
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_NULL, xdr_void_addr, NULL_VoidTPtr,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test_tcp 1"));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test_tcp 1"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    clnt_perrno_spec(context, call_stat);
+    str_res = clnt_sperrno_spec(context, call_stat);
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ADD_NUM, xdr_int_addr, in_arg,
+                               xdr_int_addr, out_arg, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test_tcp 2"));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test_tcp 2"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    clnt_perrno_spec(context, call_stat);
+    str_res = clnt_sperrno_spec(context, call_stat);
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    out_res = readInt_VoidTPtr(out_arg);
+    verbose("TCP: ADD function returned %d\n", out_res);
+
+    clnt_control_spec(context, clnt_ptr, SUT_CLGET_FD, out_arg);
+    out_res = readInt_VoidTPtr(out_arg);
+    verbose("CLGET_FD: %d\n", out_res);
+
+    writeCString_VoidTPtr(in_str, create_CString("This is a test string!"));
+    writePointer_VoidTPtr(context, in_str_arg, in_str);
+    writePointer_VoidTPtr(context, out_str_arg, NULL_VoidTPtr);
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_REPLACE_STR, xdr_wrapstring_addr, in_str_arg,
+                               xdr_wrapstring_addr, out_str_arg, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test_tcp 3"));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test_tcp 3"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    clnt_perrno_spec(context, call_stat);
+    str_res = clnt_sperrno_spec(context, call_stat);
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    out_str = readPointer_VoidTPtr(context, out_str_arg);
+    str_res = readCString_VoidTPtr(out_str);
+    verbose("TCP: STR function returned '%s'\n", toCharArray_CString(str_res));
+
+    res = clnt_freeres_spec(context, clnt_ptr, xdr_wrapstring_addr, out_str_arg);
+    verbose("TCP: freeres returned %d\n", res);
+
+    clnt_destroy_spec(context, clnt_ptr);
+
+    // Testing normal behaviour: RPC/UDP server+client
+    writeInt_VoidTPtr(in_arg, 457);
+    svcudp_ptr = svcudp_create_spec(context_svcudp, SUT_RPC_ANYSOCK);
+    res = pmap_unset_spec(context_svcudp, ProgNum, VersNum);
+    func_ptr = getFunctionAddress(context_svcudp, "test_svc_proc");
+    res = svc_register_spec(context_svcudp, svcudp_ptr, ProgNum, VersNum, func_ptr, SUT_IPPROTO_UDP);
+    svc_run_spec(context_svcudp);
+    ts_sleep_msec(300);
+
+    clnt_ptr = clnt_create_spec(context, create_CString("127.0.0.1"), ProgNum, VersNum, create_CString("udp"));
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_NULL, xdr_void_addr, NULL_VoidTPtr,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test_udp 1"));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test_udp 1"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    clnt_perrno_spec(context, call_stat);
+    str_res = clnt_sperrno_spec(context, call_stat);
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ADD_NUM, xdr_int_addr, in_arg,
+                               xdr_int_addr, out_arg, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test_udp 2"));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test_udp 2"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    clnt_perrno_spec(context, call_stat);
+    str_res = clnt_sperrno_spec(context, call_stat);
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    out_res = readInt_VoidTPtr(out_arg);
+    verbose("UDP: ADD function returned %d\n", out_res);
+
+    // Testing error calls
+    for (i=0; i<=8; ++i)
+    {
+        writeInt_VoidTPtr(in_arg, i);
+        call_stat = clnt_call_spec(context, clnt_ptr, PROC_ERR_AUTH, xdr_int_addr, in_arg,
+                                   xdr_void_addr, NULL_VoidTPtr, timeout);
+        clnt_perror_spec(context, clnt_ptr, format_CString("test PROC_ERR_AUTH [%d] ", i));
+        str_res = clnt_sperror_spec(context, clnt_ptr, format_CString("test PROC_ERR_AUTH [%d] ", i));
+        verbose("Message: <%s>\n", toCharArray_CString(str_res));
+    }
+
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ERR_DECODE, xdr_void_addr, NULL_VoidTPtr,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test PROC_ERR_DECODE   "));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test PROC_ERR_DECODE   "));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    clnt_geterr_spec(context, clnt_ptr, err_ptr);
+
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ERR_NOPROC, xdr_void_addr, NULL_VoidTPtr,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test PROC_ERR_NOPROC   "));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test PROC_ERR_NOPROC   "));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ERR_NOPROG, xdr_void_addr, NULL_VoidTPtr,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test PROC_ERR_NOPROG   "));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test PROC_ERR_NOPROG   "));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    initProgvers(context, vers_arg, 0, 3);
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ERR_PROGVERS, xdr_progvers_addr, vers_arg,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test PROC_ERR_PROGVERS "));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test PROC_ERR_PROGVERS "));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ERR_SYSTEMERR, xdr_void_addr, NULL_VoidTPtr,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test PROC_ERR_SYSTEMERR"));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test PROC_ERR_SYSTEMERR"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    call_stat = clnt_call_spec(context, clnt_ptr, PROC_ERR_WEAKAUTH, xdr_void_addr, NULL_VoidTPtr,
+                               xdr_void_addr, NULL_VoidTPtr, timeout);
+    clnt_perror_spec(context, clnt_ptr, create_CString("test PROC_ERR_WEAKAUTH "));
+    str_res = clnt_sperror_spec(context, clnt_ptr, create_CString("test PROC_ERR_WEAKAUTH "));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    clnt_destroy_spec(context, clnt_ptr);
+
+    // Testing failures: trying to connect to unreachable host
+    clnt_ptr = clnt_create_spec(context, create_CString("nesushscestvuyushsciy host"), ProgNum, VersNum, create_CString("tcp"));
+    REQ("", "client creation should fail (unknown host)", isNULL_VoidTPtr(clnt_ptr));
+    clnt_pcreateerror_spec(context, create_CString("test3"));
+    str_res = clnt_spcreateerror_spec(context, create_CString("test3"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    // Testing failures: trying to connect to absent RPC server
+    clnt_ptr = clnt_create_spec(context, create_CString("127.0.0.1"), ProgNum_Fail, VersNum, create_CString("udp"));
+    REQ("", "client creation should fail (program not registered)", isNULL_VoidTPtr(clnt_ptr));
+    clnt_pcreateerror_spec(context, create_CString("test4"));
+    str_res = clnt_spcreateerror_spec(context, create_CString("test4"));
+    verbose("Message: <%s>\n", toCharArray_CString(str_res));
+
+    // Just output of all possible error messages
+    for (i=0; i<=25; ++i)
+    {
+        clnt_perrno_spec(context, i);
+        str_res = clnt_sperrno_spec(context, i);
+        verbose("Code: %d; Message: <%s>\n", i, toCharArray_CString(str_res));
+    }
+
+    deallocateMemoryBlock(context, in_arg);
+    deallocateMemoryBlock(context, out_arg);
+    deallocateMemoryBlock(context, vers_arg);
+    deallocateMemoryBlock(context, err_ptr);
+    deallocateMemoryBlock(context, in_str);
+    deallocateMemoryBlock(context, in_str_arg);
+    deallocateMemoryBlock(context, out_str_arg);
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm rpc_svc_clnt_scenario =
+{
+    .init = init_rpc_svc_clnt_scenario,
+    .finish = finish_rpc_svc_clnt_scenario,
+    .actions = { 
+                rpc_svc_clnt_scen,
+                NULL 
+               }
+};
+
+bool main_socket_rpc_svc_clnt(int argc, char** argv)
+{
+    rpc_svc_clnt_scenario(argc,argv);
+    return true;
+}
+
+
+#ifdef SOCKET_RPC_SVC_CLNT_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+// #include "process/process/process_model.seh"
+// #include "pthread/pthread/pthread_media.seh"
+// #include "pthread/mutex/mutexattr_media.seh"
+// #include "pthread/mutex/mutex_media.seh"
+#include "socket/rpc/svc_media.seh"
+#include "socket/rpc/clnt_media.seh"
+#include "socket/rpc/pmap_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initSocketRpcPmapSubsystem();
+
+    initSocketRpcSvcSubsystem();
+    initSocketRpcClntSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    addTraceToFile("trace.xml");
+
+    // Run test scenario
+    main_socket_rpc_svc_clnt(argc, argv);
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif
+
+/********************************************************************/
+/**                       Service functions                        **/
+/********************************************************************/
+
+static VoidTPtr getFunctionAddress(CallContext context, const char* func_name)
+{
+    VoidTPtr res = NULL_VoidTPtr;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "func_addr_socket_rpc_svc_clnt:$(str)",
+                                create_CString((CharT*)func_name)
+                    );
+    executeCommandInContext(context, &command);
+    if (!isBadVerdict())
+    {
+        res = readPointer_TSStream(context, &command.response);
+    }
+
+    destroy_TSCommand(&command);
+
+    return res;
+}
+
+static SizeT getSizeofProgvers(CallContext context)
+{
+    SizeT res = 0;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "get_sizeof_progvers");
+    executeCommandInContext(context, &command);
+    if (!isBadVerdict())
+    {
+        res = readSize_TSStream(&command.response);
+    }
+
+    destroy_TSCommand(&command);
+
+    return res;
+}
+
+static void initProgvers(CallContext context, VoidTPtr buf, ULongT low_vers, ULongT high_vers)
+{
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "init_progvers:$(ptr)$(ulong)$(ulong)",
+                                create_VoidTPtrObj(buf),
+                                create_ULongTObj(low_vers),
+                                create_ULongTObj(high_vers)
+                    );
+    executeCommandInContext(context, &command);
+
+    destroy_TSCommand(&command);
+}
+

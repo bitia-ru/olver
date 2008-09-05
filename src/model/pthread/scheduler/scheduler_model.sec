@@ -1,0 +1,1003 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "pthread/scheduler/scheduler_config.h"
+#include "pthread/scheduler/scheduler_model.seh"
+#include "config/system_config.seh"
+#include "data/errno_model.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+#pragma SEC subsystem scheduler "pthread.scheduler"
+
+/* TODO: Update the model: ERROR macros shall be updated */
+#undef ERROR_UNCHECKABLE
+#define ERROR_UNCHECKABLE(a,b,c)
+
+/* 
+   The group of functions 'pthread.scheduler' consists of: 
+       pthread_getconcurrency [2]
+       pthread_getschedparam [1]
+       pthread_setconcurrency [2]
+       pthread_setschedparam [1]
+       pthread_setschedprio(GLIBC_2.3.4) [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_getconcurrency, pthread_setconcurrency - get and set the level of 
+    concurrency
+
+SYNOPSIS
+
+[XSI]  #include <pthread.h>
+
+    int pthread_getconcurrency(void);
+    int pthread_setconcurrency(int new_level); 
+
+DESCRIPTION
+
+    Unbound threads in a process may or may not be required to be 
+    simultaneously active. By default, the threads implementation ensures that 
+    a sufficient number of threads are active so that the process can continue 
+    to make progress. While this conserves system resources, it may not produce
+    the most effective level of concurrency.
+
+    The pthread_setconcurrency() function allows an application to inform the 
+    threads implementation of its desired concurrency level, new_level. The 
+    actual level of concurrency provided by the implementation as a result of 
+    this function call is unspecified.
+
+    If new_level is zero, it causes the implementation to maintain the 
+    concurrency level at its discretion as if pthread_setconcurrency() had 
+    never been called.
+
+    The pthread_getconcurrency() function shall return the value set by a 
+    previous call to the pthread_setconcurrency() function. If the 
+    pthread_setconcurrency() function was not previously called, this function 
+    shall return zero to indicate that the implementation is maintaining the 
+    concurrency level.
+
+    A call to pthread_setconcurrency() shall inform the implementation of its 
+    desired concurrency level. The implementation shall use this as a hint, 
+    not a requirement.
+
+    If an implementation does not support multiplexing of user threads on top 
+    of several kernel-scheduled entities, the pthread_setconcurrency() and 
+    pthread_getconcurrency() functions are provided for source code 
+    compatibility but they shall have no effect when called. To maintain the 
+    function semantics, the new_level parameter is saved when 
+    pthread_setconcurrency() is called so that a subsequent call to 
+    pthread_getconcurrency() shall return the same value.
+
+RETURN VALUE
+
+    If successful, the pthread_setconcurrency() function shall return zero; 
+    otherwise, an error number shall be returned to indicate the error.
+
+    The pthread_getconcurrency() function shall always return the concurrency 
+    level set by a previous call to pthread_setconcurrency(). If the 
+    pthread_setconcurrency() function has never been called, 
+    pthread_getconcurrency() shall return zero.
+
+ERRORS
+
+    The pthread_setconcurrency() function shall fail if:
+
+[EINVAL]
+
+    The value specified by new_level is negative.
+
+[EAGAIN]
+
+    The value specified by new_level would cause a system resource to be 
+    exceeded.
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification
+IntT pthread_getconcurrency_spec( CallContext context )
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        if(concurrency_level_model == 0)        
+            return { Lev0, "Concurrency level is zero" };
+        else
+            return { LevOther, "Another concurrency level" };
+    }
+    post
+    {
+        /*
+         * The pthread_getconcurrency() function shall always return the concurrency level set by a previous call to
+         * pthread_setconcurrency(). If the pthread_setconcurrency() function has never been called,
+         * pthread_getconcurrency() shall return zero.
+         */
+        if( !@isModelConcurrencyLevelUnkn() )
+        {    
+            REQ("pthread_getconcurrency.02", "shall always return the concurrency level",
+                pthread_getconcurrency_spec == @concurrency_level_model
+               );
+        }
+        
+        return true;
+    }
+}
+
+specification
+IntT pthread_setconcurrency_spec( CallContext context, IntT new_level)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        if(new_level==max_IntT || new_level==max_IntT)
+            return { extremal, "Extremal parameter" };
+
+
+        if(new_level<0)
+            return { paramNeg, "Negative parameter" };
+
+        return { paramAnoth, "Another values" };
+    }
+    post
+    {
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */      
+        ERROR_BEGIN(POSIX_PTHREAD_SETCONCURRENCY, "pthread_setconcurrency.03.02", pthread_setconcurrency_spec!=0, pthread_setconcurrency_spec)
+        /*
+         * The pthread_setconcurrency() function shall fail if: 
+         * [EINVAL]
+         *     The value specified by new_level is negative.
+         */
+            ERROR_SHALL(POSIX_PTHREAD_SETCONCURRENCY, EINVAL,"pthread_setconcurrency.04.01",
+                        new_level<0
+                       )
+
+        /*
+         * The pthread_setconcurrency() function shall fail if:
+         * [EAGAIN]
+         *      The value specified by new_level would cause a system resource to be exceeded.
+         */
+            /*[Is uncheckable, because we have no info about corresponding resource limit]*/
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_SETCONCURRENCY, EAGAIN,"pthread_setconcurrency.04.02")
+
+        /*
+         * These functions shall not return an error code of [EINTR].
+         */
+            ERROR_NEVER(POSIX_PTHREAD_SETCONCURRENCY, EINTR,"pthread_setconcurrency.04")
+            
+        ERROR_END()
+
+        /* [Successful branch] */
+
+        /* {pthread_setconcurrency.03.01} If successful, the pthread_setconcurrency() function shall return zero;*/
+        REQ("?pthread_setconcurrency.03.01","If successful, shall return zero",
+            pthread_setconcurrency_spec==0
+           );
+
+        /*
+         * The pthread_setconcurrency() function allows an application to inform the threads 
+         * implementation of its desired concurrency level, new_level. The actual level of 
+         * concurrency provided by the implementation as a result of this function call is unspecified.
+         */
+        REQ("pthread_setconcurrency.01", 
+            "Allows an application to inform the threads implementation of "
+            "its desired concurrency level, new_level", 
+            true);
+
+        
+        return true;
+    }
+}
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+NAME
+    
+    pthread_getschedparam, pthread_setschedparam - dynamic thread scheduling 
+    parameters access (REALTIME THREADS)
+
+SYNOPSIS
+    
+    [THR TPS]  #include <pthread.h>
+
+    int pthread_getschedparam(pthread_t thread, int *restrict policy,
+           struct sched_param *restrict param);
+    int pthread_setschedparam(pthread_t thread, int policy,
+           const struct sched_param *param); 
+
+DESCRIPTION
+
+    The pthread_getschedparam() and pthread_setschedparam() functions shall, 
+    respectively, get and set the scheduling policy and parameters of 
+    individual threads within a multi-threaded process to be retrieved and set.
+    For SCHED_FIFO and SCHED_RR, the only required member of the sched_param 
+    structure is the priority sched_priority. For SCHED_OTHER, the affected 
+    scheduling parameters are implementation-defined.
+
+    The pthread_getschedparam() function shall retrieve the scheduling policy 
+    and scheduling parameters for the thread whose thread ID is given by thread
+    and shall store those values in policy and param, respectively. The 
+    priority value returned from pthread_getschedparam() shall be the value 
+    specified by the most recent pthread_setschedparam(), 
+    pthread_setschedprio(), or pthread_create() call affecting the target 
+    thread. It shall not reflect any temporary adjustments to its priority as a
+    result of any priority inheritance or ceiling functions. The 
+    pthread_setschedparam() function shall set the scheduling policy and 
+    associated scheduling parameters for the thread whose thread ID is given 
+    by thread to the policy and associated parameters provided in policy and 
+    param, respectively.
+
+    The policy parameter may have the value SCHED_OTHER, SCHED_FIFO, or 
+    SCHED_RR. The scheduling parameters for the SCHED_OTHER policy are 
+    implementation-defined. The SCHED_FIFO and SCHED_RR policies shall have a 
+    single scheduling parameter, priority.
+
+    [TSP]  If _POSIX_THREAD_SPORADIC_SERVER is defined, then the policy 
+    argument may have the value SCHED_SPORADIC, with the exception for the 
+    pthread_setschedparam() function that if the scheduling policy was not 
+    SCHED_SPORADIC at the time of the call, it is implementation-defined 
+    whether the function is supported; in other words, the implementation need 
+    not allow the application to dynamically change the scheduling policy to 
+    SCHED_SPORADIC. The sporadic server scheduling policy has the associated 
+    parameters sched_ss_low_priority, sched_ss_repl_period, 
+    sched_ss_init_budget, sched_priority, and sched_ss_max_repl. The specified 
+    sched_ss_repl_period shall be greater than or equal to the specified 
+    sched_ss_init_budget for the function to succeed; if it is not, then the 
+    function shall fail. The value of sched_ss_max_repl shall be within the 
+    inclusive range [1, {SS_REPL_MAX}] for the function to succeed; if not, the
+    function shall fail. 
+
+    If the pthread_setschedparam() function fails, the scheduling parameters 
+    shall not be changed for the target thread.
+
+RETURN VALUE
+
+    If successful, the pthread_getschedparam() and pthread_setschedparam() 
+    functions shall return zero; otherwise, an error number shall be returned 
+    to indicate the error.
+
+ERRORS
+
+    The pthread_getschedparam() function may fail if:
+
+    [ESRCH]
+        The value specified by thread does not refer to an existing thread.
+
+    The pthread_setschedparam() function may fail if:
+    
+    [EINVAL]
+        The value specified by policy or one of the scheduling parameters 
+        associated with the scheduling policy policy is invalid.
+
+    [ENOTSUP]
+        An attempt was made to set the policy or scheduling parameters to an 
+        unsupported value.
+    
+    [ENOTSUP]
+        [TSP]  An attempt was made to dynamically change the scheduling policy 
+        to SCHED_SPORADIC, and the implementation does not support this change. 
+
+    [EPERM]
+        The caller does not have the appropriate permission to set either the 
+        scheduling parameters or the scheduling policy of the specified thread.
+
+    [EPERM]
+        The implementation does not allow the application to modify one of the 
+        parameters to the value specified.
+
+    [ESRCH]
+        The value specified by thread does not refer to a existing thread.
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+#define equals_SchedParam(par1,par2) (par1->sched_priority == par2->sched_priority)
+
+specification
+IntT pthread_getschedparam_spec( CallContext context, PThreadT thread, IntT * policy, SchedParam * param )
+{
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("","policy!=NULL",policy!=NULL);
+
+        /*[Implicit precondition]*/
+        REQ("","param!=NULL",param!=NULL);
+
+        return true;
+    }
+    coverage C_ThreadPolicy
+    {
+        ThreadState * thread_state = findThreadState_PThreadT(thread);
+
+        if(thread_state != NULL)
+        {
+            if(thread_state->attr!=NULL)
+            {
+                if(isPolicyInitialized_PThreadAttr(thread_state->attr))
+                {
+                    switch(thread_state->attr->policy)
+                    {
+                    case SUT_SCHED_OTHER: return {PolicySchedOther, "policy == SCHED_OTHER"};
+                    case SUT_SCHED_FIFO: return {PolicySchedFifo, "policy == SCHED_FIFO"};
+                    case SUT_SCHED_RR: return {PolicySchedRR, "policy == SCHED_RR"};
+                    case SUT_SCHED_SPORADIC: return {PolicySchedSporadic, "policy == SCHED_SPORADIC"};
+                    }
+                }
+            }
+        }
+        return {Other, "Other"};
+    }
+    coverage C_ThreadSchedParam
+    {
+        ThreadState * thread_state = findThreadState_PThreadT(thread);
+
+        if(thread_state != NULL)
+        {
+            if(thread_state->attr!=NULL)
+            {
+                if(isSchedParInitialized_PThreadAttr(thread_state->attr))
+                {
+                    return {SchedParInitialized, "SchedParam is initialized"};
+                }
+            }
+        }
+        return {Other, "Other"};
+    }
+
+    post
+    {
+        ThreadState * thread_state = findThreadState_PThreadT(thread);
+
+        ERROR_BEGIN(POSIX_PTHREAD_GETSCHEDPARAM, "pthread_getschedparam.08.02", pthread_getschedparam_spec!=0, pthread_getschedparam_spec)
+        /*
+         * The pthread_getschedparam() function may fail if:
+         * [ESRCH]
+         *     The value specified by thread does not refer to an existing thread.
+         */
+            ERROR_MAY(POSIX_PTHREAD_GETSCHEDPARAM, ESRCH,"pthread_getschedparam.09.01", 
+                      thread_state == NULL
+                     )
+
+        /*
+         * These functions shall not return an error code of [EINTR].
+         */
+            ERROR_NEVER(POSIX_PTHREAD_GETSCHEDPARAM, EINTR,"pthread_getschedparam.11")
+
+        ERROR_END()
+
+        /*
+         * If successful, the pthread_getschedparam() and pthread_setschedparam() functions shall return zero
+         */
+        REQ("pthread_getschedparam.08.01", "If successful, shall return zero", pthread_getschedparam_spec==0);
+      
+
+        if(thread_state == NULL)
+        {
+            /* [The case, when we have no information about the thread] */
+            return true;
+        }
+
+        /*
+         * The pthread_getschedparam() function shall retrieve the scheduling policy and scheduling parameters for the thread whose
+         * thread ID is given by thread and shall store those values in policy and param, respectively. The priority
+         * value returned from pthread_getschedparam() shall be the value specified by the most recent pthread_setschedparam(),
+         * pthread_setschedprio(), or pthread_create() call affecting the target thread. It shall not reflect any temporary
+         * adjustments to its priority as a result of any priority inheritance or ceiling functions.
+         */
+        if(policy!=NULL && thread_state->attr!=NULL && isPolicyInitialized_PThreadAttr(thread_state->attr))
+        {
+            REQ("pthread_getschedparam.02", "shall retrieve the scheduling policy and scheduling parameters", 
+                 thread_state->attr->policy == *policy
+               ); 
+        }
+        if(policy!=NULL && thread_state->attr!=NULL && isSchedParInitialized_PThreadAttr(thread_state->attr))
+        {
+            /* For SCHED_OTHER, the affected scheduling parameters are implementation-defined.
+             */
+            if(thread_state->attr->policy!=SUT_SCHED_OTHER)
+            {
+                REQ("pthread_getschedparam.02", "shall retrieve the scheduling policy and scheduling parameters", 
+                    equals_SchedParam(thread_state->attr->shedPar, param)
+                   );
+            }
+        }
+
+        return true;
+    }
+}
+
+specification
+IntT pthread_setschedparam_spec( CallContext context, PThreadT thread, IntT policy, SchedParam * param )
+{
+    ThreadState * thread_state;
+    IntT atsPolicy;
+    bool atsPolicy_inited = false;
+    SchedParam atsParam;
+    bool atsParam_inited = false;
+
+    pre
+    {
+        thread_state = findThreadState_PThreadT(thread);
+
+        /*
+         * if the scheduling policy was not SCHED_SPORADIC at the time of the call, it is
+         * implementation-defined whether the function is supported
+         */
+        if(thread_state!=NULL && thread_state->attr!=NULL)
+        {
+            if(POSIX_OPTION(context,TSP) && isPolicyInitialized_PThreadAttr(thread_state->attr))
+            {
+                REQ("app.pthread_setschedparam.12", "It is not allow to change the scheduling policy to SCHED_SPORADIC", 
+                    !(thread_state->attr->policy != SUT_SCHED_SPORADIC && policy == SUT_SCHED_SPORADIC)
+                    );
+            }
+                      
+            if(isPolicyInitialized_PThreadAttr(thread_state->attr))
+            {
+                atsPolicy = thread_state->attr->policy;
+                atsPolicy_inited = true;
+            }
+            if(isSchedParInitialized_PThreadAttr(thread_state->attr))
+            {
+                atsParam.sched_priority = thread_state->attr->shedPar->sched_priority;
+                atsParam_inited = true;
+            }
+        }
+        return true;
+    }
+    coverage C_ThreadPolicy
+    {
+        ThreadState * thread_state = findThreadState_PThreadT(thread);
+
+        if(thread_state != NULL)
+        {
+            if(thread_state->attr!=NULL)
+            {
+                if(isPolicyInitialized_PThreadAttr(thread_state->attr))
+                {
+                    switch(thread_state->attr->policy)
+                    {
+                    case SUT_SCHED_OTHER: return {PolicySchedOther, "policy == SCHED_OTHER"};
+                    case SUT_SCHED_FIFO: return {PolicySchedFifo, "policy == SCHED_FIFO"};
+                    case SUT_SCHED_RR: return {PolicySchedRR, "policy == SCHED_RR"};
+                    case SUT_SCHED_SPORADIC: return {PolicySchedSporadic, "policy == SCHED_SPORADIC"};
+                    }
+                }
+            }
+        }
+        return {Other, "Other"};
+    }
+    coverage C_ThreadSchedParam
+    {
+        ThreadState * thread_state = findThreadState_PThreadT(thread);
+
+        if(thread_state != NULL)
+        {
+            if(thread_state->attr!=NULL)
+            {
+                if(isSchedParInitialized_PThreadAttr(thread_state->attr))
+                {
+                    return {SchedParInitialized, "SchedParam is initialized"};
+                }
+            }
+        }
+        return {Other, "Other"};
+    }
+
+    coverage C_policy
+    {
+        switch(policy)
+        {
+        case SUT_SCHED_OTHER: return {PolicySchedOther, "policy == SCHED_OTHER"};
+        case SUT_SCHED_FIFO: return {PolicySchedFifo, "policy == SCHED_FIFO"};
+        case SUT_SCHED_RR: return {PolicySchedRR, "policy == SCHED_RR"};
+        case SUT_SCHED_SPORADIC: return {PolicySchedSporadic, "policy == SCHED_SPORADIC"};
+        default: return {PolicyWrong, "policy is wrong"};
+        }
+    }
+
+    post
+    {
+        thread_state = findThreadState_PThreadT(thread);
+
+        if(pthread_setschedparam_spec!=0 && thread_state != NULL && thread_state->attr!=NULL)
+        {
+            /*
+             * If the pthread_setschedparam() function fails, the scheduling parameters shall 
+             * not be changed for the target thread.
+             */
+            if(isPolicyInitialized_PThreadAttr(thread_state->attr) && atsPolicy_inited)
+            {
+                REQ("?pthread_setschedparam.07", "If fails, parameters shall not be changed", 
+                     thread_state->attr->policy == atsPolicy                     
+                   );
+            }
+            if(isSchedParInitialized_PThreadAttr(thread_state->attr) && atsParam_inited)
+            {
+                REQ("?pthread_setschedparam.07", "If fails, parameters shall not be changed", 
+//                     thread_state->attr->shedPar->sched_priority == atsParam.sched_priority
+                    equals_SchedParam(thread_state->attr->shedPar, (&atsParam))
+                   );
+            }
+        }
+
+        ERROR_BEGIN(POSIX_PTHREAD_SETSCHEDPARAM, "pthread_setschedparam.08.02", pthread_setschedparam_spec!=0, 
+                    pthread_setschedparam_spec
+                   )
+        /*
+         * The pthread_setschedparam() function may fail if:
+         * [EINVAL]
+         *     The value specified by policy or one of the scheduling parameters associated 
+         *     with the scheduling policy policy is invalid.
+         */
+        /* The policy parameter may have the value SCHED_OTHER, SCHED_FIFO, or SCHED_RR.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPARAM, EINVAL,"pthread_setschedparam.10.01;pthread_setschedparam.03", 
+                       (policy==SUT_SCHED_OTHER || policy == SUT_SCHED_FIFO || policy == SUT_SCHED_RR)
+                       ? False_Bool3 : Unknown_Bool3
+                      )
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPARAM, EINVAL,"pthread_setschedparam.10.01;pthread_setschedparam.03", 
+                       (param == NULL)
+                       ? True_Bool3 : Unknown_Bool3
+                      )
+
+        /*
+         * The pthread_setschedparam() function may fail if:
+         * [ENOTSUP]
+         *      An attempt was made to set the policy or scheduling parameters to an unsupported value.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPARAM, ENOTSUP,"pthread_setschedparam.10.02;pthread_setschedparam.03",
+                       (policy==SUT_SCHED_OTHER || policy == SUT_SCHED_FIFO || policy == SUT_SCHED_RR)
+                       ? False_Bool3 : Unknown_Bool3
+                      )
+        /*
+         * The pthread_setschedparam() function may fail if:
+         * [EPERM]
+         *      The caller does not have the appropriate permission to set either the scheduling 
+         *      parameters or the scheduling policy of the specified thread.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPARAM, EPERM,"pthread_setschedparam.10.04", 
+                      Unknown_Bool3
+                     )
+        /*
+         * The pthread_setschedparam() function may fail if:
+         * [EPERM]
+         *      The implementation does not allow the application to modify one 
+         *      of the parameters to the value specified.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPARAM, EPERM,"pthread_setschedparam.10.05", 
+                      Unknown_Bool3
+                     )
+
+        /*
+         * The pthread_setschedparam() function may fail if:
+         * [ESRCH]
+         *      The value specified by thread does not refer to a existing thread.
+         */
+            ERROR_MAY(POSIX_PTHREAD_SETSCHEDPARAM, ESRCH,"pthread_setschedparam.10.06", 
+                      thread_state == NULL
+                     )
+        /*
+         * These functions shall not return an error code of [EINTR].
+         */
+            ERROR_NEVER(POSIX_PTHREAD_SETSCHEDPARAM, EINTR,"pthread_setschedparam.11")
+
+          if( POSIX_OPTION(context,TSP) )  /* [TSP] */
+          {
+            /*
+             * The pthread_setschedparam() function may fail if:
+             * [ENOTSUP]
+             *      An attempt was made to set the policy or scheduling parameters to an unsupported value.
+             */
+            /* If _POSIX_THREAD_SPORADIC_SERVER is defined, then the policy argument may have the value SCHED_SPORADIC
+             */
+            ERROR_MAY(POSIX_PTHREAD_SETSCHEDPARAM, ENOTSUP,"pthread_setschedparam.10.02;pthread_setschedparam.05",
+                       ((policy==SUT_SCHED_SPORADIC)? False_Bool3 : Unknown_Bool3)
+                      )
+            
+            /*
+             * The pthread_setschedparam() function may fail if:
+             * [ENOTSUP]
+             *      [TSP] An attempt was made to dynamically change the scheduling policy to SCHED_SPORADIC, 
+             *      and the implementation does not support this change. 
+             */
+            if(thread_state != NULL && thread_state->attr!=NULL)
+            {
+                if(isPolicyInitialized_PThreadAttr(thread_state->attr))
+                {
+                    ERROR_MAY(POSIX_PTHREAD_SETSCHEDPARAM, ENOTSUP,"pthread_setschedparam.10.03", 
+                              ((thread_state->attr->policy == SUT_SCHED_SPORADIC)
+                              ? False_Bool3 : Unknown_Bool3)
+                             )
+                }
+
+                ERROR_MAY(POSIX_PTHREAD_SETSCHEDPARAM, ENOTSUP,"pthread_setschedparam.10.03", 
+                          ((policy != SUT_SCHED_SPORADIC)
+                          ? False_Bool3 : Unknown_Bool3)
+                         )
+            }
+          }
+
+        ERROR_END()       
+
+        /*
+         * If successful, the pthread_getschedparam() and pthread_setschedparam() functions shall return zero
+         */
+        REQ("pthread_setschedparam.08.01","If successful, shall return zero",
+            pthread_setschedparam_spec==0
+           );
+        
+        if(thread_state != NULL)
+        {
+            /*
+             * The pthread_setschedparam() function shall set the scheduling policy and associated 
+             * scheduling parameters for the thread whose thread ID is given by thread to the 
+             * policy and associated parameters provided in policy and param, respectively.
+             */
+            REQ("","attr shall not be NULL",thread_state->attr!=NULL);
+
+            REQ("?pthread_setschedparam.04","Policy shall be initialized",isPolicyInitialized_PThreadAttr(thread_state->attr));
+
+            REQ("?pthread_setschedparam.04", "shall set the scheduling _policy_ and associated scheduling parameters", 
+                thread_state->attr->policy == policy
+               );            
+
+            /* 
+             * The scheduling parameters for the SCHED_OTHER policy are implementation-defined.
+             */
+            if(thread_state->attr->policy!=SUT_SCHED_OTHER && param!=NULL)
+            {
+                REQ("?pthread_setschedparam.04","SchedParam shall be initialized",isSchedParInitialized_PThreadAttr(thread_state->attr));
+
+                REQ("?pthread_setschedparam.04;pthread_setschedparam.01", "shall set the scheduling policy and associated _scheduling parameters_", 
+                       equals_SchedParam(thread_state->attr->shedPar, param )
+                   );
+            }
+        }
+
+        if(POSIX_OPTION(context,TSP))
+        {
+            /*
+             * The sporadic server scheduling policy has the associated parameters
+             * sched_ss_low_priority, sched_ss_repl_period, sched_ss_init_budget, sched_priority, and
+             * sched_ss_max_repl.
+             */
+            /* The specified sched_ss_repl_period shall be greater than or equal to the specified sched_ss_init_budget for the function to succeed; if it is not, then the function shall fail.
+             */
+            REQ("pthread_setschedparam.06.01", 
+                "Shall be: sched_ss_repl_period>=sched_ss_init_budget", 
+                true);        
+
+            /* The value of sched_ss_max_repl shall be within the inclusive range [1, {SS_REPL_MAX}] for the function to succeed; if not, the function
+             * shall fail.
+             */
+            REQ("pthread_setschedparam.06.02", 
+                "sched_ss_max_repl shall be within [1, {SS_REPL_MAX}]", 
+                true);
+        }        
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_setschedprio - dynamic thread scheduling parameters access 
+    (REALTIME THREADS)
+
+SYNOPSIS
+    
+    [THR TPS]  #include <pthread.h>
+
+    int pthread_setschedprio(pthread_t thread, int prio); 
+
+DESCRIPTION
+
+    The pthread_setschedprio() function shall set the scheduling priority for 
+    the thread whose thread ID is given by thread to the value given by prio. 
+    See Scheduling Policies for a description on how this function call affects
+    the ordering of the thread in the thread list for its new priority.
+
+    If the pthread_setschedprio() function fails, the scheduling priority of 
+    the target thread shall not be changed.
+
+RETURN VALUE
+
+    If successful, the pthread_setschedprio() function shall return zero; 
+    otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_setschedprio() function may fail if:
+
+    [EINVAL]
+
+        The value of prio is invalid for the scheduling policy of the specified
+        thread.
+
+    [ENOTSUP]
+
+        An attempt was made to set the priority to an unsupported value.
+
+    [EPERM]
+        
+        The caller does not have the appropriate permission to set the 
+        scheduling policy of the specified thread.
+
+    [EPERM]
+
+        The implementation does not allow the application to modify the 
+        priority to the value specified.
+
+    [ESRCH]
+
+        The value specified by thread does not refer to an existing thread.
+
+The pthread_setschedprio() function shall not return an error code of [EINTR].
+*/
+
+specification
+IntT pthread_setschedprio_spec( CallContext context, PThreadT thread, IntT prio )
+{
+    ThreadState * thread_state;
+    SchedParam atsParam;
+    bool atsParam_inited = false;
+
+    pre
+    {
+        thread_state = findThreadState_PThreadT(thread);
+
+        /*
+         * if the scheduling policy was not SCHED_SPORADIC at the time of the call, it is
+         * implementation-defined whether the function is supported
+         */
+        if(thread_state!=NULL && thread_state->attr!=NULL)
+        {                     
+            if(isSchedParInitialized_PThreadAttr(thread_state->attr))
+            {
+                atsParam.sched_priority = thread_state->attr->shedPar->sched_priority;
+                atsParam_inited = true;
+            }           
+        }
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        thread_state = findThreadState_PThreadT(thread);
+
+        if(pthread_setschedprio_spec!=0 && thread_state != NULL && thread_state->attr!=NULL)
+        {
+            /*
+             * If the pthread_setschedprio() function fails, the scheduling priority of 
+             * the target thread shall not be changed.
+             */
+            if(isSchedParInitialized_PThreadAttr(thread_state->attr) && atsParam_inited)
+            {
+                REQ("?pthread_setschedprio.02", "If fails, parameters shall not be changed", 
+                    equals_SchedParam(thread_state->attr->shedPar, (&atsParam))
+                   );
+            }
+        }
+
+        ERROR_BEGIN(POSIX_PTHREAD_SETSCHEDPRIO, "pthread_setschedprio.03.02", pthread_setschedprio_spec!=0, 
+                    pthread_setschedprio_spec
+                   )
+        /*
+         * The pthread_setschedprio() function may fail if:
+         * [EINVAL]
+         *      The value of prio is invalid for the scheduling policy of the specified thread.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPRIO, EINVAL,"pthread_setschedprio.04.01", Unknown_Bool3)
+
+        /*
+         * The pthread_setschedprio() function may fail if:
+         * [ENOTSUP]
+         *      An attempt was made to set the priority to an unsupported value.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPRIO, ENOTSUP, "pthread_setschedprio.04.02", Unknown_Bool3);
+            
+        /*
+         * The pthread_setschedprio() function may fail if:
+         * [EPERM]
+         *      The caller does not have the appropriate permission to set the 
+         *      scheduling policy of the specified thread.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPRIO, EPERM, "pthread_setschedprio.04.03", Unknown_Bool3)
+
+        /*
+         * The pthread_setschedprio() function may fail if:
+         * [EPERM]
+         *      The implementation does not allow the application to modify the priority to the value specified.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_SETSCHEDPRIO, EPERM, "pthread_setschedprio.04.04", Unknown_Bool3)
+
+        /*
+         * The pthread_setschedprio() function may fail if:
+         * [ESRCH]
+         *      The value specified by thread does not refer to an existing thread.
+         */
+            ERROR_MAY(POSIX_PTHREAD_SETSCHEDPRIO, ESRCH, "pthread_setschedprio.04.05",
+                      thread_state == NULL
+                     )
+
+        /*
+         * The pthread_setschedprio() function shall not return an error code of [EINTR].
+         */
+            ERROR_NEVER(POSIX_PTHREAD_SETSCHEDPRIO, EINTR, "pthread_setschedprio.05")
+
+        ERROR_END()       
+
+        /*
+         * If successful, the pthread_setschedprio() function shall return zero
+         */
+        REQ("pthread_setschedprio.03.01","If successful, shall return zero", pthread_setschedprio_spec==0);
+        
+        if(thread_state != NULL)
+        {
+            /*
+             * The pthread_setschedprio() function shall set the scheduling priority for 
+             * the thread whose thread ID is given by thread to the value given by prio.
+             */
+            REQ("","attr shall not be NULL",thread_state->attr!=NULL);
+
+            REQ("?pthread_setschedprio.01","SchedParam shall be initialized",isSchedParInitialized_PThreadAttr(thread_state->attr));
+
+            REQ("?pthread_setschedprio.01","shall set the scheduling parameters", 
+                   thread_state->attr->shedPar->sched_priority == prio
+               );
+         }
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                          Model Data                            **/
+/********************************************************************/
+
+IntT concurrency_level_model;
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool isModelConcurrencyLevelUnkn(void)
+{
+    return (concurrency_level_model == -1);
+}
+
+ThreadState * findThreadState_PThreadT(PThreadT thread_t)
+{
+    int i,j,k,size1,size2,size3;
+    SystemState * systemState; 
+    ProcessState* processState;
+    ThreadIdObj * thread_id;
+        
+    size1 = size_Map(systems);
+    for( i = 0; i < size1; i++ )        
+    {
+        systemState = get_Map( systems, key_Map( systems, i ) );
+        size2 = size_Map(systemState->processes);
+        for( j = 0; j < size2; j++ )
+        {
+            processState = get_Map( systemState->processes, key_Map( systemState->processes, j ) );
+            size3 = size_Map(processState->threads);
+            for( k = 0; k < size3; k++ )
+            {
+                thread_id = (ThreadIdObj *)key_Map( processState->threads, k );
+
+                if( thread_id->thread == thread_t)
+                    return get_Map( processState->threads, thread_id );
+            }
+        }
+    }
+    return NULL;
+}
+
+bool isPolicyInitialized_PThreadAttr(PThreadAttr * attr)
+{
+    Integer * inited;
+    inited = get_Map(attr->isInitialized, create_Integer(POLICY));
+    if(inited == NULL)
+        return false;
+    return (*inited!=0);
+}
+
+bool isSchedParInitialized_PThreadAttr(PThreadAttr * attr)
+{
+    Integer * inited;
+    inited = get_Map(attr->isInitialized, create_Integer(SHEDPAR));
+    if(inited == NULL)
+        return false;
+    return (*inited!=0);
+}
+
+bool init_scheduler_model(CallContext context)
+{
+    concurrency_level_model = 0;
+
+    if(getSystemConfigurationValue(context,SUT_SC_THREAD_SPORADIC_SERVER) == SC_VALUE_UNKNOWN )
+    {
+        traceUserInfo("You shall call sysconf(_SC_THREAD_SPORADIC_SERVER) before, to get known about [TSP] extension!");
+        return false;
+    }
+}
+
+void setModelConcurrencyLevelUnkn(void)
+{
+    concurrency_level_model = -1;
+}
+

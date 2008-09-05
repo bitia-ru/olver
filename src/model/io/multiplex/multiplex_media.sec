@@ -1,0 +1,191 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "process/process/process_common.seh"
+#include "io/multiplex/multiplex_media.seh"
+
+/*******************************Set*****Set**********************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initIoMultiplexSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_poll_spec(poll_media);
+    set_mediator_select_spec(select_media);
+}
+
+/********************************************************************/
+/**                           Formatters                           **/
+/********************************************************************/
+static void writePollFdList_TSStream (  TSStream* stream,
+                                        List* /*<PollFd>*/ lst,
+                                        NfdsT nfds
+                                     )
+{
+    int i;
+
+    VERIFY_TYPE(writePollFdList_TSStream, &type_List, lst);
+
+    assertion(stream != NULL, "writePollFdList_TSStream: stream is NULL");
+
+    if(nfds == 0) {
+        writeLong_TSStream(stream, 0);
+
+        return;
+    }
+
+    assertion(size_List(lst) >= nfds,
+        "writePollFdList_TSStream: number of elems in lst is fewer than nfds");
+
+    writeLong_TSStream(stream, nfds);
+
+    for(i = 0; i < nfds; i++)
+    {
+        PollFd* st = get_List(lst, i);
+
+        writeInt_TSStream(stream, st->fd.filedesc);
+        writeShort_TSStream(stream, st->events);
+        writeShort_TSStream(stream, st->revents);
+    }
+}
+
+static List* readPollFdList_TSStream(CallContext context, TSStream* stream)
+{
+    int i;
+    NfdsT nfds;
+    FileDescId fdi = {context.system, context.process, -1};
+    PollFd* pf = create_PollFd(fdi, 0, 0);
+    List* res = create_List(&type_PollFd);
+
+    assertion(stream != NULL, "readPollFdList_TSStream: stream is NULL");
+
+    nfds = readLong_TSStream(stream);
+
+    for(i = 0; i < nfds; i++)
+    {
+        PollFd* pf = create_PollFd(fdi, 0, 0);
+        pf->fd.filedesc = readInt_TSStream(stream);
+        pf->events = readShort_TSStream(stream);
+        pf->revents = readShort_TSStream(stream);
+ 
+        append_List(res, pf);
+    }
+
+    assertion(size_List(res) == nfds,
+        "readPollFdList_TSStream: "
+        "number of elems in lst is fewer than nfds %d %d",
+        nfds,
+        size_List(res));
+
+    return res;
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** poll_spec **/
+mediator poll_media for specification
+IntT poll_spec(CallContext context, List/*<PollFd>*/ *fds, NfdsT nfds, IntT timeout, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "poll:");
+
+        writePollFdList_TSStream(&command.command, fds, nfds);
+        writeInt_TSStream(&command.command, timeout);
+
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            copy(readPollFdList_TSStream(context, &command.response), fds);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** select_spec **/
+mediator select_media for specification
+IntT select_spec (  CallContext context,
+                    IntT nfds,
+                    Set* /*IntT*/ readfds,
+                    Set* /*IntT*/ writefds,
+                    Set* /*IntT*/ errorfds,
+                    TimeValTObj* timeout,
+                    ErrorCode* errno
+                 )
+{
+
+    call
+    {
+        IntT res;
+        List *lstrd, *lstwr, *lster;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand (  &command,
+                            "select:$(int)$(timeval)",
+                            create_IntTObj(nfds),
+                            timeout
+                         );
+
+        lstrd = readfds ? toList_Set(readfds) : NULL;
+        lstwr = writefds ? toList_Set(writefds) : NULL;
+        lster = errorfds ? toList_Set(errorfds) : NULL;
+
+        writeIntList_TSStream(&command.command, lstrd);
+        writeIntList_TSStream(&command.command, lstwr);
+        writeIntList_TSStream(&command.command, lster);
+
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            copy(readTimeVal_TSStream(&command.response), timeout);
+            
+            lstrd = readIntList_TSStream(&command.response);
+            lstwr = readIntList_TSStream(&command.response);
+            lster = readIntList_TSStream(&command.response);
+            
+            if(lstrd) copy(toSet_List(lstrd), readfds);  else readfds = NULL;
+            if(lstwr) copy(toSet_List(lstwr), writefds); else writefds = NULL;
+            if(lster) copy(toSet_List(lster), errorfds); else errorfds = NULL;
+        }
+
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}

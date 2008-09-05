@@ -1,0 +1,1185 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "signal/sigset/sigset_config.h"
+#include "signal/sigset/sigset_model.seh"
+
+#pragma SEC subsystem sigset "signal.sigset"
+
+/* 
+   The group of functions 'signal.sigset' consists of: 
+       sigaddset [2]
+       sigandset [1]
+       sigdelset [2]
+       sigemptyset [2]
+       sigfillset [2]
+       sigisemptyset [1]
+       sigismember [2]
+       sigorset [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sigaddset - add a signal to a signal set
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int sigaddset(sigset_t *set, int signo); 
+
+DESCRIPTION
+
+    The sigaddset() function adds the individual signal specified by the signo
+    to the signal set pointed to by set. Applications shall call either 
+    sigemptyset() or sigfillset() at least once for each object of 
+    type sigset_t prior to any other use of that object. If such an object is
+    not initialized in this way, but is nonetheless supplied as an argument 
+    to sigaddset(), the results are undefined.
+
+RETURN VALUE
+
+    Upon successful completion, sigaddset() shall return 0; otherwise,
+    it shall return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The sigaddset() function may fail if:
+    [EINVAL] The value of the signo argument is an invalid or unsupported
+    signal number.
+
+*/
+
+specification
+IntT sigaddset_spec(CallContext context, 
+                    SigSetTPtr set, 
+                    IntT signo, 
+                    ErrorCode* errno)
+{
+    SigSet* s;
+    SignalObj* sig;
+    pre
+    {
+        s = getSigSet(set);
+        sig = create_SignalObj(signo);
+        /*
+         * Applications shall call either sigemptyset() or sigfillset() at 
+         * least once for each object of type sigset_t prior to any other 
+         * use of that object.
+         */
+        REQ("app.sigaddset.02","Set is not initialized", s->is_init != false);
+        return true;
+    }
+    coverage C
+    {
+        #if SIGNAL_SIGSET_INT_PAIR_GENSTATE
+            if(isDefinedSig(signo))
+            {
+                if(contains_Set(s->data, sig))
+                {
+                    return { DefinedAlreadyThere, 
+                        "This signal is defined and already in the set" };
+                }
+                else 
+                {
+                    return { DefinedMustBeAdded, 
+                        "This signal is defined must be added without error"};
+                };
+            }
+            else if (isRealtimeSig(signo))
+            {            
+                if(contains_Set(s->data, sig))
+                {
+                    return { RealtimeAlreadyThere, 
+                        "This signal is realtime and already in the set" };
+                }
+                else 
+                {
+                    return { RealtimeMustBeAdded, 
+                        "This signal is realtime and must be added without error"};
+                };
+            }
+            else
+            {  
+             
+                return { MayBeAnError, "This signal is not obligatory to support"};
+            }
+
+        #else
+            if (isAlwaysSupported(signo))
+            {
+                if(contains_Set(s->data, sig))
+                {
+                    return { SupportedAlreadyThere, 
+                        "This signal is supported and already in the set" };
+                }
+                else 
+                {
+                    return { SupportedMustBeAdded, 
+                        "This signal is supported and must be added without error"};
+                };
+            }
+            else
+            {   /*
+                 * Automatic enumeration of possibilities in this case is not
+                 * deterministic and to test the system in this case we need to 
+                 * know completely, which signals  are correct and disjoint this
+                 * branch.
+                 */ 
+                return { MayBeAnError, "This signal is not obligatory to support"};
+            }
+        #endif
+    }
+    post
+    {    
+        /* [Model state is updated in onSigaddset()] */        
+        /*
+         * Upon successful completion, sigaddset() ..., otherwise, it shall 
+         * return -1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_SIGADDSET, "sigaddset.01.02", (sigaddset_spec == -1), *errno)
+        /*
+         * The sigaddset() function may fail if:
+         *
+         * [EINVAL]
+         * The value of the signo argument is an invalid or unsupported 
+         * signal number.
+         */
+            ERROR_MAY(POSIX_SIGADDSET, EINVAL,"sigaddset.05.01", 
+                      !isAlwaysSupported(signo))
+
+        ERROR_END()
+        
+        /*
+         * The sigaddset() function adds the individual signal specified by 
+         * the signo to the signal set pointed to by set.
+         * Upon successful completion, sigaddset() shall return 0;
+         */
+        REQ("sigaddset.01.01", "Unavailable return value", 
+            sigaddset_spec == 0);
+    }
+}
+
+void onSigaddset(CallContext context, 
+                 SigSetTPtr set, 
+                 IntT signo, 
+                 IntT sigaddset_spec)
+{
+    SigSet* s = getSigSet(set);
+    SignalObj* sig = create_SignalObj(signo);
+    if(sigaddset_spec == 0)     
+    {            
+        add_Set(s->data, sig);
+    };
+    return;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    sigandset -- build a new signal set by combining the two input sets using 
+    logical AND
+
+SYNOPSIS
+
+    #include <signal.h> 
+
+    int sigandset(sigset_t * set,
+                  const sigset_t * left,
+                  const sigset_t * right);
+
+
+DESCRIPTION
+
+    The sigandset() shall combine the two signal sets referenced by left and
+    right, using a logical AND operation, and shall place the result in 
+    the location referenced by set, The resulting signal set shall contain 
+    only signals that are in both the set referenced by left and the set 
+    referenced by right.
+
+RETURN VALUE
+
+    On success, sigandset() shall return 0. otherwise, sigandset() 
+    shall return -1 and set errno to indicate the error.
+
+ERRORS
+
+    EINVAL if one or more of set, left, or right was a null pointer.
+    
+*/
+
+specification
+IntT sigandset_spec( CallContext context, 
+                     SigSetTPtr set, 
+                     SigSetTPtr left, 
+                     SigSetTPtr right,
+                     ErrorCode* errno)
+{
+    SigSet* sleft;
+    SigSet* sright;
+    
+    pre
+    {
+        sleft  = getSigSet(left);
+        sright = getSigSet(right);
+        /*
+         * Applications shall call either sigemptyset() or sigfillset() at 
+         * least once for each object of type sigset_t prior to any other 
+         * use of that object. (POSIX for other functions, but not LSB for 
+         * this function)
+         */
+        /* [If all sigset are not NULL, left and right must be init]  */
+        REQ("","All sets of signal are not NULL, but at least one of them has not been initialized", 
+            (isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || isNULL_VoidTPtr(right)) ||
+            ((sleft->is_init == true) && (sright->is_init == true)));
+        return true;
+    }
+    coverage C
+    {
+        if (isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || isNULL_VoidTPtr(right))
+        {
+            return {SomeNULLValues, "One or more set is a null pointer"};
+        }
+        else
+        {
+            return {AllNotNULL, "All pointers have not NULL values"};
+        }
+    }
+    post
+    {
+        VERBOSE("sigdelset\n");
+        /*
+         * On success, sigandset() ..., otherwise, sigandset() shall 
+         * return -1 and set errno to indicate the error
+         */
+        ERROR_BEGIN(LSB_SIGANDSET, "sigandset.01.02", (sigandset_spec == -1), *errno)
+        /*
+         * ERRORS:
+         * [EINVAL]
+         *  One or more of set, left, or right was a null pointer.
+         */
+            ERROR_SHALL(LSB_SIGANDSET, EINVAL,"sigandset.04.01",
+                        isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || 
+                        isNULL_VoidTPtr(right))
+
+        ERROR_END()
+
+        /*
+         * The sigandset() shall combine the two signal
+         * sets referenced
+         * by left and right,
+         * using a logical AND operation, and shall place the result in the location
+         * referenced by set
+         * On success, sigandset() shall return 0
+         */
+        REQ("sigandset.01.01", "Unavailable return value", sigandset_spec == 0);
+
+        return true;
+    }
+}
+
+void onSigandset(CallContext context, 
+                 SigSetTPtr set, 
+                 SigSetTPtr left, 
+                 SigSetTPtr right,
+                 IntT sigandset_spec)
+{    
+    SigSet* sres;
+    SigSet* sleft;
+    SigSet* sright;
+    Set* templeft;
+    Set* tempright;
+    
+    sres   = getSigSet(set);
+    sleft  = getSigSet(left);
+    sright = getSigSet(right);
+    templeft= create_Set(&type_SignalObj);
+    tempright = create_Set(&type_SignalObj);
+
+    if (!(isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || isNULL_VoidTPtr(right)) &&
+        (sigandset_spec == 0))
+    {
+        sres->is_init = true;
+        
+        clear_Set(templeft);  //needs, if set == left or set == right
+        clear_Set(tempright);
+        addAll_Set(templeft, sleft->data);
+        addAll_Set(tempright, sright->data);
+
+        clear_Set(sres->data);
+
+        addAll_Set(sres->data, templeft);
+        retainAll_Set(sres->data, tempright);
+
+        clear_Set(templeft);
+        clear_Set(tempright);
+    }
+    return;
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    sigdelset - delete a signal from a signal set
+
+SYNOPSIS
+    
+    [CX]  #include <signal.h>
+
+    int sigdelset(sigset_t *set, int signo); 
+
+
+DESCRIPTION
+
+    The sigdelset() function deletes the individual signal specified by signo
+    from the signal set pointed to by set.
+    Applications should call either sigemptyset() or sigfillset() at least
+    once for each object of type sigset_t prior to any other use of that 
+    object. If such an object is not initialized in this way, but is 
+    nonetheless supplied as an argument to sigdelset(), the results 
+    are undefined.
+
+RETURN VALUE
+
+    Upon successful completion, sigdelset() shall return 0; otherwise, 
+    it shall return -1 and set errno to indicate the error.
+
+ERRORS
+    
+    The sigdelset() function may fail if:
+    [EINVAL] The signo argument is not a valid signal number, or is an 
+    unsupported signal number. 
+    
+*/
+
+specification
+IntT sigdelset_spec( CallContext context,  
+                     SigSetTPtr set, 
+                     IntT signo, 
+                     ErrorCode* errno)
+{    
+    SigSet* s;
+    SignalObj* sig;
+    pre
+    {
+        s = getSigSet(set);
+        sig = create_SignalObj(signo);
+        /*
+         * Applications shall call either sigemptyset() or sigfillset() at 
+         * least once for each object of type sigset_t prior to any other 
+         * use of that object.
+         */
+        REQ("app.sigdelset.02","Set is not initialized", s->is_init != false);
+        return true;
+    }
+    coverage C
+    {
+        #if SIGNAL_SIGSET_INT_PAIR_GENSTATE
+            if(isDefinedSig(signo))
+            {
+                if(!contains_Set(s->data, sig))
+                {
+                    return { DefinedAlreadyOutOfThere, 
+                        "This signal is defined and already out of set" };
+                }
+                else 
+                {
+                    return { DefinedMustBeDeleted, 
+                        "This signal is defined and must be deleted without error"};
+                }
+            }        
+            else if(isRealtimeSig(signo))
+            {
+                if(!contains_Set(s->data, sig))
+                {
+                    return { RealtimeAlreadyOutOfThere, 
+                        "This signal is realtime and already out of set" };
+                }
+                else 
+                {
+                    return { RealtimeMustBeDeleted, 
+                        "This signal is realtime and must be deleted without error"};
+                }
+            }
+            else
+            {   /*
+                 * Automatic enumeration of possibilities in this case is 
+                 * undeterministic and to test sistem in this case we need to 
+                 * know complitely, which signals  are correct 
+                 * and disjoint this branch
+                 */ 
+                return { MayBeAnError, "This signal is not obligatory to support"};
+            }
+
+        #else
+            if (isAlwaysSupported(signo))
+            {
+                if(!contains_Set(s->data, sig))
+                {
+                    return { SupportedAlreadyOutOfThere, 
+                        "This signal is supported and already out of set" };
+                }
+                else 
+                {
+                    return { SupportedMustBeDeleted, 
+                        "This signal is supported and must be deleted without error"};
+                };
+            }
+            else
+            {
+                return { MayBeAnError, "This signal is not obligatory to support"};
+            }
+        #endif
+    }
+    post
+    {
+        /*
+         * The sigdelset() function deletes the individual signal specified by
+         * signo from the signal set pointed to by set. otherwise, it shall 
+         * return -1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_SIGDELSET, "sigdelset.01.02", (sigdelset_spec == -1), *errno)
+        /*
+         * The sigdelset() function may fail if:
+         *
+         * [EINVAL]
+         * The signo argument is not a valid signal number, or is an 
+         * unsupported signal number.
+         */
+            ERROR_MAY(POSIX_SIGDELSET, EINVAL,"sigdelset.05.01", 
+                      !isAlwaysSupported(signo))
+
+        ERROR_END()
+
+        /*
+         * The sigdelset() function deletes the individual signal specified 
+         * by signo from the signal set pointed to by set.
+         * Upon successful completion, sigdelset() shall return 0;
+         */
+        REQ("sigdelset.01.01", "Unavailable return value",
+            sigdelset_spec == 0);
+
+        return true;
+    }
+}
+
+void onSigdelset( CallContext context,  
+                  SigSetTPtr set, 
+                  IntT signo,
+                  IntT sigdelset_spec)
+{
+    SigSet* s = getSigSet(set);
+    SignalObj* sig = create_SignalObj(signo);
+    if(sigdelset_spec == 0)     
+    {            
+        remove_Set(s->data, sig);
+    };
+    return;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sigemptyset - initialize and empty a signal set
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int sigemptyset(sigset_t *set); 
+
+DESCRIPTION
+
+    The sigemptyset() function initializes the signal set pointed to by set,
+    such that all signals defined in IEEE Std 1003.1-2001 are excluded.
+
+RETURN VALUE
+
+    Upon successful completion, sigemptyset() shall return 0; otherwise, 
+    it shall return -1 and set errno to indicate the error.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+IntT sigemptyset_spec( CallContext context,  SigSetTPtr set, ErrorCode* errno)
+{
+    SigSet* s;
+    pre
+    {
+        s = getSigSet(set);
+        /*
+         * [Standard doesn't define behaviour of the function in this case]
+         */
+        REQ("","Set is NULL", s != NULL);
+        return true;      
+    }
+    coverage C
+    {
+        if(true)
+        {
+            return { EmpTheOnlyBranch, "The only emp branch" };        
+        }
+    }
+    post
+    {
+        /*
+         * The sigemptyset() function initializes the signal set pointed to
+         * by set, such that all signals defined in IEEE Std 1003.1-2001 are
+         * excluded. otherwise, it shall return -1 and set errno to indicate
+         * the error.
+         */
+
+        ERROR_BEGIN(POSIX_SIGEMPTYSET, "sigemptyset.01.02", 
+             (sigemptyset_spec == -1), *errno)
+        /*
+         * No errors are defined.
+         */
+        ERROR_END()
+         
+        /*
+         * The sigemptyset() function initializes the signal set pointed to 
+         * by set, such that all signals defined in IEEE Std 1003.1-2001 are 
+         * excluded. Upon successful completion, sigemptyset() shall return 0;
+         */
+        REQ("sigemptyset.01.01", "Wrong return value", sigemptyset_spec == 0);
+
+        return true;
+    }
+}
+
+void onSigemptyset(CallContext context,  SigSetTPtr set, IntT sigemptyset_spec)
+{
+    SigSet* s;
+    s = getSigSet(set);    
+    if(s != NULL)
+    {        
+        s->is_init = true;
+        clear_Set(s->data);
+    }
+    return;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sigfillset - initialize and fill a signal set
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int sigfillset(sigset_t *set); 
+
+DESCRIPTION
+
+    The sigfillset() function shall initialize the signal set pointed 
+    to by set, such that all signals defined in this volume 
+    of IEEE Std 1003.1-2001 are included.
+
+RETURN VALUE
+
+    Upon successful completion, sigfillset() shall return 0; otherwise, 
+    it shall return -1 and set errno to indicate the error.
+
+ERRORS
+
+    No errors are defined.
+    
+*/
+
+specification
+IntT sigfillset_spec( CallContext context,  SigSetTPtr set, ErrorCode* errno)
+{
+    SigSet* s;
+    pre
+    {
+        s = getSigSet(set);
+        /*
+         * [Standard doesn't define behaviour of function in this case]
+         */
+        REQ("","Set is NULL", s != NULL);
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranchFill, "The only branch" };        
+    }
+    post
+    {   
+        /*
+         * The sigfillset() function shall initialize the signal set pointed 
+         * to by set, such that all signals defined in this volume of 
+         * IEEE Std 1003.1-2001 are included. otherwise, it shall return -1 
+         * and set errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_SIGFILLSET, "sigfillset.01.02", (sigfillset_spec == -1), *errno)
+        /*
+         * No errors are defined.
+         */
+        ERROR_END()
+        
+        /*
+         * The sigfillset() function shall initialize the signal set pointed 
+         * to by set, such that all signals defined in this volume of 
+         * IEEE Std 1003.1-2001 are included.
+         * Upon successful completion, sigfillset() shall return 0;
+         */
+        REQ("sigfillset.01.01", "Wrong return value", sigfillset_spec == 0);
+
+        return true;
+    }
+}
+
+void onSigfillset(CallContext context,  SigSetTPtr set, IntT sigfillset_spec)
+{
+    int i;
+    SigSet* s;
+    SignalObj* sig;
+    s = getSigSet(set);
+
+    if(s != NULL)
+    {        
+        s->is_init = true;
+        clear_Set(s->data);            
+        for (i = 1; i <= SIGDEFF; i++)
+        {
+            sig = create_SignalObj(i);
+            add_Set(s->data, sig);
+        };
+        if (IS_ADD_REALTIME_SIGNALS)
+        {
+            for (i = sigrtmin; i <= sigrtmax; i++)
+            {                
+                sig = create_SignalObj(i);
+                add_Set(s->data, create_SignalObj(i));
+            }
+        }
+    }
+    return;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    sigisemptyset -- check for empty signal set
+
+SYNOPSIS
+
+    #include <signal.h> 
+
+    int sigisemptyset(const sigset_t * set);
+
+DESCRIPTION
+
+    The sigisemptyset() function shall check for empty signal set 
+    referenced by set. 
+
+RETURN VALUE
+
+    The sigisemptyset() function shall return a positive non-zero value if
+    the signal set referenced by set is empty, or zero if this set is nonempty.
+    On error, sigisemptyset() shall return -1 and set errno to indicate 
+    the error.
+
+ERRORS
+
+    EINVAL set is a null pointer.
+
+*/
+
+specification
+IntT sigisemptyset_spec( CallContext context, SigSetTPtr set, ErrorCode* errno)
+{
+    SigSet* s;
+    pre
+    {
+        s = getSigSet(set);
+        /*
+         * [If sigset has not been initialized, 
+         *  we know nothing about behaviour of this function]
+         */
+
+        REQ("","Set is not NULL, but it has not been initialized",
+            (isNULL_VoidTPtr(set)) || (s->is_init == true));
+        return true;
+    }
+    coverage C
+    {
+        if(isNULL_VoidTPtr(set))
+        {
+            return { NULLSetPointer, "Set pointer is NULL" };
+        }
+        else if(size_Set(s->data) == 0)
+        {
+            return { ExistingEmptySet, "Set exists and empty" };
+        }
+        else
+        {
+            return { ExistingSet, "Set exists and not empty" };
+        }        
+    }
+    post
+    {   
+        /*
+         * The sigisemptyset() function shall check for empty signal set 
+         * referenced by set. On error, sigisemptyset() shall return -1 and 
+         * set errno to indicate the error.
+         */
+         ERROR_BEGIN(LSB_SIGISEMPTYSET, "sigisemptyset.01.03", sigisemptyset_spec == -1, *errno)
+        /*
+         *
+         * [EINVAL] set is a null pointer.
+         */
+            ERROR_SHALL(LSB_SIGISEMPTYSET, EINVAL,"sigisemptyset.04.01", 
+                        isNULL_VoidTPtr(set))
+
+        ERROR_END()
+
+        /*
+         * The sigisemptyset() function shall check for empty signal set 
+         * referenced by set. The sigisemptyset() function shall return a 
+         * positive non-zero value if the signal set referenced by set 
+         * is empty
+         */
+        if(size_Set(s->data) == 0)
+        {
+            REQ("sigisemptyset.01.01", "Wrong return value", 
+                sigisemptyset_spec > 0);
+        }
+
+        /*
+         * The sigisemptyset() function shall check for empty signal set 
+         * referenced by set. zero if this set is empty
+         */
+        if(sigisemptyset_spec == 0)
+        {
+            REQ("sigisemptyset.01.02", "Wrong return value", 
+                size_Set(s->data) > 0);
+        }
+
+        return true;     
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sigismember - test for a signal in a signal set
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int sigismember(const sigset_t *set, int signo); 
+
+DESCRIPTION
+
+    The sigismember() function shall test whether the signal specified by
+    signo is a member of the set pointed to by set.
+
+    Applications should call either sigemptyset() or sigfillset() at least
+    once for each object of type sigset_t prior to any other use of that
+    object. If such an object is not initialized in this way, but is 
+    nonetheless supplied as an argument to sigismember(), the results 
+    are undefined.
+
+RETURN VALUE
+
+    Upon successful completion, sigismember() shall return 1 if the specified 
+    signal is a member of the specified set, or 0 if it is not. Otherwise, it
+    shall return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The sigismember() function may fail if:
+    [EINVAL] 
+    The signo argument is not a valid signal number, or is an unsupported
+    signal number.
+
+*/
+
+specification
+IntT sigismember_spec( CallContext context, 
+                       SigSetTPtr set, 
+                       IntT signo,
+                       ErrorCode* errno)
+{
+    SigSet* s;
+    SignalObj* sig;
+
+    pre
+    {
+        s = getSigSet(set);
+        sig = create_SignalObj(signo);
+        /*
+         * Applications shall call either sigemptyset() or sigfillset() at 
+         * least once for each object of type sigset_t prior to any other 
+         * use of that object.
+         */
+        REQ("app.sigismember.02","Set is not initialized", s->is_init != false);
+        return true;
+    }
+    coverage C
+    {
+        if (isAlwaysSupported(signo))
+        {
+            if(contains_Set(s->data, sig))
+            {
+                return { SignalInSet, "The signal is in the set" };
+            }
+            else
+            {
+                return { SignalOutOfSet, "The signal isn't in the set" };
+            }
+        }
+        else
+        {
+            return { MayBeAnError, "This signal is not obligatory to support"};
+        }        
+    }
+    post
+    {
+        /*
+         * The sigismember() function shall test whether the signal specified 
+         * by signo is a member of the set pointed to by set.
+         * Otherwise, it shall return -1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_SIGISMEMBER, "sigismember.01.03", (sigismember_spec == -1), *errno)
+        /*
+         * The sigismember() function may fail if:
+         *
+         * [EINVAL]
+         * The signo argument is not a valid signal number, or is an 
+         * unsupported signal number.
+         */
+            ERROR_MAY(POSIX_SIGISMEMBER, EINVAL,"sigismember.05.01",
+                      !isAlwaysSupported(signo))
+
+        ERROR_END()
+
+        /*
+         * The sigismember() function shall test whether the signal specified 
+         * by signo is a member of the set pointed to by set.
+         */
+        if(sigismember_spec == 1 )
+        {
+            /*
+             * The sigismember() function shall test whether the signal
+             * specified by signo is a member of the set pointed to by set.
+             * Upon successful completion, sigismember() shall return 1 if 
+             * the specified signal is a member of the specified set
+             */
+            REQ("sigismember.01.01", "Wrong return value", 
+            contains_Set(s->data, sig));
+        }
+        else
+        {
+            /*
+             * The sigismember() function shall test whether the signal 
+             * specified by signo is a member of the set pointed to by
+             * set. or 0 if it is not.
+             */
+             REQ("sigismember.01.02", "Unavailable return value", true);
+        };
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    sigorset -- build a new signal set by combining the two input sets using 
+    logical OR
+
+SYNOPSIS  
+
+    #include <signal.h> 
+
+    int sigorset(sigset_t * set, const sigset_t * left, const sigset_t * right);
+
+DESCRIPTION
+  
+    The sigorset() shall combine the two signal sets referenced by left and 
+    right, using a logical OR operation, and shall place the result in the 
+    location referenced by set, The resulting signal set shall contain only 
+    signals that are in either the set referenced by left or the set 
+    referenced by right.
+
+RETURN VALUE
+
+    On success, sigorset() shall return 0. otherwise, sigorset() shall
+    return -1 and set errno to indicate the error.
+
+ERRORS 
+    
+    EINVAL if one or more of set, left, or right was a null pointer.
+    
+*/
+
+specification
+IntT sigorset_spec( CallContext context,
+                    SigSetTPtr set, 
+                    SigSetTPtr left, 
+                    SigSetTPtr right,
+                    ErrorCode* errno)
+{
+    SigSet* sleft;
+    SigSet* sright;
+    
+    pre
+    {
+        sleft  = getSigSet(left);
+        sright = getSigSet(right);
+        /*
+         * Applications shall call either sigemptyset() or sigfillset() at 
+         * least once for each object of type sigset_t prior to any other 
+         * use of that object. (POSIX for other functions)
+         */
+        /* [If all sigset are not NULL, left and right must be init] */
+        REQ("","All sets of signal are not NULL, but at least one of them has not been initialized", 
+            (isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || isNULL_VoidTPtr(right)) ||
+            ((sleft->is_init == true) && (sright->is_init == true)));
+        return true;
+    }
+    coverage C
+    {
+        if (isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || isNULL_VoidTPtr(right))
+        {
+            return {SomeNULLValues, "One or more set is a null pointer"};
+        }
+        else
+        {
+            return {AllNotNULL, "All pointers have not NULL values"};
+        }
+    }
+    post
+    {
+        /*
+         * On success, sigorset() ..., otherwise, sigorset() shall return 
+         * -1 and set errno to indicate the error
+         */
+        ERROR_BEGIN(LSB_SIGORSET, "sigorset.01.02", (sigorset_spec == -1), *errno)
+        /*
+         * ERRORS:
+         * [EINVAL]
+         *  One or more of set, left, or right was a null pointer.
+         */
+            ERROR_SHALL(LSB_SIGORSET, EINVAL,"sigorset.04.01",
+                        isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || 
+                        isNULL_VoidTPtr(right))
+
+        ERROR_END()
+
+        /*
+         * The sigorset() shall combine the two signal
+         * sets referenced
+         * by left and right,
+         * using a logical OR operation, and shall place the result in the location
+         * referenced by set
+         * On success, sigorset() shall return 0
+         */
+        REQ("sigorset.01.01", "Unavailable return value", sigorset_spec == 0);
+
+        return true;
+    }
+}
+
+void onSigorset(CallContext context,
+                SigSetTPtr set,
+                SigSetTPtr left,
+                SigSetTPtr right,
+                IntT sigorset_spec)
+{
+    SigSet* sres;
+    SigSet* sleft;
+    SigSet* sright;
+    Set* templeft;
+    Set* tempright;
+    
+    sres   = getSigSet(set);
+    sleft  = getSigSet(left);
+    sright = getSigSet(right);
+    templeft= create_Set(&type_SignalObj);
+    tempright = create_Set(&type_SignalObj);
+
+    if (!(isNULL_VoidTPtr(set) || isNULL_VoidTPtr(left) || isNULL_VoidTPtr(right)) &&
+        (sigorset_spec == 0))
+    {
+        sres->is_init = true;
+        
+        clear_Set(templeft);  //needs, if set == left or set == right
+        clear_Set(tempright);
+        addAll_Set(templeft, sleft->data);
+        addAll_Set(tempright, sright->data);
+
+        clear_Set(sres->data);
+
+        addAll_Set(sres->data, templeft);
+        addAll_Set(sres->data, tempright);
+
+        clear_Set(templeft);
+        clear_Set(tempright);
+    }
+    return;
+}
+
+/********************************************************************/
+/**           Model Representation of Signals                      **/
+/********************************************************************/
+/* 
+ * SIGRTMIN variable contains the number of available real-time signal
+ * with lowest priority.
+ */
+int sigrtmin;
+
+/* 
+ * SIGRTMAX variable contains the number of available real-time signal
+ * with highest priority.
+ */
+int sigrtmax;
+
+specification typedef struct SigSet SigSet = {};
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+SigSet* create_SigSet(SigSetTPtr address)  //creates model of signal set
+{
+    Set* s = create_Set(&type_SignalObj);
+    SigSet* ss = NULL;
+    ss = create(&type_SigSet, address, false, s);
+    return ss;
+}
+
+SigSet* getSigSet(SigSetTPtr address)
+{
+    return getObjectInMemory(address);
+}
+
+bool isRealtimeSig(IntT sig)
+{
+    if((sig <= sigrtmax) && (sig >= sigrtmin)) 
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool isDefinedSig(IntT sig)
+{
+    if((sig <= SIGDEFF) && (sig >= 1)) 
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+/*
+ * Returns true if sig is basic signal, which should be processed always
+ * (without errors)
+ */
+bool isAlwaysSupported(IntT sig) 
+{
+    return ((sig <= SIGDEFF) && (sig >= 1)) || 
+        ((sig <= sigrtmax) && (sig >= sigrtmin));
+}
+

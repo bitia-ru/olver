@@ -1,0 +1,203 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/search/search_media.seh"
+#include "common/common_media.seh"
+
+CByteArray* baList_to_CByteArray(CByteArrayList* list)
+{
+    CByteArray* res = create_CByteArray(NULL, 0);
+    int sz = size_List(list);
+    int i;
+
+    for (i=0; i<sz; i++)
+        res = concat_CByteArray(res, get_List(list, i));
+
+    return res;
+}
+
+CByteArrayList* CByteArray_to_BAList(CByteArray* ba, int elem_width)
+{
+    CByteArrayList* res = create_List(&type_CByteArray);
+    CByteArray* tmp;
+    int sz = size_CByteArray(ba) / elem_width;
+    int i;
+    ByteT* data = byteArray_CByteArray(ba);
+
+    for (i=0; i<sz; i++)
+    {
+        tmp = create_CByteArray(data + i * elem_width, elem_width);
+        add_List(res, i, tmp);
+    }
+
+    return res;
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilSearchSearchSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_bsearch_spec(bsearch_media);
+    set_mediator_lfind_spec(lfind_media);
+    set_mediator_lsearch_spec(lsearch_media);
+    set_mediator_qsort_spec(qsort_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** bsearch_spec **/
+mediator bsearch_media for specification
+SizeT bsearch_spec(CallContext context, CByteArray* key, CByteArrayList* base,
+                   SizeT nel, SizeT width)
+    reads base, key
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        SizeT res = -1;
+
+        format_TSCommand(&command, "bsearch:$(ba)$(ba)$(size)$(size)",
+                                    key,
+                                    baList_to_CByteArray(base),
+                                    create_SizeTObj(nel),
+                                    create_SizeTObj(width)
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readSize_TSStream(&command.response);
+            copy(CByteArray_to_BAList(readCByteArray_TSStream(&command.response), width), base);
+            copy(readCByteArray_TSStream(&command.response), key);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** lfind_spec **/
+mediator lfind_media for specification
+bool lfind_spec(CallContext context, CByteArray* key, CByteArrayList* base,
+                SizeT *nelp, SizeT width, SizeT* index)
+    reads base, key, *nelp
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        bool res;
+ 
+        format_TSCommand(&command, "lfind:$(ba)$(ba)$(size)$(size)",
+                                    key,
+                                    baList_to_CByteArray(base),
+                                    create_SizeTObj(*nelp),
+                                    create_SizeTObj(width)
+                        );
+
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *index = readSize_TSStream(&command.response);
+            *nelp = readSize_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+
+            copy(CByteArray_to_BAList(readCByteArray_TSStream(&command.response), width), base);
+            copy(readCByteArray_TSStream(&command.response), key);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** lsearch_spec **/
+mediator lsearch_media for specification
+bool lsearch_spec(CallContext context, CByteArray* key, CByteArrayList* base,
+                  SizeT *nelp, SizeT width, SizeT* index)
+    reads key
+    updates base, *nelp
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        bool res;
+        
+        format_TSCommand(&command, "lsearch:$(ba)$(ba)$(size)$(size)",
+                                    key,
+                                    baList_to_CByteArray(base),
+                                    create_SizeTObj(*nelp),
+                                    create_SizeTObj(width)
+                        );
+
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *index = readSize_TSStream(&command.response);
+           *nelp = readSize_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+
+            copy(CByteArray_to_BAList(readCByteArray_TSStream(&command.response), width), base);
+            copy(readCByteArray_TSStream(&command.response), key);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** qsort_spec **/
+mediator qsort_media for specification
+void qsort_spec(CallContext context, CByteArrayList* base, SizeT nel, SizeT width)
+    updates base
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "qsort:$(ba)$(size)$(size)",
+                                    baList_to_CByteArray(base),
+                                    create_SizeTObj(nel),
+                                    create_SizeTObj(width)
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            copy(CByteArray_to_BAList(readCByteArray_TSStream(&command.response), width), base);
+        }
+
+        destroy_TSCommand(&command);
+
+        return;
+    }
+}
+
+
+

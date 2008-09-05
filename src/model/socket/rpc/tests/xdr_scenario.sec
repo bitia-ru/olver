@@ -1,0 +1,840 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "socket/rpc/tests/xdr_scenario.seh"
+
+#include "socket/rpc/xdr_model.seh"
+// #include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "config/type_config.seh"
+#include "io/fstream/fstream_model.seh"
+#include "io/fstream/fstream_media.seh"
+
+#include "socket/rpc/xdr_config.h"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+// Test Union type for xdr_union function
+typedef union
+{
+    int int_part;
+    char char_part;
+    long long_part;
+} test_union_type;
+
+enum
+{
+    INT_TYPE,
+    CHAR_TYPE,
+    LONG_TYPE
+};
+
+static const int BUF_SIZE = 4096;
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+// for xdr_union
+static XdrDiscrimT discrims_ex[] = {
+    {INT_TYPE,  (CharT *)"xdr_int"},
+    {CHAR_TYPE, (CharT *)"xdr_char"},
+    {LONG_TYPE, (CharT *)"xdr_long"},
+    {0, (CharT *)""}
+};
+static int discrims_ex_sz = sizeof(discrims_ex) / sizeof(XdrDiscrimT);
+
+// Set of values of different types
+typedef struct {
+    // for xdr_simple
+    BoolT     bool_val;
+    CharT     char_val;
+    ShortT    short_val;
+    IntT      int_val;
+    LongT     long_val;
+    UCharT    uchar_val;
+    UShortT   ushort_val;
+    UIntT     uint_val;
+    ULongT    ulong_val;
+    Unifloat* float_val;
+    Unifloat* double_val;
+    EnumT     enum_val;
+
+    // for xdr_complex
+    CaddrT          array_val;
+    UIntT           array_sz;
+    UIntT           array_elem_sz;
+
+    CharTPtr        bytes_val;
+    UIntT           bytes_sz;
+
+    CaddrT          opaque_val;
+    UIntT           opaque_sz;
+
+    CharTPtr        pointer_val;
+    CharTPtr        pointer_null_val;
+
+    CharTPtr        reference_val;
+
+    CharTPtr        string_val;
+
+    CharTPtr        union_val;
+    EnumT           union_discr;
+    XdrDiscrimTPtr  union_discrims;
+
+    CaddrT          vector_val;
+    UIntT           vector_sz;
+    UIntT           vector_elem_sz;
+
+    CharTPtr        wrapstring_val;
+
+    // for rpc_xdr
+    AcceptedReplyTPtr   accepted_reply_val;
+    RpcMsgTPtr          callhdr_val;
+    RpcMsgTPtr          callmsg_val;
+    OpaqueAuthTPtr      opaque_auth_val;
+    RejectedReplyTPtr   rejected_reply_val;
+    RpcMsgTPtr          replymsg_val;
+} TestVars;
+
+List* allocatedBlocks = NULL;
+
+SizeT sizeof_AcceptedReplyT;
+SizeT sizeof_RpcMsgT;
+SizeT sizeof_OpaqueAuthT;
+SizeT sizeof_RejectedReplyT;
+SizeT sizeof_XdrDiscrimT;
+SizeT sizeof_XdrT;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_rpc_xdr_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    context = getContext();
+    allocatedBlocks = create_List(&type_VoidTPtrObj);
+
+    sizeof_AcceptedReplyT = getSizeOfType(context, "struct accepted_reply");
+    sizeof_RpcMsgT        = getSizeOfType(context, "struct rpc_msg");
+    sizeof_OpaqueAuthT    = getSizeOfType(context, "struct opaque_auth");
+    sizeof_RejectedReplyT = getSizeOfType(context, "struct rejected_reply");
+    sizeof_XdrDiscrimT    = getSizeOfType(context, "struct xdr_discrim");
+    sizeof_XdrT           = getSizeOfType(context, "XDR");
+
+    return true;
+}
+
+static void finish_rpc_xdr_scenario(void)
+{
+    deallocateSavedMemoryBlocks(context, allocatedBlocks);
+    TEST_SCENARIO_VERDICT_VERBOSE(rpc_xdr_scenario);
+}
+
+static ByteT array_ex[] = {123, 218, 11, 125, 15, 76, 0, 45, 0, 0, 0, 0, 66, 130, 65, 98};
+static int array_ex_sz = sizeof(array_ex) / sizeof(ByteT);
+
+static ByteT bytes_ex[] = {123, 218, 11, 125, 15, 76, 0, 45, 0, 0, 0, 0, 66, 130, 65, 98};
+static int bytes_ex_sz = sizeof(bytes_ex) / sizeof(ByteT);
+
+static ByteT opaque_ex[] = {123, 218, 11, 125, 15, 76, 0, 45, 0, 0, 0, 0, 66, 130, 65, 98};
+static int opaque_ex_sz = sizeof(opaque_ex) / sizeof(ByteT);
+
+static IntT pointer_ex = 0xD892CA95;
+
+static IntT reference_ex = 0x59AC298D;
+
+static LongT union_ex = (LongT)-0x7892CA95;
+
+static ByteT vector_ex[] = {123, 218, 11, 125, 15, 76, 0, 45, 0, 0, 0, 0, 66, 130, 65, 98};
+static int vector_ex_sz = sizeof(vector_ex) / sizeof(ByteT);
+
+
+static bool rpc_xdr_init_test_vars(TestVars* t)
+{
+    // Necessary because specification types are present in TestVars (Unifloat)
+    memset(t, 0, sizeof(TestVars));
+
+    // xdr_simple
+    t->bool_val   = true;
+    t->char_val   = 'x';
+    t->short_val  = -12;
+    t->int_val    = -123000;
+    t->long_val   = -12300000;
+    t->uchar_val  = '\xA9';
+    t->ushort_val = 40000;
+    t->uint_val   = 400000;
+    t->ulong_val  = 4000000;
+    t->float_val  = convertString_Unifloat(create_CString(PI), UniFloatT);
+    t->double_val = convertString_Unifloat(create_CString(PI), UniDoubleT);
+    t->enum_val   = 3;
+
+    // xdr_complex
+    t->array_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->array_sz = array_ex_sz / sizeof_IntT;
+    t->array_elem_sz = sizeof_IntT;
+    writeCByteArray_VoidTPtr(t->array_val, create_CByteArray(array_ex, array_ex_sz));
+
+    t->bytes_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->bytes_sz = bytes_ex_sz;
+    writeCByteArray_VoidTPtr(t->bytes_val, create_CByteArray(bytes_ex, bytes_ex_sz));
+
+    t->opaque_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->opaque_sz = opaque_ex_sz;
+    writeCByteArray_VoidTPtr(t->opaque_val, create_CByteArray(opaque_ex, opaque_ex_sz));
+
+    t->pointer_val = allocateMemoryBlockSave(context, sizeof_IntT, allocatedBlocks);
+    writeInt_VoidTPtr(t->pointer_val, pointer_ex);
+
+    t->pointer_null_val = NULL_VoidTPtr;
+
+    t->reference_val = allocateMemoryBlockSave(context, sizeof_IntT, allocatedBlocks);
+    writeInt_VoidTPtr(t->reference_val, reference_ex);
+
+    t->string_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    writeCString_VoidTPtr(t->string_val, create_CString("test string"));
+
+    t->union_val = allocateMemoryBlockSave(context, sizeof_LongT, allocatedBlocks);
+    t->union_discrims = allocateInitDiscrimsData(context, discrims_ex, discrims_ex_sz);
+    t->union_discr = INT_TYPE;
+    writeLong_VoidTPtr(t->union_val, union_ex);
+
+    t->vector_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->vector_sz = vector_ex_sz / sizeof_IntT;
+    t->vector_elem_sz = sizeof_IntT;
+    writeCByteArray_VoidTPtr(t->vector_val, create_CByteArray(vector_ex, vector_ex_sz));
+
+    t->wrapstring_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    writeCString_VoidTPtr(t->wrapstring_val, create_CString("test string"));
+
+    // rpc_xdr
+    t->accepted_reply_val = allocateMemoryBlockSave(context, sizeof_AcceptedReplyT, allocatedBlocks);
+    initNullAcceptedReply(context, t->accepted_reply_val, false);
+    t->callhdr_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+    initCallRpcMsg(context, t->callhdr_val);
+    t->callmsg_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+    initCallRpcMsg(context, t->callmsg_val);
+    t->opaque_auth_val = allocateMemoryBlockSave(context, sizeof_OpaqueAuthT, allocatedBlocks);
+    initNullOpaqueAuth(context, t->opaque_auth_val);
+    t->rejected_reply_val = allocateMemoryBlockSave(context, sizeof_RejectedReplyT, allocatedBlocks);
+    initNullRejectedReply(context, t->rejected_reply_val);
+    t->replymsg_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+    initReplyRpcMsg(context, t->replymsg_val);
+
+    return true;
+}
+
+static bool rpc_xdr_init_empty_test_vars(TestVars* t)
+{
+    // Necessary because specification types are present in TestVars (Unifloat)
+    memset(t, 0, sizeof(TestVars));
+
+    // Protection from stream buffer overflow.
+    t->float_val  = convertString_Unifloat(create_CString(PI), UniFloatT);
+    t->double_val = convertString_Unifloat(create_CString(PI), UniDoubleT);
+
+    // xdr_complex
+    t->array_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->array_elem_sz = sizeof_IntT;
+
+    t->bytes_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+
+    t->opaque_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->opaque_sz = opaque_ex_sz;
+
+    t->pointer_val = allocateMemoryBlockSave(context, sizeof_IntT, allocatedBlocks);
+
+    t->pointer_null_val = allocateMemoryBlockSave(context, sizeof_IntT, allocatedBlocks);
+
+    t->reference_val = allocateMemoryBlockSave(context, sizeof_IntT, allocatedBlocks);
+
+    t->string_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+
+    t->union_val = allocateMemoryBlockSave(context, sizeof_LongT, allocatedBlocks);
+    t->union_discrims = allocateInitDiscrimsData(context, discrims_ex, discrims_ex_sz);
+
+    t->vector_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->vector_sz = vector_ex_sz / sizeof_IntT;
+    t->vector_elem_sz = sizeof_IntT;
+
+    t->wrapstring_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+
+    // rpc_xdr
+    t->accepted_reply_val = allocateMemoryBlockSave(context, sizeof_AcceptedReplyT, allocatedBlocks);
+    initNullAcceptedReply(context, t->accepted_reply_val, true);
+    t->callhdr_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+    t->callmsg_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+    t->opaque_auth_val = allocateMemoryBlockSave(context, sizeof_OpaqueAuthT, allocatedBlocks);
+    t->rejected_reply_val = allocateMemoryBlockSave(context, sizeof_RejectedReplyT, allocatedBlocks);
+    t->replymsg_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+
+    return true;
+}
+
+static bool rpc_xdr_init_null_test_vars(TestVars* t)
+{
+    // Necessary because specification types are present in TestVars (Unifloat)
+    memset(t, 0, sizeof(TestVars));
+
+    // Protection from stream buffer overflow.
+    t->float_val  = convertString_Unifloat(create_CString(PI), UniFloatT);
+    t->double_val = convertString_Unifloat(create_CString(PI), UniDoubleT);
+
+    // xdr_complex
+    t->array_val = NULL_VoidTPtr;
+    t->array_elem_sz = sizeof_IntT;
+
+    t->bytes_val = NULL_VoidTPtr;
+
+    t->opaque_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->opaque_sz = opaque_ex_sz;
+
+    t->pointer_val = NULL_VoidTPtr;
+
+    t->pointer_null_val = NULL_VoidTPtr;
+
+    t->reference_val = NULL_VoidTPtr;
+
+    t->string_val = NULL_VoidTPtr;
+
+    t->union_val = allocateMemoryBlockSave(context, sizeof_LongT, allocatedBlocks);
+    t->union_discrims = allocateInitDiscrimsData(context, discrims_ex, discrims_ex_sz);
+
+    t->vector_val = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    t->vector_sz = vector_ex_sz / sizeof_IntT;
+    t->vector_elem_sz = sizeof_IntT;
+
+    t->wrapstring_val = NULL_VoidTPtr;
+
+    // rpc_xdr
+    t->accepted_reply_val = allocateMemoryBlockSave(context, sizeof_AcceptedReplyT, allocatedBlocks);
+    initNullAcceptedReply(context, t->accepted_reply_val, true);
+    t->callhdr_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+    t->callmsg_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+    t->opaque_auth_val = allocateMemoryBlockSave(context, sizeof_OpaqueAuthT, allocatedBlocks);
+    t->rejected_reply_val = allocateMemoryBlockSave(context, sizeof_RejectedReplyT, allocatedBlocks);
+    t->replymsg_val = allocateMemoryBlockSave(context, sizeof_RpcMsgT, allocatedBlocks);
+
+    return true;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+#define DO_CHECK(expr)                          \
+    do {                                        \
+        if (!(expr))                            \
+        {                                       \
+            res = false;                        \
+            ++num_fails;                        \
+        }                                       \
+    } while (0)
+
+static bool rpc_xdr_check_decoded(TestVars* t, const TestVars* orig)
+{
+    bool res = true;
+    int num_fails = 0;
+
+    // xdr_simple
+    DO_CHECK(t->bool_val == orig->bool_val);
+    DO_CHECK(t->char_val == orig->char_val);
+    DO_CHECK(t->short_val == orig->short_val);
+    DO_CHECK(t->int_val == orig->int_val);
+    DO_CHECK(t->long_val == orig->long_val);
+    DO_CHECK(t->uchar_val == orig->uchar_val);
+    DO_CHECK(t->ushort_val == orig->ushort_val);
+    DO_CHECK(t->uint_val == orig->uint_val);
+    DO_CHECK(t->ulong_val == orig->ulong_val);
+    DO_CHECK(equals(t->float_val, orig->float_val));
+    DO_CHECK(equals(t->double_val, orig->double_val));
+    DO_CHECK(t->enum_val == orig->enum_val);
+
+    // xdr_complex
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->array_val, array_ex_sz), readCByteArray_VoidTPtr(orig->array_val, array_ex_sz)));
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->bytes_val, bytes_ex_sz), readCByteArray_VoidTPtr(orig->bytes_val, bytes_ex_sz)));
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->opaque_val, opaque_ex_sz), readCByteArray_VoidTPtr(orig->opaque_val, opaque_ex_sz)));
+    DO_CHECK(readInt_VoidTPtr(t->pointer_val) == readInt_VoidTPtr(orig->pointer_val));
+    DO_CHECK(isNULL_VoidTPtr(t->pointer_null_val) && isNULL_VoidTPtr(orig->pointer_null_val));
+    DO_CHECK(readInt_VoidTPtr(t->reference_val) == readInt_VoidTPtr(orig->reference_val));
+    DO_CHECK(equals(readCString_VoidTPtr(t->string_val), readCString_VoidTPtr(orig->string_val)));
+    DO_CHECK(readInt_VoidTPtr(t->union_val) == readInt_VoidTPtr(orig->union_val));
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->vector_val, vector_ex_sz), readCByteArray_VoidTPtr(orig->vector_val, vector_ex_sz)));
+    DO_CHECK(equals(readCString_VoidTPtr(t->wrapstring_val), readCString_VoidTPtr(orig->wrapstring_val)));
+
+    // rpc_xdr
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->accepted_reply_val, sizeof_AcceptedReplyT), readCByteArray_VoidTPtr(orig->accepted_reply_val, sizeof_AcceptedReplyT)));
+    // xdr_callhdr does not allow decoding!
+    // DO_CHECK(equals(readCByteArray_VoidTPtr(t->callhdr_val, sizeof_RpcMsgT), readCByteArray_VoidTPtr(orig->callhdr_val, sizeof_RpcMsgT)));
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->callmsg_val, sizeof_RpcMsgT), readCByteArray_VoidTPtr(orig->callmsg_val, sizeof_RpcMsgT)));
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->opaque_auth_val, sizeof_OpaqueAuthT), readCByteArray_VoidTPtr(orig->opaque_auth_val, sizeof_OpaqueAuthT)));
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->rejected_reply_val, sizeof_RejectedReplyT), readCByteArray_VoidTPtr(orig->rejected_reply_val, sizeof_RejectedReplyT)));
+    DO_CHECK(equals(readCByteArray_VoidTPtr(t->replymsg_val, sizeof_RpcMsgT), readCByteArray_VoidTPtr(orig->replymsg_val, sizeof_RpcMsgT)));
+
+    verbose("Check finished");
+    if (num_fails == 0)
+        verbose(" successfully.\n");
+    else
+        verbose(" unsuccessfully (%d fails).\n", num_fails);
+
+    return (num_fails == 0);
+}
+
+#define CALL_AND_CHECK(func_call)               \
+    do {                                        \
+        res = func_call;                        \
+        if (!res) {                             \
+            verbose("Fail: %s\n", #func_call);  \
+            ++num_fails;}                       \
+    } while(0)
+
+static bool rpc_xdr_encode_test(XdrTPtr xdrs, TestVars* t)
+{
+    BoolT res = true;
+    int num_fails = 0;
+
+    // 'xdr_simple' group
+    CALL_AND_CHECK(xdr_bool_spec(context, xdrs, &(t->bool_val)));
+    CALL_AND_CHECK(xdr_char_spec(context, xdrs, &(t->char_val)));
+    CALL_AND_CHECK(xdr_short_spec(context, xdrs, &(t->short_val)));
+    CALL_AND_CHECK(xdr_int_spec(context, xdrs, &(t->int_val)));
+    CALL_AND_CHECK(xdr_long_spec(context, xdrs, &(t->long_val)));
+    CALL_AND_CHECK(xdr_u_char_spec(context, xdrs, &(t->uchar_val)));
+    CALL_AND_CHECK(xdr_u_short_spec(context, xdrs, &(t->ushort_val)));
+    CALL_AND_CHECK(xdr_u_int_spec(context, xdrs, &(t->uint_val)));
+    CALL_AND_CHECK(xdr_u_long_spec(context, xdrs, &(t->ulong_val)));
+    CALL_AND_CHECK(xdr_float_spec(context, xdrs, t->float_val));
+    CALL_AND_CHECK(xdr_double_spec(context, xdrs, t->double_val));
+    CALL_AND_CHECK(xdr_enum_spec(context, xdrs, &(t->enum_val)));
+    CALL_AND_CHECK(xdr_void_spec(context));
+
+    // 'xdr_complex' group
+    CALL_AND_CHECK(xdr_array_spec(context, xdrs, &(t->array_val), &(t->array_sz), BUF_SIZE / t->array_elem_sz, t->array_elem_sz, xdr_int_addr));
+    CALL_AND_CHECK(xdr_bytes_spec(context, xdrs, &(t->bytes_val), &(t->bytes_sz), BUF_SIZE));
+    CALL_AND_CHECK(xdr_opaque_spec(context, xdrs, t->opaque_val, t->opaque_sz));
+    CALL_AND_CHECK(xdr_pointer_spec(context, xdrs, &(t->pointer_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_pointer_spec(context, xdrs, &(t->pointer_null_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_reference_spec(context, xdrs, &(t->reference_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_string_spec(context, xdrs, &(t->string_val), BUF_SIZE));
+
+    CALL_AND_CHECK(xdr_union_spec(context, xdrs, &(t->union_discr), t->union_val, t->union_discrims, NULL_VoidTPtr));
+    CALL_AND_CHECK(xdr_union_spec(context, xdrs, &(t->union_discr), t->union_val, t->union_discrims, xdr_int_addr));
+
+    CALL_AND_CHECK(xdr_vector_spec(context, xdrs, t->vector_val, t->vector_sz, t->vector_elem_sz, xdr_int_addr));
+    CALL_AND_CHECK(xdr_wrapstring_spec(context, xdrs, &(t->wrapstring_val)));
+
+    // 'rpc_xdr' group
+    CALL_AND_CHECK(xdr_accepted_reply_spec(context, xdrs, t->accepted_reply_val));
+    // xdr_callhdr does not allow decoding!
+    // CALL_AND_CHECK(xdr_callhdr_spec(context, xdrs, t->callhdr_val));
+    CALL_AND_CHECK(xdr_callmsg_spec(context, xdrs, t->callmsg_val));
+    CALL_AND_CHECK(xdr_opaque_auth_spec(context, xdrs, t->opaque_auth_val));
+    CALL_AND_CHECK(xdr_rejected_reply_spec(context, xdrs, t->rejected_reply_val));
+    CALL_AND_CHECK(xdr_replymsg_spec(context, xdrs, t->replymsg_val));
+
+    verbose("Encoding finished");
+    if (num_fails == 0)
+        verbose(" successfully.\n");
+    else
+        verbose(" unsuccessfully (%d fails).\n", num_fails);
+
+    return (num_fails == 0);
+}
+
+static bool rpc_xdr_decode_test(XdrTPtr xdrs, TestVars* t, const TestVars* orig)
+{
+    BoolT res = true;
+    int num_fails = 0;
+
+    // 'xdr_simple' group
+    CALL_AND_CHECK(xdr_bool_spec(context, xdrs, &(t->bool_val)));
+    CALL_AND_CHECK(xdr_char_spec(context, xdrs, &(t->char_val)));
+    CALL_AND_CHECK(xdr_short_spec(context, xdrs, &(t->short_val)));
+    CALL_AND_CHECK(xdr_int_spec(context, xdrs, &(t->int_val)));
+    CALL_AND_CHECK(xdr_long_spec(context, xdrs, &(t->long_val)));
+    CALL_AND_CHECK(xdr_u_char_spec(context, xdrs, &(t->uchar_val)));
+    CALL_AND_CHECK(xdr_u_short_spec(context, xdrs, &(t->ushort_val)));
+    CALL_AND_CHECK(xdr_u_int_spec(context, xdrs, &(t->uint_val)));
+    CALL_AND_CHECK(xdr_u_long_spec(context, xdrs, &(t->ulong_val)));
+    CALL_AND_CHECK(xdr_float_spec(context, xdrs, t->float_val));
+    CALL_AND_CHECK(xdr_double_spec(context, xdrs, t->double_val));
+    CALL_AND_CHECK(xdr_enum_spec(context, xdrs, &(t->enum_val)));
+    CALL_AND_CHECK(xdr_void_spec(context));
+
+    // 'xdr_complex' group
+    CALL_AND_CHECK(xdr_array_spec(context, xdrs, &(t->array_val), &(t->array_sz), BUF_SIZE / t->array_elem_sz, t->array_elem_sz, xdr_int_addr));
+    CALL_AND_CHECK(xdr_bytes_spec(context, xdrs, &(t->bytes_val), &(t->bytes_sz), BUF_SIZE));
+    CALL_AND_CHECK(xdr_opaque_spec(context, xdrs, t->opaque_val, t->opaque_sz));
+    CALL_AND_CHECK(xdr_pointer_spec(context, xdrs, &(t->pointer_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_pointer_spec(context, xdrs, &(t->pointer_null_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_reference_spec(context, xdrs, &(t->reference_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_string_spec(context, xdrs, &(t->string_val), BUF_SIZE));
+
+    CALL_AND_CHECK(xdr_union_spec(context, xdrs, &(t->union_discr), t->union_val, t->union_discrims, NULL_VoidTPtr));
+    CALL_AND_CHECK(xdr_union_spec(context, xdrs, &(t->union_discr), t->union_val, t->union_discrims, xdr_int_addr));
+
+    CALL_AND_CHECK(xdr_vector_spec(context, xdrs, t->vector_val, t->vector_sz, t->vector_elem_sz, xdr_int_addr));
+    CALL_AND_CHECK(xdr_wrapstring_spec(context, xdrs, &(t->wrapstring_val)));
+
+    // 'rpc_xdr' group
+    CALL_AND_CHECK(xdr_accepted_reply_spec(context, xdrs, t->accepted_reply_val));
+    // xdr_callhdr does not allow decoding!
+    // CALL_AND_CHECK(xdr_callhdr_spec(context, xdrs, t->callhdr_val));
+    CALL_AND_CHECK(xdr_callmsg_spec(context, xdrs, t->callmsg_val));
+    CALL_AND_CHECK(xdr_opaque_auth_spec(context, xdrs, t->opaque_auth_val));
+    CALL_AND_CHECK(xdr_rejected_reply_spec(context, xdrs, t->rejected_reply_val));
+    CALL_AND_CHECK(xdr_replymsg_spec(context, xdrs, t->replymsg_val));
+
+    verbose("Decoding finished");
+    if (num_fails == 0)
+        verbose(" successfully.\n");
+    else
+        verbose(" unsuccessfully (%d fails).\n", num_fails);
+
+    return rpc_xdr_check_decoded(t, orig) && (num_fails == 0);
+}
+
+static bool rpc_xdr_free1_test(XdrTPtr xdrs, TestVars* t)
+{
+    BoolT res = true;
+    int num_fails = 0;
+
+    CALL_AND_CHECK(xdr_array_spec(context, xdrs, &(t->array_val), &(t->array_sz), BUF_SIZE / t->array_elem_sz, t->array_elem_sz, xdr_int_addr));
+    CALL_AND_CHECK(xdr_bytes_spec(context, xdrs, &(t->bytes_val), &(t->bytes_sz), BUF_SIZE));
+    CALL_AND_CHECK(xdr_pointer_spec(context, xdrs, &(t->pointer_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_pointer_spec(context, xdrs, &(t->pointer_null_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_reference_spec(context, xdrs, &(t->reference_val), sizeof_IntT, xdr_int_addr));
+    CALL_AND_CHECK(xdr_string_spec(context, xdrs, &(t->string_val), BUF_SIZE));
+    CALL_AND_CHECK(xdr_wrapstring_spec(context, xdrs, &(t->wrapstring_val)));
+
+    verbose("Freeing finished");
+    if (num_fails == 0)
+        verbose(" successfully.\n");
+    else
+        verbose(" unsuccessfully (%d fails).\n", num_fails);
+
+    return (num_fails == 0);
+}
+
+#define XDR_FREE_WRAP(func_ptr, obj_ptr)                    \
+    do {                                                    \
+        if (!isNULL_VoidTPtr(obj_ptr))                      \
+            xdr_free_spec(context, func_ptr, &(obj_ptr));   \
+    } while(0)
+
+static bool rpc_xdr_free2_test(TestVars* t)
+{
+    // xdr_free works correctly only for xdr_string and xdr_wrapstring functions!
+
+//     XDR_FREE_WRAP(xdr_array_addr, t->array_val);
+//     XDR_FREE_WRAP(xdr_bytes_addr, t->bytes_val);
+//     XDR_FREE_WRAP(xdr_pointer_addr, t->pointer_val);
+//     XDR_FREE_WRAP(xdr_pointer_addr, t->pointer_null_val);
+//     XDR_FREE_WRAP(xdr_reference_addr, t->reference_val);
+    XDR_FREE_WRAP(xdr_string_addr, t->string_val);
+    XDR_FREE_WRAP(xdr_wrapstring_addr, t->wrapstring_val);
+
+    verbose("Freeing finished successfully.\n");
+
+    return true;
+}
+
+scenario
+bool rpc_xdr_scen()
+{
+    VoidTPtr buffer;
+    XdrTPtr xdrs;
+    TestVars encode, decode, decodef1, decodef2;
+    bool res = true;
+    FILETPtr fp;
+
+    initSocketRpcXdrModel();
+
+    buffer = allocateMemoryBlockSave(context, BUF_SIZE, allocatedBlocks);
+    xdrs = allocateMemoryBlockSave(context, sizeof_XdrT, allocatedBlocks);
+
+    // Usual encoding+decoding
+    res &= rpc_xdr_init_test_vars(&encode);
+
+    xdrmem_create_spec(context, xdrs, buffer, BUF_SIZE, SUT_XDR_ENCODE);
+    res &= rpc_xdr_encode_test(xdrs, &encode);
+    xdr_destroy_spec(context, xdrs);
+
+    res &= rpc_xdr_init_empty_test_vars(&decode);
+
+    xdrmem_create_spec(context, xdrs, buffer, BUF_SIZE, SUT_XDR_DECODE);
+    res &= rpc_xdr_decode_test(xdrs, &decode, &encode);
+    xdr_destroy_spec(context, xdrs);
+
+    // Decoding with memory allocation and freeing by x_op==XDR_FREE 
+    res &= rpc_xdr_init_test_vars(&encode);
+
+    xdrmem_create_spec(context, xdrs, buffer, BUF_SIZE, SUT_XDR_ENCODE);
+    res &= rpc_xdr_encode_test(xdrs, &encode);
+    xdr_destroy_spec(context, xdrs);
+
+    res &= rpc_xdr_init_null_test_vars(&decodef1);
+
+    xdrmem_create_spec(context, xdrs, buffer, BUF_SIZE, SUT_XDR_DECODE);
+    res &= rpc_xdr_decode_test(xdrs, &decodef1, &encode);
+    xdr_destroy_spec(context, xdrs);
+
+    xdrmem_create_spec(context, xdrs, NULL_VoidTPtr, 0, SUT_XDR_FREE);
+    res &= rpc_xdr_free1_test(xdrs, &decodef1);
+    xdr_destroy_spec(context, xdrs);
+
+    // Decoding with memory allocation and partial freeing by xdr_free
+    // Full freeing is unavailable because of incorrect work of xdr_free!
+    res &= rpc_xdr_init_test_vars(&encode);
+
+    xdrmem_create_spec(context, xdrs, buffer, BUF_SIZE, SUT_XDR_ENCODE);
+    res &= rpc_xdr_encode_test(xdrs, &encode);
+    xdr_destroy_spec(context, xdrs);
+
+    res &= rpc_xdr_init_null_test_vars(&decodef2);
+
+    xdrmem_create_spec(context, xdrs, buffer, BUF_SIZE, SUT_XDR_DECODE);
+    res &= rpc_xdr_decode_test(xdrs, &decodef2, &encode);
+    xdr_destroy_spec(context, xdrs);
+
+    res &= rpc_xdr_free2_test(&decodef2);
+
+    // Simple calls for xdrrec_*
+    fp = fopen_spec(context, create_CString("/tmp/test_socket_rpc_xdr"), create_CString("w"), errno_model, false);
+    xdrrec_create_spec(context, xdrs, 0, 0, fp, readfp_addr, writefp_addr, SUT_XDR_ENCODE);
+    encode.int_val = 1234;
+    res &= xdr_int_spec(context, xdrs, &(encode.int_val));
+    res &= xdr_callhdr_spec(context, xdrs, encode.callhdr_val);
+    if(XDRREC_EXTENDED)
+    {
+        res &= xdrrec_endofrecord_spec(context, xdrs, true);
+    }
+    xdr_destroy_spec(context, xdrs);
+    fclose_spec(context, fp, errno_model);
+
+    fp = fopen_spec(context, create_CString("/tmp/test_socket_rpc_xdr"), create_CString("r"), errno_model, false);
+    xdrrec_create_spec(context, xdrs, 0, 0, fp, readfp_addr, writefp_addr, SUT_XDR_DECODE);
+    if(XDRREC_EXTENDED)
+    {
+        decode.int_val = 0;
+        res &= xdrrec_skiprecord_spec(context, xdrs);
+        res &= xdr_int_spec(context, xdrs, &(decode.int_val));
+        res &= (decode.int_val == encode.int_val);
+    }
+    xdrrec_eof_spec(context, xdrs);
+    xdr_destroy_spec(context, xdrs);
+    fclose_spec(context, fp, errno_model);
+
+    return res;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm rpc_xdr_scenario =
+{
+    .init = init_rpc_xdr_scenario,
+    .finish = finish_rpc_xdr_scenario,
+    .actions = { 
+                rpc_xdr_scen,
+                NULL 
+               }
+};
+
+bool main_socket_rpc_xdr(int argc, char** argv)
+{
+    rpc_xdr_scenario(argc,argv);
+    return true;
+}
+
+
+#ifdef SOCKET_RPC_XDR_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "socket/rpc/xdr_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initIoFstreamSubsystem();
+
+    initSocketRpcXdrSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+    initMath();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    addTraceToFile("trace.xml");
+
+    // Run test scenario
+    main_socket_rpc_xdr(argc, argv);
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif
+
+/********************************************************************/
+/**                       Service functions                        **/
+/********************************************************************/
+
+XdrDiscrimTPtr allocateInitDiscrimsData(CallContext context, XdrDiscrimT* discrims_ex, IntT discrims_ex_sz)
+{
+    XdrDiscrimTPtr data_ptr;
+    int i;
+
+    data_ptr = allocateMemoryBlockSave(context, discrims_ex_sz * sizeof_XdrDiscrimT, allocatedBlocks);
+    for (i=0; i<discrims_ex_sz; ++i)
+    {
+        initUnionDiscrimItem(context, data_ptr, discrims_ex, i);
+    }
+
+    return data_ptr;
+}
+
+void initUnionDiscrimItem(CallContext context, XdrDiscrimTPtr xdr_discrim_ptr,
+                          XdrDiscrimT* discrims_ex, IntT discrims_ex_num)
+{
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "init_xdr_discrim:$(ptr)$(int)$(str)$(int)",
+                                create_VoidTPtrObj(xdr_discrim_ptr),
+                                create_IntTObj(discrims_ex[discrims_ex_num].value),
+                                create_CString(discrims_ex[discrims_ex_num].proc),
+                                create_IntTObj(discrims_ex_num)
+                    );
+    executeCommandInContext(context, &command);
+
+    destroy_TSCommand(&command);
+}
+
+// 'minimal' means that only ar->ar_results.proc is initialized
+// (it is needed to be initialized even for decoding).
+void initNullAcceptedReply(CallContext context, AcceptedReplyTPtr ar, bool minimal)
+{
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "init_null_accepted_reply:$(ptr)$(int)",
+                                create_VoidTPtrObj(ar),
+                                create_IntTObj(minimal)
+                    );
+    executeCommandInContext(context, &command);
+
+    destroy_TSCommand(&command);
+}
+
+void initNullRejectedReply(CallContext context, RejectedReplyTPtr rr)
+{
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "init_null_rejected_reply:$(ptr)",
+                                create_VoidTPtrObj(rr)
+                    );
+    executeCommandInContext(context, &command);
+
+    destroy_TSCommand(&command);
+}
+
+void initNullOpaqueAuth(CallContext context, OpaqueAuthTPtr ap)
+{
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "init_null_opaque_auth:$(ptr)",
+                                create_VoidTPtrObj(ap)
+                    );
+    executeCommandInContext(context, &command);
+
+    destroy_TSCommand(&command);
+}
+
+void initCallRpcMsg(CallContext context, RpcMsgTPtr msg)
+{
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "init_call_rpc_msg:$(ptr)",
+                                create_VoidTPtrObj(msg)
+                    );
+    executeCommandInContext(context, &command);
+
+    destroy_TSCommand(&command);
+}
+
+void initReplyRpcMsg(CallContext context, RpcMsgTPtr msg)
+{
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "init_reply_rpc_msg:$(ptr)",
+                                create_VoidTPtrObj(msg)
+                    );
+    executeCommandInContext(context, &command);
+
+    destroy_TSCommand(&command);
+}
+
+VoidTPtr allocateMemoryBlockSave(CallContext context, SizeT size, List* allocatedBlocks)
+{
+    VoidTPtr tmp = allocateMemoryBlock(context, size);
+    append_List(allocatedBlocks, create_VoidTPtrObj(tmp));
+    return tmp;
+}
+
+void deallocateSavedMemoryBlocks(CallContext context, List* allocatedBlocks)
+{
+    VoidTPtrObj* tmp;
+    int i;
+    for (i=0; i<size_List(allocatedBlocks); ++i)
+    {
+        tmp = (VoidTPtrObj*)get_List(allocatedBlocks, i);
+        deallocateMemoryBlock(context, *tmp);
+    }
+}

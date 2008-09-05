@@ -1,0 +1,214 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_model.seh"
+#include "system/user/user_media.seh"
+#include "process/process/tests/process_scenario.seh"
+#include "process/process/process_model.seh"
+#include "process/process/process_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/control_center.seh"
+#include "process/meta/user_model.seh"
+#include "process/meta/user_media.seh"
+#include "process/environ/environ_media.seh"
+#include "fs/meta/access_media.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "process/context/tests/context_scenario.seh"
+#include "process/context/context_model.seh"
+#include "process/context/context_media.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static UContextT * ucp1;
+static UContextT * ucp2;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    int i;
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    context = getContext();
+    ucp1 = createEmpty_UContextT( 1 );
+    ucp2 = createEmpty_UContextT( 2 );
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init_get_make_set_scenario( int argc, char ** argv ) { return init_scenario( "get make set context" ); }
+static bool init_get_swap_scenario    ( int argc, char ** argv ) { return init_scenario( "get swap context"     ); }
+
+static void finish_get_make_set_scenario( void ) finish_scenario( get_make_set_context )
+static void finish_get_swap_scenario    ( void ) finish_scenario( get_swap_context     )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool get_make_set_scen()
+{
+    iterate ( int i = 1; i <= 3; i++; )
+    {
+        ProcessState * processState;
+        List /* CharTObj */ * ucpForMakecontext;
+        dotPrint( 10, 50 );
+        switch ( i ) {
+            case 1: getcontext_spec( context, ucp1 ); break;
+            case 2: setcontext_spec( context, ucp1 ); break;
+            case 3: makecontext_spec( context, ucp1, create_CString( "funcAtMakecontext1" ), 0 ); break;
+        }
+    }
+    return true;
+}
+
+scenario
+bool get_swap_scen()
+{
+    iterate ( int i = 1; i <= 2; i++; )
+    {
+        dotPrint( 10, 50 );
+        switch ( i ) {
+            case 1: getcontext_spec ( context,       ucp1                     ); break;
+            case 2: swapcontext_spec( context, ucp2, ucp1, requestErrorCode() ); break;
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+static Map * saveSingleModelState( void ) { return clone( systems ); }
+
+static void restoreSingleModelState( Map * saved_state ) { systems = saved_state; }
+
+static bool isSingleModelStateStationary( void ) { return true; }
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm get_make_set_context_scenario =
+{
+    .init    = init_get_make_set_scenario  ,
+    .finish  = finish_get_make_set_scenario,
+    .actions = { get_make_set_scen,
+                 NULL
+               }
+};
+
+scenario dfsm get_swap_context_scenario =
+{
+    .init    = init_get_swap_scenario  ,
+    .finish  = finish_get_swap_scenario,
+    .actions = { get_swap_scen,
+                 NULL
+               }
+};
+
+#ifdef PROCESS_CONTEXT_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initProcessContextSubsystem();
+}
+
+bool main_process_context_local( int argc, char** argv )
+{
+    get_make_set_context_scenario( argc, argv );
+    get_swap_context_scenario    ( argc, argv );
+    return true;
+}
+
+int main( int argc, char** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    main_process_context_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

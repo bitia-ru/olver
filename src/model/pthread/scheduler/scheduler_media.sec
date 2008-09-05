@@ -1,0 +1,220 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/scheduler/scheduler_media.seh"
+#include "common/common_media.seh"
+#include "pthread/attr/attr_model.seh"
+#include "atl/integer.h"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initPThreadSchedulerSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_pthread_getconcurrency_spec(pthread_getconcurrency_media);
+    set_mediator_pthread_setconcurrency_spec(pthread_setconcurrency_media);
+    set_mediator_pthread_getschedparam_spec(pthread_getschedparam_media);
+    set_mediator_pthread_setschedparam_spec(pthread_setschedparam_media);
+    set_mediator_pthread_setschedprio_spec(pthread_setschedprio_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** pthread_getconcurrency_spec **/
+mediator pthread_getconcurrency_media for specification
+IntT pthread_getconcurrency_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res=0;
+    
+        format_TSCommand( &command, "pthread_getconcurrency" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        concurrency_level_model = pthread_getconcurrency_spec;
+    }
+}
+
+/** pthread_setconcurrency_spec **/
+
+mediator pthread_setconcurrency_media for specification
+IntT pthread_setconcurrency_spec( CallContext context, IntT new_level )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res=0;
+        
+        format_TSCommand( &command, "pthread_setconcurrency:$(int)", create_IntTObj(new_level) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        if(pthread_setconcurrency_spec==0)
+        {
+            setModelConcurrencyLevelUnkn();
+        }
+    }
+}
+
+
+/** pthread_getschedparam_spec **/
+mediator pthread_getschedparam_media for specification
+IntT pthread_getschedparam_spec( CallContext context, PThreadT thread, IntT * policy, SchedParam * param )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;   
+            
+        format_TSCommand( &command, "pthread_getschedparam:$(ulong)$(int)$(int)", create_ULongTObj(thread),
+                           create_IntTObj(policy==NULL?1:0),create_IntTObj(param==NULL?1:0)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res = readInt_TSStream(&command.response);
+            if(policy!=NULL)
+                *policy = readInt_TSStream(&command.response);
+            if(param!=NULL)
+                param->sched_priority = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }   
+}
+
+
+
+
+/** pthread_setschedparam_spec **/
+mediator pthread_setschedparam_media for specification
+IntT pthread_setschedparam_spec( CallContext context, PThreadT thread, IntT policy, SchedParam * param )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "pthread_setschedparam:$(ulong)$(int)$(int)$(int)", create_ULongTObj(thread), 
+            create_IntTObj(policy), create_IntTObj(param==NULL?1:0), create_IntTObj(param==NULL?0:param->sched_priority)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        ThreadState * thread_state;
+                
+        if(pthread_setschedparam_spec==0)
+        {
+            thread_state = findThreadState_PThreadT(thread);
+            if(thread_state!=NULL && thread_state->attr!=NULL) 
+            {
+                thread_state->attr->policy = policy;
+                put_Map(thread_state->attr->isInitialized,create_Integer(POLICY),create_Integer(1));
+                if(param!=NULL && thread_state->attr->policy != SUT_SCHED_OTHER)
+                {
+                    thread_state->attr->shedPar = create_ShedParam(param->sched_priority, 0, NULL, NULL, 0);
+                    put_Map(thread_state->attr->isInitialized,create_Integer(SHEDPAR),create_Integer(1));
+                }
+            }
+        }
+    }
+}
+
+/** pthread_setschedprio_spec **/
+mediator pthread_setschedprio_media for specification
+IntT pthread_setschedprio_spec( CallContext context, PThreadT thread, IntT prio )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "pthread_setschedprio:$(ulong)$(int)", 
+                          create_ULongTObj(thread), create_IntTObj(prio)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        ThreadState * thread_state;
+                
+        if(pthread_setschedprio_spec==0)
+        {
+            thread_state = findThreadState_PThreadT(thread);
+            if(thread_state!=NULL && thread_state->attr!=NULL) 
+            {
+                thread_state->attr->shedPar = create_ShedParam(prio, 0, NULL, NULL, 0);
+                put_Map(thread_state->attr->isInitialized,create_Integer(SHEDPAR),create_Integer(1));
+            }
+        }
+    }
+}

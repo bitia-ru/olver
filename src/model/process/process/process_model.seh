@@ -1,0 +1,896 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef PROCESS_MODEL_SEH
+#define PROCESS_MODEL_SEH
+
+#include "atl/set.h"
+#include "atl/map.h"
+#include "atl/list.h"
+#include "common/common_model.seh"
+#include "common/common_scenario.seh"
+#include "data/signal_model.seh"
+#include "io/file/file_model.seh"
+#include "io/fstream/fstream_model.seh"
+#include "memory/mman/mman_model.seh"
+#include "pthread/pthread/pthread_model.seh"
+#include "process/fenv/fenv_model.seh"
+#include "util/getopt/getopt.seh"
+#include "util/pam/pam_model.seh"
+
+/********************************************************************/
+/**                  Process Model Initialization                  **/
+/********************************************************************/
+
+void initProcessModel(void);
+
+/********************************************************************/
+/**                         Memory Mode                            **/
+/********************************************************************/
+
+typedef enum MemoryMode
+{
+  UnknownMMode,
+  BreakValueMMode,
+  StandardMMode,
+  UndefinedMMode // undefined by standard
+} MemoryMode;
+
+specification typedef MemoryMode* MemMode;
+
+/********************************************************************/
+/**                          Hash Table                            **/
+/********************************************************************/
+
+specification typedef
+struct HashSearchTable
+{
+  Map*        hash_table;        // String -m-> VoidTPtrObj
+  SizeT        hash_table_nel; // nel parameter passed to hash_table
+} HashSearchTable;
+
+HashSearchTable *create_HashSearchTable(Map* map, SizeT nel);
+
+/********************************************************************/
+/**                       Process Meta Attributes                  **/
+/********************************************************************/
+
+specification typedef
+struct WaitedSignal
+{
+    UIntT       nanoseconds;
+    Signal      *signal     ;
+    TimerTObj * timer      ; // NULL for alarms and itimers
+} WaitedSignal;
+
+WaitedSignal * create_WaitedSignal( UIntT nanoseconds, Signal *signal, TimerTObj * timer );
+
+typedef struct ProcessMetaInfo
+{
+  // Parent
+  ProcessId   parent;
+  // Process Group
+  ProcessId   pgroup;
+  // Session
+  ProcessId   session;
+  // Controlling Terminal
+  CString*    cterm;
+  // File System Attributes
+
+  FileId      root;
+  FileId      workdir;
+
+  FilePermissions *umask;
+
+  // User Attributes
+  UidT        real_userid;
+  GidT        real_groupid;
+  UidT        effective_userid;
+  GidT        effective_groupid;
+  List*       groups;             // Supplementary group IDs: GidTObj-list
+  UidT        saved_setuserid;
+  GidT        saved_setgroupid;
+  // Nice Number
+  UIntT NZero;
+  UIntT nice ; // [ 0, 2 * NZero - 1 ]
+  // Clocks
+  Set /* ClockidTObj */ * clockIds;
+  // Timers
+  Map /* TimerTObj +> SignalObj */ * timersToSignals;
+  // signals waited from alarms and timers
+  List /* WaitedSignal */ * waitedSignals;
+} ProcessMetaInfo;
+
+/********************************************************************/
+/**                            Pam Data                            **/
+/********************************************************************/
+
+specification typedef struct PamData { // private:
+    // init data
+    CString * serviceName;
+    CString * username    ;
+    IntT pamConversation;
+    // pamh (as id)
+    PamHandleT pamh;
+    // pamh date
+    //     authenticate and session data
+    bool authenticate;
+    bool sessionOpen;
+    //     items data
+    //         string items data
+    Map /* IntTObj +> CString */ * stringItems;
+    //         pam_conv structure item data
+    Object * pamConv;
+#if 0 // for avoid too many "// "
+    //     items data
+    //         string items data
+    static bool stringItemType( IntT itemType );
+    void setStringItem( IntT itemType, CString * itemValue );
+    CString * getStringItem( IntT itemType ) const;
+public:
+    bool correspondTo( PamHandleT pamh ) const;
+    // pamh date
+    //     authenticate and session data
+    void setAuthentication( void );
+    bool authenticated( void ) const;
+    void openSession( void );
+    void closeSession( void );
+    bool sessionOpened( void ) const;
+    //     items data
+    static bool correctItemType( IntT itemType );
+    void setItem( IntT itemType, VoidTPtr itemPtr );
+    Object * getItem( IntT itemType ) const;
+#endif // 0 for avoid too many "// "
+} PamData;
+
+/* quasi constructor */
+PamData * create_PamData( CString * service_name, CString * username, IntT pam_conversation, PamHandleT pamh );
+
+bool stringItemType_PamData( IntT itemType );
+void setStringItem_PamData( PamData * thisPamData, IntT itemType, CString * itemValue );
+CString * getStringItem_PamData( /* const */ PamData * thisPamData, IntT itemType );
+bool correspondTo_PamData( /* const */ PamData * thisPamData, PamHandleT pamh );
+void setAuthentication_PamData( PamData * thisPamData );
+bool authenticated_PamData( /* const */ PamData * thisPamData );
+void openSession_PamData( PamData * thisPamData );
+void closeSession_PamData( PamData * thisPamData );
+bool sessionOpened_PamData( /* const */ PamData * thisPamData );
+bool correctItemType_PamData( IntT itemType );
+void setItem_PamData( PamData * thisPamData, IntT itemType, VoidTPtr itemPtr );
+Object * getItem( /* const */ PamData * thisPamData, IntT itemType );
+
+specification typedef struct PamDatas { // private:
+    Set /* PamData */ * datas;
+#if 0 // for avoid too many "// "
+public:
+    PamData * find( PamHandleT pamh );
+    void add( const PamData * pamData );
+    void remove( PamHandleT pamh );
+#endif // 0 for avoid too many "// "
+} PamDatas;
+
+/* quasi constructor */
+PamDatas * create_PamDatas( void );
+
+PamData * find_PamDatas( PamDatas * thisPamDatas, PamHandleT pamh );
+void add_PamDatas( PamDatas * thisPamDatas, /* const */ PamData * pamData );
+void remove_PamDatas( PamDatas * thisPamDatas, PamHandleT pamh );
+
+/********************************************************************/
+/**                          Process State                         **/
+/********************************************************************/
+
+specification typedef struct ProcessState ProcessState;
+
+specification typedef
+struct FinishedChild
+{
+    ProcessState * processState ;
+    IntT           returnedValue;
+} FinishedChild;
+
+FinishedChild * create_FinishedChild( ProcessState * processState, IntT returnedValue );
+
+struct ProcessState
+{
+    ProcessId        processid;
+
+    Map*             environ;// Process Environment (CString -m-> CString)
+
+    // Memory State
+    List*            memory_blocks;     // MemoryBlock-list
+    MemoryMode       memory_mode;
+
+    // Threads State
+    Map*             threads;           // ThreadId -m-> ThreadState
+    //Map*             blocked_calls;     // ThreadId -m-> Object // TODO: to be removed
+    Set*             threads_to_be_run;  // ThreadId-set
+    // File Descriptors
+    Map*             file_descriptors;  // FileDescId -m-> FileDescriptor
+    // Directory descriptors
+    Set*             dir_descriptors;  // DIR
+    // Static Data
+    Map*             staticData;
+    // Process Meta Attributes
+    ProcessMetaInfo  meta;
+    // Process Signal Processing
+    Map*             signal_actions;  // SignalObj -m-> SigAction
+
+    /*
+     * Represents queue for signals (for usual signals queue need only for
+     * checking, in fact, usual signal handler called one time for many signals
+     * in queue).
+     *      key   - signal number (SignalObj)
+     *      value - List of signal Params (SignalParamsObj)
+     */
+    Map*             signal_queue;
+
+    /*
+     * Represents sgnals, that was processed for usual signals
+     *      key   - signal number (SignalObj)
+     *      value - List of Lists of unique identificators (type IntTObj)
+     */
+    Map*             processed_signals;
+
+    /*
+     * Counter, defines unique identificator for next signal to this process
+     */
+    int              current_unique_sigid;
+
+    /*
+     * Bool value show if this process stopped
+     */
+    bool             is_stopped;
+
+    /*
+     * Bool value show if this process is zombie process
+     */
+    bool             is_zombie;
+
+    // Memory.mman mmap attributes
+    /*
+     * List of MMapState* - an address-ordered maps (without intersection).
+     */
+    List*            MMaps;
+
+    // 'sysconf' System Configuration Variables
+    Map*             sysconf;           // IntT -m-> LongT
+
+    HashSearchTable* hash_search_table;// Static Data
+
+    Set*             users;
+    bool             isSetFilled;
+    bool             isDatabaseClosed;
+
+    Set*             startedThreads;
+
+    VoidTPtr         pthread_once_parameter;
+    StringTPtr       buffer_string;
+
+    ProcessState *   childInCreation;// is now in fork-call, creating child
+
+    bool             inExecCall;// is now in exec-call
+
+    // process has successfully executed by the exec functions - used in pgroup
+    bool             wasSuccessfulExecCall;
+
+    // registered for call at exit
+    List /* CString */ * registeredForCallAtExit;
+
+    // finished child processes
+    Set /* FinishedChild */ * finishedChildren;
+    FinishedChild * finishedChild_for_wair_return;
+
+    // pipes between the calling program and the executed by popen commands
+    Set /* VoidTPtrObj */ * pipesFromPopen;
+
+    List /* CharTObj */ * ucp;// prepared by getcontext
+    List /* CharTObj */ * setjmp_env;// prepared by setjmp
+    List /* CharTObj */ * sigsetjmp_env;// prepared by sigsetjmp
+
+    FEnvTPtr         fe_dfl_env;    // FE_DFL_ENV
+    FEnvT*           fenv;
+    GetoptRet*       getOpt;
+
+    // ncurses
+    VoidTPtr         stdscr_wnd;
+    VoidTPtr         cur_term;
+    IntT             TermNLines, TermNCols;
+    List*            riplines;
+    List*            window_list;
+
+    List*            initedTerminals;
+    bool             terminalFilterSet;
+    IntT             slk_format;
+    IntT             use_env;
+
+    Object*          SysLogSt;
+    Object*          MemBrkSt;
+    IntT             policy;
+    Map*             priority_max;
+    Map*             priority_min;
+    ShedParam*       param;
+    // Pam Datas
+    PamDatas * pamDatas;
+// private:
+    // Compiled regular expressions
+    Object * compiledRegularExpressionsAsObject;
+#if 0 // for avoid too many "// "
+public:
+    void initCompiledRegularExpressionsAsObject( Object * compiledRegularExpressions ); // can not be called with NULL
+    Object * getCompiledRegularExpressionsAsObject( void ); // can not be called before initCompiledRegularExpressions
+#endif // 0 for avoid too many "// "
+};
+
+/* quasi constructor */
+ProcessState * create_ProcessState( ProcessId processid );
+
+void initCompiledRegularExpressionsAsObject_ProcessState
+         ( ProcessState * thisProcessState, Object * compiledRegularExpressionsAsObject );
+Object * getCompiledRegularExpressionsAsObject_ProcessState( ProcessState * thisProcessState );
+
+ProcessState* registerProcessState( ProcessId processid, ProcessState* process );
+
+ProcessState* registerProcess( ProcessId processid );
+
+/********************************************************************/
+/**                         Process Storage                        **/
+/********************************************************************/
+ProcessState* getProcessState( ProcessId processid );
+ProcessState* findProcessState( Map* processes, ProcessId processid );
+
+ProcessState* getProcessState_CallContext( CallContext context );
+ProcessState* getProcessState_ThreadId( ThreadId threadid );
+ProcessState* getProcessState_FileDescId( FileDescId file_desc_id );
+
+/********************************************************************/
+/**                       Static Process State                     **/
+/********************************************************************/
+
+Object* getProcessStaticData(CallContext context, CString* sDataName);
+void    setProcessStaticData(CallContext context, CString* sDataName, Object* Data);
+int registerProcessStaticData(CallContext context, CString* sDataName, Object* initData);
+
+/********************************************************************/
+/**                         Helper Functions                       **/
+/********************************************************************/
+Map* getProcessEnvironment( CallContext context );
+void setProcessEnvironment( CallContext context, Map* environ );
+
+CString* getEnv_CallContext(CallContext context, CString* var);
+
+List* getMemoryState( CallContext context );
+List* getMemoryState_ProcessId( ProcessId processid );
+
+
+void toStandardMemMode(CallContext context);
+
+Map*  getThreads( CallContext context );           // ThreadId -m-> ThreadState
+Map*  getThreads_ProcessId( ProcessId processid ); // ThreadId -m-> ThreadState
+
+int   getNumberOfThreads( CallContext context );
+int   getNumberOfThreads_ProcessId( ProcessId processid );
+
+Map*  getFileDescriptors( CallContext context );           // FileDescId -m-> FileDescriptor
+Map*  getFileDescriptors_ProcessId( ProcessId processid ); // FileDescId -m-> FileDescriptor
+
+FEnvTPtr getDefaultFloatingPointEnvironment( CallContext context );
+FEnvTPtr getDefaultFloatingPointEnvironment_ProcessId( ProcessId processid );
+
+void setDefaultFloatingPointEnvironment( CallContext context, FEnvTPtr fe_dfl_env );
+void setDefaultFloatingPointEnvironment_ProcessId( ProcessId processid, FEnvTPtr fe_dfl_env );
+
+FEnvT* getFloatingPointEnvironment( CallContext context );
+FEnvT* getFloatingPointEnvironment_ProcessId( ProcessId processid );
+
+void setFloatingPointEnvironment( CallContext context, FEnvT *fenv);
+void setFloatingPointEnvironment_ProcessId( ProcessId processid, FEnvT *fenv );
+
+/*
+ * Returns process group id of the process specified by processid
+ * or WrongProcessId if the processid does not match any process.
+ */
+ProcessId getProcessGroupId_ProcessId(ProcessId processid);
+
+/*
+ * Returns process group id of the process specified by processid
+ * or WrongProcessId if the processid does not match any process.
+ */
+ProcessId getSessionId_ProcessId(ProcessId processid);
+
+/*
+ * Returns a name of the controlling terminal of the process specified by processid
+ * or NULL if the process has no a controlling terminal.
+ */
+CString* getControllingTerminalName_ProcessId(ProcessId processid);
+
+/*
+ * Returns true iff the process specified by processid has a controlling terminal.
+ */
+bool hasControllingTerminal_ProcessId(ProcessId processid);
+
+/*
+ * Returns true iff the processid matches some process in the system.
+ */
+bool isValidProcessId(ProcessId processid);
+
+/*
+ * Returns true iff the pgroupid matches some process group id in the system.
+ */
+bool isValidProcessGroupId(ProcessId pgroupid);
+
+/*
+ * Returns true iff the pgroupid matches some process group id in
+ * the session specifed by sessionid.
+ */
+bool isValidProcessGroupIdInSession(ProcessId pgroupid, ProcessId sessionid);
+
+/*
+ * Returns true iff the pgroupid matches the orphaned process group id.
+ * Orphaned process group is a process group in which the parent of
+ * every member is either itself a member of the group or is not a member
+ * of the group's session.
+ */
+Bool3 isOrphanedProcessGroupId(ProcessId pgroupid);
+
+/*
+ * Return real/effective user/group id of the process specified by processid.
+ */
+UidTObj* getRealUserId_ProcessId( ProcessId processid );
+GidTObj* getRealGroupId_ProcessId( ProcessId processid );
+UidTObj* getEffectiveUserId_ProcessId( ProcessId processid );
+GidTObj* getEffectiveGroupId_ProcessId( ProcessId processid );
+
+/*
+ * Returns fileid of the current root of the process specified by processid.
+ */
+FileId getRoot_ProcessId( ProcessId processid );
+
+/*
+ * Sets a root directory of the process specified by processid.
+ */
+void setRoot_ProcessId( ProcessId processid, FileId root );
+
+/*
+ * Returns fileid of the current work directory of the process specified by processid.
+ */
+FileId getWorkDirectory_ProcessId( ProcessId processid );
+
+/*
+ * Sets a new current work directory of the process specified by processid.
+ */
+void setWorkDirectory_ProcessId( ProcessId processid, FileId workdir );
+
+/*
+ * Gets set of children for the calling process.
+ */
+Set /* ProcessState */ * getChildren_CallContext( CallContext context );
+
+/*
+ * Gets set of processes in the same group as the calling process.
+ */
+Set /* ProcessState */ * getProcessesInGroup_CallContext( CallContext context );
+
+/*
+ * Gets set of processes in the same session as the calling process.
+ */
+Set /* ProcessState */ * getProcessesInSession_CallContext( CallContext context );
+
+/********************************************************************/
+/**                    Signal Helper Functions                     **/
+/********************************************************************/
+
+/*
+ * Returns new unique signal identificator
+ */
+int MakeNewCurrentUID(ProcessState* prSt);
+
+/*
+ * Returns true if the signal is blocked by the process specified by processid.
+ */
+bool isSignalBlocked_ProcessId(ProcessId processid, SignalVal signal);
+
+/*
+ * Returns signal handler of the process specified for the signal.
+ * If the processid does not match any process in the system
+ * SUT_SIG_ERR is returned.
+ */
+SignalHandler getSignalHandler_ProcessId(ProcessId processid, SignalVal signal);
+
+/*
+ * Returns true if the signal is handled by the process specified by processid.
+ */
+bool isSignalHandled_ProcessId(ProcessId processid, SignalVal signal);
+
+/*
+ * Temporary here.
+ */
+void sendSignalToProcess(ProcessId processid, SignalVal signal);
+void sendSignalToProcessGroup(ProcessId processid, SignalVal signal);
+
+/*
+ * Temporary here.
+ */
+bool signalShouldBeSentToProcess(ProcessId processid, SignalVal signal);
+bool signalShouldBeSentToProcessGroup(ProcessId processid, SignalVal signal);
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** common for exit group and return_from_main **/
+specification typedef
+struct ExitCall
+{
+    CallContext context;
+    IntT        status ;
+} ExitCall;
+
+ExitCall * create_ExitCall( CallContext context, IntT status );
+
+void onExit( CallContext context, IntT status );
+
+specification typedef
+struct ExitReturnType
+{
+    String      * name   ;
+    CallContext   context;
+} ExitReturnType;
+
+ExitReturnType * create_ExitReturnType(
+    String      * name,
+    CallContext   context
+);
+
+reaction ExitReturnType * exitCalledProcess_return( void );
+reaction ExitReturnType * exit_processTerminated  ( void );
+
+void onExitCalledProcessReturn( CallContext context );
+void onExitProcessTerminated  ( CallContext context );
+
+/** _Exit_spec **/
+specification
+void _Exit_spec( CallContext context, IntT status );
+
+/** __cxa_atexit_spec **/
+specification
+IntT __cxa_atexit_spec( CallContext context, CString * func, VoidTPtr arg, VoidTPtr dso_handle );
+
+/** __libc_start_main_spec **/
+specification
+IntT __libc_start_main_spec( CallContext context, CString * main, IntT argc, List /* CString */ * ubp_av,
+                                                  CString * init, CString * fini, CString * rtld_fini,
+                                                  VoidTPtr stack_end
+                           );
+
+/** __register_atfork_spec **/
+specification
+IntT __register_atfork_spec( CallContext context,
+                             CString * prepare, CString * parent, CString * child, VoidTPtr __dso_handle
+                           );
+
+/** _exit_spec **/
+specification
+void _exit_spec( CallContext context, IntT status );
+
+/** abort_spec **/
+specification typedef
+struct AbortCall
+{
+    CallContext context;
+} AbortCall;
+
+AbortCall * create_AbortCall( CallContext context );
+
+specification
+void abort_spec( CallContext context );
+
+void onAbort( CallContext context );
+
+specification typedef
+struct AbortReturnType
+{
+    CallContext context;
+} AbortReturnType;
+
+AbortReturnType * create_AbortReturnType(CallContext context);
+
+reaction AbortReturnType * abortCalledProcess_return( void );
+reaction AbortReturnType * abort_processTerminated  ( void );
+
+void onAbortCalledProcessReturn( CallContext context );
+void onAbortProcessTerminated  ( CallContext context );
+
+/** common for daemon, fork, forkpty and vfork **/
+specification typedef
+struct ForkCall
+{
+    CallContext context;
+} ForkCall;
+
+ForkCall * create_ForkCall( CallContext context );
+
+void onFork( CallContext context );
+
+specification typedef
+struct ForkReturnType
+{
+    String      * name          ;
+    CallContext   context       ;
+    ProcessId     returned_value;
+    ErrorCode   * error_code    ;
+    PThreadT      childThread   ;
+} ForkReturnType;
+
+ForkReturnType * create_ForkReturnType(
+    String      * name,
+    CallContext   context,
+    ProcessId     returned_value,
+    ErrorCode   * error_code,
+    PThreadT      childThread
+);
+
+reaction ForkReturnType * fork_return       ( void );
+reaction ForkReturnType * forkToChild_return( void );
+
+void onForkReturn       ( String * name, CallContext context, ProcessId fork_spec, ErrorCode * error_code );
+void onForkToChildReturn(                CallContext context, PThreadT childThread                        );
+
+/** daemon_spec **/
+specification
+void daemon_spec( CallContext context, IntT nochdir, IntT noclose );
+
+/** common for exec group **/
+specification typedef
+struct ExecCall
+{
+    String             * name   ;
+    CallContext          context;
+    CString            * path   ;
+    List /* CString */ * argv   ;
+    List /* CString */ * envp   ;
+} ExecCall;
+
+ExecCall * create_ExecCall( String * name,
+                            CallContext context, CString * path, List /* CString */ * argv, List /* CString */ * envp
+                          );
+
+void onExec( String * name, CallContext context, CString * path, List /* CString */ * argv, List /* CString */ * envp );
+
+specification typedef
+struct ExecReturnType
+{
+    CallContext          context       ;
+    IntT                 returned_value;
+    CString            * path          ;
+    List /* CString */ * argv          ;
+    List /* CString */ * envp          ;
+    ErrorCode          * error_code    ;
+} ExecReturnType;
+
+ExecReturnType * create_ExecReturnType(
+    CallContext          context,
+    IntT                 returned_value,
+    CString            * path,
+    List /* CString */ * argv,
+    List /* CString */ * envp,
+    ErrorCode          * error_code
+);
+
+CallContext findCorrespondContext( CallContext context, Map * systems );
+
+reaction ExecReturnType * execOldProcess_return( void );
+reaction ExecReturnType * execNewProcess_return( void );
+
+void onExecOldProcessReturn( CallContext context );
+void onExecNewProcessReturn( CallContext context );
+
+/** execl_spec **/
+specification
+void execl_spec( CallContext context, CString * path, List /* CString */ * argv );
+
+/** execle_spec **/
+specification
+void execle_spec( CallContext context, CString * path, List /* CString */ * argv, List /* CString */ * envp );
+
+/** execlp_spec **/
+specification
+void execlp_spec( CallContext context, CString * file, List /* CString */ * argv );
+
+/** execv_spec **/
+specification
+void execv_spec( CallContext context, CString * path, List /* CString */ * argv );
+
+/** execve_spec **/
+specification
+void execve_spec( CallContext context, CString * path, List /* CString */ * argv, List /* CString */ * envp );
+
+/** execvp_spec **/
+specification
+void execvp_spec( CallContext context, CString * file, List /* CString */ * argv );
+
+/** exit_spec **/
+specification
+void exit_spec( CallContext context, IntT status );
+
+/** fork_spec **/
+specification
+void fork_spec( CallContext context );
+
+/** forkpty_spec **/
+specification
+void forkpty_spec( CallContext context );
+
+/** pclose_spec **/
+specification typedef
+struct PcloseCall
+{
+    CallContext context;
+    FILETPtr    stream ;
+} PcloseCall;
+
+PcloseCall * create_PcloseCall( CallContext context, FILETPtr stream );
+
+specification
+void pclose_spec( CallContext context, FILETPtr stream );
+
+void onPclose( CallContext context, FILETPtr stream );
+
+specification typedef
+struct PcloseReturnType
+{
+    CallContext   context       ;
+    IntT          returned_value;
+    ErrorCode   * error_code    ;
+} PcloseReturnType;
+
+PcloseReturnType * create_PcloseReturnType(
+    CallContext   context,
+    IntT          returned_value,
+    ErrorCode   * error_code
+);
+
+reaction PcloseReturnType * pclose_return( void );
+
+void onPcloseReturn( CallContext context, IntT pclose_spec, ErrorCode * error_code );
+
+/** popen_spec **/
+specification typedef
+struct PopenCall
+{
+    CallContext   context;
+    CString     * command;
+    CString     * mode   ;
+} PopenCall;
+
+PopenCall * create_PopenCall( CallContext context, CString * command, CString * mode );
+
+specification
+void popen_spec( CallContext context, CString * Command, CString * mode );
+
+void onPopen( CallContext context, CString * command, CString * mode );
+
+specification typedef
+struct PopenReturnType
+{
+    CallContext   context       ;
+    FILETPtr      returned_value;
+    ErrorCode   * error_code    ;
+} PopenReturnType;
+
+PopenReturnType * create_PopenReturnType(
+    CallContext   context,
+    FILETPtr      returned_value,
+    ErrorCode   * error_code
+);
+
+reaction PopenReturnType * popen_return( void );
+
+void onPopenReturn( CallContext context, FILETPtr popen_spec, ErrorCode * error_code );
+
+/** return_from_main_spec **/
+specification
+void return_from_main_spec( CallContext context, IntT status );
+
+/** system_spec **/
+specification
+IntT system_spec( CallContext context, CString *cmd, ErrorCode *errno);
+
+/** vfork_spec **/
+specification
+void vfork_spec( CallContext context, CString * funcName );
+
+/** common for wait group **/
+specification typedef
+struct WaitCall
+{
+    String      * name         ;
+    CallContext   context      ;
+    ProcessId     pid          ;
+    bool          isStatLocNull;
+    IntT          options      ;
+} WaitCall;
+
+WaitCall * create_WaitCall( String * name, CallContext context, ProcessId pid, bool isStatLocNull, IntT options );
+
+void onWait( String * name, CallContext context, ProcessId pid, bool isStatLocNull, IntT options );
+
+specification typedef
+struct WaitReturnType
+{
+    CallContext   context       ;
+    ProcessId     returned_value;
+    ErrorCode   * error_code    ;
+    IntT          stat_loc      ;
+    bool          isWIfExited   ;
+    IntT          WExitStatus   ;
+    bool          isWIfSignaled ;
+    IntT          WTermSig      ;
+    bool          isWIfStopped  ;
+    IntT          WStopSig      ;
+    bool          isWIfContinued;
+} WaitReturnType;
+
+WaitReturnType * create_WaitReturnType(
+    CallContext   context,
+    ProcessId     returned_value,
+    ErrorCode   * error_code,
+    IntT          stat_loc,
+    bool          isWIfExited,
+    IntT          WExitStatus,
+    bool          isWIfSignaled,
+    IntT          WTermSig,
+    bool          isWIfStopped,
+    IntT          WStopSig,
+    bool          isWIfContinued
+);
+
+ProcessState * getPreProcessState            ( ProcessId   processid, Map * preSystems );
+ProcessState * getPreProcessState_CallContext( CallContext context  , Map * preSystems );
+
+reaction WaitReturnType * wait_return( void );
+
+void onWaitReturn( CallContext context, ProcessId returned_value );
+
+/** wait_spec **/
+specification
+void wait_spec( CallContext context, bool isStatLocNull );
+
+/** wait4_spec **/
+specification
+void wait4_spec( CallContext context, ProcessId pid, bool isStatLocNull, IntT options, bool isRusageNull );
+
+/** waitpid_spec **/
+specification
+void waitpid_spec( CallContext context, ProcessId pid, bool isStatLocNull, IntT options );
+
+/********************************************************************/
+/**                    Signal Helper Functions                     **/
+/********************************************************************/
+void PrintfProcessSignalQueue(ProcessState* prSt);
+void PrintfProcessProcessedSignals(ProcessState* prSt);
+void PrintfProcessSignalActions(ProcessState* prSt);
+
+/********************************************************************/
+/**                    Zombie Process Functions                    **/
+/********************************************************************/
+bool isProcessZombie(ProcessState* pr_st);
+void setProcessZombie(ProcessState* pr_st);
+
+#endif

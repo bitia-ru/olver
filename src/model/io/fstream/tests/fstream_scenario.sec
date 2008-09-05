@@ -1,0 +1,930 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "fs/dir/dir_model.seh"
+#include "fs/fs/fs_model.seh"
+#include "system/system/system_model.seh"
+#include "io/file/file_media.seh"
+#include "io/file/file_model.seh"
+#include "io/fstream/buffer_media.seh"
+#include "io/fstream/buffer_model.seh"
+#include "io/fstream/fstream_media.seh"
+#include "io/fstream/fstream_model.seh"
+#include "io/fstream/lock_media.seh"
+#include "io/fstream/lock_model.seh"
+#include "io/fstream/wstream_media.seh"
+#include "io/fstream/wstream_model.seh"
+#include "process/meta/fs_model.seh"
+#include "process/process/process_model.seh"
+#include "process/process/process_common.seh"
+#include "io/fstream/tests/fstream_scenario.seh"
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static CString * rootpath;
+static ErrorCode * errorCode;
+
+static char * modes[] = { "r" , "rb", "w" , "wb", "a" , "ab", "r+", "rb+", "r+b", "w+", "wb+", "w+b", "a+", "ab+", "a+b" };
+
+//static int forPutc[] = { -192, -128, -64, -1, 0, 1, 63, 127, 191 };
+static int forPutc[] = { 127, 191 };
+
+static char * forPuts[] = { "" , "small", "large-large" };
+
+specification typedef struct FileShortInfo FileShortInfo = {};
+
+FileShortInfo * create_FileShortInfo( CString * name, CString * mode, bool is64, FILETPtr desc )
+{
+    return create( & type_FileShortInfo, name, mode, is64, desc );
+}
+
+void setDesc_FileShortInfo( FileShortInfo * thisFileShortInfo, FILETPtr desc ) {
+    thisFileShortInfo->desc.system  = desc.system ;
+    thisFileShortInfo->desc.process = desc.process;
+    thisFileShortInfo->desc.address = desc.address;
+}
+
+bool isNoFile_FileShortInfo( /* const */ FileShortInfo * thisFileShortInfo ) {
+    return thisFileShortInfo->name == NULL && isNULL_VoidTPtr( thisFileShortInfo->desc );
+}
+
+bool isClosedFile_FileShortInfo( /* const */ FileShortInfo * thisFileShortInfo ) {
+    return thisFileShortInfo->name != NULL && isNULL_VoidTPtr( thisFileShortInfo->desc );
+}
+
+bool isOpenedFile_FileShortInfo( /* const */ FileShortInfo * thisFileShortInfo ) {
+    return thisFileShortInfo->name != NULL && ! isNULL_VoidTPtr( thisFileShortInfo->desc );
+}
+
+bool isExistedFile_FileShortInfo( /* const */ FileShortInfo * thisFileShortInfo ) {
+    return thisFileShortInfo->name != NULL;
+}
+
+static List /* FileShortInfo */ * fileInfos;
+
+static List /* FileShortInfo */ * createFileInfos( void ) {
+    List /* FileShortInfo */ * res = create_List( & type_FileShortInfo );
+    int nameI, modeI, is64I;
+    bool needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    // for ( nameI = 0; nameI <= 0xFF; nameI++ ) {
+    for ( nameI = 0; nameI <= ( needConformanceTestQuality ? 0x01 : 0x03 ); nameI++ ) {
+        for ( modeI = 0; modeI < sizeof( modes ) / sizeof( modes[ 0 ] ); modeI++ ) {
+            for ( is64I = 0; is64I <= 1; is64I++ ) {
+                CString * mode = create_CString( modes[ modeI ] );
+                bool is64 = ( is64I == 1 );
+                append_List( res, create_FileShortInfo( NULL, mode, is64, NULL_VoidTPtr ) );
+            } // for is64I
+        } // for modeI
+    } // for nameI
+    return res;
+} // createFileInfos
+
+/********************************************************************/
+/**                    Helper Functions                            **/
+/********************************************************************/
+
+// makes full path string from local path
+#define FP(path) (getRelativeTestPathCh(path))
+
+// makes full path string
+#define P(path)  (create_CString(path))
+
+#define MKDIR_A(path, perms)\
+    mkdir_spec(context, path, create_FilePermissions_String(perms), requestErrorCode())
+
+
+static void update_cwd(CallContext context)
+{
+    SizeT size = 1024;
+    StringTPtr buf = allocateMemoryBlock(context, size);
+    ProcessState* pstate= getProcessState_CallContext(context);
+
+    getcwd_spec(context, buf, size, requestErrorCode());
+    rootpath=getPath_File(getFileSystem(context), getFile_FileId(pstate->meta.workdir));
+    deallocateMemoryBlock(context, buf);
+}
+
+static FileShortInfo * findAndPrepareFileInfoForOpen( List /* FileShortInfo */ * fileInfos ) {
+    Set /* CString */ * existedFiles = create_Set( & type_CString );
+    int i;
+    for ( i = 0; i < size_List( fileInfos ); i++ ) {
+        FileShortInfo * curInfo = get_List( fileInfos, i );
+        if ( isExistedFile_FileShortInfo( curInfo ) ) { add_Set( existedFiles, curInfo->name ); }
+    } // for i
+    for ( i = 0; i < size_List( fileInfos ); i++ ) {
+        FileShortInfo * curInfo = get_List( fileInfos, i );
+        if ( isNoFile_FileShortInfo( curInfo ) ) {
+            int nameI = 0;
+            do { curInfo->name = format_CString( "/fstream/testFstreamFile%04X", nameI++ );
+            } while ( contains_Set( existedFiles, curInfo->name ) );
+            curInfo->mode = replaceC_String( curInfo->mode, 'r', 'w' );
+            return curInfo;
+        } else if ( isClosedFile_FileShortInfo( curInfo ) ) {
+            return curInfo;
+        } // if ( isNoFile_FileShortInfo( curInfo ) )
+    } // for i
+    return NULL;
+} // findAndPrepareFileInfoForOpen
+
+static int quantityOpenedFileInfos( /* const */ List /* FileShortInfo */ * fileInfos ) {
+    int result = 0;
+    int i;
+    for ( i = 0; i < size_List( fileInfos ); i++ ) {
+        if ( isOpenedFile_FileShortInfo( get_List( fileInfos, i ) ) ) { result++; }
+    }
+    return result;
+}
+
+static FileShortInfo * getOpenedFileInfo( /* const */ List /* FileShortInfo */ * fileInfos, int fileI ) {
+    int i;
+    for ( i = 0; i < size_List( fileInfos ); i++ ) {
+        FileShortInfo * curInfo = get_List( fileInfos, i );
+        if ( isOpenedFile_FileShortInfo( curInfo ) && fileI-- == 0 ) { return curInfo; }
+    } // for i
+    return NULL;
+} // getOpenedFileInfo
+
+static FileShortInfo * findOpenedFileInfo( /* const */ List /* FileShortInfo */ * fileInfos ) {
+    return getOpenedFileInfo( fileInfos, 0 );
+}
+
+/********************************************************************/
+/**                    Test Scenario Initialization                **/
+/********************************************************************/
+
+static bool init_fstream_scenario(int argc,char** argv)
+{
+    context = getContext();
+    rootpath = getRelativeTestPathCh( "" );
+    errorCode = requestErrorCode();
+    initPathSystemConfiguration();
+    update_cwd( context );
+
+    MKDIR_A(FP(""),"rwxrwxrwx");
+    MKDIR_A(FP("/fstream"),"rwxrwxrwx");
+    setUptodate_Directory(getFile_FileSystem(getFileSystem(context), FP("/fstream")), true);
+
+    rootpath=FP("/fstream");
+
+    fileInfos = createFileInfos();
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Finalization                  **/
+/********************************************************************/
+
+static void finish_fstream_scenario( void )
+{
+    TEST_SCENARIO_VERDICT_VERBOSE( fstream_scenario );
+
+    recursive_remove(context, rootpath);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+Integer * get_FstreamGenState( void ) {
+    return create_Integer( quantityOpenedFileInfos( fileInfos ) );
+}
+
+/********************************************************************/
+/**                    Test Actions                                **/
+/********************************************************************/
+
+scenario
+bool fstream__IO_feof_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        _IO_feof_spec( context, fileInfo->desc );
+    }
+}
+
+scenario
+bool fstream__IO_getc_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        _IO_getc_spec( context, fileInfo->desc );
+    }
+}
+
+scenario
+bool fstream__IO_putc_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int cI = 0; cI < sizeof( forPutc ) / sizeof( forPutc[ 0 ] ); cI++ )
+        {
+            _IO_putc_spec( context, forPutc[ cI ], fileInfo->desc );
+        }
+    }
+}
+
+scenario
+bool fstream__IO_puts_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int sI = 0; sI < sizeof( forPuts ) / sizeof( forPuts[ 0 ] ); sI++ )
+        {
+            _IO_puts_spec( context, create_CString( forPuts[ sI ] ) );
+        }
+    }
+}
+
+scenario
+bool fstream___fpending_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        __fpending_spec( context, fileInfo->desc );
+    }
+}
+
+scenario
+bool fstream_clearerr_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        clearerr_spec( context, fileInfo->desc );
+    }
+}
+
+scenario
+bool fstream_fclose_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo;
+        verbose( "fstream_fclose_scen : fileI is %4d, state is %d\n", fileI, value_Integer( get_FstreamGenState() ) );
+        fileInfo = findOpenedFileInfo( fileInfos );
+        fclose_spec( context, fileInfo->desc, errorCode );
+        setDesc_FileShortInfo( fileInfo, NULL_VoidTPtr );
+        verbose( "fstream_fclose_scen :                state is %d\n", value_Integer( get_FstreamGenState() ) );
+    }
+}
+
+scenario
+bool fstream_feof_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        feof_spec( context, fileInfo->desc );
+    }
+}
+
+scenario
+bool fstream_ferror_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        ferror_spec( context, fileInfo->desc );
+    }
+}
+
+scenario
+bool fstream_fflush_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int unlockedI = 0; unlockedI <= 1; unlockedI++; )
+        {
+            bool unlocked = ( unlockedI == 1 );
+            fflush_spec( context, fileInfo->desc, errorCode, unlocked );
+        }
+    }
+}
+
+scenario
+bool fstream_fgetc_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int typeI = 1; typeI <= 3; typeI++; )
+        {
+            int type = ( typeI == 1 ? F_Type : ( typeI == 2 ? Macro_Type : ( typeI == 3 ? Macro_Unlocked_Type : -1 ) ) );
+            fgetc_spec( context, fileInfo->desc, errorCode, type, NULL, NULL );
+        }
+    }
+}
+
+scenario
+bool fstream_fgets_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int n = 0; n <= 15; n += 5; )
+        {
+            fgets_spec( context, n, fileInfo->desc, errorCode );
+        }
+    }
+}
+
+scenario
+bool fstream_fileno_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        fileno_spec( context, fileInfo->desc, errorCode );
+    }
+}
+
+scenario
+bool fstream_fopen_scen()
+{
+    iterate ( int fileI = quantityOpenedFileInfos( fileInfos ); fileI < size_List( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo;
+        FILETPtr desc;
+        verbose( "fstream_fopen_scen : fileI is %4d, state is %d\n", fileI, value_Integer( get_FstreamGenState() ) );
+        fileInfo = findAndPrepareFileInfoForOpen( fileInfos );
+        // printC_String( "fstream_fopen_scen : fileName is ", getRelativeTestPath( fileInfo->name ) );
+        // printC_String( "fstream_fopen_scen : fileInfo->mode is ", fileInfo->mode );
+        desc = fopen_spec( context, getRelativeTestPath( fileInfo->name ), fileInfo->mode, errorCode, fileInfo->is64 );
+        if ( ! isNULL_VoidTPtr( desc ) ) { setDesc_FileShortInfo( fileInfo, desc ); }
+        verbose( "fstream_fopen_scen :                state is %d\n", value_Integer( get_FstreamGenState() ) );
+    }
+}
+
+scenario
+bool fstream_fputc_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int cI = 0; cI < sizeof( forPutc ) / sizeof( forPutc[ 0 ] ); cI++ )
+        {
+            iterate ( int typeI = 1; typeI <= 5; typeI++; )
+            {
+                int type;
+                switch ( typeI ) {
+                    case 1: type = F_Type             ;
+                    case 2: type = Macro_Type         ;
+                    case 3: type = Macro_Unlocked_Type;
+                    case 4: type = Char_Type          ;
+                    case 5: type = Char_Unlocked_Type ;
+                }
+                fputc_spec( context, forPutc[ cI ], fileInfo->desc, errorCode, type );
+            }
+        }
+    }
+}
+
+scenario
+bool fstream_fputs_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int sI = 0; sI < sizeof( forPuts ) / sizeof( forPuts[ 0 ] ); sI++ )
+        {
+            fputs_spec( context, create_CString( forPuts[ sI ] ), fileInfo->desc, errorCode );
+        }
+    }
+}
+
+scenario
+bool fstream_ftell_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int typeI = 1; typeI <= 5; typeI++; )
+        {
+            int type = ( typeI == 1 ? LongType : ( typeI == 2 ? OffType : ( typeI == 3 ? Off64Type : -1 ) ) );
+            ftell_spec( context, fileInfo->desc, errorCode, type );
+        }
+    }
+}
+
+scenario
+bool fstream_getw_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        getw_spec( context, fileInfo->desc, errorCode );
+    }
+}
+
+scenario
+bool fstream_puts_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int sI = 0; sI < sizeof( forPuts ) / sizeof( forPuts[ 0 ] ); sI++ )
+        {
+            puts_spec( context, create_CString( forPuts[ sI ] ), errorCode );
+        }
+    }
+}
+
+scenario
+bool fstream_putw_scen()
+{
+    iterate ( int fileI = 0; fileI < quantityOpenedFileInfos( fileInfos ); fileI++; )
+    {
+        FileShortInfo * fileInfo = getOpenedFileInfo( fileInfos, fileI );
+        iterate ( int w = -1024; w <= 1024; w += 64; )
+        {
+            putw_spec( context, fileInfo->desc, w, errorCode );
+        }
+    }
+}
+
+scenario
+bool fstream_open_close_scen()
+{
+    CString * mode = create_CString( "w+" );
+    VoidTPtr buffer;
+    FPosTPtr pos;
+    FileDescId fildes;
+    FILETPtr file, file64;
+    WStringTPtr ws;
+
+    FilePermission * owner = create_FilePermission( true, true, false );
+    FilePermission * group = create_FilePermission( true, true, false );
+    FilePermission * other = create_FilePermission( true, true, false );
+    FilePermissions * perms = create_FilePermissions( owner, group, other, Unknown_Bool3, Unknown_Bool3, Unknown_Bool3 );
+    OpenFlags oflag = { ReadWrite, Blocking, true, true, false, false, false, false };
+
+    verbose( "fstream_open_close_scen\n" );
+
+    fildes = open_spec( context, FP( "/fstream/open_fdopen" ), oflag, perms, errorCode, false );
+    file = fdopen_spec( context, fildes, create_CString( "r" ), errorCode );
+    fileno_spec( context, file, errorCode );
+    fclose_spec( context, file, errorCode );
+
+    file   = fopen_spec( context, FP( "/fstream/fopen_freopen"    ), mode, errorCode, false );
+    file64 = fopen_spec( context, FP( "/fstream/fopen_freopen_64" ), mode, errorCode, true  );
+    file   = freopen_spec( context, FP( "/fstream/fopen_freopen"    ), mode, file  , errorCode, false );
+    file64 = freopen_spec( context, FP( "/fstream/fopen_freopen_64" ), mode, file64, errorCode, true  );
+
+    buffer=allocateMemoryBlock(context, (SizeT) 100);
+    pos=allocateMemoryBlock(context, (SizeT) 100);
+    ws=allocateMemoryBlock(context, (SizeT) 100);
+
+    writeCString_VoidTPtr(ws, create_CString("output"));
+
+    setbuf_spec(context, file, NULL_VoidTPtr);
+    setbuffer_spec(context, file, NULL_VoidTPtr, 0, requestErrorCode());
+    setvbuf_spec(context, file, buffer, SUT_IOLBF, 90, requestErrorCode());
+
+    fclose_spec( context, file  , errorCode );
+    fclose_spec( context, file64, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_put_tell_scen()
+{
+    FILETPtr file;
+
+    verbose( "fstream_put_tell_scen\n" );
+
+    file = fopen_spec( context, FP( "/fstream/put_tell" ), create_CString( "w+" ), errorCode, false );
+
+    ftell_spec( context, file, errorCode, LongType );
+
+    fputc_spec( context, 25, file, errorCode, F_Type              );
+    fputc_spec( context, 35, file, errorCode, Macro_Type          );
+    fputc_spec( context, 65, file, errorCode, Macro_Unlocked_Type );
+    fputc_spec( context, 45, file, errorCode, Char_Type           );
+    fputc_spec( context, 65, file, errorCode, Char_Unlocked_Type  );
+
+    ftell_spec( context, file, errorCode, LongType );
+
+    clearerr_spec( context, file );
+    __fpending_spec( context, file );
+    _IO_puts_spec( context, create_CString( "output string" ) );
+    _IO_putc_spec( context, 145, file );
+    _IO_feof_spec( context, file );
+
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_write_read_scen()
+{
+    FILETPtr file, file64;
+    VoidTPtr buffer;
+    int i;
+
+    verbose( "fstream_write_read_scen\n" );
+
+    file   = fopen_spec( context, FP( "/fstream/write_read" )   , create_CString( "w" ), errorCode, false );
+    file64 = fopen_spec( context, FP( "/fstream/write_read_64" ), create_CString( "w" ), errorCode, true  );
+
+    buffer = allocateMemoryBlock( context, (SizeT)100 );
+
+    feof_spec( context, file );
+    ferror_spec( context, file );
+    fflush_spec( context, file, errorCode, true  );
+    fflush_spec( context, file, errorCode, false );
+
+    ftell_spec( context, file  , errorCode, LongType  );
+    ftell_spec( context, file  , errorCode, OffType   );
+    ftell_spec( context, file64, errorCode, Off64Type );
+
+    for ( i = 0; i < 2 ; i++ ) {
+        fwrite_spec( context, file,  buffer, (SizeT)3, (SizeT)5, errorCode );
+    }
+
+    rewind_spec( context, file, errorCode );
+
+    fputs_spec( context, create_CString( "output string" ), file, errorCode );
+
+    fseek_spec( context, file  , 0, SEEK_END, LongType , errorCode );
+    fseek_spec( context, file  , 0, SEEK_END, OffType  , errorCode );
+    fseek_spec( context, file64, 0, SEEK_END, Off64Type, errorCode );
+
+    fclose_spec( context, file  , errorCode );
+    fclose_spec( context, file64, errorCode );
+
+    fopen_spec( context, FP( "/fstream/write_read" ), create_CString( "r" ), errorCode, false );
+    fread_spec( context, buffer, (SizeT)3, (SizeT)5, file, errorCode );
+    fseek_spec( context, file, 0, SEEK_SET, LongType, errorCode );
+    ftell_spec( context, file, errorCode, LongType );
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_put_get_scen()
+{
+    FILETPtr file;
+    WStringTPtr ws;
+
+    verbose( "fstream_put_get_scen\n" );
+
+    file = fopen_spec( context, FP( "/fstream/put_get" ), create_CString( "w+" ), errorCode, false );
+
+    fputs_spec( context, create_CString( "some data for next read" ), file, errorCode );
+    rewind_spec( context, file, errorCode );
+
+    fgetc_spec( context, file, errorCode, F_Type             , NULL, NULL );
+    fgetc_spec( context, file, errorCode, Macro_Type         , NULL, NULL );
+    fgetc_spec( context, file, errorCode, Macro_Unlocked_Type, NULL, NULL );
+
+    _IO_getc_spec( context, file );
+
+    getw_spec( context, file, errorCode );
+
+    fgets_spec( context, 5, file, errorCode );
+
+    puts_spec( context, create_CString( "output string" ), errorCode );
+    putw_spec( context, file, (IntT)150, errorCode );
+    fputwc_spec( context, (WCharT) 100, file, errorCode, Macro_Type );
+
+    fclose_spec( context, file, errorCode );
+
+    file = fopen_spec( context, FP( "/fstream/put_get" ), create_CString( "w+" ), errorCode, false );
+
+    fwide_spec( context, file, 0, errorCode );
+    fgetwc_spec( context, file, errorCode, Macro_Type, NULL, NULL );
+
+    fgetwc_spec( context, file, errorCode, F_Type         , NULL, NULL );
+    fgetwc_spec( context, file, errorCode, F_Unlocked_Type, NULL, NULL );
+
+    ws = allocateMemoryBlock( context, (SizeT)100 );
+    writeCString_VoidTPtr( ws, create_CString( "output" ) );
+    fgetws_spec( context, 5, file, errorCode );
+
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_get_char_1_scen()
+{
+    FILETPtr file;
+    CString * input = create_CString( "some input text" );
+    verbose( "fstream_get_char_1_scen\n" );
+
+    file = fopen_spec( context, FP( "/fstream/get_char_1" ), create_CString( "w+" ), errorCode, false );
+
+    fgetc_spec( context, file, errorCode, Char_Type, input, FP( "/fstream/stdinAsFile.txt" ) );
+
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_get_char_2_scen()
+{
+    FILETPtr file;
+    CString * input = create_CString( "some input text" );
+    verbose( "fstream_get_char_2_scen\n" );
+
+    file = fopen_spec( context, FP( "/fstream/get_char_2" ), create_CString( "w+" ), errorCode, false );
+
+    fgetc_spec( context, file, errorCode, Char_Unlocked_Type, input, FP( "/fstream/stdinAsFile.txt" ) );
+
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_unget_scen()
+{
+    FILETPtr file;
+
+    verbose( "fstream_unget_scen\n" );
+
+    file = fopen_spec( context, FP( "/fstream/unget" ), create_CString( "w+" ), errorCode, false );
+
+    fputs_spec( context, create_CString( "output string" ), file, errorCode );
+
+    rewind_spec( context, file, errorCode );
+
+    fgetc_spec( context, file, errorCode, F_Type, NULL, NULL );
+    fgetc_spec( context, file, errorCode, F_Type, NULL, NULL );
+
+    ungetc_spec( context, file, 220, true );
+    ungetc_spec( context, file, 120, true );
+
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_char_scen()
+{
+    FILETPtr file, file64;
+    FPosTPtr pos;
+    WString * input = createW_String( "some input text" );
+
+    CallContext context2 = createProcess();
+
+    verbose( "fstream_char_scen\n" );
+
+    pos = allocateMemoryBlock( context2, (SizeT)100 );
+
+    file   = fopen_spec( context2, FP( "/fstream/fstream_char"   ), create_CString( "w+" ), errorCode, false );
+    file64 = fopen_spec( context2, FP( "/fstream/fstream_char64" ), create_CString( "w+" ), errorCode, true  );
+
+    fgetpos_spec(context2, file, pos, errorCode, false);
+    fsetpos_spec(context2, file, pos, false, errorCode);
+
+    ungetwc_spec(context2, (WIntT) 11, file, errorCode, true);
+    ungetwc_spec(context2, (WIntT) 11, file, errorCode, false);
+    ungetwc_spec(context2, (WIntT) 11, file, errorCode, true);
+
+    fgetwc_spec( context2, file, errorCode, Char_Type, input, FP( "/fstream/stdinAsFile.txt" ) );
+
+    fgetpos_spec(context2, file64, pos, errorCode, true);
+    fsetpos_spec(context2, file64, pos, true, errorCode);
+
+    fgetwc_spec( context2, file, errorCode, Char_Type, input, FP( "/fstream/stdinAsFile.txt" ) );
+    fputwc_spec( context2, (WCharT)140, file, errorCode, Char_Type );
+
+    fclose_spec( context2, file  , errorCode );
+    fclose_spec( context2, file64, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_lock_scen()
+{
+    FILETPtr file;
+    bool threadWasBlocked;
+
+    verbose( "fstream_lock_scen\n" );
+
+    file = fopen_spec( context, FP( "/fstream/fstream_lock" ), create_CString( "w+" ), errorCode, false );
+
+    flockfile_spec   ( context, file, & threadWasBlocked );
+    funlockfile_spec ( context, file                     );
+    flockfile_spec   ( context, file, & threadWasBlocked );
+    ftrylockfile_spec( context, file                     );
+    funlockfile_spec ( context, file                     );
+    funlockfile_spec ( context, file                     );
+
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+scenario
+bool fstream_fputwc_fputc_scen()
+{
+    FILETPtr file;
+
+    verbose( "fstream_fputwc_fputc_scen\n" );
+
+    file = fopen_spec( context, FP( "/fstream/fputwc_fputc" ), create_CString( "w" ), errorCode, false );
+    fputwc_spec( context, (WCharT)100, file, errorCode, F_Type );
+    fclose_spec( context, file, errorCode );
+
+    file = fopen_spec( context, FP( "/fstream/fputwc_fputc" ), create_CString( "w" ), errorCode, false );
+    fputc_spec( context, 25, file, errorCode, F_Type );
+    ftell_spec( context, file, errorCode, LongType );
+    fclose_spec( context, file, errorCode );
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario ndfsm fstream_scenario =
+{
+    .init     = init_fstream_scenario  ,
+    .finish   = finish_fstream_scenario,
+    .getState = (PtrGetState)get_FstreamGenState,
+    .actions  = { fstream_fopen_scen     ,
+                  fstream__IO_feof_scen  ,
+                  fstream__IO_getc_scen  ,
+                  //fstream__IO_putc_scen  ,
+                  fstream__IO_puts_scen  ,
+                  fstream___fpending_scen,
+                  fstream_clearerr_scen  ,
+                  fstream_feof_scen      ,
+                  fstream_ferror_scen    ,
+                  fstream_fflush_scen    ,
+                  fstream_fgetc_scen     ,
+                  //fstream_fgets_scen     ,
+                  fstream_fileno_scen    ,
+                  fstream_fputc_scen     ,
+                  //fstream_fputs_scen     ,
+                  fstream_ftell_scen     ,
+                  fstream_puts_scen      ,
+                  fstream_fclose_scen    ,
+                  NULL
+                }
+};
+
+scenario dfsm fstream_wide_scenario =
+{
+    .init     = init_fstream_scenario  ,
+    .finish   = finish_fstream_scenario,
+    .getState = (PtrGetState)get_FstreamGenState,
+    .actions  = { fstream_fopen_scen     ,
+                  fstream__IO_feof_scen  ,
+                  fstream___fpending_scen,
+                  fstream_clearerr_scen  ,
+                  fstream_feof_scen      ,
+                  fstream_ferror_scen    ,
+                  fstream_fflush_scen    ,
+                  fstream_fileno_scen    ,
+                  fstream_ftell_scen     ,
+                  fstream_getw_scen      ,
+                  //fstream_putw_scen      ,
+                  fstream_fclose_scen    ,
+                  NULL
+                }
+};
+
+scenario dfsm fstream_action_scenario =
+{
+    .init    = init_fstream_scenario  ,
+    .finish  = finish_fstream_scenario,
+    .actions = { fstream_open_close_scen,
+                 fstream_put_tell_scen  ,
+                 fstream_write_read_scen,
+                 fstream_put_get_scen   ,
+                 fstream_unget_scen     ,
+                 fstream_char_scen      ,
+                 fstream_lock_scen      ,
+                 NULL
+               }
+};
+
+scenario dfsm fstream_fputwc_fputc_scenario =
+{
+    .init    = init_fstream_scenario  ,
+    .finish  = finish_fstream_scenario,
+    .actions = { fstream_fputwc_fputc_scen,
+                 NULL
+               }
+};
+
+scenario dfsm fstream_get_char_1_scenario =
+{
+    .init    = init_fstream_scenario  ,
+    .finish  = finish_fstream_scenario,
+    .actions = { fstream_get_char_1_scen,
+                 NULL
+               }
+};
+
+scenario dfsm fstream_get_char_2_scenario =
+{
+    .init    = init_fstream_scenario  ,
+    .finish  = finish_fstream_scenario,
+    .actions = { fstream_get_char_2_scen,
+                 NULL
+               }
+};
+
+#ifdef IO_FSTREAM_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "fs/dir/dir_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "process/meta/fs_media.seh"
+#include "process/process/process_media.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+
+    initIoFileSubsystem();
+    initProcessMetaFsSubsystem();
+    initFsDirSubsystem();
+    initProcessProcessSubsystem();
+    initIoFstreamSubsystem();
+    initIoFstreamBufferSubsystem();
+    initIoFstreamWstreamSubsystem();
+    initIoFstreamLockSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile("trace.xml");
+    // Run test scenario
+    fstream_scenario(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

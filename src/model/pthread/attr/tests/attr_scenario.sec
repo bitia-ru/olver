@@ -1,0 +1,446 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/attr/tests/attr_scenario.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "pthread/attr/attr_model.seh"
+#include "pthread/attr/attr_media.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "atl/integer.h"
+#include "pthread/pthread/pthread_model.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static const int maxSize = 30000;
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static VoidTPtr attr;
+static VoidTPtr structBuffer;
+static VoidTPtr stackBuffer;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+
+static void init_sysconf_data()
+{
+/** 
+    sysconf_spec( context, SUT_SC_THREAD_STACK_MIN, requestErrorCode() );
+    sysconf_spec( context, SUT_SC_PAGE_SIZE, requestErrorCode() );
+**/
+
+    //TODO: Call sysconf_spec to acquire SUT_SC_THREAD_STACK_MIN value
+    LongT cmdRes;
+    TSCommand command = create_TSCommand();
+    TSCommand command1 = create_TSCommand();
+    
+    format_TSCommand( &command, "get_SC_THREAD_STACK_MIN" );
+    executeCommandInContext( context, &command );
+    cmdRes=readLong_TSStream(&command.response);
+    destroy_TSCommand(&command);
+
+    setSystemConfigurationValue(context,SUT_SC_THREAD_STACK_MIN, cmdRes);    
+
+    //TODO: Call sysconf_spec to acquire SUT_SC_PAGE_SIZE value
+    format_TSCommand( &command1, "get_SC_PAGE_SIZE" );
+    executeCommandInContext( context, &command1 );
+    cmdRes=readLong_TSStream(&command1.response);
+    destroy_TSCommand(&command1);
+
+    setSystemConfigurationValue(context, SUT_SC_PAGE_SIZE, cmdRes);    
+}
+
+
+static bool init_attr_scenario(int argc, char** argv)
+{
+    LongT minSz;
+    
+    context = getContext();
+    init_sysconf_data();
+
+    minSz=getSystemConfigurationValue(context, SUT_SC_THREAD_STACK_MIN);
+    
+    attr = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(attr))
+        return false;
+
+    stackBuffer = allocateMemoryBlock(context, minSz);
+    if (isNULL_VoidTPtr(stackBuffer))
+        return false;
+
+
+
+    return true;
+}
+
+static void finish_attr_scenario(void)
+{
+    deallocateMemoryBlock(context, attr);
+    deallocateMemoryBlock(context, stackBuffer);
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+scenario
+bool attr_scen()
+{
+    SizeT minSize = getSystemConfigurationValue(context, 
+                                                SUT_SC_THREAD_STACK_MIN);
+    VoidTPtr alignedPtr=generateVirtualPointer(context);
+    
+    IntT             sched_priority=1;
+    IntT             sched_ss_low_priority=2; 
+    TimeSpecTObj*    sched_ss_repl_period=create_TimeSpecTObj( getTimeSpecT(25, 45) );
+    TimeSpecTObj*    sched_ss_init_budget=create_TimeSpecTObj( getTimeSpecT(25, 5) );  
+    IntT             sched_ss_max_repl=5;     
+    ShedParam* param=create_ShedParam( sched_priority, 
+        sched_ss_low_priority, sched_ss_repl_period, sched_ss_init_budget, 
+        sched_ss_max_repl);;
+    alignedPtr.address=0x28;
+
+    __errno_location_spec(context); 
+    pthread_self_spec(context); 
+    pthread_setcanceltype_spec(context, SUT_PTHREAD_CANCEL_DEFERRED); 
+    pthread_attr_getstack_spec(context, attr);
+
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_FIFO);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_RR);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_OTHER);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_SPORADIC);
+    pthread_attr_setschedpolicy_spec(context, attr, 123213);
+
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_setschedparam_spec(context, attr, param);
+    pthread_attr_setschedparam_spec(context, attr, param);
+    pthread_attr_setschedparam_spec(context, attr, param);
+
+    pthread_attr_getdetachstate_spec(context, attr);
+    pthread_attr_getdetachstate_spec(context, attr);
+    pthread_attr_getdetachstate_spec(context, attr);
+
+    pthread_attr_destroy_spec(context, attr);
+
+    attr = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(attr))
+      return false;
+
+    pthread_attr_init_spec(context, attr);
+    pthread_attr_init_spec(context, attr);
+    pthread_attr_destroy_spec(context, attr);
+
+    attr = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(attr))
+      return false;
+
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_FIFO);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_RR);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_OTHER);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_SPORADIC);
+    pthread_attr_setschedpolicy_spec(context, attr, 123213);
+   
+    
+    pthread_attr_setschedparam_spec(context, attr, param);
+
+    pthread_attr_init_spec(context, attr);
+    pthread_attr_init_spec(context, attr);
+    pthread_attr_init_spec(context, attr);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_getschedpolicy_spec(context, attr);
+
+    pthread_attr_getguardsize_spec(context, attr);
+    pthread_attr_getguardsize_spec(context, attr);
+    pthread_attr_getguardsize_spec(context, attr);
+    pthread_attr_setguardsize_spec(context, attr, 0);
+    pthread_attr_setguardsize_spec(context, attr, 11111);
+    pthread_attr_setguardsize_spec(context, attr, 3434);
+    pthread_attr_setguardsize_spec(context, attr, 33333);
+    pthread_attr_getinheritsched_spec(context, attr);
+    pthread_attr_setguardsize_spec(context, attr, 33333);
+    pthread_attr_setguardsize_spec(context, attr, 33333);
+
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_setschedparam_spec(context, attr, param);
+    pthread_attr_getschedparam_spec(context, attr);
+
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, SUT_PTHREAD_SCOPE_SYSTEM);
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, SUT_PTHREAD_SCOPE_PROCESS);
+    pthread_attr_getscope_spec(context, attr);
+
+    pthread_attr_getstacksize_spec(context, attr);
+    pthread_attr_getstacksize_spec(context, attr);
+    pthread_attr_setstacksize_spec(context, attr, 111111111);
+    pthread_attr_getstacksize_spec(context, attr);
+
+    pthread_attr_setinheritsched_spec(context, attr, 
+                                      SUT_PTHREAD_INHERIT_SCHED);
+    pthread_attr_getinheritsched_spec(context, attr);
+    pthread_attr_setinheritsched_spec(context, attr, 
+                                      SUT_PTHREAD_EXPLICIT_SCHED);
+
+    
+    pthread_attr_destroy_spec(context, attr);
+
+    attr = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(attr))
+      return false;
+
+    pthread_attr_destroy_spec(context, attr);
+
+    attr = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(attr))
+      return false;
+
+    pthread_attr_destroy_spec(context, attr);
+
+    attr = allocateMemoryBlock(context, maxSize);
+    if (isNULL_VoidTPtr(attr))
+      return false;
+
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_setschedparam_spec(context, attr, param);
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_getschedparam_spec(context, attr);
+
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, SUT_PTHREAD_SCOPE_SYSTEM);
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, SUT_PTHREAD_SCOPE_PROCESS);
+    pthread_attr_getscope_spec(context, attr);
+
+    pthread_attr_setstacksize_spec(context, attr, 1111);
+    pthread_attr_getstacksize_spec(context, attr);
+
+    pthread_attr_getdetachstate_spec(context, attr);
+    pthread_attr_getinheritsched_spec(context, attr);
+    pthread_attr_getguardsize_spec(context, attr);
+    pthread_attr_getstackaddr_spec(context, attr);
+
+    pthread_attr_setstackaddr_spec(context, attr, stackBuffer);
+    pthread_attr_getstackaddr_spec(context, attr);
+    pthread_attr_setstackaddr_spec(context, attr, stackBuffer);
+    pthread_attr_setstackaddr_spec(context, attr, stackBuffer);
+
+    pthread_attr_setdetachstate_spec(context, attr, 
+                                       SUT_PTHREAD_CREATE_DETACHED);
+
+    pthread_attr_setinheritsched_spec(context, attr, 
+                                      SUT_PTHREAD_INHERIT_SCHED);
+    pthread_attr_getinheritsched_spec(context, attr);
+
+    pthread_attr_setinheritsched_spec(context, attr, 234);
+    pthread_attr_setinheritsched_spec(context, attr, 1233);
+
+    pthread_attr_setguardsize_spec(context, attr, 0);
+    pthread_attr_getguardsize_spec(context, attr);
+
+    if(pthread_attr_setstack_spec(context, attr, generateVirtualPointer(context), 
+                               11)==-1)
+        return true;
+    pthread_attr_getstack_spec(context, attr);
+
+    pthread_attr_init_spec(context, attr);
+
+    pthread_attr_getstackaddr_spec(context, attr);
+    pthread_attr_getstackaddr_spec(context, attr);
+    pthread_attr_getstackaddr_spec(context, attr);
+
+    pthread_attr_setinheritsched_spec(context, attr, 5555);
+    pthread_attr_getinheritsched_spec(context, attr);
+
+    pthread_attr_setguardsize_spec(context, attr, 25);
+    pthread_attr_getguardsize_spec(context, attr);
+
+
+    pthread_attr_getdetachstate_spec(context, attr);
+    pthread_attr_setdetachstate_spec(context, attr, 
+                                       SUT_PTHREAD_CREATE_DETACHED);
+    pthread_attr_getdetachstate_spec(context, attr);
+
+    pthread_attr_setdetachstate_spec(context, attr, 
+                                       SUT_PTHREAD_CREATE_JOINABLE);
+    pthread_attr_getdetachstate_spec(context, attr);
+    pthread_attr_setdetachstate_spec(context, attr, 25);
+    pthread_attr_getdetachstate_spec(context, attr);
+    pthread_attr_getdetachstate_spec(context, attr);
+
+    pthread_attr_setguardsize_spec(context, attr, 250);
+    pthread_attr_getguardsize_spec(context, attr);
+    pthread_attr_getguardsize_spec(context, attr);
+    pthread_attr_getguardsize_spec(context, attr);
+    pthread_attr_getguardsize_spec(context, attr);
+
+    pthread_attr_setinheritsched_spec(context, attr, 
+                                      SUT_PTHREAD_EXPLICIT_SCHED);
+    pthread_attr_getinheritsched_spec(context, attr);
+    pthread_attr_getinheritsched_spec(context, attr);
+    pthread_attr_getinheritsched_spec(context, attr);
+    pthread_attr_getinheritsched_spec(context, attr);
+
+    pthread_attr_getstack_spec(context, attr);
+    pthread_attr_setstack_spec(context, attr, generateVirtualPointer(context), 
+                               1);
+    pthread_attr_getstack_spec(context, attr);
+    pthread_attr_setstack_spec(context, attr, generateVirtualPointer(context), 
+                               minSize);
+    pthread_attr_setguardsize_spec(context, attr, 250);
+    pthread_attr_setstack_spec(context, attr, alignedPtr, 16);
+    pthread_attr_setstack_spec(context, attr, alignedPtr, 17);
+    pthread_attr_setstack_spec(context, attr, alignedPtr, 32);
+
+    pthread_attr_setstackaddr_spec(context, attr, stackBuffer);
+    pthread_attr_setstackaddr_spec(context, attr, stackBuffer);
+    pthread_attr_setstackaddr_spec(context, attr, stackBuffer);
+    pthread_attr_setstackaddr_spec(context, attr, stackBuffer);
+    pthread_attr_getstackaddr_spec(context, attr);
+    pthread_attr_getstackaddr_spec(context, attr);
+
+    pthread_attr_setstacksize_spec(context, attr, 1111111);
+    pthread_attr_getstacksize_spec(context, attr);
+    pthread_attr_setstacksize_spec(context, attr, 1111);
+    pthread_attr_getstacksize_spec(context, attr);
+
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, SUT_PTHREAD_SCOPE_SYSTEM);
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, SUT_PTHREAD_SCOPE_PROCESS);
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, 5555);
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_setscope_spec(context, attr, 123);
+    pthread_attr_getscope_spec(context, attr);
+    pthread_attr_getscope_spec(context, attr);
+
+
+    pthread_attr_setschedparam_spec(context, attr, param);
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_getschedparam_spec(context, attr);
+    pthread_attr_getschedparam_spec(context, attr);
+
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_FIFO);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_RR);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_OTHER);
+    pthread_attr_getschedpolicy_spec(context, attr);
+    pthread_attr_setschedpolicy_spec(context, attr, SUT_SCHED_SPORADIC);
+    pthread_attr_setschedpolicy_spec(context, attr, 123213);
+
+    return true;
+    
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm attr_scenario =
+{
+    .init = init_attr_scenario,
+    .finish = finish_attr_scenario,
+    .actions = {
+        attr_scen,
+        NULL
+    },
+};
+
+bool main_system_pthread_attr( int argc, char** argv )
+{
+  attr_scenario(argc, argv);
+  return true;
+}
+
+#ifdef PTHREAD_ATTR_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/search/hash_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+  reinitControlCenter();
+  initCommonModel();
+  initCommonMedia();
+  initCommonScenarioState();
+
+  initSystemConfiguration();
+  initSystemModel();
+  initProcessModel();
+  initPThreadModel();
+
+  initPthreadAttrSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+  //
+  initTestSystem();
+  loadSUT();
+
+  // Set up tracer
+  //setTraceEncoding("windows-1251");
+  addTraceToFile("trace.xml");
+  // Run test scenario
+  main_system_pthread_attr(argc, argv);
+
+//  unloadSUT();
+  return 0;
+}
+#endif
+
+

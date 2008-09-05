@@ -1,0 +1,880 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "util/assert/assert_model.seh"
+
+#include "system/system/system_model.seh"
+#include "util/assert/assert_media.seh"
+#include "process/process/process_common.seh"
+#include "util/format/printf_model.seh"
+#include <string.h>
+
+#pragma SEC subsystem assert "util.assert"
+
+
+
+/*
+   The group of functions 'util.assert' consists of:
+       __assert_fail [2]
+       err [2]
+       error [2]
+       errx [2]
+       verrx [2]
+       warn [2]
+       warnx [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+__assert_fail -- abort the program after false assertion
+
+SYNOPSIS
+
+void __assert_fail(const char * assertion, const char * file, unsigned int
+line, const char * function);
+
+DESCRIPTION
+
+The __assert_fail() function is used to implement the assert() interface of ISO
+POSIX (2003). The __assert_fail() function shall print the given file filename,
+line line number, function function name and a message on the standard error
+stream in an unspecified format, and abort program execution via the abort()
+function. For example:
+
+a.c:10: foobar: Assertion a == b failed.
+
+If function is NULL, __assert_fail() shall omit information about the function.
+
+assertion, file, and line shall be non-NULL.
+
+The __assert_fail() function is not in the source standard; it is only in the
+binary standard. The assert() interface is not in the binary standard; it is
+only in the source standard. The assert() may be implemented as a macro.
+*/
+
+specification
+void __assert_fail_spec( CallContext context, CString * assertion_str, CString * file, UIntT line, CString * function_str)
+{
+    pre
+    {
+        /*
+         * assertion, file, and line shall be non-NULL
+         */
+        REQ("app.__assertion_fail.04", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        CString * result_stderr = getStderr();
+        CharT * cstr = toCharArray_CString(result_stderr);
+        CharT line_str[ 32 ];
+
+        line_str[ 0 ] = 0;
+
+        traceFormattedUserInfo("STDERR:$(obj)", result_stderr);
+
+        /*
+         * The __assert_fail() function shall print
+         * on the standard error stream
+         */
+        REQ("__assert_fail.01.05", "shall print on the stderr", result_stderr != NULL);
+
+        /*
+         * The __assert_fail() function shall print
+         * the given `file` filename
+         */
+        REQ("__assert_fail.01.01", "shall print the given filename", strstr(cstr, toCharArray_CString(file)) );
+
+        /*
+         * The __assert_fail() function shall print
+         * `line` line number
+         */
+        sprintf(line_str, "%i", line);
+        REQ("__assert_fail.01.02", "shall print line number", strstr(cstr, line_str) );
+
+        if(function_str != NULL)
+        {
+            /*
+             * The __assert_fail() function shall print
+             * `function` function name
+             */
+            REQ("__assert_fail.01.03",
+                "Shall print `function` function name",
+                strstr(cstr, toCharArray_CString(function_str)) );
+        }
+        else
+        {
+            /*
+             * If function is NULL, __assert_fail() shall omit information about the function
+             */
+            IMPLEMENT_REQ("__assert_fail.03");
+        }
+
+        /*
+         * The __assert_fail() function shall print
+         * a message
+         */
+        REQ("__assert_fail.01.04", "shall print a message",strstr(cstr, toCharArray_CString(assertion_str)) );
+
+        /*
+         * The __assert_fail() function shall print
+         * in an unspecified format
+         */
+        IMPLEMENT_REQ("__assert_fail.01.06");
+
+        /*
+         * The __assert_fail() function shall  abort program execution via the
+         * abort() function.
+         * The abort() function shall not return.
+         */
+        REQ( "__assert_fail.02", "abort program execution via the abort() function", getThread(context) == NULL );
+
+
+        return true;
+    }
+}
+
+specification typedef struct AssertFailCall AssertFailCall = {};
+
+AssertFailCall * create_AssertFailCall( CallContext context, CString * result_stderr )
+{
+    return create( &type_AssertFailCall, context, result_stderr );
+}
+
+void onAssertFail( CallContext context )
+{
+    SystemState * systemState = getSystemState( context.system );
+    ProcessId processId = create_ProcessId( context.system, context.process );
+    ProcessId specialSystemParent = getSpecialSystemParent( context.system );
+    int i;
+    remove_Map( systemState->processes, create_ProcessIdObj( processId ) );
+    for ( i = 0; i < size_Map( systemState->processes ); i++ ) {
+        ProcessIdObj * key = key_Map( systemState->processes, i );
+        ProcessState * processState = get_Map( systemState->processes, key );
+        if ( processState->meta.parent.process == context.process ) { processState->meta.parent = specialSystemParent; }
+    }
+}
+
+specification typedef struct AssertFailReturnType AssertFailReturnType = {};
+
+AssertFailReturnType * create_AssertFailReturnType( CallContext context )
+{
+    return create( &type_AssertFailReturnType, context );
+}
+
+reaction AssertFailReturnType * assertFail_return( void )
+{
+    post
+    {
+        /*
+         * The __assert_fail() function shall  abort program execution via the
+         * abort() function.
+         * The abort() function shall not return.
+         */
+        REQ( "__assert_fail.02", "abort program execution via the abort() function", false );
+
+        return true;
+    }
+}
+
+/*
+ * common for err group and error
+ */
+reaction ExitReturnType * errCalledProcess_return( void )
+{
+    post
+    {
+        String      * name    = errCalledProcess_return->name   ;
+        CallContext   context = errCalledProcess_return->context;
+
+        ExitCall * blocked_call = showCommand( @getBlockedCalls(), context, "exit" );
+        IntT exitstatus = blocked_call->status;
+
+        // verbose( "errCalledProcess_return \n" );
+        /*
+         * The err() function shall not return
+         *
+         * errx() does not return
+         *
+         * verrx() does not return
+         */
+        req4( name, "err.05"  , "The err() function shall not return", false );
+        req4( name, "errx.05" , "errx() does not return"             , false );
+        req4( name, "verrx.05", "verrx() does not return"            , false );
+
+        /*
+         * If exitstatus is nonzero, error() shall call exit(exitstatus).
+         */
+        req4( name, "error.04", "If exitstatus is nonzero, error() shall call exit", exitstatus == 0 );
+
+        return true;
+    }
+}
+
+reaction ExitReturnType * err_processTerminated( void )
+{
+    post
+    {
+        String      * name    = err_processTerminated->name   ;
+        CallContext   context = err_processTerminated->context;
+
+        ExitCall * blocked_call = showCommand( @getBlockedCalls(), context, "exit" );
+        IntT eval       = blocked_call->status;
+        IntT exitstatus = blocked_call->status;
+
+        SystemState * systemState = getSystemState( context.system );
+
+        // Когда Хорошилов сделает перехват вывода на терминал, будем пользоваться его функциями.
+        CallContext workedContext = getWorkedContext_CallContext( context );
+        CString * errput = getFileContents( workedContext, getTestScenarioSandboxPathCh( "stderrAsFile.txt" ) );
+
+        bool checkResult;
+
+        // printC_String( "err_processTerminated : errput is ", errput );
+        checkResult = checkWarnResult( toCharArray_String( name ), NULL, NULL, errput );
+        // verbose( "err_processTerminated : checkResult is %s\n", checkResult ? "true" : "false" );
+        /*
+         * The err() function shall display a formatted error message on the standard
+         * error stream
+         *
+         * The errx() function shall display a formatted error message on the standard
+         * error stream
+         *
+         * The verrx() shall behave as errx() except that instead of being called with a
+         * variable number of arguments, it is called with an argument list as defined by
+         * <stdarg.h>.
+         *
+         *
+         */
+        req4( name, "err.01"  , "a formatted error message on the standard error stream", checkResult );
+        req4( name, "errx.01" , "a formatted error message on the standard error stream", checkResult );
+        req4( name, "verrx.01", "a formatted error message on the standard error stream", checkResult );
+        req4( name, "error.01", "error() shall print a message to standard error"       , checkResult );
+
+        /*
+         * First, err() shall write the last component of the program name, a colon
+         * character, and a space character
+         *
+         * The last component of the program name, a colon character, and a space shall be
+         * output
+         *
+         * The verrx() shall behave as errx() except that instead of being called with a
+         * variable number of arguments, it is called with an argument list as defined by
+         * <stdarg.h>.
+         */
+        req4( name, "err.02"  , "the last component of the program name, a colon character, and a space", checkResult );
+        req4( name, "errx.02" , "the last component of the program name, a colon character, and a space", checkResult );
+        req4( name, "verrx.01", "the last component of the program name, a colon character, and a space", checkResult );
+
+        /*
+         * If fmt is non-NULL, it shall be used as a format string for the printf() family
+         * of functions, and err() shall write the formatted message, a colon character,
+         * and a space
+         *
+         * If fmt is non-NULL, it shall be used as the format string for the printf()
+         * family of functions, and the formatted error message, a colon character, and a
+         * space shall be output
+         *
+         * The verrx() shall behave as errx() except that instead of being called with a
+         * variable number of arguments, it is called with an argument list as defined by
+         * <stdarg.h>.
+         */
+        req4( name, "err.03"  , "the formatted message, a colon character, and a space", checkResult );
+        req4( name, "errx.03" , "the formatted message, a colon character, and a space", checkResult );
+        req4( name, "verrx.01", "the formatted message, a colon character, and a space", checkResult );
+
+        /*
+         * Finally, the error message string affiliated with the current value of the
+         * global variable errno shall be written, followed by a newline character
+         *
+         * The output shall be followed by a newline character
+         *
+         * The verrx() shall behave as errx() except that instead of being called with a
+         * variable number of arguments, it is called with an argument list as defined by
+         * <stdarg.h>.
+         */
+        req4( name, "err.04"  , "the value of errno shall be written, followed by a newline character", checkResult );
+        req4( name, "errx.04" , "The output shall be followed by a newline character"                 , checkResult );
+        req4( name, "verrx.01", "The output shall be followed by a newline character"                 , checkResult );
+
+        /*
+         * error() shall build the message from the following elements in their specified
+         * order
+         *
+         * the program name
+         *
+         * the colon and space characters, then the result of using the printf-style
+         * format and the optional arguments
+         *
+         * if errnum is nonzero, error() shall add the colon and space characters, then
+         * the result of strerror(errnum)
+         *
+         * a newline
+         */
+        req4( name, "error.02.01", "the program name"                                                , checkResult );
+        req4( name, "error.02.02", "the colon and space, then the result of format and the arguments", checkResult );
+        req4( name, "error.02.03", "if errnum is nonzero, the colon and space, the strerror(errnum)" , checkResult );
+        req4( name, "error.02.04", "a newline"                                                       , checkResult );
+
+        /*
+         * If the application has provided a function named error_print_progname(), error()
+         * shall call this to supply the program name
+         */
+        req4( name, "error.03.01", "", TODO_REQ() );
+
+        /*
+         * otherwise, error() uses the content of the global variable program_name
+         */
+        req4( name, "error.03.02", "", TODO_REQ() );
+
+        /*
+         * the program shall terminate with the exit value of eval.
+         *
+         * errx() does not return, but shall exit with the value of eval
+         *
+         * verrx() does not return, but exits with the value of eval
+         */
+        checkResult = true;
+        req4( name, "err.06"  , "the program shall terminate with the exit value of eval"      , checkResult );
+        req4( name, "errx.06" , "errx() does not return, but shall exit with the value of eval", checkResult );
+        req4( name, "verrx.06", "verrx() does not return, but exits with the value of eval"    , checkResult );
+
+        /*
+         * If exitstatus is nonzero, error() shall call exit(exitstatus).
+         */
+        req4( name, "error.04", "If exitstatus is nonzero, error() shall call exit", exitstatus != 0 && checkResult );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    err -- display formatted error messages
+
+SYNOPSIS
+
+    #include <err.h>
+    void err(int eval, const char * fmt, ...);
+
+DESCRIPTION
+
+    The err() function shall display a formatted error message on the standard
+    error stream. First, err() shall write the last component of the program
+    name, a colon character, and a space character. If fmt is non-NULL, it shall
+    be used as a format string for the printf() family of functions, and err()
+    shall write the formatted message, a colon character, and a space. Finally,
+    the error message string affiliated with the current value of the global
+    variable errno shall be written, followed by a newline character.
+
+    The err() function shall not return, the program shall terminate with the
+    exit value of eval.
+
+    See Also
+
+        error(), errx()
+
+RETURN VALUE
+
+    None.
+
+ERRORS
+
+    None.
+*/
+specification
+void err_spec( CallContext context, IntT eval, CString * fmt, List /* NULL */ * arguments, CString * stderrAsFile )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [common preconditions for printf group] */
+        REQ( "", "Common preconditions for printf group", checkPrintfPreconditions( "err", fmt, arguments ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    error -- print error message
+
+SYNOPSIS
+
+    #include <err.h>
+    void error(int exitstatus, int errnum, const char * format, ...);
+
+DESCRIPTION
+
+    error() shall print a message to standard error.
+
+    error() shall build the message from the following elements in their
+    specified order:
+
+    1. the program name. If the application has provided a function named
+       error_print_progname(), error() shall call this to supply the program
+       name; otherwise, error() uses the content of the global variable
+       program_name.
+
+    2. the colon and space characters, then the result of using the printf-style
+       format and the optional arguments.
+
+    3. if errnum is nonzero, error() shall add the colon and space characters,
+       then the result of strerror(errnum).
+
+    4. a newline.
+
+    If exitstatus is nonzero, error() shall call exit(exitstatus).
+
+    See Also
+
+        err(), errx()
+*/
+specification
+void error_spec( CallContext context, IntT exitstatus, IntT errnum, CString * format, List /* NULL */ * arguments, CString * stderrAsFile)
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [common preconditions for printf group] */
+        REQ( "", "Common preconditions for printf group", checkPrintfPreconditions( "error", format, arguments ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    errx -- display formatted error message and exit
+
+SYNOPSIS
+
+    #include <err.h>
+    void errx(int eval, const char * fmt, ...);
+
+DESCRIPTION
+
+    The errx() function shall display a formatted error message on the standard
+    error stream. The last component of the program name, a colon character, and
+    a space shall be output. If fmt is non-NULL, it shall be used as the format
+    string for the printf() family of functions, and the formatted error
+    message, a colon character, and a space shall be output. The output shall be
+    followed by a newline character.
+
+    errx() does not return, but shall exit with the value of eval.
+
+RETURN VALUE
+
+    None.
+
+ERRORS
+
+    None.
+
+    See Also
+
+        error(), err()
+*/
+specification
+void errx_spec( CallContext context, IntT eval, CString * fmt, List /* NULL */ * arguments, CString * stderrAsFile )
+{
+    pre
+    {
+        // verbose( "errx_spec, pre : eval is %d, ", eval );
+        // printC_String( "fmt is ", fmt );
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [common preconditions for printf group] */
+        REQ( "", "Common preconditions for printf group", checkPrintfPreconditions( "errx", fmt, arguments ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        // verbose( "errx_spec, post : eval is %d, ", eval );
+        // printC_String( "fmt is ", fmt );
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    verrx -- display formatted error message and exit
+
+SYNOPSIS
+
+    #include <stdarg.h> #include <err.h>
+    void verrx(int eval, const char * fmt, va_list args);
+
+DESCRIPTION
+
+    The verrx() shall behave as errx() except that instead of being called with
+    a variable number of arguments, it is called with an argument list as
+    defined by <stdarg.h>.
+
+    verrx() does not return, but exits with the value of eval.
+
+RETURN VALUE
+
+    None.
+
+ERRORS
+
+    None.
+*/
+specification
+void verrx_spec( CallContext context, IntT eval, CString * fmt, List /* NULL */ * arguments, CString * stderrAsFile )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [common preconditions for printf group] */
+        REQ( "", "Common preconditions for printf group", checkPrintfPreconditions( "verrx", fmt, arguments ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    warn -- formatted error messages
+
+SYNOPSIS
+
+    #include <err.h>
+    void warn(const char * fmt, ...);
+
+DESCRIPTION
+
+    The warn() function shall display a formatted error message on the standard
+    error stream. The output shall consist of the last component of the program
+    name, a colon character, and a space character. If fmt is non-NULL, it shall
+    be used as a format string for the printf() family of functions, and the
+    formatted message, a colon character, and a space are written to stderr.
+    Finally, the error message string affiliated with the current value of the
+    global variable errno shall be written to stderr, followed by a newline
+    character.
+
+RETURN VALUE
+
+    None.
+
+ERRORS
+
+    None.
+*/
+specification
+void warn_spec( CallContext context, CString * fmt, List /* NULL */ * arguments, CString * errput, CString * stderrAsFile )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [common preconditions for printf group] */
+        REQ( "", "Common preconditions for printf group", checkPrintfPreconditions( "warn", fmt, arguments ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        /* [Check output] */
+        REQ( "", "Check output", checkWarnResult( "warn", fmt, arguments, errput ) );
+        /*
+         * The warn() function shall display a formatted error message on the standard
+         * error stream.
+         */
+        REQ("warn.01", "", TODO_REQ());
+
+        /*
+         * The output shall consist of the last component of the program name, a colon
+         * character, and a space character.
+         */
+        REQ("warn.02", "", TODO_REQ());
+
+        /*
+         * If fmt is non-NULL, it shall be used as a format string for the printf() family
+         * of functions, and the formatted message, a colon character, and a space are
+         * written to stderr.
+         */
+        REQ("warn.03", "", TODO_REQ());
+
+        /*
+         * Finally, the error message string affiliated with the current value of the
+         * global variable errno shall be written to stderr, followed by a newline
+         * character.
+         */
+        REQ("warn.04", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    warnx -- formatted error messages
+
+SYNOPSIS
+
+    #include <err.h>
+    void warnx(const char * fmt, ...);
+
+DESCRIPTION
+
+    The warnx() function shall display a formatted error message on the standard
+    error stream. The last component of the program name, a colon character, and
+    a space shall be output. If fmt is non-NULL, it shall be used as the format
+    string for the printf() family of functions, and the formatted error
+    message, a colon character, and a space shall be output. The output shall be
+    followed by a newline character.
+
+RETURN VALUE
+
+    None.
+
+ERRORS
+
+    None.
+*/
+specification
+void warnx_spec( CallContext context, CString * fmt, List /* NULL */ * arguments, CString * errput, CString * stderrAsFile )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [common preconditions for printf group] */
+        REQ( "", "Common preconditions for printf group", checkPrintfPreconditions( "warnx", fmt, arguments ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        /* [Check output] */
+        REQ( "", "Check output", checkWarnResult( "warnx", fmt, arguments, errput ) );
+
+        /*
+         * The warnx() function shall display a formatted error message on the standard
+         * error stream.
+         */
+        REQ("warnx.01", "", TODO_REQ());
+
+        /*
+         * The last component of the program name, a colon character, and a space shall be
+         * output.
+         */
+        REQ("warnx.02", "", TODO_REQ());
+
+        /*
+         * If fmt is non-NULL, it shall be used as the format string for the printf()
+         * family of functions, and the formatted error message, a colon character, and a
+         * space shall be output.
+         */
+        REQ("warnx.03", "", TODO_REQ());
+
+        /*
+         * The output shall be followed by a newline character.
+         */
+        REQ("warnx.04", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool checkWarnResult( const char * funcName, CString * format, List /* NULL */ * arguments, CString * errput ) {
+    CString * expectedResult = getExpectedResult( funcName );
+    bool verdict;
+    // printC_String( "checkWarnResult : errput         is ", errput         );
+    // printC_String( "checkWarnResult : expectedResult is ", expectedResult );
+    if ( equals( substring_CString( expectedResult, 0, 5 ), create_CString( "[^:]*" ) ) ) {
+        int pos;
+        expectedResult = substringFrom_CString( expectedResult, 5 );
+        if ( ( pos = indexOfChar_CString( errput, ':' ) ) != -1 ) { errput = substringFrom_CString( errput, pos ); }
+    }
+    verdict = equals( expectedResult, errput );
+    if ( ! verdict ) {
+        String * expectedResAsString = toString( expectedResult );
+        String * resAsString         = toString( errput         );
+        traceFormattedUserInfo( "checkWarnResult\n"                                                                     );
+        traceFormattedUserInfo( "checkWarnResult : expectedResult is [%s]\n", toCharArray_String( expectedResAsString ) );
+        traceFormattedUserInfo( "checkWarnResult : result         is [%s]\n", toCharArray_String( resAsString         ) );
+    }
+    // "close" data
+    clearExpectedResultAndReqIds( funcName );
+    // assertion( verdict, "stop" ); // for debug purpose
+    return verdict;
+}

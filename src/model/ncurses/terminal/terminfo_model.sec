@@ -1,0 +1,927 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/terminal/terminfo_model.seh"
+#include "process/process/process_model.seh"
+#include "ncurses/ncurses/ncurses_data.seh"
+
+#pragma SEC subsystem terminal "ncurses.terminal"
+
+
+
+/*
+   The group of functions 'ncurses.terminal.terminfo' consists of:
+       del_curterm [1]
+       putp [1]
+       restartterm [1]
+       set_curterm [1]
+       setupterm [1]
+       termname [1]
+       tigetflag [1]
+       tigetnum [1]
+       tigetstr [1]
+       tparm [1]
+       tputs [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    del_curterm, restartterm, set_curterm, setupterm - interfaces to the terminfo
+                                                       database
+
+SYNOPSIS
+
+    #include <term.h>
+    int del_curterm(TERMINAL *oterm);
+    int restartterm(char *term, int fildes, int *errret);
+    TERMINAL *set_curterm(TERMINAL *nterm);
+    int setupterm(char *term, int fildes, int *errret);
+
+DESCRIPTION
+
+    These functions retrieve information from the terminfo database.
+
+    To gain access to the terminfo database, setupterm() must be called first.
+    It is automatically called by initscr() and newterm(). The setupterm()
+    function initialises the other functions to use the terminfo record for a
+    specified terminal (which depends on whether use_env() was called).It sets
+    the cur_term external variable to a TERMINAL structure that contains the
+    record from the terminfo database for the specified terminal.
+
+    The terminal type is the character string term; if term is a null pointer,
+    the environment variable TERM is used.If TERM is not set or if its value is
+    an empty string, then "unknown" is used as the terminal type. The
+    application must set fildes to a file descriptor, open for output, to the
+    terminal device, before calling setupterm().If errret is not null, the
+    integer it points to is set to one of the following values to report the
+    function outcome:
+
+        -1
+        The terminfo database was not found (function fails).
+        0
+        The entry for the terminal was not found in terminfo (function fails).
+        1
+        Success.
+
+    If setupterm() detects an error and errret is a null pointer, setupterm()
+    writes a diagnostic message and exits.
+
+    A simple call to setupterm() that uses all the defaults and sends the
+    output to stdout is:
+
+        setupterm((char *)0, fileno(stdout), (int *)0);
+
+    The set_curterm() function sets the variable cur_term to nterm, and makes
+    all of the terminfo boolean, numeric, and string variables use the values
+    from nterm.
+
+    The del_curterm() function frees the space pointed to by oterm and makes it
+    available for further use. If oterm is the same as cur_term, references to
+    any of the terminfo boolean, numeric, and string variables thereafter may
+    refer to invalid memory locations until setupterm() is called again.
+
+    The restartterm() function assumes a previous call to setupterm() (perhaps
+    from initscr() or newterm()).It lets the application specify a different
+    terminal type in term and updates the information returned by baudrate()
+    based on fildes, but does not destroy other information created by
+    initscr(), newterm() or setupterm().
+
+RETURN VALUE
+
+    Upon successful completion, set_curterm() returns the previous value of
+    cur_term. Otherwise, it returns a null pointer.
+
+    Upon successful completion, the other functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT del_curterm_spec(CallContext context, TerminalTPtr oterm)
+{
+    VoidTPtr oldTerm = getNCursesCurrentTerminal(context);
+
+    pre
+    {
+        /*
+        * To gain access to the terminfo database, setupterm() must be called first.
+        */
+        REQ("app.setupterm.02", "Setupterm shall be called first", getNCursesTerminal(oterm)!=NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        return { FreeSpacePointedByOterm, "free the space pointed to by oterm" };
+    }
+    post
+    {
+        if (del_curterm_spec == SUT_OK)
+        {
+            /*
+             * Upon successful completion, the other functions return OK.
+             */
+            REQ("del_curterm.09.01", "Function shall return OK", del_curterm_spec == SUT_OK);
+
+            /*
+            * The del_curterm() function frees the space pointed to by oterm and makes it
+            * available for further use.
+            */
+            REQ("?del_curterm.02", "Space shall be freed", getNCursesTerminal(oterm)==NULL);
+
+            if (equals_VoidTPtr(oldTerm, oterm))
+            {
+                /*
+                * If oterm is the same as cur_term, references to any of the terminfo boolean,
+                * numeric, and string variables thereafter may refer to invalid memory locations
+                * until setupterm() is called again.
+                */
+                REQ("?del_curterm.03", "cur_term shall be NULL in model", isNULL_VoidTPtr(getNCursesCurrentTerminal(context)));
+            }
+
+        }
+        else
+        {
+            /*
+            * Otherwise, they return ERR.
+            */
+            REQ("del_curterm.09.02", "Function shall return ERR", del_curterm_spec == SUT_ERR);
+        }
+
+     
+        return true;
+    }
+}
+
+
+void onDelCurTerm(CallContext context, TerminalTPtr oterm, IntT del_curterm_spec)
+{
+    NCursesTerminal* stdTerm = getNCursesStdTerminal(context);
+
+    if (del_curterm_spec == SUT_OK)
+    {
+        if (stdTerm!=NULL && equals_VoidTPtr(stdTerm->address, oterm))
+        {
+            setNCursesStdTerminal(context, NULL_VoidTPtr);
+            setNCursesStdWindow(context, NULL_VoidTPtr);
+
+        }
+        unregisterNCursesTerminal(oterm);
+    }
+}
+
+
+specification typedef struct SetCurTermReturnType SetCurTermReturnType = {};
+
+SetCurTermReturnType * create_SetCurTermReturnType(
+    TerminalTPtr oldTerm,
+    VoidTPtr stdscr
+    )
+{
+    return create(&type_SetCurTermReturnType,
+        oldTerm,
+        stdscr
+        );
+}
+
+specification
+SetCurTermReturnType* set_curterm_spec(CallContext context, TerminalTPtr new_term)
+{
+    NCursesTerminal* oldTerm = getNCursesStdTerminal(context);
+
+    pre
+    {
+        /*
+        * To gain access to the terminfo database, setupterm() must be called first.
+        */
+        REQ("app.setupterm.02", "Setupterm shall be called first", oldTerm!=NULL);
+
+        oldTerm = clone(oldTerm);
+
+        return true;
+    }
+    coverage C
+    {
+        return { SetVariable_cur_term_ToNterm, "Set the variable cur_term to nterm" };
+    }
+    post
+    {
+        NCursesTerminal* stdTerm = getNCursesStdTerminal(context);
+
+        if (!isNULL_VoidTPtr(set_curterm_spec->oldTerm))
+        {
+            /*
+            * The set_curterm() function sets the variable cur_term to nterm, and makes all
+            * of the terminfo boolean, numeric, and string variables use the values from
+            * nterm.
+            */
+            REQ("set_curterm.02", "cur_term variable shall be valid", equals_VoidTPtr(get_cur_term(context), new_term));
+
+            /*
+            * Upon successful completion, set_curterm() returns the previous value of
+            * cur_term.
+            */
+            REQ("set_curterm.03.01", "set_curterm() shall return the previous value of  cur_term",
+                equals_VoidTPtr(set_curterm_spec->oldTerm, oldTerm->address));
+        }
+        else
+        {
+            /*
+            * Otherwise, it returns a null pointer.
+            */
+            REQ("set_curterm.03.02", "Function shall return NULL", isNULL_VoidTPtr(set_curterm_spec->oldTerm));
+        }
+
+
+
+        return true;
+    }
+}
+
+void onSetCurterm(CallContext context, TerminalTPtr new_term, SetCurTermReturnType* set_curterm_spec)
+{
+    if (!isNULL_VoidTPtr(set_curterm_spec->oldTerm))
+    {
+        ProcessState* ps=getProcessState_CallContext(context);
+
+        setNCursesStdTerminal(context, new_term);
+        setNCursesStdWindow(context, set_curterm_spec->stdscr);
+
+    }
+}
+
+specification typedef struct SetupTermReturnType SetupTermReturnType = {};
+
+SetupTermReturnType * create_SetupTermReturnType(
+    IntT retVal,
+    IntT errret,
+    CString *returnedType,
+    bool isTERMempty
+)
+{
+    return create(&type_SetupTermReturnType,
+        retVal,
+        errret,
+        returnedType,
+        isTERMempty
+        );
+}
+
+//This specification refers to: restartterm, setupterm
+specification
+SetupTermReturnType* setupterm_spec(CallContext context, CString* term, bool restart)
+{
+    if (restart){ FILTER("restartterm"); }
+    else{ FILTER("setupterm"); }
+
+    pre
+    {
+        if (restart)
+        {
+            /*
+            * The restartterm() function assumes a previous call to setupterm() (perhaps from
+            * initscr() or newterm()).
+            */
+            REQ("app.restartterm.02", "The restartterm() function assumes a previous call to setupterm()",
+                !isNULL_VoidTPtr(getNCursesCurrentTerminal(context)));
+        }
+
+        return true;
+    }
+    post
+    {
+        if (setupterm_spec->retVal == SUT_OK)
+        {
+            NCursesTerminal* stdTerm = getNCursesStdTerminal(context);
+
+            /*
+            * Upon successful completion, the other functions return OK.
+            */
+            REQ("setupterm.09.01;restartterm.09.01", "Function shall retirn OK", setupterm_spec->retVal == SUT_OK);
+
+            /*
+            * If errret is not null, the integer it points to is set to one of the following
+            * values to report the function outcome:
+            *
+            * 1 Success.
+            */
+            REQ("setupterm.07.03;restartterm.setupterm.07.03", "Value of errret shall be 1", setupterm_spec->errret == 1);
+
+            /*
+            * It sets the cur_term external variable to a TERMINAL structure that contains
+            * the record from the terminfo database for the specified terminal.
+            */
+            REQ("?setupterm.04;restartterm.setupterm.04", "cur_term value shall be valid",
+                equals_VoidTPtr(get_cur_term(context), stdTerm->address));
+
+            if (term == NULL && setupterm_spec->isTERMempty)
+            {
+                /*
+                * If TERM is not set or if its value is an empty string, then "unknown" is used
+                * as the terminal type.
+                */
+                REQ("?setupterm.05.02;restartterm.setupterm.05.02", "Terminal type shall be unknown", equals(stdTerm->type, create_CString("unknown")));
+            }
+            else
+            {
+                if (term!=NULL)
+                {
+                    /*
+                    * The terminal type is the character string term; if term is a null pointer, the
+                    * environment variable TERM is used.
+                    */
+                    REQ("?setupterm.05.01;restartterm.setupterm.05.01", "Terminal type shall be valid", equals(stdTerm->type, term));
+                }
+            }
+
+            /*
+            * It lets the application specify a different terminal type in term and updates
+            * the information returned by baudrate() based on fildes,
+            */
+            REQ("restartterm.03.01", "", TODO_REQ());
+
+            /*
+            * but does not destroy other information created by initscr(), newterm() or
+            * setupterm().
+            */
+            REQ("restartterm.03.02", "", TODO_REQ());
+
+        }
+        else
+        {
+            /*
+            * Otherwise, they return ERR.
+            */
+            REQ("setupterm.09.02;restartterm.09.02", "Function shall return ERR", setupterm_spec->retVal == SUT_ERR);
+
+            /*
+            * If errret is not null, the integer it points to is set to one of the following
+            * values to report the function outcome:
+            *
+            * -1 The terminfo database was not found (function fails).
+            */
+            /*
+            * If errret is not null, the integer it points to is set to one of the following
+            * values to report the function outcome:
+            *
+            * 0 The entry for the terminal was not found in terminfo (function fails).
+            */
+
+            REQ("setupterm.07.01;setupterm.07.02;restartterm.setupterm.07.01;restartterm.setupterm.07.02", "Value of errret shall be 0 or -1",
+                setupterm_spec->errret == -1 || setupterm_spec->errret == 0);
+        }
+
+
+        /*
+        * If setupterm() detects an error and errret is a null pointer, setupterm()
+        * writes a diagnostic message and exits.
+        */
+        REQ_UNCHECKABLE("setupterm.08;restartterm.setupterm.08", "This is inhibited in agent, because program will not reach this point");
+
+ 
+      
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+
+void onSetupterm(CallContext context, CString* term, SetupTermReturnType* setupterm_spec)
+{
+    NCursesTerminal* stdTerm;
+
+    if (setupterm_spec->retVal == SUT_OK)
+    {
+        registerStdTerminal(context);
+        setVariables_StdTerminal(context);
+        readTerminfo(context, create_CString(OLVERCT_TERMINFO_PATH));
+
+        stdTerm = getNCursesStdTerminal(context);
+
+        if (term!=NULL)
+        {
+            stdTerm->type = clone(term);
+        }
+        else
+        {
+            stdTerm->type = clone(setupterm_spec->returnedType);
+        }
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    termname - get terminal name
+
+SYNOPSIS
+
+    #include <curses.h>
+    char *termname(void);
+
+DESCRIPTION
+
+    The termname() function obtains the terminal name as recorded by setupterm().
+
+RETURN VALUE
+
+    The termname() function returns a pointer to the terminal name.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+CString* termname_spec(CallContext context)
+{
+    NCursesTerminal* stdTerm = getNCursesStdTerminal(context);
+
+    pre
+    {
+        /*
+        * To gain access to the terminfo database, setupterm() must be called first.
+        */
+        REQ("app.setupterm.02", "Setupterm shall be called first", stdTerm!=NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        return { GetTerminalName, "Get terminal name" };
+    }
+    post
+    {
+        /*
+        * The termname() function obtains the terminal name as recorded by setupterm().
+        */
+        /*
+        * The termname() function returns a pointer to the terminal name.
+        */
+        REQ("termname.01;termname.02", "The termname() function returns a pointer to the terminal name",
+            equals(termname_spec, stdTerm->type));
+
+        return true;
+    }
+}
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    putp, tputs - output commands to the terminal
+
+SYNOPSIS
+
+    #include <term.h>
+    int putp(const char *str);
+    int tputs(const char *str, int affcnt, int (*putfunc)(int));
+
+DESCRIPTION
+
+    These functions output commands contained in the terminfo database to the
+    terminal.
+
+    The putp() function is equivalent to tputs(str, 1, putchar).The output of
+    putp() always goes to stdout, not to the fildes specified in setupterm().
+
+    The tputs() function outputs str to the terminal. The str argument must be
+    a terminfo string variable or the return value from tgetstr(), tgoto(),
+    tigetstr() or tparm(). The affcnt argument is the number of lines affected,
+    or 1 if not applicable.If the terminfo database indicates that the terminal
+    in use requires padding after any command in the generated string, tputs()
+    inserts pad characters into the string that is sent to the terminal, at
+    positions indicated by the terminfo database. The tputs() function outputs
+    each character of the generated string by calling the user-supplied
+    function putfunc (see below).
+
+    The user-supplied function putfunc (specified as an argument to tputs()) is
+    either putchar() or some other function with the same prototype. The
+    tputs() function ignores the return value of putfunc.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+bool isStringInTerminfo(CString* str, NCursesTerminal* stdTerm)
+{
+    Map* strVals=stdTerm->terminfo->mp_str;
+    IntT i;
+
+    for (i=0;i<size_Map(strVals);i++)
+    {
+        CString* key = key_Map(strVals, i);
+        CString* val = get_Map(strVals, key);
+        if (equals(val, str))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+//This specification refers to: putp, tputs
+specification
+IntT putp_spec(CallContext context, CString* str, IntT affcnt, bool putfunc, IntT standardKey)
+{
+    NCursesTerminal* stdTerm = getNCursesStdTerminal(context);
+
+    pre
+    {
+        /*
+        * [Implicit precondition]
+        */
+        REQ("", "Terminal shall be initialized", stdTerm!=NULL);
+
+        if (standardKey == -1)
+        {
+            /*
+            * The str argument must be a terminfo string variable or the return value from
+            * tgetstr(), tgoto(), tigetstr() or tparm().
+            */
+            REQ("app.tputs.03;app.putp.tputs.03", "The str argument shall be a terminfo string variable",
+                isStringInTerminfo(str, stdTerm));
+        }
+
+        return true;
+    }
+    post
+    {
+        if (putp_spec == SUT_OK)
+        {
+            /*
+            * Upon successful completion, these functions return OK.
+            */
+            REQ("putp.09.01;tputs.09.01", "Function shall return OK", putp_spec == SUT_OK);
+
+            /*
+            * If the terminfo database indicates that the terminal in use requires padding
+            * after any command in the generated string, tputs() inserts pad characters into
+            * the string that is sent to the terminal, at positions indicated by the terminfo
+            * database.
+            */
+            REQ("putp.tputs.05;tputs.05", "", TODO_REQ());
+        }
+        else
+        {
+            /*
+            * Otherwise, they return ERR.
+            */
+            REQ("putp.09.02;tputs.09.02", "Function shall return ERR", putp_spec == SUT_ERR);
+        }
+
+  
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX (R) Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    tigetflag, tigetnum, tigetstr, tparm - retrieve capabilities from the terminfo
+    database
+
+SYNOPSIS
+
+    #include <term.h>
+
+    int tigetflag(char *capname);
+
+    int tigetnum(char *capname);
+
+    char *tigetstr(char *capname);
+
+    char *tparm(char *cap, long p1, long p2, long p3, long p4, long
+                p5, long p6, long p7, long p8, long p9);
+
+DESCRIPTION
+
+    The tigetflag(), tigetnum(), and tigetstr() functions obtain boolean,
+    numeric and string capabilities, respectively, from the selected record of the
+    terminfo database. For each capability, the value to use as capname appears
+    in the Capname column in the table in Defined Capabilities .
+
+    The tparm() function takes as cap a string capability. If cap is
+    parameterised (as described in ), tparm() resolves the parameterisation.
+    If the parameterised string refers to parameters %p1 through %p9, then tparm()
+    substitutes the values of p1 through p9, respectively.
+
+RETURN VALUE
+
+    Upon successful completion, tigetflag(), tigetnum() and tigetstr() return
+    the specified capability. The tigetflag() function returns -1 if capname
+    is not a boolean capability. The tigetnum() function returns -2 if
+    capname is not a numeric capability. The tigetstr() function returns (char
+    *)-1 if capname is not a string capability.
+
+    Upon successful completion, tparm() returns str with parameterisation
+    resolved. Otherwise, it returns a null pointer.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+IntT tigetflag_spec(CallContext context, CString* capname)
+{
+    pre
+    {
+        /*
+         * For each capability, the value to use as capname appears in the Capname
+         * column in the table in Defined Capabilities .
+         */
+        REQ("app.tigetflag.02", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        Object* res_flag = getItem_NCursesTerminfo_Terminfo(context, terminfo, capname);
+
+        if (tigetflag_spec == -1)
+        {
+            /*
+             * The tigetflag() function returns -1 if capname is not a boolean capability.
+             */
+            REQ("tigetflag.03.02", "capname should be a boolean capability",
+                T(res_flag == NULL)
+                ||
+                T(type(res_flag) != &type_IntTObj)
+               );
+
+            return true;
+        }
+        else
+        {
+            REQ("", "capability should be present and valid", T(res_flag != NULL) && T(type(res_flag) == &type_IntTObj));
+        }
+
+        /*
+         * The tigetflag(), tigetnum(), and tigetstr() functions obtain boolean,
+         * numeric and string capabilities, respectively, from the selected record of the
+         * terminfo database.
+         */
+        /*
+         * Upon successful completion, tigetflag(), tigetnum() and tigetstr() return
+         * the specified capability.
+         */
+        REQ("tigetflag.01;tigetflag.03.01", "return value should be equal to the capability requested",
+            tigetflag_spec == *((IntTObj*)res_flag)
+           );
+
+        return true;
+    }
+}
+
+
+specification
+IntT tigetnum_spec(CallContext context, CString* capname)
+{
+    pre
+    {
+        /*
+         * For each capability, the value to use as capname appears in the Capname
+         * column in the table in Defined Capabilities .
+         */
+        REQ("app.tigetnum.02", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        Object* res_num = getItem_NCursesTerminfo_Terminfo(context, terminfo, capname);
+
+        if (tigetnum_spec == -2)
+        {
+            /*
+             * The tigetnum() function returns -2 if capname is not a numeric capability.
+             */
+            REQ("tigetnum.03.02", "capname should be a numeric capability",
+                T(res_num == NULL)
+                ||
+                T(type(res_num) != &type_IntTObj)
+               );
+
+            return true;
+        }
+        else
+        {
+            REQ("", "capability should be present and valid", T(res_num != NULL) && T(type(res_num) == &type_IntTObj));
+        }
+
+        /*
+         * The tigetflag(), tigetnum(), and tigetstr() functions obtain boolean,
+         * numeric and string capabilities, respectively, from the selected record of the
+         * terminfo database.
+         */
+        /*
+         * Upon successful completion, tigetflag(), tigetnum() and tigetstr() return
+         * the specified capability.
+         */
+        REQ("tigetnum.01;tigetnum.03.01", "return value should be equal to the capability requested",
+            tigetnum_spec == *((IntTObj*)res_num)
+           );
+
+        return true;
+    }
+}
+
+
+specification
+StringTPtr tigetstr_spec(CallContext context, CString* capname)
+{
+    pre
+    {
+        /*
+         * For each capability, the value to use as capname appears in the Capname
+         * column in the table in Defined Capabilities .
+         */
+        REQ("app.tigetstr.02", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        Object* res_str = getItem_NCursesTerminfo_Terminfo(context, terminfo, capname);
+        CString* res_func;
+
+        if (isInvalid_VoidTPtr(tigetstr_spec))
+        {
+            /*
+             * The tigetstr() function returns (char *)-1 if capname is not a string
+             * capability.
+             */
+            REQ("tigetstr.03.02", "capname should be a string capability",
+                T(res_str == NULL)
+                ||
+                T(type(res_str) != &type_CString)
+               );
+
+            return true;
+        }
+        else
+        {
+            REQ("", "capability should be present and valid",
+                T(res_str != NULL)
+                &&
+                T(type(res_str) == &type_CString)
+                &&
+                T(!isNULL_VoidTPtr(tigetstr_spec))
+               );
+        }
+
+        res_func = readCString_VoidTPtr(tigetstr_spec);
+
+        /*
+         * The tigetflag(), tigetnum(), and tigetstr() functions obtain boolean,
+         * numeric and string capabilities, respectively, from the selected record of the
+         * terminfo database.
+         */
+        /*
+         * Upon successful completion, tigetflag(), tigetnum() and tigetstr() return
+         * the specified capability.
+         */
+        REQ("tigetstr.01;tigetstr.03.01", "return value should be equal to the capability requested",
+            equals(res_func, res_str)
+           );
+
+        return true;
+    }
+}
+
+
+specification
+StringTPtr tparm_spec(CallContext context, CString* cap, LongT p1, LongT p2, LongT p3,
+                      LongT p4, LongT p5, LongT p6, LongT p7, LongT p8, LongT p9)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if (isNULL_VoidTPtr(tparm_spec))
+        {
+            /*
+             * Otherwise, it returns a null pointer.
+             */
+            REQ("tparm.04.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * The tparm() function takes as cap a string capability.
+         */
+        REQ("tparm.01", "", TODO_REQ());
+
+        /*
+         * If cap is parameterised (as described in ), tparm() resolves the
+         * parameterisation.
+         */
+        REQ("tparm.02", "", TODO_REQ());
+
+        /*
+         * If the parameterised string refers to parameters %p1 through %p9, then tparm()
+         * substitutes the values of p1 through p9, respectively.
+         */
+        REQ("tparm.03", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, tparm() returns str with parameterisation
+         * resolved.
+         */
+        REQ("tparm.04.01", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+/* Variable needed for work with terminfo when no initialized terminal is present. */
+NCursesTerminfo* terminfo;

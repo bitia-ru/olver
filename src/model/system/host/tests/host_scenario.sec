@@ -1,0 +1,405 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "system/host/tests/host_scenario.seh"
+#include "system/host/host_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+
+#include "system/user/user_media.seh" 
+#include "process/meta/user_media.seh"
+
+#include "config/test_system_config.h"
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+
+static VoidTPtr buf;
+static int maxSize = 32800;
+
+CString * old_hostname;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/ 
+
+
+static bool init_host_scenario(int argc, char** argv)
+{
+    /* Init test scenario data */
+    context = getContext();
+    
+    return true;
+}
+
+
+static bool init_system_host_scenario(int argc, char** argv)
+{
+    return init_host_scenario(argc,argv);
+}
+
+static void finish_host_scenario(void)
+{
+    /**/
+}
+
+
+static bool init_host_scenario2(int argc, char** argv)
+{
+    ThreadId t_id;
+    Passwd * passwd;
+    /* Init test scenario data */
+
+
+    /* [params: creating thread] */
+    if(argc!=1)
+    {
+        traceUserInfo("init_host_scenario2:Wrong arguments!");
+        return false;
+    }
+
+    if(strcmp(argv[0],(char*)USER_NAME_TESTER)==0)
+    {
+        /* [for unprevileged user] */
+        t_id = createProcess(); 
+        
+        context = getSystemContext( t_id.system, t_id.process );      
+
+        // for initialization
+        sysconf_spec(context, SUT_SC_OPEN_MAX, requestErrorCode());
+       
+        passwd = getpwnam_spec(context,create_CString((char*)USER_NAME_TESTER),requestErrorCode(),cancel_status);
+        if(passwd == NULL)
+        {
+            traceUserInfo("init_host_scenario2:getpwnam_spec(USER_NAME_TESTER) has returned NULL");
+            return false;
+        }      
+        
+        if( setgid_spec(context,passwd->pw_gid,requestErrorCode()) != 0 
+            || setuid_spec(context,passwd->pw_uid,requestErrorCode()) != 0 )
+        {
+            traceUserInfo("init_host_scenario2:setgid or setuid(tester) failed");
+            return false;
+        }      
+    }
+    else if(strcmp(argv[0],"root")==0)
+    {
+        t_id = createProcess(); 
+
+        context = getSystemContext( t_id.system, t_id.process );
+
+        // for initialization
+        sysconf_spec(context, SUT_SC_OPEN_MAX, requestErrorCode());
+
+        if( setgid_spec(context,0,requestErrorCode()) != 0 
+           || setuid_spec(context,0,requestErrorCode()) != 0 )
+        {
+            traceUserInfo("init_host_scenario2:setgid or setuid(0) failed");
+            return false;
+        }
+    }
+    else 
+    {
+        traceUserInfo("init_host_scenario2:Wrong argument format!");
+        return false;
+    }
+
+    buf = allocateMemoryBlock(context,maxSize);
+    if (isNULL_VoidTPtr(buf))
+        return false;
+
+    // for initializing the model state
+    gethostname_spec(context,buf,1000); 
+
+    return true;
+}
+
+
+static bool init_system_host_unpriviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1];
+    myargv[0]=(char*)USER_NAME_TESTER;
+    return init_host_scenario2(1,myargv);
+}
+
+
+
+static bool init_system_host_priviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1];
+    myargv[0]="root";
+    return init_host_scenario2(1,myargv);
+}
+
+static void finish_host_scenario2(void)
+{
+    if(old_hostname!=NULL)
+    {
+        writeCString_VoidTPtr( buf, old_hostname );
+        sethostname_spec(context,buf,length_CString(old_hostname)+1,requestErrorCode());
+    }
+
+    deallocateMemoryBlock(context,buf);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool gethostid_scen(void)
+{
+    gethostid_spec(context);
+
+    return true;
+}
+
+scenario 
+bool gethostname_scen(void)
+{
+    SystemState * sysstate = getSystemState(context.system);
+
+    iterate(int i=0;i<=5;i++;)
+    {
+        switch(i)
+        {
+        case 0:
+            gethostname_spec(context,buf,1000); 
+            break;
+        case 1:
+            gethostname_spec(context,buf,0);
+            break;
+        case 2:
+            gethostname_spec(context,buf,1);
+            break;
+        case 3:
+            gethostname_spec(context,buf,2);
+            break;
+        case 4:
+            if(sysstate->hostname!=NULL)
+                gethostname_spec(context,buf,length_CString(sysstate->hostname));
+            break;
+        case 5:
+            if(sysstate->hostname!=NULL)
+                gethostname_spec(context,buf,length_CString(sysstate->hostname)+1);
+            break;
+        default: 
+            return false;
+        }
+    }
+    return true;
+}
+
+scenario 
+bool sethostname_scen(void)
+{
+    CString * test_str = create_CString("testhostname");
+    
+    iterate(int i=0;i<=1;i++;)
+    {
+        switch(i)
+        {
+        
+        case 0:
+            writeCString_VoidTPtr( buf, test_str );
+    
+            sethostname_spec(context,buf,length_CString(test_str)+1,requestErrorCode()); 
+            break;
+        case 1:
+            if(old_hostname==NULL)
+                return false;
+
+            writeCString_VoidTPtr( buf, old_hostname );
+   
+            sethostname_spec(context,buf,length_CString(old_hostname)+1,requestErrorCode()); 
+            break;
+        default:
+            return true;
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool uname_scen(void)
+{
+    UtsnameT * name = create_UtsnameT(NULL,NULL,NULL,NULL,NULL,NULL);
+
+    iterate(int i=0;i<=1;i++;)
+    {
+        switch(i)
+        {
+        case 0:
+            uname_spec(context,name,requestErrorCode());
+            break;
+        case 1:
+            uname_spec(context,NULL,requestErrorCode());
+            break;
+        default: 
+            return false;
+        }
+    }
+    return true;
+}
+
+Object * host_getState(void)
+{
+    SystemState * sysstate = getSystemState(context.system);
+    
+    return clone(sysstate->hostname);
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm host_scenario = /* without states */
+{
+    .init = init_host_scenario,
+    .finish = finish_host_scenario,
+    .actions = {
+        gethostid_scen,
+        NULL
+    }
+};
+
+scenario dfsm host_scenario2 =
+{
+    .init = init_host_scenario2,
+    .finish = finish_host_scenario2,
+    .getState = host_getState,
+    .actions = {
+        gethostname_scen,
+        uname_scen,
+        sethostname_scen,
+        NULL
+    }
+};
+
+
+scenario dfsm system_host = 
+{
+    .init = init_system_host_scenario,
+        .finish = finish_host_scenario,
+        .actions = {
+        gethostid_scen,
+            NULL
+    }
+};
+
+
+scenario dfsm system_host_unpriviledged =
+{
+    .init = init_system_host_unpriviledged_scenario,
+        .finish = finish_host_scenario2,
+        .getState = host_getState,
+        .actions = {
+        gethostname_scen,
+            uname_scen,
+            sethostname_scen,
+            NULL
+    }
+};
+
+
+scenario dfsm system_host_priviledged =
+{
+    .init = init_system_host_priviledged_scenario,
+        .finish = finish_host_scenario2,
+        .getState = host_getState,
+        .actions = {
+        gethostname_scen,
+            uname_scen,
+            sethostname_scen,
+            NULL
+    }
+};
+
+
+
+bool main_system_host(int argc, char** argv)
+{
+    system_host(argc, argv);
+    system_host_unpriviledged(argc, argv);
+    system_host_priviledged(argc, argv);
+
+    return true;
+}
+
+#ifdef SYSTEM_HOST_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/control_center.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "system/host/host_media.seh"
+#include "process/meta/user_media.seh"
+#include "system/user/user_media.seh" 
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initProcessMetaUserSubsystem();
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+
+    initSystemHostSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    /* Set up tracer */
+    /* setTraceEncoding("windows-1251");
+     */
+    addTraceToFile("trace.xml");
+
+    /* Run test scenario */
+    main_system_host(argc,argv);
+
+    /*  unloadSUT(); */
+    return 0;
+}
+#endif

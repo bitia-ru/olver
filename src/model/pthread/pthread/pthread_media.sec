@@ -1,0 +1,753 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "pthread/pthread/pthread_media.seh"
+#include "common/common_media.seh"
+#include "common/common_model.seh"
+#include "common/common_scenario.seh"
+#include "config/system_config.seh"
+#include "process/process/process_model.seh"
+
+
+bool isFirstPThreadOnceCall(ProcessState* ps, CallContext context,
+                            PThreadOnceTPtr once_control);
+
+/********************************************************************/
+/**                        Format Functions                        **/
+/********************************************************************/
+
+/* PShared */
+void writePShared_TSStream( TSStream* stream, IntTObj* value )
+{
+    writeTypeHeaderTSStream(stream,"pshared");
+    switch (*value)
+    {
+    case SUT_PTHREAD_PROCESS_PRIVATE :
+        writeStringLiteral_TSStream( stream, "PTHREAD_PROCESS_PRIVATE" );
+        return;
+    case SUT_PTHREAD_PROCESS_SHARED :
+        writeStringLiteral_TSStream( stream, "PTHREAD_PROCESS_SHARED" );
+        return;
+    default :
+        writeInt_TSStream( stream, *value );
+    }
+}
+
+static void pshared_formatter(TSStream* stream,IntTObj* value)
+{
+    VERIFY_TYPE( pshared_formatter, &type_IntTObj, value );
+    
+    writePShared_TSStream( stream, value );
+}
+
+IntT readPShared_TSStream(TSStream* stream)
+{
+    IntT res;
+    
+    verifyType_TSStream(stream,"pshared");
+    if (startsWith_TSStream(stream,"str"))
+    {
+        CString* value = readCString_TSStream(stream);
+        if (equals(value,create_CString("PTHREAD_PROCESS_PRIVATE")))
+            return SUT_PTHREAD_PROCESS_PRIVATE;
+        else if (equals(value,create_CString("PTHREAD_PROCESS_SHARED")))
+            return SUT_PTHREAD_PROCESS_SHARED;
+        setBadVerdict("Invalid value of PThreadPShared");
+    }
+    res = readInt_TSStream(stream);
+    switch (res)
+    {case SUT_PTHREAD_PROCESS_PRIVATE :
+    case SUT_PTHREAD_PROCESS_SHARED :
+        res = -11;
+        break;
+    }
+    return res;
+}
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+static void _pthread_cleanup_return_processor(ThreadId threadId, 
+                                         TSStream* stream, TSMetaData* meta)
+{
+   VoidTPtr arg =  readPointer_TSStream(threadId, stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        _pthread_cleanup_return,
+        create_PThreadCleanupReturnType(threadId, arg),
+        meta->timestamp
+        );
+    VERBOSE("reaction registered...\n");
+}
+
+static void _pthread_cleanup_pop_return_processor(ThreadId threadId, 
+                                         TSStream* stream, TSMetaData* meta)
+{
+    int arg = readInt_TSStream(stream);
+
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        _pthread_cleanup_pop_return,
+        create_PThreadCleanupPopReturnType(threadId, arg),
+        meta->timestamp
+        );
+    VERBOSE("reaction registered...\n");
+}
+
+static void pthread_join_return_processor(ThreadId threadId, TSStream* stream, 
+                                          TSMetaData* meta)
+{
+    IntT     res;
+    ThreadId thread;
+    VoidTPtr value_ptr;
+    bool notZeroPointer;
+    bool threadExists;
+    bool cancel;
+    PThreadJoinReturnType *rres;
+    
+    cancel = readInt_TSStream(stream);
+    
+    if (!cancel)
+    {
+        res = readInt_TSStream(stream);
+        value_ptr = readPointer_TSStream(threadId,  stream);
+        thread.thread=readULong_TSStream(stream);
+        notZeroPointer=readInt_TSStream(stream);
+    }
+    thread.process=threadId.process;
+    thread.system=threadId.system;
+    
+    rres = create_PThreadJoinReturnType(
+        getThreadId_CallContext(threadId),
+        cancel,
+        res, 
+        value_ptr, 
+        thread, 
+        NULL,
+        NULL,
+        notZeroPointer);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_join_return,
+        rres,
+        meta->timestamp
+        );
+    
+}
+
+
+static void pthread_testcancel_return_processor(ThreadId threadId, TSStream* stream, 
+                                          TSMetaData* meta)
+{
+    bool cancel;
+    
+    cancel = readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_testcancel_return,
+        create_PThreadTestCancelReturnType(threadId, cancel, NULL),
+        meta->timestamp
+        );
+    
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initPthreadPthreadSubsystem(void)
+{
+    // Set up mediators
+    set_mediator___errno_location_spec(__errno_location_media);
+    set_mediator__pthread_cleanup_pop_spec(_pthread_cleanup_pop_media);
+    set_mediator__pthread_cleanup_push_spec(_pthread_cleanup_push_media);
+
+    set_mediator_pthread_cancel_spec(pthread_cancel_media);
+    set_mediator_pthread_create_spec(pthread_create_media);
+    set_mediator_pthread_detach_spec(pthread_detach_media);
+    set_mediator_pthread_equal_spec(pthread_equal_media);
+    set_mediator_pthread_exit_spec(pthread_exit_media);
+    set_mediator_pthread_join_spec(pthread_join_media);
+    set_mediator_pthread_once_spec(pthread_once_media);
+    set_mediator_pthread_self_spec(pthread_self_media);
+    set_mediator_pthread_setcancelstate_spec(pthread_setcancelstate_media);
+    set_mediator_pthread_setcanceltype_spec(pthread_setcanceltype_media);
+    set_mediator_pthread_testcancel_spec(pthread_testcancel_media);
+    set_mediator_pthread_testcancel_return(pthread_testcancel_return_media);
+
+    set_mediator_pthread_started_event(pthread_started_event_media);
+    set_mediator_pthread_join_return(pthread_join_return_media);
+
+    set_mediator__pthread_cleanup_return( _pthread_cleanup_return_media);
+    set_mediator__pthread_cleanup_pop_return(
+                                           _pthread_cleanup_pop_return_media);
+    set_mediator_pthread_finish_spec(pthread_finish_media);
+
+    // Set up dr processors
+    registerDRProcessor("pthread_join_return", pthread_join_return_processor);
+    registerDRProcessor("_pthread_cleanup_return",
+        _pthread_cleanup_return_processor);
+    registerDRProcessor("_pthread_cleanup_pop_return",
+        _pthread_cleanup_pop_return_processor);
+    registerDRProcessor("pthread_testcancel_return", pthread_testcancel_return_processor);
+
+    // Set up formatters
+    registerTSFormatter("pshared",(TSFormatterFuncType)pshared_formatter);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** __errno_location_spec **/
+mediator __errno_location_media for specification
+VoidTPtr __errno_location_spec(CallContext context)
+{
+    call
+    {
+        VoidTPtr res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "__errno_location");
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+
+/** _pthread_cleanup_pop_spec **/
+
+mediator _pthread_cleanup_pop_media for specification
+void _pthread_cleanup_pop_spec(CallContext context, IntT execute)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "_pthread_cleanup_pop:$(int)", 
+                 create_IntTObj(execute)); 
+        
+        executeCommandInContext( context, &command );
+        
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;            
+        }
+        
+        destroy_TSCommand(&command);             
+    }
+    state
+    {
+        onPThreadCleanupPop(context, execute);
+    }   
+}
+
+mediator _pthread_cleanup_return_media for reaction
+PThreadCleanupReturnType* _pthread_cleanup_return(void)
+{
+    state
+    {
+        onPThreadCleanupReturn(_pthread_cleanup_return->context,
+                                            _pthread_cleanup_return->arg);
+    }
+}
+
+mediator _pthread_cleanup_pop_return_media for reaction
+PThreadCleanupPopReturnType* _pthread_cleanup_pop_return(void)
+{
+    state
+    {
+        onPThreadCleanupPopReturn(_pthread_cleanup_pop_return->context,
+                                  _pthread_cleanup_pop_return->arg);
+    }
+}
+
+/** _pthread_cleanup_push_spec **/
+mediator _pthread_cleanup_push_media for specification
+void _pthread_cleanup_push_spec(CallContext context, VoidTPtr arg)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "_pthread_cleanup_push:$(ptr)", 
+            create_VoidTPtrObj(arg) );
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onPThreadCleanupPush(context, arg);
+    }
+}
+
+/** pthread_cancel_spec **/
+mediator pthread_cancel_media for specification
+IntT pthread_cancel_spec(CallContext context, ThreadId thread)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_cancel:$(ulong)",
+            create_ULongTObj(thread.thread)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onPThreadCancel(context, thread, pthread_cancel_spec);
+    }
+}
+
+
+/** pthread_create_spec **/
+
+mediator pthread_create_media for specification
+IntT  pthread_create_spec(CallContext context, ThreadId* thread, 
+                          PThreadAttrTPtr attr, VoidTPtr arg)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_create:$(ptr)$(ptr)",
+            create_VoidTPtrObj(attr),
+            create_VoidTPtrObj(arg));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+            res = readInt_TSStream( &command.response );
+            thread->thread = readULong_TSStream(&command.response);
+            thread->system=context.system;
+            thread->process=context.process;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onPThreadCreate(context, thread, attr, arg, pthread_create_spec);
+    }
+}
+
+
+mediator pthread_started_event_media for  
+reaction PThreadStartedEventType* pthread_started_event(void)
+{
+    state
+    {
+        onPThreadStartedEventReturn(pthread_started_event->context);
+    }
+}
+
+/** pthread_detach_spec **/
+mediator pthread_detach_media for specification
+IntT pthread_detach_spec(CallContext context, ThreadId thread)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_detach:$(ulong)",
+            create_ULongTObj(thread.thread)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onPThreadDetach(context, thread, pthread_detach_spec);
+        
+    }
+}
+
+
+/** pthread_equal_spec **/
+mediator pthread_equal_media for specification
+IntT pthread_equal_spec(CallContext context, ThreadId t1, ThreadId t2)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_equal:$(ulong)$(ulong)",
+            create_ULongTObj(t1.thread),
+            create_ULongTObj(t2.thread)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+/** pthread_exit_spec **/
+mediator pthread_exit_media for specification
+void pthread_exit_spec(CallContext context, VoidTPtr value_ptr)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "pthread_exit:$(ptr)",
+            create_VoidTPtrObj(value_ptr)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            bool cstatus;
+            CancelStatus status = &cstatus;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                // That is impossible that thread was not cancelled!
+                setBadVerdict("Thread must be cancelled on pthread_exit");
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+    state
+    {
+        onPThreadExit(context, value_ptr);
+    }
+}
+
+
+/** pthread_join_spec **/
+mediator pthread_join_media for specification
+void pthread_join_spec(CallContext context, ThreadId thread, 
+                       VoidTPtr* value_ptr)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        ThreadState* st = getThread(thread);
+        
+         
+        if(value_ptr!=NULL)
+        {
+            format_TSCommand( &command, "pthread_join:$(ulong)$(int)",
+                create_ULongTObj(thread.thread),
+                create_IntTObj(1)
+                );
+        }
+        else
+        {
+            format_TSCommand( &command, "pthread_join:$(ulong)$(int)",
+                create_ULongTObj(thread.thread),
+                create_IntTObj(0)
+                );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+    }
+    state
+    {
+        onPThreadJoin(context, thread);
+    }
+}
+
+
+mediator pthread_join_return_media for 
+reaction PThreadJoinReturnType* pthread_join_return(void)
+{
+    state
+    {
+        onPThreadJoinReturn(pthread_join_return);
+    }
+}
+
+
+/** pthread_once_spec **/
+mediator pthread_once_media for specification
+PThreadOnceInitReturnType* pthread_once_spec(CallContext context, 
+                                             PThreadOnceTPtr once_control)
+{
+    call
+    {
+        PThreadOnceInitReturnType* res;
+        IntT result;
+        IntT funcCalled;
+        TSCommand command = create_TSCommand();
+        ProcessState* ps=getProcessState_CallContext(context);
+        
+        if (isFirstPThreadOnceCall(ps, context, once_control) && 
+            !isZeroArray(once_control, sizeof_Type(context, "int")))
+        {
+           /*
+            * The behavior of pthread_once() is undefined if once_control has 
+            * automatic storage duration or is not initialized by PTHREAD_ONCE_INIT.
+            */
+            IMPLEMENT_REQ("pthread_once.06");
+            setBadVerdict("Initial value is invalid");
+        }
+        
+         
+        format_TSCommand( &command, "pthread_once:$(ptr)",
+            create_VoidTPtrObj(once_control));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            result=readInt_TSStream( &command.response );
+            funcCalled=readInt_TSStream( &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        res=create_PThreadOnceInitReturnType( result, funcCalled );
+        return res; 
+    }
+    state
+    {
+        onPThreadOnce(context, once_control, pthread_once_spec->result);
+    }
+}
+
+
+/** pthread_self_spec **/
+mediator pthread_self_media for specification
+ThreadId pthread_self_spec(CallContext context)
+{
+    call
+    {
+          ThreadId res;
+        TSCommand command = create_TSCommand();
+
+         
+        format_TSCommand( &command, "pthread_self");
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res.thread = readULong_TSStream(&command.response);
+            res.system=context.system;
+            res.process=context.process;
+        }
+
+        destroy_TSCommand(&command);
+        return res; 
+  }
+}
+
+/** pthread_setcancelstate_spec **/
+mediator pthread_setcancelstate_media for specification
+SetCancelStateReturnType* pthread_setcancelstate_spec(CallContext context, 
+                                                      IntT pstate)
+{
+    call
+    {
+        SetCancelStateReturnType* res;
+        IntT retVal;
+        IntT oldState;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_setcancelstate:$(int)",
+            create_IntTObj(pstate));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            retVal = readInt_TSStream( &command.response );
+            oldState = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        res=create_SetCancelStateReturnType(retVal, oldState);
+        
+        return res; 
+    }
+    state
+    {
+        onPThreadSetCancelState(context, pstate, pthread_setcancelstate_spec);
+    }
+}
+
+
+/** pthread_setcanceltype_spec **/
+mediator pthread_setcanceltype_media for specification
+SetCancelTypeReturnType* pthread_setcanceltype_spec(CallContext context, 
+                                                    IntT canceltype)
+{
+    call
+    {
+        SetCancelTypeReturnType* res;
+        IntT retVal;
+        IntT oldType;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_setcanceltype:$(int)",
+            create_IntTObj(canceltype));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            retVal = readInt_TSStream( &command.response );
+            oldType = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        res=create_SetCancelTypeReturnType(retVal, oldType);
+        
+        return res; 
+    }
+    state
+    {
+        onPThreadSetCancelType(context, canceltype, pthread_setcanceltype_spec);
+    }
+}
+
+
+/** pthread_testcancel_spec **/
+mediator pthread_testcancel_media for specification
+void pthread_testcancel_spec(CallContext context, CancelStatus status)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_testcancel");
+        executeCommandInContext( context, &command );
+        
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+    
+    state
+    {
+        onPThreadTestCancel(context);
+    }
+}
+
+mediator pthread_testcancel_return_media for
+reaction PThreadTestCancelReturnType* pthread_testcancel_return(void)
+{
+    state
+    {
+        onPThreadTestCancelReturn(pthread_testcancel_return);
+    }
+}
+
+/** pthread_finish_spec **/
+mediator pthread_finish_media for specification
+void pthread_finish_spec(CallContext context, VoidTPtr value_ptr)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "pthread_finish:$(ptr)",
+            create_VoidTPtrObj(value_ptr)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+    state
+    {
+        onPThreadExit(context, value_ptr);
+    }
+}

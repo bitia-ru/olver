@@ -1,0 +1,525 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "pthread/rwlock/rwlock_model.seh"
+#include "pthread/rwlock/tests/rwlock_scenario.seh"
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/control_center.seh"
+
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+
+void printWaitedListLight(List *waited_threads);
+void printAllRwlocks(void);
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/* number of threads */
+#define THREAD_NUM_N_M 2
+
+/* number of rwlocks */ 
+#define RWLOCK_NUM_N_M 2
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static VoidTPtr rwlocks[RWLOCK_NUM_N_M];
+static VoidTPtr rwlocks_area[RWLOCK_NUM_N_M];
+static CallContext context;
+static CallContext contexts[THREAD_NUM_N_M];
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+specification typedef  struct  RwlockStateSpec_N_M_Light{
+    bool initialized;                       // are rwlocks initialized
+    unsigned int  wlocked;                           
+    unsigned int readers;                   
+    unsigned int readers_wait;              
+    unsigned int writers_wait;              
+} RwlockStateSpec_N_M_Light;
+
+specification typedef struct RwlockStateSpec_N_M_Light RwlockStateSpec_N_M_Light = {
+};
+
+RwlockStateSpec_N_M_Light * create_RwlockStateSpec_N_M_Light(
+    bool initialized,
+    unsigned int  wlocked,
+    unsigned int readers,
+    unsigned int readers_wait,
+    unsigned int writers_wait
+)
+{
+    return create(&type_RwlockStateSpec_N_M_Light,
+        initialized,
+        wlocked,
+        readers,
+        readers_wait,
+        writers_wait
+        );
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+bool ThreadWaiterMultiLight(CallContext thread)
+{
+    int i;
+    for(i=0;i<RWLOCK_NUM_N_M;i++)
+    {
+        if(ThreadWaitReader(getRwlock(rwlocks[i]), thread)) return true;
+        if(ThreadWaitWriter(getRwlock(rwlocks[i]), thread)) return true;
+    }
+    return false;
+}
+
+List *getWaitedThreadsLight(void)
+{
+    unsigned int i,j;
+    List *waited_threads = create_List(&type_ThreadIdObj);
+
+    for(i=0;i<THREAD_NUM_N_M;i++)
+    {
+        for(j=0;j<RWLOCK_NUM_N_M;j++)
+        {
+            if( ThreadWaitReader(getRwlock(rwlocks[j]), contexts[i])
+                || ThreadWaitWriter(getRwlock(rwlocks[j]), contexts[i])
+                )
+            {
+                append_List(waited_threads, create_ThreadIdObj(contexts[i]));
+                break;
+            }
+        }
+    }
+    return waited_threads;
+}
+
+bool isExistTwoFreeThreads()
+{
+    return true;
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+void cleanup_N_rwlock_light_scenario()
+{
+    int i,j;
+
+    /* delete threads */
+    for(i = 1; i < THREAD_NUM_N_M; i++)
+    {
+        if(!isWrong_ThreadId(contexts[i]))
+        {
+            // TODO: delete thread
+        }
+    }    
+
+    /* deallocate memory */
+    for(j = 0; j < RWLOCK_NUM_N_M; j++)
+    {
+        if (!isNULL_VoidTPtr(rwlocks_area[j]))
+        {
+            deallocateMemoryBlock(context, rwlocks_area[j]);
+        }
+    }
+}
+
+void finish_N_rwlock_light_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(N_rwlock_light_scenario);
+    cleanup_N_rwlock_light_scenario();
+}
+
+bool init_N_M_lightscenario(int argc, char** argv)
+{
+    unsigned int i,j;
+    bool result = true;
+    setWTimeMSec(SERIALIZATION_TIME);
+    
+    context = getContext();
+    contexts[0] = context;
+
+    /* create threads */
+    for(i=1;i<THREAD_NUM_N_M;i++)
+    {
+        contexts[i] = createThread();
+        if(isWrong_ThreadId(contexts[i])) result = false;
+    }
+
+    verbose("Threads have been created\n");
+
+    for(j=0;j<RWLOCK_NUM_N_M;j++)
+    {
+        rwlocks_area[j] = allocateMemoryBlock(context, 1024);
+        if (isNULL_VoidTPtr(rwlocks_area[j])) result = false;
+        rwlocks[j] = NULL_VoidTPtr;
+    }
+    setTSTimeModel(NotUseTSTime);
+    
+    set_assertion_exit_callback();
+
+    setFindFirstSeriesOnly(true);
+
+    if(!result)
+    {
+        cleanup_N_rwlock_light_scenario();
+    }
+    return result;
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+RwlockStateSpec_N_M_Light* get_RwlockState_N_M_Light(void)
+{
+    bool initialized = false;
+    unsigned int j, wlocked = 0, readers=0, readers_wait=0, writers_wait=0;
+    
+    /* if any rwlock is initialized then all rwlocks are initialized */
+    if(isNULL_VoidTPtr(rwlocks[0]))
+    {
+        initialized = false; 
+    }
+    else
+    {
+        initialized = true;
+    }
+
+    if(initialized)
+    {
+        for(j=0; j<RWLOCK_NUM_N_M; j++)
+        {
+            Rwlock *tmp_rwlock = getRwlock(rwlocks[j]);
+            wlocked += (isWrong_ThreadId(tmp_rwlock->writer))? 0 : 1;
+            readers += size_MultiSet(tmp_rwlock->readers_list);
+            readers_wait += size_Set(tmp_rwlock->reader_wait_list);
+            writers_wait += size_List(tmp_rwlock->writer_wait_list);
+        }
+    }
+    return create_RwlockStateSpec_N_M_Light(initialized, wlocked, readers, readers_wait, writers_wait);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool init_N_M_lightscen()
+{
+    unsigned int j;
+    for(j=0;j<RWLOCK_NUM_N_M;j++)
+    {
+        if(!isNULL_VoidTPtr(rwlocks[j])) return true;
+    }
+
+    verbose("init_N_M_lightscen\n");
+    for(j=0;j<RWLOCK_NUM_N_M;j++)
+    {
+        pthread_rwlock_init_spec(contexts[0], rwlocks_area[j], NULL_VoidTPtr);    
+        rwlocks[j] = rwlocks_area[j];
+    }
+
+    return true;
+}
+
+scenario
+bool destroy_N_M_lightscen() 
+{
+    unsigned int j;
+    for(j=0;j<RWLOCK_NUM_N_M;j++)
+    {
+        if(isNULL_VoidTPtr(rwlocks[j])) return true;
+        if(!isDestroyPossible(rwlocks[j])) return true;
+    }
+    
+    verbose("destroy_N_M_lightscen\n");
+    for(j=0;j<RWLOCK_NUM_N_M;j++)
+    {
+        pthread_rwlock_destroy_spec(contexts[0], rwlocks[j]);
+        rwlocks[j] = NULL_VoidTPtr;
+    }
+    return true;
+}
+
+scenario
+bool rdlock_takeover_N_M_lightscen()
+{
+    unsigned int i, j;
+    
+    if (isNULL_VoidTPtr(rwlocks[0])) return true;
+    
+    for (i=0;i<THREAD_NUM_N_M;i++)
+        for (j=0;j<RWLOCK_NUM_N_M;j++)
+        {
+            CallContext context_tmp = contexts[i];
+            Rwlock* rwlock_m = getRwlock(rwlocks[j]);
+            List *waited_threads = getWaitedThreadsLight();
+
+            if(!contains_List(waited_threads, create_ThreadIdObj(context_tmp)))
+            {
+                if(!LockedByWriter(rwlock_m) && !ThreadReader(rwlock_m, context_tmp))
+                {
+                    verbose("RDLOCK          %u %u\n", (unsigned int)context_tmp.thread, rwlock_m->address.address);
+                    pthread_rwlock_rdlock_spec(contexts[i], rwlocks[j]);
+                    return true;
+                }
+            }
+        }
+    return true;
+}
+
+
+scenario
+bool rdlock_stuck_N_M_lightscen()
+{
+    unsigned int i, j;
+    
+    if (isNULL_VoidTPtr(rwlocks[0])) return true;
+   
+    for(i=0;i<THREAD_NUM_N_M;i++)
+        for(j=0;j<RWLOCK_NUM_N_M;j++)
+        {
+            CallContext context_tmp = contexts[i];
+            Rwlock* rwlock_m = getRwlock(rwlocks[j]);
+            List *waited_threads = getWaitedThreadsLight();
+
+            printWaitedListLight(waited_threads);
+            if(size_List(waited_threads)<THREAD_NUM_N_M-1
+                && !contains_List(waited_threads, create_ThreadIdObj(context_tmp))
+                )
+            {
+                //verbose("size_List(waited_threads) :%u \n", size_List(waited_threads));
+
+                if(!ThreadWriter(rwlock_m, context_tmp) && LockedByWriter(rwlock_m))
+                {
+                    if(ReaderExist(rwlock_m)||
+                        LockedByWriter(rwlock_m)
+                        )
+                    {
+                        printAllRwlocks();
+                        verbose("RDLOCK STUCK            %u %u\n", (unsigned int)context_tmp.thread, rwlock_m->address.address);
+                        pthread_rwlock_rdlock_spec(contexts[i], rwlocks[j]);
+                        verbose("RDLOCK STUCK             finish\n");
+                        return true;
+                    }
+                }
+            }
+        }    
+}
+
+/*
+scenario
+bool tryrdlock_stuck_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        for(i=0;i<THREAD_NUM_N_M;i++)
+        {
+            CallContext tmp = contexts[i];
+
+            if(!isThreadReader(tmp) && !isThreadWaitReader(tmp)&& !isThreadWaitWriter(tmp))
+            {
+                if (isLockedByWriter()&& !isThreadWriter(tmp))
+                {
+                    verbose("TRYRDLOCK STUCK            %u\n", tmp.thread);
+                    pthread_rwlock_tryrdlock_spec(contexts[i], rwlock);
+                    break;
+                }
+            }
+        }
+    }
+    return true;
+}
+*/
+
+scenario
+bool wrlock_takeover_N_M_lightscen()
+{
+    unsigned int i, j;
+    
+    if (isNULL_VoidTPtr(rwlocks[0])) return true;
+   
+    for(i=0;i<THREAD_NUM_N_M;i++)
+        for(j=0;j<RWLOCK_NUM_N_M;j++)
+        {
+            CallContext context_tmp = contexts[i];
+            Rwlock* rwlock_m = getRwlock(rwlocks[j]);
+            List *waited_threads = getWaitedThreadsLight();
+
+            if(!contains_List(waited_threads, create_ThreadIdObj(context_tmp)))
+            {
+                if(!LockedByWriter(rwlock_m) && ! ReaderExist(rwlock_m))
+                {
+                    verbose("WRLOCK TAKEOVER         %u %u\n", (unsigned int)context_tmp.thread, rwlock_m->address.address);
+                    pthread_rwlock_wrlock_spec(contexts[i], rwlocks[j]);
+                    return true;
+                }
+            }
+        }
+    return true;
+}
+
+
+scenario
+bool unlock_reader_N_M_lightscen()
+{    
+    unsigned int i, j;
+ 
+    if (isNULL_VoidTPtr(rwlocks[0])) return true;
+
+    for (i=0;i<THREAD_NUM_N_M;i++)
+        for (j=0;j<RWLOCK_NUM_N_M;j++)
+        {
+            CallContext context_tmp = contexts[i];
+            Rwlock* rwlock_m = getRwlock(rwlocks[j]);
+
+            List *waited_threads = getWaitedThreadsLight();
+            if(!contains_List(waited_threads, create_ThreadIdObj(context_tmp)))
+            {
+                if(ThreadReader(rwlock_m, context_tmp))
+                {
+                    verbose("UNLOCK READER          %u %u\n", (unsigned int)context_tmp.thread, rwlock_m->address.address);
+                    pthread_rwlock_unlock_spec(contexts[i], rwlocks[j]);
+                    return true;
+                }
+            }
+            
+        }    
+    return true;
+}
+
+
+scenario
+bool unlock_writer_N_M_lightscen()
+{
+    unsigned int i, j;
+ 
+    if (isNULL_VoidTPtr(rwlocks[0])) return true;
+
+    for(i=0;i<THREAD_NUM_N_M;i++)
+        for(j=0;j<RWLOCK_NUM_N_M;j++)
+        {
+            CallContext context_tmp = contexts[i];
+            Rwlock* rwlock_m = getRwlock(rwlocks[j]);
+            if(!ThreadWaiterMultiLight(context_tmp) && ThreadWriter(rwlock_m, context_tmp))
+            {
+                printAllRwlocks();
+                verbose("UNLOCK WRITER         %u %u\n", (unsigned int)context_tmp.thread, rwlock_m->address.address);
+                pthread_rwlock_unlock_spec(contexts[i], rwlocks[j]);
+                return true;
+            }
+        }
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+Map* saveRwlockModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreRwlockModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+bool isRwlockModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm rwlock_N_rwlock_light_scenario =
+{
+    .init = init_N_M_lightscenario,
+    .finish = finish_N_rwlock_light_scenario,
+    .getState = (PtrGetState)get_RwlockState_N_M_Light,
+    .saveModelState = (PtrSaveModelState)saveRwlockModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreRwlockModelState,
+    .isStationaryState = (PtrIsStationaryState)isRwlockModelStateStationary,
+    .actions = {
+            //pthread_rwlock_init_scen,
+            
+            //rdlock_takeover_scen,
+            //rdlock_stuck_scen,
+            
+            //tryrdlock_takeover_scen,
+            //tryrdlock_stuck_scen,
+
+            //wrlock_takeover_scen,
+            //wrlock_stuck_scen,
+            
+            //unlock_writer_scen,
+            //unlock_reader_scen,
+            
+            //pthread_rwlock_destroy_scen,
+
+            init_N_M_lightscen,
+            rdlock_takeover_N_M_lightscen,
+            rdlock_stuck_N_M_lightscen,
+            unlock_reader_N_M_lightscen,
+            wrlock_takeover_N_M_lightscen,
+            unlock_writer_N_M_lightscen,
+            destroy_N_M_lightscen,
+            NULL
+    }
+};
+
+/********************************************************************/
+/**                         Debug Functions                        **/
+/********************************************************************/
+
+void printWaitedListLight(List *waited_threads)
+{
+    unsigned int i=0;
+
+    verbose("WaitedList: ");
+    for(i=0;i<size_List(waited_threads);i++)
+    {
+        ThreadIdObj *thread = get_List(waited_threads, i);
+        verbose("%u ", thread->thread);
+    }
+    verbose("\n");
+    return;
+}
+
+void printAllRwlocks(void)
+{
+    unsigned int j;
+    for(j=0;j<THREAD_NUM_N_M;j++)
+    {
+        printRwlock(getRwlock(rwlocks[j]));
+    }
+}

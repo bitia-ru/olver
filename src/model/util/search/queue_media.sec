@@ -1,0 +1,242 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/search/queue_media.seh"
+#include "common/common_media.seh"
+
+
+size_t r_adv=2; //has to be greater than 0
+size_t l_adv=2; //has to be greater than 0
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initUtilSearchQueueSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_insque_spec(insque_media);
+    set_mediator_remque_spec(remque_media);
+    set_mediator_create_circular_queue_spec(create_circular_queue_media);
+    set_mediator_create_linear_queue_spec(create_linear_queue_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+bool debug_insque = false;
+
+/** insque_spec **/
+mediator insque_media for specification
+void insque_spec(CallContext context, VoidTPtr element, QueueElementPtr pred)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "insque:$(ptr)$(ptr)",
+                                     create_VoidTPtrObj(element),
+                                     create_VoidTPtrObj(pred)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+    state
+    {
+        registerObjectInMemory(element, 2 * sizeof_VoidTPtr, read_QueueElement(context, element));
+        updateModelQueue(context, element, l_adv + 1, r_adv);
+    }
+}
+
+
+/** remque_spec **/
+mediator remque_media for specification
+void remque_spec(CallContext context, QueueElementPtr element)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "remque:$(ptr)",
+                                     create_VoidTPtrObj(element)
+                        );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        QueueElement* tmp = getQueueElement(element);
+        QueueElementPtr el_forward = tmp->forward;
+        QueueElementPtr el_backward = tmp->backward;
+
+        unregisterObjectInMemory(element);
+
+        if (!equals_VoidTPtr(el_backward, element) && !equals_VoidTPtr(el_forward, element))
+        {
+            if(!isNULL_VoidTPtr(el_backward))
+                updateModelQueue(context, el_backward, l_adv - 1, r_adv);
+        
+            else if(!isNULL_VoidTPtr(el_forward))
+                updateModelQueue(context, el_forward, l_adv, r_adv - 1);
+        }
+
+        return;
+    }
+}
+
+mediator create_circular_queue_media for specification
+void create_circular_queue_spec(CallContext context, VoidTPtr element)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "create_circular_queue:$(ptr)",
+                                     create_VoidTPtrObj(element)
+                        );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+
+        return;
+    }
+    state
+    {
+        registerObjectInMemory(element, 2 * sizeof_VoidTPtr, read_QueueElement(context, element));
+    }
+}
+
+mediator create_linear_queue_media for specification
+void create_linear_queue_spec(CallContext context, VoidTPtr element)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "create_linear_queue:$(ptr)",
+                                    create_VoidTPtrObj(element)
+                        );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+
+        return;
+    }
+    state
+    {
+        registerObjectInMemory(element, 2 * sizeof_VoidTPtr, read_QueueElement(context, element));
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+void updateModelQueue(CallContext context, QueueElementPtr element, int ll, int rr)
+{
+    int count_right = 0, count_left = 0;
+    QueueElement* current;
+    
+    List * read_elems = create_List(NULL);
+
+    current = getQueueElement(element);
+
+    copy(read_QueueElement(context, current->address), current);
+
+    append_List(read_elems, current);
+    
+    while(count_left < ll)
+    {
+        QueueElementPtr prev = current->backward;
+        if(isNULL_VoidTPtr(prev)) break;
+        
+        current = getQueueElement(prev);
+        if(!contains_List( read_elems, current))
+        {
+            copy(read_QueueElement(context, prev),current);
+            append_List(read_elems, current);
+            count_left++;
+        }else break;
+    }
+
+    current = getQueueElement(element);
+
+    while(count_right < rr)
+    {
+        QueueElementPtr next = current->forward;
+        if(isNULL_VoidTPtr(next)) break;
+        
+        current = getQueueElement(next);
+        if(!contains_List( read_elems, current))
+        {
+            copy(read_QueueElement(context, next),current);
+            append_List(read_elems, current);
+            count_right++;
+        }else break;
+    }
+}
+
+QueueElement* read_QueueElement(CallContext context, VoidTPtr element)
+{
+    VoidTPtr forward, backward;
+
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand( &command, "read_queue_element:$(ptr)",
+                                    create_VoidTPtrObj(element)
+                    );
+
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        forward = readPointer_TSStream(context, &command.response);
+        backward = readPointer_TSStream(context, &command.response);
+    }
+
+    destroy_TSCommand(&command);
+    
+    return create_QueueElement(element, forward, backward); 
+}

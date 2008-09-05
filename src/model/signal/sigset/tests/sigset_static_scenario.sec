@@ -1,0 +1,265 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "signal/sigset/tests/sigset_scenario.seh"
+#include "signal/sigset/sigset_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+
+#define SIGSET_SCEN_ITERATION_NUMBER 27
+
+/*
+ * variables for sigset_static_scenario
+ */
+static CallContext context;
+static SigSetTPtr set1, set2, set3;
+static SigSet *mset1, *mset2, *mset3;
+
+Object* getStateSt(void)
+{
+    return (Object*) NULL;
+}
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+void cleanup_sigset_scenario(int i)
+{
+    switch(i) {
+    case -1://no errors were occured, clear all memory
+        unregisterObjectInMemory(set3);
+        deallocateMemoryBlock(context, set3);
+    case  3://error when allocated memory for set3, clear memory from set1,set2 
+        unregisterObjectInMemory(set2);
+        deallocateMemoryBlock(context, set2);
+    case  2://error when allocated memory for set2, clear memory from set1
+        unregisterObjectInMemory(set1);
+        deallocateMemoryBlock(context, set1);
+    case  1://error when allocated memory for set1 
+    default:
+        break;
+    }
+}
+
+static bool init_sigset_scenario(int argc, char** argv)
+{
+    /* Init test scenario data*/
+    context = getContext();
+    //getSigRTConsts(context, &SIGRTMIN, &SIGRTMAX);
+    init_SigRTConsts(context, &sigrtmin, &sigrtmax);
+
+    set1 = allocateMemoryBlock(context, sizeof_SUTType("sigset_t"));
+    if(isNULL_VoidTPtr(set1))
+    {
+        cleanup_sigset_scenario(1);
+        return false;
+    }
+    mset1 = create_SigSet(set1);    
+    registerObjectInMemory(set1, 0, (Object*)mset1);
+
+    set2 = allocateMemoryBlock(context, sizeof_SUTType("sigset_t"));
+    if (isNULL_VoidTPtr(set2))
+    {        
+        cleanup_sigset_scenario(2);
+        return false;
+    }
+    mset2 = create_SigSet(set2);    
+    registerObjectInMemory(set2, 0, (Object*)mset2);
+
+    set3 = allocateMemoryBlock(context, sizeof_SUTType("sigset_t"));
+    if (isNULL_VoidTPtr(set3))
+    {        
+        cleanup_sigset_scenario(3);
+        return false;
+    }
+    mset3 = create_SigSet(set3);    
+    registerObjectInMemory(set3, 0, (Object*)mset3);
+    
+    return true;
+}
+
+static void finish_sigset_scenario(void)
+{
+    cleanup_sigset_scenario(-1);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario   
+bool sigset_add_del_ismember_scen()
+{
+    int i;
+    sigemptyset_spec(context, set1, requestErrorCode());
+    for (i = 0; i < SIGSET_SCEN_ITERATION_NUMBER; i++)
+    {
+        sigaddset_spec(context,set1 ,i * 2 + 1 , requestErrorCode());
+        sigismember_spec(context,set1 , i + 10 , requestErrorCode());
+        sigaddset_spec(context,set1 ,39 - i * 3 , requestErrorCode());
+    }  
+    sigemptyset_spec(context, set1, requestErrorCode());
+    sigaddset_spec(context,set1 , 1026, requestErrorCode());
+    sigismember_spec(context, set1, 1026, requestErrorCode());
+    for (i = 0; i < SIGSET_SCEN_ITERATION_NUMBER; i++)
+    {
+        sigaddset_spec(context,set1 ,i + 4 , requestErrorCode());
+        sigaddset_spec(context,set1 ,i + 8 , requestErrorCode());
+        sigaddset_spec(context,set1 ,i + 33 , requestErrorCode());
+        sigdelset_spec(context,set1 ,i * 2 + 1 , requestErrorCode());
+        sigdelset_spec(context,set1 ,39 - i * 3 , requestErrorCode());
+        sigismember_spec(context,set1 , i - 3 , requestErrorCode());
+        sigismember_spec(context,set1 , i + 30 , requestErrorCode());
+    }  
+
+    return true;
+}
+
+scenario
+bool sigset_sigempty_sigfill_isempty_scen()
+{
+    int i;
+
+    sigemptyset_spec(context, set1, requestErrorCode());
+    for (i = 0; i < SIGSET_SCEN_ITERATION_NUMBER; i++)
+    {
+        sigaddset_spec(context,set1 ,i * 2 + 1 , requestErrorCode());
+        sigismember_spec(context,set1 , i + 1 , requestErrorCode());
+        sigemptyset_spec(context, set1, requestErrorCode());
+        sigaddset_spec(context,set1 ,39 - i * 3 , requestErrorCode());
+        sigisemptyset_spec(context, set1, requestErrorCode());
+    }
+    
+    sigfillset_spec(context, set1, requestErrorCode());
+    sigdelset_spec(context, set1, 10, requestErrorCode());
+    for(i = 1; i <= SIGDEFF; i++)
+    {
+        sigismember_spec(context, set1, i, requestErrorCode());
+    }
+    sigorset_spec(context, set1, set1, 
+                   set1, requestErrorCode());
+    sigandset_spec(context, NULL_VoidTPtr , NULL_VoidTPtr , 
+                   NULL_VoidTPtr, requestErrorCode());
+    sigorset_spec(context, NULL_VoidTPtr , NULL_VoidTPtr , 
+                       NULL_VoidTPtr, requestErrorCode());
+    return true;
+}
+
+scenario
+bool sigset_sigand_sigor_scen()
+{
+    int i;
+    sigemptyset_spec(context, set1, requestErrorCode());
+    sigemptyset_spec(context, set2, requestErrorCode());
+    
+    //prepare set1 and set2 for and/or operations 
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER; i++)
+    {
+        sigaddset_spec(context, set1, i * 2 + 3, requestErrorCode());
+        sigaddset_spec(context, set2, i*3 + 1, requestErrorCode());
+    }
+
+    //Verification with some NULL arguments
+    sigandset_spec(context, NULL_VoidTPtr , NULL_VoidTPtr , 
+                   NULL_VoidTPtr, requestErrorCode());
+    sigorset_spec(context, NULL_VoidTPtr , NULL_VoidTPtr , 
+                   NULL_VoidTPtr, requestErrorCode());
+    sigandset_spec(context, set3 , NULL_VoidTPtr , 
+                   NULL_VoidTPtr, requestErrorCode());
+    sigorset_spec(context, set3 , NULL_VoidTPtr , 
+                   NULL_VoidTPtr, requestErrorCode());
+
+    sigemptyset_spec(context, set3, requestErrorCode());
+
+    sigandset_spec(context, set3 , set1 , 
+                   NULL_VoidTPtr, requestErrorCode());
+    sigorset_spec(context, set3 , NULL_VoidTPtr , 
+                   set2, requestErrorCode());
+    sigandset_spec(context, NULL_VoidTPtr , set1, 
+                   set2, requestErrorCode());
+    sigorset_spec(context, NULL_VoidTPtr , set1, 
+                   set2, requestErrorCode());
+
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER * 3 + 3; i++)
+    {
+        sigismember_spec(context, set3, i, requestErrorCode());
+    }
+
+    //And/or operations
+    sigandset_spec(context, set3, set2, set1, requestErrorCode());
+    for (i = 10; i < 17; i++)
+    {
+        sigdelset_spec(context, set3, i, requestErrorCode());
+    }    
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER * 3 + 3; i++)
+    {
+        sigismember_spec(context, set3, i, requestErrorCode());
+    }
+
+    sigandset_spec(context, set3, set2, set3, requestErrorCode());
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER * 3 + 3; i++)
+    {
+        sigismember_spec(context, set3, i, requestErrorCode());
+    }
+
+    sigorset_spec(context, set3, set3, set1, requestErrorCode());
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER * 3 + 3; i++)
+    {
+        sigismember_spec(context, set3, i, requestErrorCode());
+    }
+
+    sigorset_spec(context, set3, set1, set2, requestErrorCode());
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER * 3 + 3; i++)
+    {
+        sigismember_spec(context, set3, i, requestErrorCode());
+    }
+
+    sigemptyset_spec(context, set1, requestErrorCode());
+    sigorset_spec(context, set3, set1, set2, requestErrorCode());
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER * 3 + 3; i++)
+    {
+        sigismember_spec(context, set3, i, requestErrorCode());
+    }
+
+    sigandset_spec(context, set3, set1, set2, requestErrorCode());
+    for(i = 0; i < SIGSET_SCEN_ITERATION_NUMBER * 3 + 3; i++)
+    {
+        sigismember_spec(context, set3, i, requestErrorCode());
+    }
+
+    sigisemptyset_spec(context, NULL_VoidTPtr, requestErrorCode());
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm sigset_static_scenario =
+{
+    .init = init_sigset_scenario,
+    .finish = finish_sigset_scenario,
+    .getState = getStateSt,
+    .actions = {
+        sigset_add_del_ismember_scen,
+        sigset_sigempty_sigfill_isempty_scen,
+        sigset_sigand_sigor_scen,
+        NULL
+    }
+};

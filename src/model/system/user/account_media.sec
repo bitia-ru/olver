@@ -1,0 +1,476 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "system/user/account_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSystemUserAccountSubsystem(void)
+{
+    // Set up mediators
+
+    set_mediator_endutent_spec(endutent_media);
+ 
+    set_mediator_endutxent_spec(endutxent_media);
+    set_mediator_getutxent_spec(getutxent_media);
+    set_mediator_getutxid_spec(getutxid_media);
+    set_mediator_getutxline_spec(getutxline_media);
+    set_mediator_pututxline_spec(pututxline_media);
+    set_mediator_setutxent_spec(setutxent_media);
+
+    set_mediator_getutent_spec(getutent_media);
+    set_mediator_getutent_r_spec(getutent_r_media);
+    set_mediator_login_spec(login_media);
+    set_mediator_logout_spec(logout_media);
+    set_mediator_logwtmp_spec(logwtmp_media);
+    set_mediator_setutent_spec(setutent_media);
+    set_mediator_utmpname_spec(utmpname_media);
+}
+
+/********************************************************************/
+/**                        Helper Functions                        **/
+/********************************************************************/
+
+UtmpT * readUtmpT_TSStream(CallContext context, TSStream* stream)
+{
+    IntT isnull = readInt_TSStream( stream );
+    if(isnull)
+        return NULL;
+    else
+    {
+        VoidTPtr address = readPointer_TSStream(context, stream );
+
+        CString * ut_user = readCString_TSStream( stream ); 
+        CString * ut_host = readCString_TSStream( stream ); 
+        CString * ut_id = readCString_TSStream( stream ); 
+        CString * ut_line = readCString_TSStream( stream ); 
+        PidT ut_pid = readInt_TSStream( stream ); 
+        ShortT ut_type = readShort_TSStream( stream ); 
+        TimeT tv_sec = readLong_TSStream( stream ); 
+        TimeT tv_usec = readLong_TSStream( stream ); 
+
+        TimeVal * ut_tv = create_TimeVal( tv_sec, tv_usec );
+        return create_UtmpT( address, ut_user, ut_host, ut_id, ut_line, ut_pid, ut_type, ut_tv );
+    }
+}
+
+UtmpxT * readUtmpxT_TSStream(CallContext context, TSStream* stream)
+{
+    IntT isnull = readInt_TSStream( stream );
+    if(isnull)
+        return NULL;
+    else
+    {
+        VoidTPtr address = readPointer_TSStream( context, stream );
+
+        CString * ut_user = readCString_TSStream( stream ); // User login name.
+        CString * ut_id = readCString_TSStream( stream ); // Unspecified initialization process identifier. 
+        CString * ut_line = readCString_TSStream( stream ); // Device name. 
+        PidT ut_pid = readInt_TSStream( stream ); // Process ID. 
+        ShortT ut_type = readShort_TSStream( stream ); // Type of entry. 
+        TimeT tv_sec = readLong_TSStream( stream ); 
+        TimeT tv_usec = readLong_TSStream( stream ); // Time entry was made. 
+
+        TimeVal * ut_tv = create_TimeVal( tv_sec, tv_usec );
+        return create_UtmpxT( address, ut_user, ut_id, ut_line, ut_pid, ut_type, ut_tv );
+    }
+}
+
+bool writeUtmp_VoidTPtr(CallContext context, VoidTPtr ptr, UtmpT * utmp)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+
+    if( utmp == NULL)
+        return false;
+
+    format_TSCommand( &command, "write_utmp:$(ptr)$(str)$(str)$(str)$(str)$(int)$(short)$(long)$(long)", 
+        create_VoidTPtrObj(ptr), 
+        utmp->ut_user,
+        utmp->ut_host,
+        utmp->ut_id,
+        utmp->ut_line,
+        create_IntTObj(utmp->ut_pid),
+        create_ShortTObj(utmp->ut_type),
+        create_LongTObj(utmp->ut_tv->tv_sec),
+        create_LongTObj(utmp->ut_tv->tv_usec)
+       );
+    verdict = executeCommandInContext(context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+
+    destroy_TSCommand(&command);
+
+    return verdict;
+}
+
+bool writeUtmpx_VoidTPtr(CallContext context, VoidTPtr ptr, UtmpxT * utmpx)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+
+    if( utmpx == NULL)
+        return false;
+
+    format_TSCommand( &command, "write_utmpx:$(ptr)$(str)$(str)$(str)$(int)$(short)$(long)$(long)", 
+        create_VoidTPtrObj(ptr), 
+        utmpx->ut_user,
+        utmpx->ut_id,
+        utmpx->ut_line,
+        create_IntTObj(utmpx->ut_pid),
+        create_ShortTObj(utmpx->ut_type),
+        create_LongTObj(utmpx->ut_tv->tv_sec),
+        create_LongTObj(utmpx->ut_tv->tv_usec)
+       );
+    verdict = executeCommandInContext(context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+
+    destroy_TSCommand(&command);
+
+    return verdict;
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** endutent_spec **/
+mediator endutent_media for 
+specification
+void endutent_spec(CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "endutent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);  
+  }
+}
+
+/** endutxent_spec **/
+mediator endutxent_media for specification
+void endutxent_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "endutxent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);  
+    }
+}
+
+
+
+
+/** getutxent_spec **/
+mediator getutxent_media for specification
+UtmpxT * getutxent_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        UtmpxT * res = NULL;
+    
+        format_TSCommand( &command, "getutxent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readUtmpxT_TSStream( context, &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+
+/** getutxid_spec **/
+mediator getutxid_media for specification
+UtmpxT * getutxid_spec( CallContext context, UtmpxTPtr id)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        UtmpxT * res = NULL;
+    
+        format_TSCommand( &command, "getutxid:$(ptr)", create_VoidTPtrObj(id) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readUtmpxT_TSStream( context, &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+/** getutxline_spec **/
+mediator getutxline_media for specification
+UtmpxT * getutxline_spec( CallContext context, UtmpxTPtr line)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        UtmpxT * res = NULL;
+
+        format_TSCommand( &command, "getutxline:$(ptr)", create_VoidTPtrObj(line) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readUtmpxT_TSStream( context, &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+
+/** pututxline_spec **/
+mediator pututxline_media for specification
+UtmpxT * pututxline_spec( CallContext context, UtmpxTPtr utmpx, ErrorCode * errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        UtmpxT * res = NULL;
+        
+        format_TSCommand( &command, "pututxline:$(ptr)$(int)", create_VoidTPtrObj(utmpx), errno );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readUtmpxT_TSStream( context, &command.response );
+            *errno = readInt_TSStream( &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+/** setutxent_spec **/
+mediator setutxent_media for specification
+void setutxent_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "setutxent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+}
+
+/** getutent_spec **/
+mediator getutent_media for specification
+UtmpT * getutent_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        UtmpT * res = NULL;
+    
+        format_TSCommand( &command, "getutent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readUtmpT_TSStream( context, &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** getutent_r_spec **/
+mediator getutent_r_media for specification
+IntT getutent_r_spec( CallContext context, UtmpTPtr buffer, VoidTPtr result )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res = 0;
+    
+        format_TSCommand( &command, "getutent_r:$(ptr)$(ptr)", create_VoidTPtrObj(buffer), 
+                            create_VoidTPtrObj(result) 
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( &command.response ); 
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** login_spec **/
+mediator login_media for specification
+void login_spec( CallContext context, UtmpTPtr ut )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "login:$(ptr)", create_VoidTPtrObj(ut) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);        
+    }
+}
+
+/** logout_spec **/
+mediator logout_media for specification
+IntT logout_spec( CallContext context, CString * line )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res = 0;
+    
+        format_TSCommand( &command, "logout:$(str)", line );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+
+/** logwtmp_spec **/
+mediator logwtmp_media for specification
+void logwtmp_spec( CallContext context, CString * line, CString * name, CString * host )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "logwtmp:$(str)$(str)$(str)", line, name, host );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;            
+        }
+        
+        destroy_TSCommand(&command);        
+    }
+}
+
+/** setutent_spec **/
+mediator setutent_media for specification
+void setutent_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "setutent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+}
+
+
+/** utmpname_spec **/
+mediator utmpname_media for specification
+IntT utmpname_spec( CallContext context, CString * dbname )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res = 0;
+    
+        format_TSCommand( &command, "utmpname:$(str)", dbname );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( &command.response );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}

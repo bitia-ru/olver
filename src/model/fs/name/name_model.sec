@@ -1,0 +1,876 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "fs/name/name_config.h"
+#include "fs/name/name_model.seh"
+
+#pragma SEC subsystem name "fs.name"
+
+
+/* 
+   The group of functions 'fs.name' consists of: 
+       basename [1]
+       dirname [1]
+       realpath [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    basename - return the last component of a pathname
+
+SYNOPSIS
+
+    #include <libgen.h>
+    char *basename(char *path);
+
+DESCRIPTION
+
+    The basename() function shall take the pathname pointed to by path and
+    return a pointer to the final component of the pathname, deleting any
+    trailing '/' characters.
+
+    If the string pointed to by path consists entirely of the '/' character,
+    basename()  shall return a pointer to the string "/". If the string
+    pointed to by path is exactly "//", it is implementation-defined whether
+    '/' or "//" is returned.
+
+    If path is a null pointer or points to an empty string, basename() shall
+    return a pointer to the string ".".
+
+    The basename() function may modify the string pointed to by path, and may
+    return a pointer to static storage that may then be overwritten by a
+    subsequent call to basename().
+
+    The basename() function need not be reentrant. A function that is not
+    required to be reentrant is not required to be thread-safe.
+
+RETURN VALUE
+
+    The basename() function shall return a pointer to the final component of
+    path.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+CString* basename_spec( CallContext context, CString* path )
+{
+    pre
+    {
+        return true;  
+    }
+    coverage C
+    {
+        if (path == NULL)
+        {            
+            return { NullPtr, "Null pointer received" };
+        }
+        else if (equals(path, create_CString("")))
+        {
+            return {Empty, "Empty path received"};            
+        }
+        else if (equals( path, create_CString("//")))
+        {
+            return {TwoSlashes, "Two slashes received" };        
+        }
+        else if (basename_all_slash(path))
+        {
+            return {OnlySlashes, "The path consists only of slashes"};            
+        }
+        else if(charAt_CString(path, length_CString(path)-1)=='/')
+        {
+            return {TrailingSlash,
+                        "Trailing slash(es) occured in the path" };            
+        }
+        else
+        {            
+            return {Ordinary, "Ordinary path received"};    
+        }        
+    }
+    post
+    {
+        /*
+         *  If path is a null pointer or points to an empty string,
+         *  basename() shall return a pointer to the string ".".
+         */
+        if(@path==NULL)
+        {
+            REQ("basename.04",
+                 "If path is null, basename() shall return \".\"",
+                 equals(basename_spec, create_CString("."))
+               );
+
+            return true;
+        }
+        if(equals(@path, create_CString("")))
+        {
+            REQ("basename.04",
+                 "If path is empty string, basename() shall return \".\"",
+                 equals(basename_spec, create_CString("."))
+               );
+
+            return true;
+        }
+
+        /*
+         *   If the string pointed to by path is exactly "//",
+         *   it is implementation-defined whether '/' or "//" is returned
+         */
+        if(equals(@path, create_CString("//")))
+        {
+            if(FS_NAME_BASENAME_SLASH_STATE==FS_NAME_BASENAME_SLASH_BOTH)
+            {
+                REQ("basename.03",
+                     "If path is \"//\", basename() shall return \"//\" or \"/\"",
+                     (  equals(basename_spec, create_CString("/"))
+                     || equals(basename_spec, create_CString("//"))
+                     )
+                   );
+            }
+            else if(FS_NAME_BASENAME_SLASH_STATE==FS_NAME_BASENAME_SLASH_TWO)
+            {
+                REQ( "basename.03",
+                     "If path is \"//\", basename() shall return \"//\"",
+                     equals(basename_spec, create_CString("//"))
+                   );
+            }
+            else if(FS_NAME_BASENAME_SLASH_STATE==FS_NAME_BASENAME_SLASH_ONE)
+            {
+                REQ( "basename.03",
+                     "If path is \"//\", basename() shall return \"/\"", 
+                     equals(create_CString("/"), basename_spec)
+                   );
+            }
+
+            return true;
+        }
+
+        /*
+         *   If the string pointed to by path consists entirely of the '/'
+         *   character, basename() shall return a pointer to the string "/".
+         */
+        if(basename_all_slash(@path))
+        {
+            REQ( "basename.02",
+                 "If path contains only slashes, basename() shall return \"/\"",
+                 equals(basename_spec, create_CString("/"))
+               );           
+
+            return true;
+        }
+
+        /*
+         *   The basename() function shall take the pathname pointed to by path
+         *   and return a pointer to the final component of the pathname,
+         *   deleting any trailing '/' characters.
+         */  
+        {
+            CString* expected_basename = basename_model(path);
+
+            REQ( "basename.01.01", 
+                 "basename() shall return final component of path",
+                 equals(expected_basename, basename_spec)
+               );          
+
+            return true;
+        }
+    }
+}
+
+/*
+ * A partial reference implementation of basename_spec().
+ * Prerequisites: path shall contain the final component. 
+ */
+CString* basename_model(CString* path)
+{
+    int i, j;
+    CString* expected_basename;
+
+    //Removing trailing slashes
+    for(i=length_CString(path)-1;i>=0 && charAt_CString(path, i)=='/';i--)
+    {};
+
+    j=i;
+    //Getting path's last component
+    for(;j>=0 && charAt_CString(path, j)!='/';j--)
+    {};
+        
+    expected_basename = substring_CString(path, j+1, i+1);  
+    
+    return expected_basename; 
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    dirname - report the parent directory name of a file pathname
+
+SYNOPSIS
+
+    #include <libgen.h>
+    char *dirname(char *path); 
+
+DESCRIPTION
+
+    The dirname() function shall take a pointer to a character string that
+    contains a pathname, and return a pointer to a string that is a pathname
+    of the parent directory of that file. Trailing '/' characters in the path
+    are not counted as part of the path.
+
+    If path does not contain a '/', then dirname() shall return a pointer to
+    the string ".". If path is a null pointer or points to an empty string,
+    dirname() shall return a pointer to the string "." .
+
+    The dirname() function need not be reentrant. A function that is not
+    required to be reentrant is not required to be thread-safe.
+
+RETURN VALUE
+
+    The dirname() function shall return a pointer to a string that is the
+    parent directory of path. If path is a null pointer or points to an empty
+    string, a pointer to a string "." is returned.
+
+    The dirname() function may modify the string pointed to by path, and may
+    return a pointer to static storage that may then be overwritten by
+    subsequent calls to dirname().
+
+ERRORS
+
+    No errors are defined.
+
+*/
+specification
+CString* dirname_spec( CallContext context, CString* path )
+{
+    //expected_dirname is used for placing temporary objects,
+    //for preventing memory leaks
+
+    CString* expected_dirname;
+
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        CString* empty_string=create_CString("");        
+
+        /*[If path is NULL]*/
+        if(path==NULL)
+        {
+            return { NullPtr, "Null pointer received" };
+        }
+        else if(equals(path, empty_string))
+        {
+            return {EmptyStr, "Empty path received"};
+        }
+        else if(indexOfChar_CString(path, '/')==-1)
+        {
+            return {NoSlash, "No slashes occured in the path" };
+        }
+        else if('/'==charAt_CString(path, length_CString(path)-1))
+        {
+            return {TrailingSlash, "Trailing slashes occured in the path" };
+        }
+        else
+        {            
+            if(charAt_CString(path, 0)=='/')
+              return {LeadingSlash,
+                        "Leading slash(es) occured in the path" };
+            else
+                return {Ordinary, "Ordinary path received"};
+        }   
+    }
+    post
+    {    
+        if(path!=NULL)
+        if(length_CString(path)>0)
+                if(charAt_CString(path, length_CString(path)-1)=='/')
+                    path=dirname_normalize_path(path);
+
+        /*
+         *   If path is a null pointer or points to an empty string, dirname()
+         *   shall return a pointer to the string "." .        
+         */  
+        {
+            CString* empty_string=create_CString("");
+            CString* dot=create_CString(".");
+
+            if(path==NULL)
+            {                                
+                REQ("dirname.04",
+                    "If path is null, then dirname() must return \".\"",
+                                equals(dirname_spec, dot));
+                return true;
+            }            
+
+            if(equals(path,   empty_string))
+            {                
+                REQ("dirname.04",
+                   "If path is empty string, then dirname() must return \".\"",
+                                equals(dirname_spec, dot));
+                return true;
+            }            
+        }
+
+        /*
+         *   If path does not contain a '/', then dirname() shall return a
+         *   pointer to the string ".".
+         */
+        if(indexOfChar_CString(path, '/')==-1)
+        {
+            CString* dot=create_CString(".");
+            
+            REQ("dirname.03",   "If path doesn't contain any slash, dirname() "
+                                "should return \".\"",
+                            equals(dirname_spec, dot));
+            return true;
+        }        
+
+        
+
+        expected_dirname=dirname_model(path);                     
+        
+        /*
+         *   The dirname() function shall return a pointer to a string
+         *   that is the parent directory of path.
+         *  
+         */
+        if(dirname_begins_from_2slash(path))
+        {               
+            CString* two_slash=create_CString("//");
+            CString* slash=create_CString("/");
+            
+            if(FS_NAME_DIRNAME_SLASH_STATE==FS_NAME_DIRNAME_SLASH_BOTH)
+            {            
+                REQ("dirname.01",
+                        "Path may contain leading slashes, "
+                        "in case of leading slashes dirname must be equal to "
+                        "/ or //",
+                    (  equals(slash, dirname_spec)
+                    || equals(two_slash, dirname_spec)
+                    )
+                   );
+            }
+            else
+            if(FS_NAME_DIRNAME_SLASH_STATE==FS_NAME_DIRNAME_SLASH_TWO)
+            {
+                REQ("dirname.01",
+                        "Path may contain leading slashes, "
+                        "in case of leading slashes dirname must be equal to //",
+                    equals(two_slash, dirname_spec)
+                   );
+            }
+            else
+            if(FS_NAME_DIRNAME_SLASH_STATE==FS_NAME_DIRNAME_SLASH_ONE)
+            {
+                REQ("dirname.01",
+                        "Path may contain leading slashes, "
+                        "in case of leading slashes dirname must be equal to /",
+                    equals(slash, dirname_spec)
+                   );
+            }
+
+            return true;
+        }
+        else
+        {        
+            REQ("dirname.01", "Ordinary path",
+                equals(expected_dirname, dirname_spec));                
+            return true;
+        }               
+    }
+}
+
+/*
+ * A partial reference implementation of dirname_spec().
+ * Prerequisites: path shall contain the parent directory name. 
+ */
+CString* dirname_model(CString* path)
+{
+    CString* expected_dirname;
+    int i;    
+
+    //Removing path's final component
+    for(i=length_CString(path)-1;i>=0 && charAt_CString(path, i)!='/';i--)
+    {};
+
+    //Removing trailing slashes
+    for(;i>=0 && charAt_CString(path, i)=='/';i--)
+    {};
+
+    //Getting dirname path
+    expected_dirname = substring_CString(path, 0, i+1);
+
+    //If dirname path is empty, then path begins with "//",
+    //so we must return "/" and check, if realization returned "//"
+    if(length_CString(expected_dirname)==0)
+        expected_dirname=create_CString("/");
+    
+    return expected_dirname;   
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    realpath - resolve a pathname
+
+SYNOPSIS
+
+    #include <stdlib.h>
+    char *realpath(const char *restrict file_name,
+                        char *restrict resolved_name); 
+
+DESCRIPTION
+
+    The realpath() function shall derive, from the pathname pointed to by
+    file_name, an absolute pathname that names the same file, whose resolution
+    does not involve '.', '..', or symbolic links. The generated pathname
+    shall be stored as a null-terminated string, up to a maximum of {PATH_MAX}
+    bytes, in the buffer pointed to by resolved_name.
+
+    If resolved_name is a null pointer, the behavior of realpath() is
+    implementation-defined.
+
+RETURN VALUE
+
+    Upon successful completion, realpath() shall return a pointer to the
+    resolved name. Otherwise, realpath() shall return a null pointer and set
+    errno to indicate the error, and the contents of the buffer pointed to by
+    resolved_name are undefined.
+
+ERRORS
+
+    The realpath() function shall fail if:
+
+    [EACCES]
+
+        Read or search permission was denied for a component of file_name.
+
+    [EINVAL]
+
+        The file_name argument is a null pointer.
+
+    [EIO]
+
+        An error occurred while reading from the file system.
+
+    [ELOOP]
+
+        A loop exists in symbolic links encountered during resolution of the
+        file_name argument.
+
+    [ENAMETOOLONG]
+
+        The length of the file_name argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+    [ENOENT]
+
+        A component of file_name does not name an existing file or
+        file_name points to an empty string.
+
+    [ENOTDIR]
+
+        A component of the path prefix is not a directory.
+
+
+    The realpath() function may fail if:
+
+    [ELOOP]
+
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the file_name argument.
+
+    [ENAMETOOLONG]
+    
+        Pathname resolution of a symbolic link produced an intermediate result
+        whose length exceeds {PATH_MAX}.
+
+    [ENOMEM]
+
+        Insufficient storage space is available.
+*/
+
+specification
+CString* realpath_spec( CallContext context, CString* file_name,
+                       StringTPtr resolved_name, ErrorCode* errno)
+{
+    pre
+    {
+        /*
+         * If resolved_name is a null pointer, the behavior of realpath()
+         * is implementation-defined.
+         */
+        REQ("realpath.03", "resolved_name!=NULL",
+                !isNULL_VoidTPtr(resolved_name));
+
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        Bool3 eloop;        
+        FileSystem* fs=getFileSystem(context);        
+        CString* resolved=resolvePath_Ext(context, fs, file_name, &eloop);
+        File* search_result;  
+
+        DUMP("filename == $(obj)\nrealpath returned \"$(obj)\"\nresolved==$(obj)\n",
+            file_name, realpath_spec, resolved);    
+
+        /*
+         * Otherwise, realpath() shall return a null pointer and set errno
+         * to indicate the error, and the contents of the buffer pointed
+         * to by resolved_name are undefined.
+         */
+        ERROR_BEGIN(POSIX_REALPATH, "realpath.05",
+            realpath_spec == NULL, *errno)
+        /*
+         * The realpath() function shall fail if:
+         * 
+         * [EACCES] 
+         * 
+         * Read or search permission was denied for a component of file_name. 
+         */
+            ERROR_SHALL3(POSIX_REALPATH, EACCES, "realpath.06.01",                
+                shall_isEACCES_realpath(context, fs, file_name))
+
+        /*
+         * The realpath() function shall fail if:
+         * 
+         * [EINVAL] 
+         * 
+         * The file_name argument is a null pointer. 
+         */
+            ERROR_SHALL(POSIX_REALPATH, EINVAL, "realpath.06.02",
+                file_name == NULL)
+
+        /*
+         * The realpath() function shall fail if:
+         * 
+         * [EIO] 
+         * 
+         * An error occurred while reading from the file system. 
+         */
+            ERROR_SHALL(POSIX_REALPATH, EIO, "realpath.06.03", TODO_ERR(EIO))
+
+        /*
+         * The realpath() function shall fail if:
+         * 
+         * [ELOOP] 
+         * 
+         * A loop exists in symbolic links encountered during resolution of
+         * the file_name argument. 
+         */
+            ERROR_SHALL3(POSIX_REALPATH, ELOOP, "realpath.06.04",
+                eloop)
+
+        /*
+         * The realpath() function shall fail if:
+         * 
+         * [ENAMETOOLONG] 
+         * 
+         * The length of the file_name argument exceeds {PATH_MAX} or a
+         * pathname component is longer than {NAME_MAX}. 
+         */
+            ERROR_SHALL3(POSIX_REALPATH, ENAMETOOLONG, "realpath.06.05",
+                shall_isENAMETOOLONG_realpath(context, file_name))
+
+        /*
+         * The realpath() function shall fail if:
+         * 
+         * [ENOENT] 
+         * 
+         * A component of file_name does not name an existing file or
+         * file_name points to an empty string. 
+         */
+            ERROR_SHALL3(POSIX_REALPATH, ENOENT, "realpath.06.06",
+                shall_isENOENT_realpath(context, fs, file_name))
+
+        /*
+         * The realpath() function shall fail if:
+         * 
+         * [ENOTDIR] 
+         * 
+         * A component of the path prefix is not a directory. 
+         */
+            ERROR_SHALL3(POSIX_REALPATH, ENOTDIR, "realpath.06.07",
+                shall_isENOTDIR_realpath(context, fs, file_name))
+
+        /*
+         * The realpath() function may fail if:
+         * 
+         * [ELOOP] 
+         * 
+         * More than {SYMLOOP_MAX} symbolic links were encountered during
+         * resolution of the file_name argument. 
+         */
+            ERROR_MAY3(POSIX_REALPATH, ELOOP, "realpath.07.01",
+                eloop)
+
+        /*
+         * The realpath() function may fail if:
+         * 
+         * [ENAMETOOLONG] 
+         * 
+         * Pathname resolution of a symbolic link produced an intermediate
+         * result whose length exceeds {PATH_MAX}. 
+         */
+            ERROR_MAY3(POSIX_REALPATH, ENAMETOOLONG, "realpath.07.02",
+                shall_isENAMETOOLONG_realpath(context, resolved))
+
+        /*
+         * The realpath() function may fail if:
+         * 
+         * [ENOMEM] 
+         * 
+         * Insufficient storage space is available. 
+         */
+            ERROR_MAY(POSIX_REALPATH, ENOMEM, "realpath.07.03",
+                TODO_ERR(ENOMEM))
+
+        ERROR_END()
+
+        /*
+         * The generated pathname shall be stored as a null-terminated
+         * string, up to a maximum of {PATH_MAX} bytes, in the buffer
+         * pointed to by resolved_name.
+         */
+        /*
+         * Upon successful completion, realpath() shall return a pointer
+         * to the resolved name.
+         */
+        REQ("realpath.02;realpath.04", "resolved_name == realpath return",
+            equals(readCString_VoidTPtr(resolved_name), realpath_spec));
+
+    
+        traceFormattedUserInfo("expected path: $(obj)", resolved);
+
+        /*
+         * The realpath() function shall derive, from the pathname pointed
+         * to by file_name, an absolute pathname that names the same file,
+         * whose resolution does not involve '.', '..', or symbolic links.
+         */
+        REQ("realpath.01", "Function return equals to expected return",
+                equals(resolved, realpath_spec));
+
+
+        return true;
+    }
+}
+
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+/*
+ * A helper function for basename_spec().
+ * Returns true iff the path consists entirely of the '/' character. 
+ */
+bool basename_all_slash(CString* path)
+{
+int i,length;
+
+    if (path == NULL)
+        return false;
+    length = length_CString(path);
+    if (length == 0)
+        return false;
+    for(i=0;i<length;i++)
+    {
+        if (charAt_CString(path, i)!='/')
+            return false;
+    }
+    return true;
+}
+
+/*
+ * A helper function for dirname_spec().
+ * Returns true iff the path begins with 2 slashes and 
+ * there is no any other slashes. 
+ */
+bool dirname_begins_from_2slash(CString* path)
+{
+int i,length;
+
+    if (path == NULL)
+        return false;
+    length = length_CString(path);
+    if (length > 1)
+    {
+        if (charAt_CString(path, 0)=='/' && charAt_CString(path, 1)=='/')
+        {
+            for( i=length-1; i>1; i-- )
+            {
+                if (charAt_CString(path, i) == '/')
+                    return false;
+            }
+            return true;
+        }  
+    }
+    return false;
+}
+
+/*
+ * A helper function for dirname_spec().
+ * Removes trailing slashes from the path. 
+ */
+CString* dirname_normalize_path(CString* path)
+{
+    int i = length_CString(path)-1;    
+    
+    while(i>=0 && charAt_CString(path, i)=='/')
+        i--;
+
+    if (i >= 0)
+        return substring_CString(path, 0, i+1);
+    else
+        return create_CString("//");
+}
+
+Bool3 shall_isEACCES_realpath(CallContext context, FileSystem* fs,
+                                CString* path)
+{
+    Bool3 res = False_Bool3;
+ 
+    if(!isAbsolute_Path(path))
+        return Unknown_Bool3;
+
+    path = getParentDir_Path(path);
+
+    if(NULL==path)  // is child of root
+        return Unknown_Bool3;
+
+    res = or_Bool3(res, isNoPermOnPathComponents(context, fs, path, 
+                                        false, false, true)); // check search
+
+    res = or_Bool3(res, isNoPermOnPathComponents(context, fs, path, 
+                                        true, false, false)); // check search
+
+    return res;
+}
+
+Bool3 shall_isENAMETOOLONG_realpath(CallContext context, CString* path)
+{
+    LongT path_max;
+    LongT name_max;
+    int i;
+    List *path_components;
+
+    path_max = getPathSystemConfigurationValue(context, path, SUT_PC_PATH_MAX);
+    
+    if(SC_VALUE_UNKNOWN==path_max)
+        return Unknown_Bool3;
+    
+    if(length_CString(path)>path_max)
+        return True_Bool3;
+    
+    name_max = getPathSystemConfigurationValue(context, path, SUT_PC_NAME_MAX);
+    
+    if(SC_VALUE_UNKNOWN==name_max)
+        return Unknown_Bool3;
+
+    path_components = split_Path(path);
+    for(i=0; i<size_List(path_components); i++)
+    {
+        CString *path_comp = get_List(path_components, i);
+        if(length_CString(path_comp) > name_max)
+            return True_Bool3;
+    }
+    return False_Bool3;
+}
+
+Bool3 shall_isENOENT_realpath(CallContext context, FileSystem* fs,
+                                CString* path)
+{
+    if( getFile_FileSystem(fs, path) != NULL)
+        return False_Bool3;
+
+    return Unknown_Bool3;
+}
+
+Bool3 shall_isENOTDIR_realpath(CallContext context, FileSystem* fs,
+                                CString* path)
+{
+    FileSearchResult *res = getFile_FileSystem_Ext(fs, path);
+    
+    if(res->file==NULL)
+    {
+        if(res->last!=NULL  && res->last->kind!=DirectoryFile
+                            && res->last->kind!=SymbolicLinkFile)
+        {
+            return True_Bool3;
+        }
+        return Unknown_Bool3;
+    }
+    
+    return False_Bool3;
+}

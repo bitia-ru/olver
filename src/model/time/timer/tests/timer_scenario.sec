@@ -1,0 +1,810 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_model.seh"
+#include "system/user/user_media.seh"
+#include "time/timer/timer_model.seh"
+#include "time/timer/timer_media.seh"
+#include "time/clock/clock_model.seh"
+#include "time/clock/clock_media.seh"
+#include "config/system_config.seh"
+#include "config/test_system_config.h"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/control_center.seh"
+#include "process/meta/user_model.seh"
+#include "process/meta/user_media.seh"
+#include "process/environ/environ_media.seh"
+#include "fs/meta/access_media.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "time/timer/tests/timer_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+bool needOnlyFirstPriority;
+bool needConformanceTestQuality;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+List /* NULL */ * functionData;
+
+TimeSpecT maxSuspend;
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_timers_crash_scenario(int argc,char** argv)
+{
+
+    return true;
+
+}
+
+
+static void finish_timers_crash_scenario(void)
+{
+
+}
+
+String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    TimeSpecT spt = default_TimeSpecT;
+    //needOnlyFirstPriority = false;
+    needOnlyFirstPriority = true;
+    needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    DISABLE_DEFERRED_REACTIONS
+        ThreadIdObj * contextObj;
+        ProcessId pid;
+        ClockidTObj * clock_id;
+        if ( ( functionData = createContexts() ) == NULL ) { return false; }
+        contextObj = get_List( functionData, 0 );
+        pid = create_ProcessId( contextObj->system, contextObj->process );
+        clock_id = create_ClockidTObj( 0 );
+        if ( clock_getcpuclockid_spec( * contextObj, pid, clock_id ) != 0 ) { return false; }
+        maxSuspend.sec  = 11;
+        maxSuspend.nsec = 0 ;
+        if ( equals( create_String( "alarm"               ), testingFuncName ) ||
+             equals( create_String( "created timers"      ), testingFuncName ) ||
+             equals( create_String( "getitimer setitimer" ), testingFuncName ) ||
+             equals( create_String( "ualarm"              ), testingFuncName )
+           ) {
+            setWTimeMSec( (long)maxSuspend.sec * 1000 + (long)maxSuspend.nsec / 1000000 + SERIALIZATION_TIME );
+        } else {
+            setWTimeMSec( SERIALIZATION_TIME );
+        }
+
+        clock_getres_spec( * contextObj, create_ClockidTObj(SUT_CLOCK_REALTIME), create_TimeSpecTObj(spt), requestErrorCode());
+
+    ENABLE_DEFERRED_REACTIONS
+
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init_alarm_scenario              ( int argc, char ** argv ) { return init_scenario( "alarm"               ); }
+static bool init_created_timers_scenario     ( int argc, char ** argv ) { return init_scenario( "created timers"      ); }
+static bool init_getitimer_setitimer_scenario( int argc, char ** argv ) { return init_scenario( "getitimer setitimer" ); }
+static bool init_sleeps_scenario             ( int argc, char ** argv ) { return init_scenario( "sleeps"              ); }
+static bool init_ualarm_scenario             ( int argc, char ** argv ) { return init_scenario( "ualarm"              ); }
+
+static void finish_alarm_scenario              ( void ) finish_scenario( alarm               )
+static void finish_created_timers_scenario     ( void ) finish_scenario( created_timers      )
+static void finish_getitimer_setitimer_scenario( void ) finish_scenario( getitimer_setitimer )
+static void finish_sleeps_scenario             ( void ) finish_scenario( sleeps              )
+static void finish_ualarm_scenario             ( void ) finish_scenario( ualarm              )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool alarm_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int j = 1; j <= ( maxSuspend.sec > 10 ? 2 : 1 ); j++; )
+        {
+            UIntT seconds;
+            switch ( j ) {
+                case 1: seconds = 0                         ; break;
+                case 2: seconds = (UIntT)maxSuspend.sec - 10; break;
+            }
+
+            dotPrint( 10, 100 );
+            alarm_spec( * contextObj, seconds );
+        } // iterate j
+    } // iterate contextI
+
+    return true;
+}
+
+
+
+scenario
+bool getitimer_scen()
+{
+
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int whichI = 1; whichI <= 4; whichI++; )
+        {
+            int which;
+            TimeValTObj * stuff = create_TimeValTObj( -1, -1 );
+            ITimerValTObj * value = create_ITimerValTObj( stuff, stuff );
+            switch ( whichI ) {
+                case 1: which = -1                ; break;
+                case 2: which = SUT_ITIMER_REAL   ; break;
+                case 3: which = SUT_ITIMER_VIRTUAL; break;
+                case 4: which = SUT_ITIMER_PROF   ; break;
+            }
+            dotPrint( 10, 100 );
+            getitimer_spec( * contextObj, which, value, requestErrorCode() );
+        } // iterate whichI
+    } // iterate contextI
+    return true;
+
+}
+
+
+
+scenario
+bool nanosleep_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int rqtpI = 1; rqtpI <= 2; rqtpI++; )
+        {
+            TimeSpecT tmpForRqtp;
+            TimeSpecTObj * rqtp;
+            switch ( rqtpI ) {
+                case 1: tmpForRqtp.sec = 1;  tmpForRqtp.nsec = 1000000000; break;
+                case 2: tmpForRqtp.sec = 1;  tmpForRqtp.nsec = 0         ; break;
+            }
+            rqtp = create_TimeSpecTObj( tmpForRqtp );
+            iterate ( int rmtpI = 1; rmtpI <= 2; rmtpI++; )
+            {
+                TimeSpecTObj * rmtp;
+                TimeSpecT tmpForRmtp = default_TimeSpecT;
+                switch ( rmtpI ) {
+                    case 1: rmtp = NULL                             ; break;
+                    case 2: rmtp = create_TimeSpecTObj( tmpForRmtp ); break;
+                }
+                dotPrint( 10, 100 );
+                // verbose( "n" );
+                nanosleep_spec( * contextObj, rqtp, rmtp );
+            } // iterate rmtpI
+        } // iterate rqtpI
+    } // iterate contextI
+    return true;
+}
+
+
+
+scenario
+bool setitimer_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int whichI = 1; whichI <= ( needConformanceTestQuality ? 2 : 4 ); whichI++; )
+        //iterate ( int whichI = 4; whichI <= 4; whichI++; )
+        {
+            int which;
+            int maxValueI;
+            switch ( whichI ) {
+                case 1: which = -1                ; break;
+                case 2: which = SUT_ITIMER_REAL   ; break;
+                case 3: which = SUT_ITIMER_VIRTUAL; break;
+                case 4: which = SUT_ITIMER_PROF   ; break;
+            }
+
+            // ? for ITIMER_VIRTUAL and ITIMER_PROF not work sigpause ?
+            maxValueI = ( maxSuspend.sec > 10 && whichI < 3 && ! needConformanceTestQuality ? 4 : 2 );
+
+            iterate ( int valueI = 1; valueI <= maxValueI; valueI++; )
+            //iterate ( int valueI = 3; valueI <= 3; valueI++; )
+            {
+                TimeValTObj * zero = create_TimeValTObj( 0                  , 0                      );
+                TimeValTObj * max  = create_TimeValTObj( maxSuspend.sec - 10, maxSuspend.nsec / 1000 );
+                ITimerValTObj * value;
+                switch ( valueI ) {
+                    case 1: value = create_ITimerValTObj( zero, zero ); break;
+                    case 2: value = create_ITimerValTObj( zero, max  ); break;
+                    case 3: value = create_ITimerValTObj( max , zero ); break;
+                    case 4: value = create_ITimerValTObj( max , max  ); break;
+                }
+
+                iterate ( int ovalueI = 1; ovalueI <= ( needConformanceTestQuality ? 1 : 2 ); ovalueI++; )
+                //iterate ( int ovalueI = 1; ovalueI <= 1; ovalueI++; )
+                {
+                    TimeValTObj * stuff = create_TimeValTObj( -1, -1 );
+                    ITimerValTObj * ovalue;
+                    switch ( ovalueI ) {
+                        case 1: ovalue = NULL                                ; break;
+                        case 2: ovalue = create_ITimerValTObj( stuff, stuff ); break;
+                    }
+
+                    dotPrint( 10, 100 );
+                    // verbose( "setitimer_scen : whichI, valueI, ovalueI is [%d|%d|%d]\n", whichI, valueI, ovalueI );
+                    setitimer_spec( * contextObj, which, value, ovalue );
+                } // iterate ovalueI
+
+            } // iterate valueI
+
+        } // iterate whichI
+
+    } // iterate contextI
+
+    return true;
+}
+
+
+
+scenario
+bool sleep_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int secondsI = 1; secondsI <= ( maxSuspend.sec > 10 ? 2 : 1 ); secondsI++; )
+        {
+            UIntT seconds;
+            switch ( secondsI ) {
+                case 1: seconds = 0                         ; break;
+                case 2: seconds = (UIntT)maxSuspend.sec - 10; break;
+            }
+
+            dotPrint( 10, 100 );
+            // verbose( "s" );
+            sleep_spec( * contextObj, seconds );
+        } // iterate secondsI
+
+    } // iterate contextI
+
+    return true;
+}
+
+
+
+scenario
+bool timer_create_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int clockIdI = 1; clockIdI <= ( needConformanceTestQuality ? 1 : 3 ); clockIdI++; )
+        //iterate ( int clockIdI = 1; clockIdI <= 1; clockIdI++; )
+        {
+            ClockidTObj * clock_id;
+            SystemState * systemState = getSystemState_CallContext( * contextObj );
+            switch ( clockIdI ) {
+                case 1: clock_id = key_Map( systemState->clocks, 0                                   ); break;
+                case 2: clock_id = key_Map( systemState->clocks, size_Map( systemState->clocks ) - 1 ); break;
+                case 3: clock_id = create_ClockidTObj( -1 )                                           ; break;
+            }
+            if ( false ) {
+                String * clockIdAsString = toString( clock_id );
+                verbose( "timer_create_scen : for clockIdI [%d] clock_id is [%s]\n",
+                         clockIdI, toCharArray_String( clockIdAsString )
+                       );
+            }
+
+            iterate ( int evpI = 1; evpI <= 2; evpI++; )
+            //iterate ( int evpI = 1; evpI <= 1; evpI++; )
+            {
+                Signal * evp;
+                TimerTObj * timerid = create_TimerTObj( 0 );
+                switch ( evpI ) {
+                    case 1: evp = NULL                        ; break;
+                    case 2: evp = create_Signal( SUT_SIGALRM ); break;
+                }
+
+                // verbose( "c" );
+                dotPrint( 10, 100 );
+                timer_create_spec( * contextObj, clock_id, evp, timerid, requestErrorCode() );
+            } // iterate evpI
+        } // iterate clockIdI
+
+    } // iterate contextI
+
+    return true;
+}
+
+
+
+scenario
+bool timer_delete_scen()
+{
+
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        ProcessState * processState = getProcessState_CallContext( * contextObj );
+        // iterate ( int timerIdI = -1; timerIdI < size_Map( processState->meta.timersToSignals ); timerIdI++; )
+        // timerIdI == -1 => Segmentation fault: Invalid memory address '0x3'
+        iterate ( int timerIdI = 0; ! isEmpty_Map( processState->meta.timersToSignals ); timerIdI++; )
+        //iterate ( int timerIdI = 1; timerIdI <= 1; timerIdI++; )
+        {
+            TimerTObj * timerid;
+            if ( timerIdI == -1 ) { timerid = create_TimerTObj( -1 )                          ; }
+                             else { timerid = key_Map( processState->meta.timersToSignals, 0 ); }
+            // verbose( "d" );
+            dotPrint( 10, 100 );
+            timer_delete_spec( * contextObj, timerid, requestErrorCode() );
+        } // iterate timerIdI
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool timer_getoverrun_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        ProcessState * processState = getProcessState_CallContext( * contextObj );
+        // iterate ( int timerIdI = -1; timerIdI < size_Map( processState->meta.timersToSignals ); timerIdI++; )
+        // timerIdI == -1 => Segmentation fault: Invalid memory address '0x3'
+        iterate ( int timerIdI = 0; timerIdI < size_Map( processState->meta.timersToSignals ); timerIdI++; )
+        //iterate ( int timerIdI = -1; timerIdI <= -1; timerIdI++; )
+        {
+            TimerTObj * timerid;
+            if ( timerIdI == -1 ) { timerid = create_TimerTObj( -1 )                                 ; }
+                             else { timerid = key_Map( processState->meta.timersToSignals, timerIdI ); }
+            // verbose( "o" );
+            dotPrint( 10, 100 );
+            // if was here
+            timer_getoverrun_spec( * contextObj, timerid, requestErrorCode() );
+        } // iterate timerIdI
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool timer_gettime_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        ProcessState * processState = getProcessState_CallContext( * contextObj );
+        // iterate ( int timerIdI = -1; timerIdI < size_Map( processState->meta.timersToSignals ); timerIdI++; )
+        // timerIdI == -1 => Segmentation fault: Invalid memory address '0x3'
+        iterate ( int timerIdI = 0; timerIdI < size_Map( processState->meta.timersToSignals ); timerIdI++; )
+        //iterate ( int timerIdI = -1; timerIdI <= -1; timerIdI++; )
+        {
+            TimerTObj * timerid;
+            TimeSpecT stuff = default_TimeSpecT;
+            ITimerSpecTObj * value;
+            if ( timerIdI == -1 ) { timerid = create_TimerTObj( -1 )                                 ; }
+                             else { timerid = key_Map( processState->meta.timersToSignals, timerIdI ); }
+            value = create_ITimerSpecTObj( create_TimeSpecTObj( stuff ), create_TimeSpecTObj( stuff ) );
+            // verbose( "g" );
+            dotPrint( 10, 100 );
+            timer_gettime_spec( * contextObj, timerid, value, requestErrorCode() );
+        } // iterate timerIdI
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool timer_settime_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        ProcessState * processState = getProcessState_CallContext( * contextObj );
+        int lastForTimerIdI = size_Map( processState->meta.timersToSignals ) - 1;
+        if ( lastForTimerIdI > 1 ) { lastForTimerIdI = 1; }
+        // verbose( "timer_settime_scen : size_Map( timersToSignals ) is %d\n", size_Map( processState->meta.timersToSignals ) );
+        iterate ( int timerIdI = 0; timerIdI <= lastForTimerIdI; timerIdI++; )
+        //iterate ( int timerIdI = 1; timerIdI <= size_Map( processState->meta.timersToSignals ) - 1; timerIdI++; )
+        {
+            TimerTObj * timerid = key_Map( processState->meta.timersToSignals, timerIdI );
+            iterate ( int flagsI = 1; flagsI <= 2; flagsI++; )
+            //iterate ( int flagsI = 2; flagsI <= 2; flagsI++; )
+            {
+                IntT flags;
+                switch ( flagsI ) {
+                    case 1: flags = SUT_TIMER_ABSTIME; break;
+                    case 2: flags = 0                ; break;
+                }
+                iterate ( int ovalueI = 1; ovalueI <= ( needConformanceTestQuality ? 1 : 2 ); ovalueI++; )
+                //iterate ( int ovalueI = 1; ovalueI <= 1; ovalueI++; )
+                {
+                    TimeSpecT stuff = default_TimeSpecT;
+                    TimeSpecTObj * stuffObj = create_TimeSpecTObj( stuff );
+                    ITimerSpecTObj * ovalue;
+                    int lastForValueI;
+                    switch ( ovalueI ) {
+                        case 1: ovalue = NULL                                       ; break;
+                        case 2: ovalue = create_ITimerSpecTObj( stuffObj, stuffObj ); break;
+                    }
+                    if      ( maxSuspend.sec <= 10 || flagsI == 1 || needConformanceTestQuality ) { lastForValueI = 2; }
+                    else if ( timerIdI != lastForTimerIdI || ovalueI != 2                       ) { lastForValueI = 3; }
+                                                                                             else { lastForValueI = 4; }
+                    iterate ( int valueI = 1; valueI <= lastForValueI; valueI++; )
+                    //iterate ( int valueI = 3; valueI <= lastForValueI; valueI++; )
+                    {
+                        TimeSpecT zero;
+                        TimeSpecT max ;
+                        TimeSpecTObj * zeroObj;
+                        TimeSpecTObj * maxObj ;
+                        ITimerSpecTObj * value;
+                        zero.sec = 0                  ;    zero.nsec = 0              ;
+                        max .sec = maxSuspend.sec - 10;    max .nsec = maxSuspend.nsec;
+                        zeroObj = create_TimeSpecTObj( zero );
+                        maxObj  = create_TimeSpecTObj( max  );
+                        switch ( valueI ) {
+                            case 1: value = create_ITimerSpecTObj( zeroObj, zeroObj ); break;
+                            case 2: value = create_ITimerSpecTObj( zeroObj, maxObj  ); break;
+                            case 3: value = create_ITimerSpecTObj( maxObj , zeroObj ); break;
+                            case 4: value = create_ITimerSpecTObj( maxObj , maxObj  ); break;
+                        }
+                        dotPrint( 10, 100 );
+                        // verbose( "timer_settime_scen : timerIdI, ovalueI, valueI is [%d|%d|%d]\n", timerIdI, ovalueI, valueI );
+                        // verbose( "timer_settime_scen : timerid is [%ld]\n", * timerid );
+                        timer_settime_spec( * contextObj, timerid, flags, value, ovalue );
+                    } // iterate valueI
+                } // iterate ovalueI
+            } // iterate flagsI
+        } // iterate timerIdI
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool ualarm_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int usecondsI = 1; usecondsI <= ( maxSuspend.sec > 10 ? 2 : 1 ); usecondsI++; )
+        {
+            USecondsT useconds;
+            switch ( usecondsI ) {
+                case 1: useconds = 0                                                                        ; break;
+                case 2: useconds = (USecondsT)( 100000 * ( maxSuspend.sec - 10 ) + maxSuspend.nsec / 1000 ); break;
+            }
+            iterate ( int k = 1; k <= ( usecondsI != 1 && maxSuspend.sec > 10 ? 2 : 1 ); k++; )
+            {
+                USecondsT interval;
+                switch ( k ) {
+                    case 1: interval = 0                                                                        ; break;
+                    case 2: interval = (USecondsT)( 100000 * ( maxSuspend.sec - 10 ) + maxSuspend.nsec / 1000 ); break;
+                }
+                dotPrint( 10, 100 );
+                ualarm_spec( * contextObj, useconds, interval );
+            } // iterate k
+        } // iterate usecondsI
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool usleep_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int usecondsI = 1; usecondsI <= ( maxSuspend.sec > 10 ? 3 : 2 ); usecondsI++; )
+        {
+            USecondsT useconds;
+            switch ( usecondsI ) {
+                case 1: useconds = 0                                                                        ; break;
+                case 2: useconds = 1                                                                        ; break;
+                case 3: useconds = (USecondsT)( 1000000 * ( maxSuspend.sec - 10 ) + maxSuspend.nsec / 1000 ); break;
+            }
+            dotPrint( 10, 100 );
+            // verbose( "u" );
+            usleep_spec( * contextObj, useconds );
+        } // iterate usecondsI
+    } // iterate contextI
+    return true;
+}
+
+
+static CallContext c1;
+static TimerTObj * timerid_c1;
+
+scenario bool timer_crash_scen()
+{
+    TimeSpecT spt = default_TimeSpecT;
+    ClockidTObj * clock_id = create_ClockidTObj( SUT_CLOCK_REALTIME) ;
+    TimerTObj * timerid = create_TimerTObj( 0 );
+    CallContext c2=createProcess();
+    CallContext c3=createProcess();
+    CallContext c4=createProcess();
+    TimeSpecT stuff = default_TimeSpecT;
+    TimeSpecT zero;
+    ITimerSpecTObj * value = create_ITimerSpecTObj( create_TimeSpecTObj( stuff ), create_TimeSpecTObj( stuff ) );
+    TimeSpecTObj * zeroObj;
+    ProcessId pid;
+    zero.sec = 0                  ;
+    zero.nsec = 0              ;
+    zeroObj = create_TimeSpecTObj( zero );
+
+    value = create_ITimerSpecTObj( zeroObj, zeroObj );
+    timer_settime_spec( c1, timerid_c1, SUT_TIMER_ABSTIME, value, NULL );
+
+    timer_create_spec( c2, clock_id, NULL, timerid, requestErrorCode() );
+    timer_getoverrun_spec( c2, timerid, requestErrorCode() );
+
+    timer_create_spec( c3, clock_id, NULL, timerid, requestErrorCode() );
+    timer_gettime_spec( c3, timerid, value, requestErrorCode() );
+
+    timer_create_spec( c4, clock_id, NULL, timerid, requestErrorCode() );
+    timer_delete_spec( c4, timerid, requestErrorCode() );
+
+    return true;
+}
+
+scenario bool timer_prepare_crash_scen()
+{
+    ClockidTObj * clock_id = create_ClockidTObj( SUT_CLOCK_REALTIME) ;
+    TimeSpecT spt = default_TimeSpecT;
+
+    timerid_c1 = create_TimerTObj( 0 );
+    c1 = createProcess();
+    timer_create_spec( c1, clock_id, NULL, timerid_c1, requestErrorCode());
+    clock_getres_spec( c1, create_ClockidTObj(SUT_CLOCK_REALTIME), create_TimeSpecTObj(spt), requestErrorCode());
+
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+static Map * saveSingleModelState( void ) { return clone( systems ); }
+
+static void restoreSingleModelState( Map * saved_state ) { systems = saved_state; }
+
+static bool isSingleModelStateStationary( void ) {
+    int i, j;
+    for ( i = 0; i < size_Map( systems ); i++ ) {
+        Long * key = key_Map( systems, i );
+        SystemState * systemState = get_Map( systems, key );
+        for ( j = 0; j < size_Map( systemState->processes ); j++ ) {
+            ProcessIdObj * key = key_Map( systemState->processes, j );
+            ProcessState * processState = get_Map( systemState->processes, key );
+            if ( ! isEmpty_List( processState->meta.waitedSignals ) ) { return false; }
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm alarm_scenario =
+{
+    .init              = init_alarm_scenario                               ,
+    .finish            = finish_alarm_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { alarm_scen,
+                           NULL
+                         }
+};
+
+
+
+scenario dfsm created_timers_scenario =
+{
+    .init              = init_created_timers_scenario                      ,
+    .finish            = finish_created_timers_scenario                    ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { timer_create_scen    ,
+                           timer_getoverrun_scen,
+                           timer_gettime_scen   ,
+                           timer_settime_scen   ,
+                           timer_delete_scen    ,
+                           NULL
+                         }
+};
+
+scenario dfsm timers_crash_scenario =
+{
+    .init              = init_timers_crash_scenario                ,
+    .finish            = finish_timers_crash_scenario              ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { timer_prepare_crash_scen,
+                           timer_crash_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm getitimer_setitimer_scenario =
+{
+    .init              = init_getitimer_setitimer_scenario                 ,
+    .finish            = finish_getitimer_setitimer_scenario               ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { getitimer_scen,
+                           setitimer_scen,
+                           NULL
+                         }
+
+};
+
+
+
+scenario dfsm sleeps_scenario =
+{
+    .init              = init_sleeps_scenario                              ,
+    .finish            = finish_sleeps_scenario                            ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { nanosleep_scen,
+                           sleep_scen    ,
+                           usleep_scen   ,
+                           NULL
+                         }
+
+};
+
+
+
+scenario dfsm ualarm_scenario =
+{
+    .init              = init_ualarm_scenario                              ,
+    .finish            = finish_ualarm_scenario                            ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { ualarm_scen,
+                           NULL
+                         }
+
+};
+
+
+
+
+
+bool main_time_timer_local( int argc, char** argv )
+{/**/
+    alarm_scenario              ( argc, argv );
+    created_timers_scenario     ( argc, argv );
+    getitimer_setitimer_scenario( argc, argv );
+    sleeps_scenario             ( argc, argv );
+    ualarm_scenario             ( argc, argv );/**/
+    return true;
+}
+
+
+
+#ifdef TIME_TIMER_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+    initTimeClockSubsystem();
+
+    initTimeTimerSubsystem();
+}
+
+
+
+int main( int argc, char** argv )
+
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+    addTraceToFile( "trace.xml_CTesK" );
+
+
+
+    // Run test scenario
+    main_time_timer_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+#endif
+

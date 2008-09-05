@@ -1,0 +1,183 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "socket/netif/netif_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                        Helper Functions                        **/
+/********************************************************************/
+IfNameIndex * read_IfNameIndex(CallContext context, IfNameIndexPtr ptr)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+    IfNameIndex * res = NULL;
+    
+    if(isNULL_VoidTPtr(ptr))
+        return res;
+
+    format_TSCommand( &command, "read_ifnameindex:$(ptr)", create_VoidTPtrObj(ptr) );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        res = create_emptyIfNameIndex();
+
+        res->self_ptr = ptr;
+        res->if_index = readUInt_TSStream(&command.response);
+        res->if_name = readCString_TSStream(&command.response);
+    }
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSocketNetifSubsystem(void)
+{
+    if(!init_netif())
+        traceUserInfo("init_netif failed!!!"); 
+
+  // Set up mediators
+    set_mediator_if_freenameindex_spec(if_freenameindex_media);
+    set_mediator_if_indextoname_spec(if_indextoname_media);
+    set_mediator_if_nameindex_spec(if_nameindex_media);
+    set_mediator_if_nametoindex_spec(if_nametoindex_media);
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** if_freenameindex_spec **/
+mediator if_freenameindex_media for specification
+void if_freenameindex_spec( CallContext context, IfNameIndexPtr ptr )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "if_freenameindex:$(ptr)", create_VoidTPtrObj(ptr) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);        
+    }
+}
+
+
+/** if_indextoname_spec **/
+mediator if_indextoname_media for specification
+StringTPtr if_indextoname_spec( CallContext context, UIntT ifindex, StringTPtr ifname, ErrorCode * errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        StringTPtr res;
+    
+        format_TSCommand( &command, "if_indextoname:$(uint)$(ptr)$(int)", create_UIntTObj(ifindex), 
+                            create_VoidTPtrObj(ifname), errno );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onIfIndextoname(context, ifindex, ifname, errno, if_indextoname_spec);
+    }
+}
+
+
+
+/** if_nameindex_spec **/
+mediator if_nameindex_media for specification
+List * if_nameindex_spec( CallContext context, ErrorCode * errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        VoidTPtr ptr;
+        List * res = NULL;
+    
+        format_TSCommand( &command, "if_nameindex:$(int)", errno );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            ptr = readPointer_TSStream(context, &command.response);
+            *errno = readInt_TSStream(&command.response);
+            if( !isNULL_VoidTPtr(ptr) )
+                res = read_IfNameIndexList(context, ptr);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onIfNameindex(context, errno, if_nameindex_spec);
+    }
+}
+
+
+
+/** if_nametoindex_spec **/
+mediator if_nametoindex_media for specification
+UIntT if_nametoindex_spec( CallContext context, CString * ifname)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        UIntT res;
+        
+        format_TSCommand( &command, "if_nametoindex:$(str)", ifname );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readUInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onIfNametoindex(context, ifname, if_nametoindex_spec);
+    }
+}
+
+
+
+

@@ -1,0 +1,1477 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "system/user/user_config.h"
+#include "system/user/user_model.seh"
+
+#pragma SEC subsystem user "system.user"
+
+/* 
+    The group of functions 'system.user.user' consists of: 
+        endpwent [1]
+        getpwent [1]
+        getpwnam [1]
+        getpwnam_r [1]
+        getpwuid [1]
+        getpwuid_r [1]
+        setpwent [1]
+*/
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers 
+  
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+    
+      
+NAME
+        
+    endpwent, getpwent, setpwent - user database functions
+          
+SYNOPSIS
+
+    #include <pwd.h>
+    void endpwent(void);
+    struct passwd *getpwent(void);
+    void setpwent(void); 
+              
+    DESCRIPTION
+
+    These functions shall retrieve information about users.
+
+    The getpwent() function shall return a pointer to a structure containing 
+    the broken-out fields of an entry in the user database. Each entry in the
+    user database contains a passwd structure. When first called, getpwent() 
+    shall return a pointer to a passwd structure containing the first entry in
+    the user database. Thereafter, it shall return a pointer to a passwd 
+    structure containing the next entry in the user database. Successive calls 
+    can be used to search the entire user database.
+
+    If an end-of-file or an error is encountered on reading, getpwent() shall 
+    return a null pointer.
+
+    An implementation that provides extended security controls may impose 
+    further implementation-defined restrictions on accessing the user database. 
+    In particular, the system may deny the existence of some or all of the user
+    database entries associated with users other than the caller.
+
+    The setpwent() function effectively rewinds the user database to allow 
+    repeated searches.
+
+    The endpwent() function may be called to close the user database when 
+    processing is complete.
+
+    These functions need not be reentrant. A function that is not required to 
+    be reentrant is not required to be thread-safe.
+
+    RETURN VALUE
+
+    The getpwent() function shall return a null pointer on end-of-file or 
+    error.
+
+    ERRORS
+
+    The getpwent(), setpwent(), and endpwent() functions may fail if:
+
+    [EIO] 
+    An I/O error has occurred. 
+
+    In addition, getpwent() and setpwent() may fail if:
+
+    [EMFILE] 
+    {OPEN_MAX} file descriptors are currently open in the calling process. 
+
+    [ENFILE] 
+    The maximum allowable number of files is currently open in the system. 
+
+    The return value may point to a static area which is overwritten by a 
+    subsequent call to getpwuid(), getpwnam(), or getpwent().
+*/
+specification
+Passwd* getpwent_spec(CallContext context, ErrorCode* errno, CancelStatus status)
+{
+    SystemState* curState=NULL;
+    Set*  globalUsersSet=NULL;
+    ProcessState* procState=NULL;
+    Set*  usersSet=NULL;
+    UidT  curUserUid=0;
+    Set     *oldUsersSet;
+    Set     *oldGlobalUsersSet;
+
+    procState=getProcessState_CallContext( context );
+    usersSet=procState->users;
+    curUserUid=procState->meta.effective_userid;
+    
+    curState=getSystemState( context.system );
+    globalUsersSet=curState->globalUsers;
+
+    oldUsersSet = clone(procState->users);
+    oldGlobalUsersSet = clone(curState->globalUsers);
+
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Process state shall not be NULL", procState!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "System state shall not be NULL", curState!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Set with user entries shall not be NULL", usersSet!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Set with global user entries shall not be NULL", 
+            globalUsersSet!=NULL);
+
+
+        *errno=SUT_EOK;
+       
+        return true;
+    }
+    coverage C
+    {    
+        if(procState->isDatabaseClosed==true)
+        {
+            return { FirstCalls, "First calls of getpwent" };
+        }
+        else /* if(procState->isDatabaseClosed==false) */
+        {
+            return { SuccessiveCalls, "Successive calls of getpwent" };
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+        /*
+         * The getpwent() function shall return a null pointer on end-of-file 
+         * or error.
+         */
+        REQ("getpwent.04", 
+            "The getpwent() function shall return a null pointer on error.", 
+            (*errno!=SUT_EOK)?getpwent_spec==NULL:true);
+        
+        
+        ERROR_BEGIN(POSIX_GETPWENT, "", getpwent_spec==NULL && *errno!=SUT_EOK, *errno)
+            /*
+             * The getpwent(), setpwent(), and endpwent() functions may fail if:
+             *
+             * [EIO]
+             *  An I/O error has occurred.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWENT, EIO,"getpwent.07.01", 
+                "Can not check IO errors")
+        
+            /*
+             * In addition, getpwent() and setpwent() may fail if:
+             *
+             * [EMFILE]
+             *  {OPEN_MAX} file descriptors are currently open in the calling process.
+             */
+            ERROR_MAY(POSIX_GETPWENT, EMFILE,"getpwent.08.01", isEMFILE(context))
+        
+            /*
+             * In addition, getpwent() and setpwent() may fail if:
+             *
+             * [ENFILE]
+             *  The maximum allowable number of files is currently open in the system.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWENT, ENFILE,"getpwent.08.02",
+                "Can not check this case")
+        ERROR_END()
+        
+        
+        /* [Implicit postcondition] */
+        REQ("", "Set shall be valid", isValidSet( usersSet, 0, false));
+        /* [Implicit postcondition] */
+        REQ("", "Global set with users information shall be valid", 
+            isValidSet(globalUsersSet, 0, false));  
+        
+        if(getpwent_spec!=NULL)
+        {
+            SystemState *oldSysState = @getSystemState( context.system );
+            ProcessState *oldProcState = @getProcessState_CallContext( context );
+
+            if(oldProcState==NULL)
+            {
+                /* [An item just returned is really new] */
+                REQ("", "Set shall not contain item to add",
+                    !contains_Set(
+                        oldUsersSet,
+                        getpwent_spec)
+                    );
+            }
+
+            if(oldSysState->isGlobalSetFilled)
+            {
+                /*
+                 * The getpwent() function shall return a pointer to a structure 
+                 * containing the broken-out fields of an entry in the user database. 
+                 * Each entry in the user database contains a passwd structure. When 
+                 * first called, getpwent() shall return a pointer to a passwd 
+                 * structure containing the first entry in the user database.
+                 */        
+                /*
+                 * Thereafter, it shall return a pointer to a passwd structure 
+                 * containing the next entry in the user database. Successive calls can 
+                 * be used to search the entire user database.
+                 */
+                REQ("getpwent.01;getpwent.02",
+                    "The user found exists in the set of known users",
+                    contains_Set(oldSysState->globalUsers, getpwent_spec)
+                    );
+            }
+        }
+
+
+        if (getpwent_spec==NULL) // root
+        {
+            /* [Implicit postcondition] */
+            REQ("", "Set shall be valid", isValidSet(usersSet, curUserUid, true));
+
+            /* [Implicit postcondition] */
+            REQ("", "Global set with users information shall be valid", 
+                isValidSet(globalUsersSet, curUserUid, true));
+
+            if(curUserUid==0)
+            {
+                /*
+                Linux Standard Base Core Specification 3.1
+                Copyright (c) 2004, 2005 Free Standards Group
+        
+                  21.2. User & Group Names
+          
+                    User    Group    Comments
+                    root    root    Administrative user with all appropriate privileges
+                    bin        bin        Legacy User ID/Group ID[a]
+                    daemon    daemon    Legacy User ID/Group ID[b]
+
+                    Notes:
+                        a. The bin User ID/Group ID is included for compatibility 
+                    with legacy applications. New applications should no 
+                    longer use the bin User ID/Group ID.
+                        b. The daemon User ID/Group ID was used as an unprivileged 
+                    User ID/Group ID for daemons to execute under in order to 
+                    limit their access to the system. Generally daemons should 
+                    now run under individual User ID/Group IDs in order to 
+                    further partition daemons from one another.
+                 */
+                REQ("usernames.01", "Required users: root, bin, daemon shall exist", 
+                    isRequiredUsersExist(usersSet));
+            
+                REQ("usernames.01", 
+                    "Required users: root, bin, daemon shall exist in global set", 
+                    isRequiredUsersExist(globalUsersSet));
+            
+                /* [Root shall see all users in the system] */
+                REQ("", "Root shall see all users in the system", 
+                    equals(globalUsersSet, usersSet));
+            }
+        }
+        
+        return true;
+    }
+}
+
+void onUserGetpwent(CallContext context, Passwd* getpwent_spec,  
+                    ErrorCode* errno, CancelStatus status)
+{
+    SystemState*  curState=NULL;
+    Set*          globalUsersSet=NULL;
+    ProcessState* procState=NULL;
+    Set*          usersSet=NULL;
+    UidT          curUserUid=0;
+    
+
+    if (CANCELLED(status))
+    {
+        onPThreadTestCancel(context);
+        return;
+    }
+    procState=getProcessState_CallContext( context );
+    usersSet=procState->users;
+    
+    curState=getSystemState( context.system );
+    globalUsersSet=curState->globalUsers;
+    
+    curUserUid=procState->meta.effective_userid;
+    
+    if(procState->isDatabaseClosed==true)
+    {
+        procState->isSetFilled=false;
+        clear_Set(usersSet);
+    }
+    
+    procState->isDatabaseClosed=false;
+    if(getpwent_spec != NULL)
+    {
+        add_Set(usersSet, getpwent_spec);
+        if(!curState->isGlobalSetFilled)
+            add_Set(globalUsersSet, getpwent_spec);
+    }
+    else if(*errno==SUT_EOK)
+    {        
+        procState->isSetFilled=true;
+        if(curUserUid==0)
+        {
+            curState->isGlobalSetFilled=true;
+        }
+    }
+}
+
+specification
+void endpwent_spec( CallContext context, ErrorCode* errno, CancelStatus status )
+{
+    ProcessState* curState=NULL;
+    Set*  usersSet=NULL;
+    
+    curState=getProcessState_CallContext( context );
+    if(curState!=NULL)
+        usersSet=curState->users;
+    
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Process state shall not be NULL", curState!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Set with user entries shall not be NULL",usersSet!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Cancel status shall be valid", isValid_CancelStatus(status) );
+        
+        return true;
+    }
+
+    coverage C
+    {
+        if(curState->isDatabaseClosed==true)
+        {
+            return { RedundantCalls, "Redundant calls of endpwent" };
+        }
+        else /* if(curState->isDatabaseClosed==false) */
+        {
+            return { OkCalls, "Not redundant calls of endpwent" };
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+        
+        ERROR_BEGIN(POSIX_ENDPWENT, "", *errno!=SUT_EOK, *errno)
+            /*
+             * The getpwent(), setpwent(), and endpwent() functions may fail if:
+             * [EIO]
+             *  An I/O error has occurred.
+             */
+            ERROR_UNCHECKABLE(POSIX_ENDPWENT, EIO,"endpwent.07.01",
+                "Can not check IO errors")
+        ERROR_END()
+               
+        /* [Implicit postcondition] */
+        REQ("", "Set shall be valid", isValidSet(usersSet, 0, false));
+        
+        return true;
+    }
+}
+
+void onUserEndpwent(CallContext context, ErrorCode* errno, CancelStatus status)
+{
+    ProcessState* procState=NULL;
+    procState=getProcessState_CallContext( context );
+    
+    if (CANCELLED(status))
+    {
+        onPThreadTestCancel(context);
+        return;
+    }
+    else if(*errno == SUT_EOK)
+    {
+        procState->isDatabaseClosed=true;
+    }
+}
+
+specification
+void setpwent_spec( CallContext context, ErrorCode* errno)
+{
+    ProcessState* curState=NULL;
+    Set*  usersSet=NULL;
+    
+    curState=getProcessState_CallContext( context );
+    if(curState!=NULL)
+        usersSet=curState->users;
+    
+    pre
+    {
+        
+        /* [Consistency of test suite] */
+        REQ("", "Process state shall not be NULL", curState!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Set with user entries shall not be NULL",usersSet!=NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(curState->isDatabaseClosed==true)
+        {
+            return { RedundantCalls, "Redundant calls of setpwent" };
+        }
+        else /* if(curState->isDatabaseClosed==false) */
+        {
+            return { OkCalls, "Not redundant calls of setpwent" };
+        }
+    }
+    post
+    {
+        ERROR_BEGIN(POSIX_SETPWENT, "", *errno!=SUT_EOK, *errno)
+            /*
+             * The getpwent(), setpwent(), and endpwent() functions may fail if:
+             *
+             * [EIO]
+             *  An I/O error has occurred.
+             */
+            ERROR_UNCHECKABLE(POSIX_SETPWENT, EIO,"setpwent.07.01",
+                "Can not check IO errors")
+        
+            /*
+             * In addition, getpwent() and setpwent() may fail if:
+             *
+             * [EMFILE]
+             *  {OPEN_MAX} file descriptors are currently open in the calling process.
+             */
+            ERROR_MAY(POSIX_SETPWENT, EMFILE,"setpwent.08.01", isEMFILE(context))
+        
+            /*
+             * In addition, getpwent() and setpwent() may fail if:
+             *
+             * [ENFILE]
+             *  The maximum allowable number of files is currently open in the system.
+             */
+            ERROR_UNCHECKABLE(POSIX_SETPWENT, ENFILE,"setpwent.08.02",
+                "Can not check this case")        
+        ERROR_END()
+        
+        return true;
+    }
+}
+
+
+void onUserSetpwent(CallContext context, ErrorCode* errno)
+{
+    ProcessState* procState=NULL;
+    Set*  usersSet;
+    
+    procState=getProcessState_CallContext( context );
+    usersSet=procState->users;
+    
+    if(*errno == SUT_EOK)
+    {
+        /*
+         * The setpwent() function effectively rewinds the user database to allow 
+         * repeated searches.
+         */
+        IMPLEMENT_REQ("setpwent.01");
+        
+        if(procState->isDatabaseClosed==false)
+        {
+            clear_Set(usersSet);
+            procState->isSetFilled=false;
+        }
+    }
+    
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    getpwnam, getpwnam_r - search user database for a name
+
+SYNOPSIS
+
+    #include <pwd.h>
+    struct passwd *getpwnam(const char *name);
+
+    int getpwnam_r(const char *name, struct passwd *pwd, char *buffer,
+       size_t bufsize, struct passwd **result); 
+
+
+DESCRIPTION
+
+    The getpwnam() function shall search the user database for an entry with 
+    a matching name.
+
+    The getpwnam() function need not be reentrant. A function that is not 
+    required to be reentrant is not required to be thread-safe.
+
+    Applications wishing to check for error situations should set errno to 0
+    before calling getpwnam(). If getpwnam() returns a null pointer and errno
+    is non-zero, an error occurred.
+
+    The getpwnam_r() function shall update the passwd structure pointed to by
+    pwd and store a pointer to that structure at the location pointed to by 
+    result. The structure shall contain an entry from the user database with a
+    matching name. Storage referenced by the structure is allocated from the 
+    memory provided with the buffer parameter, which is bufsize bytes in size. 
+    The maximum size needed for this buffer can be determined with the 
+    {_SC_GETPW_R_SIZE_MAX} sysconf() parameter. A NULL pointer shall be 
+    returned at the location pointed to by result on error or if the requested
+    entry is not found. 
+
+RETURN VALUE
+
+    The getpwnam() function shall return a pointer to a struct passwd with the
+    structure as defined in <pwd.h> with a matching entry if found. A null 
+    pointer shall be returned if the requested entry is not found, or an error
+    occurs. On error, errno shall be set to indicate the error.
+
+    The return value may point to a static area which is overwritten by a 
+    subsequent call to getpwent(), getpwnam(), or getpwuid().
+
+    If successful, the getpwnam_r() function shall return zero; otherwise, an 
+    error number shall be returned to indicate the error. 
+
+ERRORS
+
+    The getpwnam() and getpwnam_r() functions may fail if:
+
+    [EIO] 
+        An I/O error has occurred. 
+
+    [EINTR] 
+        A signal was caught during getpwnam(). 
+
+    [EMFILE] 
+        {OPEN_MAX} file descriptors are currently open in the calling process. 
+
+    [ENFILE] 
+        The maximum allowable number of files is currently open in the system. 
+
+    The getpwnam_r() function may fail if:
+
+    [ERANGE] 
+        Insufficient storage was supplied via buffer and bufsize to contain the 
+        data to be referenced by the resulting passwd structure.  
+*/
+
+specification
+Passwd* getpwnam_spec( CallContext context, CString* dest, ErrorCode* errno, CancelStatus status )
+{
+    ProcessState* curState=NULL;
+    Set*  usersSet=NULL;
+    Passwd* res;
+     
+    curState=getProcessState_CallContext( context );
+    if(curState!=NULL)
+        usersSet=curState->users;
+     
+    pre
+    {
+        /*
+         * Applications wishing to check for error situations should set errno to 0 before calling getpwnam().
+         */
+        REQ("app.getpwnam.02", "errno should be 0", *errno==0);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Process state shall not be NULL", curState!=NULL);
+         
+        /* [Consistency of test suite] */
+        REQ("", "Set with user entries shall not be NULL", 
+            usersSet!=NULL);
+         
+        if(curState->isSetFilled)
+            res=getpwnam_model(usersSet, dest);
+         
+        return true;
+    }
+    coverage C
+    {
+        if(curState->isSetFilled==true)
+        {
+            if(res!=NULL)
+                return { SetFilledConatains, 
+                "Set with users info was filled and contains item" };
+            else
+                return { SetFilledNotConatains, 
+                "Set with users info was filled and does not contain item" };
+        }
+        else /* if(curState->isSetFilled==false) */
+        {
+            return { SetNotFilled, "Set with users info was not filled" };
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+            
+        /*
+         * On error, errno shall be set to indicate the error.
+         */       
+        ERROR_BEGIN(POSIX_GETPWNAM, "getpwnam.07", *errno!=SUT_EOK, *errno )
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [EIO]
+             *  An I/O error has occurred.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWNAM, EIO,"getpwnam.05.01",
+                "Can not check IO errors")
+         
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [EINTR]
+             *  A signal was caught during getpwnam().
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWNAM, EINTR,"getpwnam.05.02",
+                "Can not check signals")
+         
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [EMFILE]
+             *  {OPEN_MAX} file descriptors are currently open in the calling 
+             *  process.
+             */
+            ERROR_MAY(POSIX_GETPWNAM, EMFILE,"getpwnam.05.03", isEMFILE(context))
+         
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [ENFILE]
+             *  The maximum allowable number of files is currently open in the 
+             *  system.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWNAM, ENFILE,"getpwnam.05.04",
+                "Can not check this case")
+         
+        ERROR_END()
+       
+        if(curState->isSetFilled)
+        {
+            /*
+             * The getpwnam() function shall search the user database for an 
+             * entry with a matching name.
+             */
+            IMPLEMENT_REQ("getpwnam.01");
+
+            if(res==NULL)
+            {
+                /* A null pointer shall be returned if the requested entry 
+                 * is not found, or an error occurs. 
+                 */
+                REQ("getpwnam.06", "getpwnam shall return NULL", 
+                    getpwnam_spec==NULL);
+            }
+            else
+            {
+                /* The getpwnam() function shall return a pointer to a struct
+                 * passwd with the structure as defined in <pwd.h> with a 
+                 * matching entry if found. 
+                 */ 
+                REQ("getpwnam.04", "getpwnam shall return valid value", 
+                    equals(res, getpwnam_spec));
+            }
+        }
+         
+        return true;
+    }
+}
+
+Passwd* getpwnam_model(Set* usersSet, CString*  destStr)
+{
+    int i=0;
+    for(i=0;i<size_Set(usersSet);i++)
+    {
+         Passwd* ps=get_Set(usersSet, i);
+         if(equals(ps->pw_name, destStr))
+                    return ps;
+    }
+    return NULL;
+}
+
+specification
+GetPwxxxFunctionResult* getpwnam_r_spec(CallContext context, 
+                                               CString* name, PasswdTPtr pwd, 
+                                               SizeT bufsize, 
+                                               PasswdTPtr* result, 
+                                               ErrorCode* errno,
+                                               CancelStatus status )
+{
+    ProcessState* curState=NULL;
+    Set*  usersSet=NULL;
+    Passwd* res;
+    
+    curState=getProcessState_CallContext( context );
+    if(curState!=NULL)
+        usersSet=curState->users;
+    
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Process state shall not be NULL", curState!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Set with user entries shall not be NULL",usersSet!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "pwd shall be  not NULL", !isNULL_VoidTPtr(pwd));
+        
+        /* [Implicit precondition] */
+        REQ("", "Pointer to pointer to result shall be not NULL", result!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by pwd is available in the context", 
+            isValidPointer(context, pwd));
+        
+        if(curState->isSetFilled)
+            res=getpwnam_model(usersSet, name);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(curState->isSetFilled==true)
+        {
+            if(res!=NULL)
+                return { SetFilledConatains, 
+                "Set with users info was filled and contains item" };
+            else
+                return { SetFilledNotConatains, 
+                "Set with users info was filled and does not contain item" };
+        }
+        else /* if(curState->isSetFilled==false) */
+        {
+            return { SetNotFilled, "Set with users info was not filled" };
+        }
+    }
+    coverage C_bufsize
+    {
+        LongT maxSize = getSystemConfigurationValue(context, 
+            SUT_SC_GETPW_R_SIZE_MAX);
+        
+        if(bufsize<maxSize)
+        {
+            return { BuffSmall, "Buffer size less than SC_GETPW_R_SIZE_MAX" };
+        } else if (bufsize==maxSize) {
+            return { BuffEqual, "Buffer size equals to SC_GETPW_R_SIZE_MAX" };
+        } else {
+            return { BuffMore, "Buffer size more than SC_GETPW_R_SIZE_MAX" };
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+        if(getpwnam_r_spec->errno!=0)
+        {
+            /*
+             * otherwise, an error number shall be returned to indicate the error.
+             */
+            REQ("getpwnam_r.03.02", "getpwuid_r shall return error number", 
+                getpwnam_r_spec->errno==*errno);
+
+            /*
+             *  A NULL pointer shall be returned at the location pointed to 
+             *  by result on error or if the requested entry is not found. 
+             */
+            REQ("getpwnam_r.02", "Pointer to result shall be NULL", 
+                isNULL_VoidTPtr(*result));
+        }
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_GETPWNAM_R, "getpwnam_r.03.02", getpwnam_r_spec->errno!=0, *errno)
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [EIO]
+             *  An I/O error has occurred.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWNAM_R, EIO,"getpwnam_r.05.01",
+                "Can not check IO errors")
+
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [EINTR]
+             *  A signal was caught during getpwnam().
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWNAM_R, EINTR,"getpwnam_r.05.02",
+                "Can not check signals")
+
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [EMFILE]
+             *  {OPEN_MAX} file descriptors are currently open in the calling 
+             *  process.
+             */
+            ERROR_MAY(POSIX_GETPWNAM_R, EMFILE,"getpwnam_r.05.03", isEMFILE(context))
+
+            /*
+             * The getpwnam() and getpwnam_r() functions may fail if:
+             *
+             * [ENFILE]
+             *  The maximum allowable number of files is currently open in the 
+             *  system.
+             */
+            ERROR_MAY(POSIX_GETPWNAM_R, ENFILE,"getpwnam_r.05.04", TODO_ERR(ENFILE))
+
+            /*
+             * The getpwnam_r() function may fail if:
+             *
+             * [ERANGE]
+             *  [TSF] Insufficient storage was supplied via buffer and bufsize 
+             *  to contain the data to be referenced by the resulting passwd 
+             *  structure.
+             */
+            ERROR_MAY(POSIX_GETPWNAM_R, ERANGE,"getpwnam_r.06.01", 
+                TODO_ERR(ERANGE))
+        ERROR_END()
+
+        /*
+         * If successful, the getpwnam_r() function shall return zero
+         */
+        REQ("getpwnam_r.03.01", "getpwnam_r() shall return zero on success", 
+            getpwnam_r_spec->errno==0);
+        
+        
+        if(curState->isSetFilled)
+        {
+            if(res==NULL)
+            {
+                /*
+                 *  A NULL pointer shall be returned at the location pointed to 
+                 *  by result on error or if the requested entry is not found. 
+                 */
+                REQ("getpwnam_r.02", "Pointer to result shall be NULL", 
+                    isNULL_VoidTPtr(*result));
+            }
+            else
+            {
+                /*
+                 * The getpwnam_r() function shall update the passwd structure 
+                 * pointed to by pwd and store a pointer to that structure at 
+                 * the location pointed to by result. The structure shall 
+                 * contain an entry from the user database with a matching 
+                 * name. Storage referenced by the structure is allocated from 
+                 * the memory provided with the buffer parameter, which is
+                 * bufsize bytes in size. The maximum size needed for this 
+                 * buffer can be determined with the {_SC_GETPW_R_SIZE_MAX} 
+                 * sysconf() parameter.
+                 */
+                REQ("getpwnam_r.01", 
+                    "result shall contain pointer to passwd structure", 
+                    equals_VoidTPtr(*result, pwd)
+                    );
+                
+                REQ("getpwnam_r.01", "Updated structure shall be valid", 
+                    isEqualPasswordStructures(
+                        context, 
+                        getpwnam_r_spec->pwd, res)
+                    );
+            }
+        }
+        
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getpwuid, getpwuid_r - search user database for a user ID
+
+SYNOPSIS
+
+    #include <pwd.h>
+    struct passwd *getpwuid(uid_t uid);
+    int getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer,
+       size_t bufsize, struct passwd **result); 
+
+
+DESCRIPTION
+
+    The getpwuid() function shall search the user database for an entry with a
+    matching uid.
+
+    The getpwuid() function need not be reentrant. A function that is not 
+    required to be reentrant is not required to be thread-safe.
+
+    Applications wishing to check for error situations should set errno to 0 
+    before calling getpwuid(). If getpwuid() returns a null pointer and errno 
+    is set to non-zero, an error occurred.
+
+    The getpwuid_r() function shall update the passwd structure pointed to by
+    pwd and store a pointer to that structure at the location pointed to by 
+    result. The structure shall contain an entry from the user database with a 
+    matching uid. Storage referenced by the structure is allocated from the 
+    memory provided with the buffer parameter, which is bufsize bytes in size. 
+    The maximum size needed for this buffer can be determined with the 
+    {_SC_GETPW_R_SIZE_MAX} sysconf() parameter. A NULL pointer shall be 
+    returned at the location pointed to by result on error or if the requested
+    entry is not found. 
+
+RETURN VALUE
+
+    The getpwuid() function shall return a pointer to a struct passwd with the
+    structure as defined in <pwd.h> with a matching entry if found. A null 
+    pointer shall be returned if the requested entry is not found, or an error 
+    occurs. On error, errno shall be set to indicate the error.
+
+    The return value may point to a static area which is overwritten by a 
+    subsequent call to getpwent(), getpwnam(), or getpwuid().
+
+    If successful, the getpwuid_r() function shall return zero; otherwise, an 
+    error number shall be returned to indicate the error. 
+
+ERRORS
+
+    The getpwuid() and getpwuid_r() functions may fail if:
+
+    [EIO] 
+        An I/O error has occurred. 
+    [EINTR] 
+        A signal was caught during getpwuid(). 
+    [EMFILE] 
+        {OPEN_MAX} file descriptors are currently open in the calling process. 
+    [ENFILE] 
+        The maximum allowable number of files is currently open in the system. 
+
+    The getpwuid_r() function may fail if:
+
+    [ERANGE] 
+        Insufficient storage was supplied via buffer and bufsize to contain the
+        data to be referenced by the resulting passwd structure.  
+*/
+
+specification
+Passwd* getpwuid_spec( CallContext context, UidT uid, ErrorCode* errno, 
+                       CancelStatus status )
+{
+    ProcessState* curState=NULL;
+    Set*  usersSet=NULL;
+    Passwd* res;
+    
+    curState=getProcessState_CallContext( context );
+    if(curState!=NULL)
+        usersSet=curState->users;
+    
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Process state shall not be NULL", curState!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Set with user entries shall not be NULL",usersSet!=NULL);
+        
+        /*
+         * Applications wishing to check for error situations should set errno 
+         * to 0 before calling getpwuid().
+         */
+        REQ("app.getpwuid.02", "errno should be before call", *errno==0);
+
+        if(curState->isSetFilled)
+            res=getpwuid_model(usersSet, uid);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(curState->isSetFilled==true)
+        {
+            if(res!=NULL)
+                return { SetFilledConatains, 
+                "Set with users info was filled and contains item" };
+            else
+                return { SetFilledNotConatains, 
+                "Set with users info was filled and does not contain item" };
+        }
+        else /* if(curState->isSetFilled==false) */
+        {
+            return { SetNotFilled, "Set with users info was not filled" };
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+            
+        /*
+         * On error, errno shall be set to indicate the error.
+         */
+
+        /*
+         * If getpwuid() returns a null pointer and errno is set to non-zero, 
+         * an error occurred.
+         */
+        ERROR_BEGIN(POSIX_GETPWUID, "getpwuid.03;getpwuid.05", 
+            *errno!=SUT_EOK&&getpwuid_spec==NULL, *errno)
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [EIO]
+             *  An I/O error has occurred.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWUID, EIO,"getpwuid.10.01",
+                "Can not check IO errors")
+
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [EINTR]
+             *  A signal was caught during getpwuid().
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWUID, EINTR,"getpwuid.10.02",
+                "Can not check signals")
+
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [EMFILE]
+             *  {OPEN_MAX} file descriptors are currently open in the calling process.
+             */
+            ERROR_MAY(POSIX_GETPWUID, EMFILE,"getpwuid.10.03", isEMFILE(context))
+
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [ENFILE]
+             *  The maximum allowable number of files is currently open in the system.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWUID, ENFILE,"getpwuid.10.04",
+                "Can not check this case")
+        ERROR_END()
+        
+
+
+        if(curState->isSetFilled)
+        {
+            if(res==NULL)
+            {
+                /* 
+                 * A null pointer shall be returned if the requested entry 
+                 * is not found, or an error occurs.
+                 */
+                REQ("getpwuid.03", "getpwuid shall return NULL", 
+                    getpwuid_spec==NULL);
+            }
+            else
+            {
+                /*
+                 * The getpwuid() function shall search the user database for 
+                 * an entry with a matching uid.
+                 */
+
+                /* 
+                 * The getpwuid() function shall return a pointer to a struct 
+                 * passwd with the structure as defined in <pwd.h> with a 
+                 * matching entry if found.
+                 */ 
+                REQ("getpwuid.01;getpwuid.04", "getpwuid shall return valid value", 
+                    equals(res, getpwuid_spec));
+            }
+        }
+        
+        return true;
+    }
+}
+
+Passwd* getpwuid_model(Set* usersSet, UidT dest)
+{
+    int i=0;
+    for(i=0;i<size_Set(usersSet);i++)
+    {
+         Passwd* ps=get_Set(usersSet, i);
+         if(ps->pw_uid==dest)
+                    return ps;
+    }
+    return NULL;
+}
+
+specification
+GetPwxxxFunctionResult*  getpwuid_r_spec(CallContext context, UidT uid,  
+                                                PasswdTPtr pwd, SizeT bufsize, 
+                                                PasswdTPtr* result, 
+                                                ErrorCode* errno,
+                                                CancelStatus status )
+{
+    ProcessState* curState=NULL;
+    Set*  usersSet=NULL;
+    Passwd* res;
+    
+    curState=getProcessState_CallContext( context );
+    if(curState!=NULL)
+        usersSet=curState->users;
+    
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Process state shall not be NULL", curState!=NULL);
+        
+        /* [Consistency of test suite] */
+        REQ("", "Set with user entries shall not be NULL",usersSet!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "pwd is not NULL", !isNULL_VoidTPtr(pwd));
+        
+        /* [Implicit precondition] */
+        REQ("", "Pointer to pointer to result is not NULL", result!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by pwd is available in the context", 
+            isValidPointer(context, pwd));
+        
+        if(curState->isSetFilled)
+            res=getpwuid_model(usersSet, uid);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(curState->isSetFilled==true)
+        {
+            if(res!=NULL)
+                return { SetFilledConatains, 
+                "Set with users info was filled and contains item" };
+            else
+                return { SetFilledNotConatains, 
+                "Set with users info was filled and does not contain item" };
+        }
+        else /* if(curState->isSetFilled==false) */
+        {
+            return { SetNotFilled, "Set with users info was not filled" };
+        }
+    }
+    coverage C_bufsize
+    {
+        LongT maxSize = getSystemConfigurationValue(context,
+            SUT_SC_GETPW_R_SIZE_MAX);
+        
+        if(bufsize<maxSize)
+        {
+            return { BuffSmall, "Buffer size less than SC_GETPW_R_SIZE_MAX" };
+        } else if (bufsize==maxSize) {
+            return { BuffEqual, "Buffer size equals to SC_GETPW_R_SIZE_MAX" };
+        } else {
+            return { BuffMore, "Buffer size more than SC_GETPW_R_SIZE_MAX" };
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+
+        if(getpwuid_r_spec->errno!=SUT_EOK)
+        {
+            /*
+             * otherwise, an error number shall be returned to indicate the error.
+             */
+            REQ("getpwuid_r.03.02", "getpwuid_r shall return error number", 
+                getpwuid_r_spec->errno==*errno);
+
+            /*
+             * A NULL pointer shall be returned at the location pointed to by
+             * result on error or if the requested entry is not found.
+             */
+            REQ("getpwuid_r.02", "Pointer to result shall be NULL", 
+                isNULL_VoidTPtr(*result));
+        }
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_GETPWUID_R, "getpwuid_r.03.02", getpwuid_r_spec->errno, getpwuid_r_spec->errno)
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [EIO]
+             *  An I/O error has occurred.
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWUID_R, EIO,"getpwuid_r.10.01",
+                "Can not check IO errors")
+
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [EINTR]
+             *  A signal was caught during getpwuid().
+             */
+            ERROR_UNCHECKABLE(POSIX_GETPWUID_R, EINTR,"getpwuid_r.10.02",
+                "Can not check signals")
+
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [EMFILE]
+             *  {OPEN_MAX} file descriptors are currently open in the calling 
+             *  process.
+             *
+             */
+            ERROR_MAY(POSIX_GETPWUID_R, EMFILE,"getpwuid_r.10.03", isEMFILE(context))
+
+            /*
+             * The getpwuid() and getpwuid_r() functions may fail if:
+             *
+             * [ENFILE]
+             *  The maximum allowable number of files is currently open in the 
+             *  system.
+             */
+            ERROR_MAY(POSIX_GETPWUID_R, ENFILE,"getpwuid_r.10.04", TODO_ERR(ENFILE))
+
+            /*
+             * The getpwuid_r() function may fail if:
+             *
+             * [ERANGE]
+             *
+             * [TSF]
+             *  Insufficient storage was supplied via buffer and bufsize to 
+             *  contain the data to be referenced by the resulting passwd 
+             *  structure.
+             *
+             */
+            ERROR_MAY(POSIX_GETPWUID_R, ERANGE,"getpwuid_r.11.01", 
+                TODO_ERR(ERANGE))
+        ERROR_END()
+
+        
+        /*
+         * [TSF] If successful, the getpwuid_r() function shall return zero; 
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        REQ("getpwuid_r.03.02", 
+            "getpwuid_r shall return zero", getpwuid_r_spec->errno==0);
+
+        if(curState->isSetFilled)
+        {
+            if(res==NULL)
+            {
+                /*
+                 * A NULL pointer shall be returned at the location pointed to 
+                 * by result on error or if the requested entry is not found.
+                 */
+                REQ("getpwuid_r.02", "Pointer to result shall be NULL", 
+                    isNULL_VoidTPtr(*result));
+            }
+            else
+            {
+
+                /*
+                 * The getpwuid_r() function shall update the passwd structure 
+                 * pointed to by pwd and store a pointer to that structure at 
+                 * the location pointed to by result. The structure shall 
+                 * contain an entry from the user database with a matching uid. 
+                 * Storage referenced by the structure is allocated from the 
+                 * memory provided with the buffer parameter, which is bufsize 
+                 * bytes in size. The maximum size needed for this buffer can 
+                 * be determined with the {_SC_GETPW_R_SIZE_MAX} sysconf() 
+                 * parameter.
+                 */
+                REQ("getpwuid_r.01",
+                    "result shall contain pointer to passwd structure", 
+                    equals_VoidTPtr(*result, pwd));
+
+                REQ("getpwuid_r.01", "Updated structure shall be valid", 
+                    isEqualPasswordStructures(
+                        context,
+                        getpwuid_r_spec->pwd, res)
+                    );
+            }
+        }
+       
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       User Types                               **/
+/********************************************************************/
+
+specification typedef struct GetPwxxxFunctionResult GetPwxxxFunctionResult={};
+
+GetPwxxxFunctionResult *create_GetPwxxxFunctionResult(IntT errno, Passwd *pwd)
+{
+    return create(&type_GetPwxxxFunctionResult, errno, pwd);
+}
+
+/********************************************************************/
+/**                    Local Helper Functions                      **/
+/********************************************************************/
+bool isEMFILE(CallContext context)
+{
+    LongT res = getSystemConfigurationValue(context, SUT_SC_OPEN_MAX);
+
+    if(res==SC_VALUE_NO_LIMIT)
+    {
+        return false;
+    } else if(res==SC_VALUE_UNKNOWN) {
+//        setBadVerdict("_SC_OPEN_MAX is not initialized before call to isEMFILE()");
+        return false;
+    } else if(res<=size_Map(getFileDescriptors(context))) {
+        return true;
+    }
+    return false;
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+bool isEqualPasswordStructures(CallContext context, Passwd* pwd1, Passwd* pwd2)
+{
+    if(!equals(pwd1->pw_name,pwd2->pw_name ))
+        return false;
+
+    if(pwd1->pw_uid != pwd2->pw_uid)
+        return false;
+
+    if(pwd1->pw_gid != pwd2->pw_gid)
+        return false;
+
+    if(!equals(pwd1->pw_dir, pwd2->pw_dir ))
+        return false;
+
+    if(!equals(pwd1->pw_shell, pwd2->pw_shell ))
+        return false;
+
+    return true;
+}
+
+
+bool isRequiredUserExist(Set* usersSet, CString* name)
+{
+    int i=0;
+
+    for(i=0;i<size_Set(usersSet);i++)
+    {
+         Passwd* ps=get_Set(usersSet, i);
+         if(equals(ps->pw_name, name))
+                    return true;
+    }
+    return false;
+}
+
+
+bool isRequiredUsersExist(Set* set)
+{
+    CString* root=create_CString("root");
+    CString* bin=create_CString("bin");
+    CString* daemon=create_CString("daemon");
+
+    return ( 
+        T(isRequiredUserExist(set, root)) 
+        && 
+        T(isRequiredUserExist(set, bin)) 
+        && 
+        T(isRequiredUserExist(set, daemon)) 
+        );
+}
+
+bool isValidSet(Set* usersSet, UidT self, bool checkSelf)
+{
+    int i=0, j=0;
+    for(i=0;i<size_Set(usersSet);i++)
+    {
+        for(j=0;j<size_Set(usersSet);j++)
+        {
+            if(i!=j)
+            {
+                Passwd* p1=get_Set(usersSet, i);
+                Passwd* p2=get_Set(usersSet, j);
+                if(equals(p1->pw_name, p2->pw_name))
+                    return false;
+            }
+        }
+    }
+
+    if(checkSelf)
+    {
+        /*
+         * An implementation that provides extended security controls may 
+         * impose further implementation-defined restrictions on accessing
+         * the user database. In particular, the system may deny the existence 
+         * of some or all of the user database entries associated with users 
+         * other than the caller.
+         */
+        /*
+         * [We assume that a "caller" must exist in the set of users]
+         */
+        IMPLEMENT_REQ("getpwent.05;endpwent.05");
+
+        for(i=0;i<size_Set(usersSet);i++)
+        {
+            Passwd* p=get_Set(usersSet, i);
+            if (p->pw_uid==self)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+    else
+    {
+        return true;
+    }
+}

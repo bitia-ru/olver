@@ -1,0 +1,892 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "signal/sigctrl/sigctrl_config.h"
+#include "signal/sigctrl/sigctrl_model.seh"
+#include "signal/sigstr/sigstr_model.seh"
+
+#pragma SEC subsystem sigctrl "signal.sigctrl"
+
+/*
+   The group of functions 'signal.sigctrl' consists of:
+       sighold [2]
+       sigignore [2]
+       sigpause [2]
+       sigrelse [2]
+       sigset [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sighold, sigignore, sigpause, sigrelse, sigset - signal management
+
+SYNOPSIS
+
+    [XSI]  #include <signal.h>
+
+    int sighold(int sig);
+    int sigignore(int sig);
+    int sigpause(int sig);
+    int sigrelse(int sig);
+    void (*sigset(int sig, void (*disp)(int)))(int);
+
+DESCRIPTION
+
+    Use of any of these functions is unspecified in a multi-threaded process.
+    The sighold(), sigignore(), sigpause(), sigrelse(), and sigset() functions
+    provide simplified signal management.
+    The sigset() function shall modify signal dispositions. The sig argument
+    specifies the signal, which may be any signal except SIGKILL and SIGSTOP.
+    The disp argument specifies the signal's disposition, which may be SIG_DFL
+    , SIG_IGN, or the address of a signal handler. If sigset() is used, and
+    disp is the address of a signal handler, the system shall add sig to the
+    calling process' signal mask before executing the signal handler; when the
+    signal handler returns, the system shall restore the calling process'
+    signal mask to its state prior to the delivery of the signal. In addition,
+    if sigset() is used, and disp is equal to SIG_HOLD, sig shall be added to
+    the calling process' signal mask and sig's disposition shall remain
+    unchanged. If sigset() is used, and disp is not equal to SIG_HOLD, sig
+    shall be removed from the calling process' signal mask.
+    The sighold() function shall add sig to the calling process' signal mask.
+    The sigrelse() function shall remove sig from the calling process' signal
+    mask.
+    The sigignore() function shall set the disposition of sig to SIG_IGN.
+    The sigpause() function shall remove sig from the calling process' signal
+    mask and suspend the calling process until a signal is received. The
+    sigpause() function shall restore the process' signal mask to its original
+    state before returning.
+    If the action for the SIGCHLD signal is set to SIG_IGN, child processes of
+    the calling processes shall not be transformed into zombie processes when
+    they terminate. If the calling process subsequently waits for its children
+    , and the process has no unwaited-for children that were transformed into
+    zombie processes, it shall block until all of its children terminate, and
+    wait(), waitid(), and waitpid() shall fail and set errno to [ECHILD].
+
+RETURN VALUE
+
+    Upon successful completion, sigset() shall return SIG_HOLD if the signal
+    had been blocked and the signal's previous disposition if it had not been
+    blocked. Otherwise, SIG_ERR shall be returned and errno set to indicate
+    the error.
+    The sigpause() function shall suspend execution of the thread until a
+    signal is received, whereupon it shall return -1 and set errno to [EINTR].
+    For all other functions, upon successful completion, 0 shall be returned.
+    Otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    These functions shall fail if:
+
+    [EINVAL]
+    The sig argument is an illegal signal number.
+    The sigset() and sigignore() functions shall fail if:
+
+    [EINVAL]
+    An attempt is made to catch a signal that cannot be caught, or to ignore a
+    signal that cannot be ignored.
+*/
+specification
+IntT sighold_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    pre
+    {
+        /*
+         * Use of any of these functions is unspecified in a multi-threaded process.
+         */
+        REQ("app.sighold.01", "", TODO_REQ());
+
+        return true;
+    }
+    coverage sighold_coverage = CoverageForSignal( context, sig );
+    post
+    {
+        ThreadState * threadState = getThreadState_CallContext( context );
+        Set * signalMask = get_List( threadState->signal_masks_stack, 0 );
+
+        /*
+         * Otherwise, -1 shall be returned and errno set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_SIGHOLD, "sighold.04", sighold_spec == -1, * errno )
+            /*
+             * These functions shall fail if:
+             *
+             * [EINVAL] The sig argument is an illegal signal number.
+             */
+            ERROR_SHALL( POSIX_SIGHOLD, EINVAL, "sighold.10.01", sighold_coverage == CoverageForSignal.UnknownSignal )
+        ERROR_END()
+
+        /*
+         * The sighold() function shall add sig to the calling process' signal mask
+         */
+        REQ( "sighold.02", "sighold() add sig to signal mask", contains_Set( signalMask, create_SignalObj( sig ) ) );
+
+        /*
+         * For all other functions, upon successful completion, 0 shall be returned
+         */
+        REQ( "sighold.03", "upon successful completion, 0 shall be returned", sighold_spec == 0 );
+
+        return true;
+    }
+}
+
+void onSighold( CallContext context, IntT sig )
+{
+    ThreadState* thrSt;
+    Set* cur_mask;
+    SignalObj* sigobj;
+    thrSt = getThreadState_CallContext(context);
+    cur_mask = get_List(thrSt->signal_masks_stack, 0);
+    sigobj = create_SignalObj(sig);
+
+    add_Set(cur_mask, sigobj);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sighold, sigignore, sigpause, sigrelse, sigset - signal management
+
+SYNOPSIS
+
+    [XSI]  #include <signal.h>
+
+    int sighold(int sig);
+    int sigignore(int sig);
+    int sigpause(int sig);
+    int sigrelse(int sig);
+    void (*sigset(int sig, void (*disp)(int)))(int);
+
+DESCRIPTION
+
+    Use of any of these functions is unspecified in a multi-threaded process.
+    The sighold(), sigignore(), sigpause(), sigrelse(), and sigset() functions
+    provide simplified signal management.
+    The sigset() function shall modify signal dispositions. The sig argument
+    specifies the signal, which may be any signal except SIGKILL and SIGSTOP.
+    The disp argument specifies the signal's disposition, which may be SIG_DFL
+    , SIG_IGN, or the address of a signal handler. If sigset() is used, and
+    disp is the address of a signal handler, the system shall add sig to the
+    calling process' signal mask before executing the signal handler; when the
+    signal handler returns, the system shall restore the calling process'
+    signal mask to its state prior to the delivery of the signal. In addition,
+    if sigset() is used, and disp is equal to SIG_HOLD, sig shall be added to
+    the calling process' signal mask and sig's disposition shall remain
+    unchanged. If sigset() is used, and disp is not equal to SIG_HOLD, sig
+    shall be removed from the calling process' signal mask.
+    The sighold() function shall add sig to the calling process' signal mask.
+    The sigrelse() function shall remove sig from the calling process' signal
+    mask.
+    The sigignore() function shall set the disposition of sig to SIG_IGN.
+    The sigpause() function shall remove sig from the calling process' signal
+    mask and suspend the calling process until a signal is received. The
+    sigpause() function shall restore the process' signal mask to its original
+    state before returning.
+    If the action for the SIGCHLD signal is set to SIG_IGN, child processes of
+    the calling processes shall not be transformed into zombie processes when
+    they terminate. If the calling process subsequently waits for its children
+    , and the process has no unwaited-for children that were transformed into
+    zombie processes, it shall block until all of its children terminate, and
+    wait(), waitid(), and waitpid() shall fail and set errno to [ECHILD].
+
+RETURN VALUE
+
+    Upon successful completion, sigset() shall return SIG_HOLD if the signal
+    had been blocked and the signal's previous disposition if it had not been
+    blocked. Otherwise, SIG_ERR shall be returned and errno set to indicate
+    the error.
+    The sigpause() function shall suspend execution of the thread until a
+    signal is received, whereupon it shall return -1 and set errno to [EINTR].
+    For all other functions, upon successful completion, 0 shall be returned.
+    Otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    These functions shall fail if:
+
+    [EINVAL]
+    The sig argument is an illegal signal number.
+    The sigset() and sigignore() functions shall fail if:
+
+    [EINVAL]
+    An attempt is made to catch a signal that cannot be caught, or to ignore a
+    signal that cannot be ignored.
+*/
+specification
+IntT sigignore_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    pre
+    {
+        /*
+         * Use of any of these functions is unspecified in a multi-threaded process.
+         */
+        REQ("app.sigignore.01", "", TODO_REQ());
+
+        return true;
+    }
+    coverage sigignore_coverage = CoverageForSignal( context, sig );
+    post
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+        SigAction * sigAction = get_Map( processState->signal_actions, create_SignalObj( sig ) );
+
+        /*
+         * Otherwise, -1 shall be returned and errno set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_SIGIGNORE, "sigignore.04", sigignore_spec == -1, * errno )
+            /*
+             * These functions shall fail if:
+             *
+             * [EINVAL] The sig argument is an illegal signal number.
+             */
+            /*
+             * The sigset() and sigignore() functions shall fail if:
+             *
+             * [EINVAL] An attempt is made to catch a signal that cannot be caught, or to
+             * ignore a signal that cannot be ignored.
+             */
+            ERROR_SHALL( POSIX_SIGIGNORE, EINVAL, "sigignore.10.01;sigset.11.01",
+                                                  sigignore_coverage == CoverageForSignal.UnknownSignal
+                       )
+        ERROR_END()
+
+        /*
+         * The sigignore() function shall set the disposition of sig to SIG_IGN
+         */
+        REQ( "sigignore.02", "sigignore() set the disposition of sig to SIG_IGN", sigAction->m_sa_handler == SUT_SIG_IGN );
+
+        /*
+         * For all other functions, upon successful completion, 0 shall be returned
+         */
+        REQ( "sigignore.03", "upon successful completion, 0 shall be returned", sigignore_spec == 0 );
+
+        return true;
+    }
+}
+
+void onSigignore(CallContext context, IntT sig)
+{
+    ProcessState* prSt;
+    SigAction* new_action;
+
+    new_action = create_SigAction();
+    new_action->m_sa_handler = SUT_SIG_IGN;
+
+    prSt = getProcessState_CallContext(context);
+    put_Map(prSt->signal_actions,  create_SignalObj(sig), new_action);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sighold, sigignore, sigpause, sigrelse, sigset - signal management
+
+SYNOPSIS
+
+    [XSI]  #include <signal.h>
+
+    int sighold(int sig);
+    int sigignore(int sig);
+    int sigpause(int sig);
+    int sigrelse(int sig);
+    void (*sigset(int sig, void (*disp)(int)))(int);
+
+DESCRIPTION
+
+    Use of any of these functions is unspecified in a multi-threaded process.
+    The sighold(), sigignore(), sigpause(), sigrelse(), and sigset() functions
+    provide simplified signal management.
+    The sigset() function shall modify signal dispositions. The sig argument
+    specifies the signal, which may be any signal except SIGKILL and SIGSTOP.
+    The disp argument specifies the signal's disposition, which may be SIG_DFL
+    , SIG_IGN, or the address of a signal handler. If sigset() is used, and
+    disp is the address of a signal handler, the system shall add sig to the
+    calling process' signal mask before executing the signal handler; when the
+    signal handler returns, the system shall restore the calling process'
+    signal mask to its state prior to the delivery of the signal. In addition,
+    if sigset() is used, and disp is equal to SIG_HOLD, sig shall be added to
+    the calling process' signal mask and sig's disposition shall remain
+    unchanged. If sigset() is used, and disp is not equal to SIG_HOLD, sig
+    shall be removed from the calling process' signal mask.
+    The sighold() function shall add sig to the calling process' signal mask.
+    The sigrelse() function shall remove sig from the calling process' signal
+    mask.
+    The sigignore() function shall set the disposition of sig to SIG_IGN.
+    The sigpause() function shall remove sig from the calling process' signal
+    mask and suspend the calling process until a signal is received. The
+    sigpause() function shall restore the process' signal mask to its original
+    state before returning.
+    If the action for the SIGCHLD signal is set to SIG_IGN, child processes of
+    the calling processes shall not be transformed into zombie processes when
+    they terminate. If the calling process subsequently waits for its children
+    , and the process has no unwaited-for children that were transformed into
+    zombie processes, it shall block until all of its children terminate, and
+    wait(), waitid(), and waitpid() shall fail and set errno to [ECHILD].
+
+RETURN VALUE
+
+    Upon successful completion, sigset() shall return SIG_HOLD if the signal
+    had been blocked and the signal's previous disposition if it had not been
+    blocked. Otherwise, SIG_ERR shall be returned and errno set to indicate
+    the error.
+    The sigpause() function shall suspend execution of the thread until a
+    signal is received, whereupon it shall return -1 and set errno to [EINTR].
+    For all other functions, upon successful completion, 0 shall be returned.
+    Otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    These functions shall fail if:
+
+    [EINVAL]
+    The sig argument is an illegal signal number.
+    The sigset() and sigignore() functions shall fail if:
+
+    [EINVAL]
+    An attempt is made to catch a signal that cannot be caught, or to ignore a
+    signal that cannot be ignored.
+*/
+specification
+void sigpause_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    pre
+    {
+        /*
+         * Use of any of these functions is unspecified in a multi-threaded process.
+         */
+        REQ("app.sigpause.01", "", TODO_REQ());
+
+        return true;
+    }
+    coverage sigpause_coverage = CoverageForSignal( context, sig );
+    post
+    {
+        verbose( "sigpause_spec : sig is %d\n", sig );
+        return true;
+    }
+}
+
+void onSigpause( CallContext context, IntT sig )
+{
+    IntT was_set;
+    ThreadState* thrSt;
+    Set* cur_mask;
+    SignalObj* sigobj;
+
+    thrSt = getThreadState_CallContext(context);
+    cur_mask = get_List(thrSt->signal_masks_stack, 0);
+    sigobj = create_SignalObj(sig);
+
+    if (contains_Set(cur_mask, sigobj))
+    {
+        was_set = 1;
+    }
+    else
+    {
+        was_set = 0;
+    }
+
+    remove_Set(cur_mask, sigobj);
+
+    startBlockedCall(context, create_SigpauseBlockedType(context, sig, was_set));
+}
+
+reaction SigpauseReactionType * sigpause_react( void )
+{
+    post
+    {
+        /*
+         * errno set to indicate the error
+         */
+        ERROR_BEGIN( POSIX_SIGPAUSE, "sigpause.05",
+                     * sigpause_react->errno != SUT_EOK && * sigpause_react->errno != SUT_EINTR,
+                     * sigpause_react->errno
+                   )
+            verbose( "sigpause_react : sigpause_react->sig is %d\n", sigpause_react->sig );
+            /*
+             * These functions shall fail if:
+             *
+             * [EINVAL] The sig argument is an illegal signal number.
+             */
+            ERROR_SHALL( POSIX_SIGPAUSE, EINVAL, "sigpause.10.01",
+                         signalToCString( sigpause_react->context, sigpause_react->sig ) == NULL
+                       )
+        ERROR_END()
+
+        /*
+         * The sigpause() function shall
+         *
+         * remove sig from the calling process' signal mask
+         */
+        REQ("sigpause.02.01", "", TODO_REQ());
+
+        /*
+         * The sigpause() function shall
+         *
+         * suspend the calling process until a signal is received
+         */
+        REQ("sigpause.02.02", "", TODO_REQ());
+
+        /*
+         * The sigpause() function shall restore the process' signal mask to its original
+         * state before returning
+         */
+        REQ("sigpause.03", "", TODO_REQ());
+
+        /*
+         * The sigpause() function shall suspend execution of the thread until a signal is
+         * received
+         */
+        REQ("sigpause.04", "", TODO_REQ());
+
+        /*
+         * whereupon it shall return -1 and set errno to [EINTR].
+         */
+        REQ( "sigpause.05", "", sigpause_react->res == -1 && * sigpause_react->errno == SUT_EINTR );
+    }
+}
+
+void onSigpauseReact(SigpauseReactionType* params)
+{
+    ThreadState* thrSt;
+    Set* cur_mask;
+    SignalObj* sigobj;
+    SigpauseBlockedType* blockedCall;
+
+
+    blockedCall = finishBlockedCall(params->context);
+    if (blockedCall->was_set != 0) //before sigpause call mask was set for this signal
+    {
+        thrSt = getThreadState_CallContext(params->context);
+        cur_mask = get_List(thrSt->signal_masks_stack, 0);
+        sigobj = create_SignalObj(blockedCall->sig);
+        add_Set(cur_mask, sigobj);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sighold, sigignore, sigpause, sigrelse, sigset - signal management
+
+SYNOPSIS
+
+    [XSI]  #include <signal.h>
+
+    int sighold(int sig);
+    int sigignore(int sig);
+    int sigpause(int sig);
+    int sigrelse(int sig);
+    void (*sigset(int sig, void (*disp)(int)))(int);
+
+DESCRIPTION
+
+    Use of any of these functions is unspecified in a multi-threaded process.
+    The sighold(), sigignore(), sigpause(), sigrelse(), and sigset() functions
+    provide simplified signal management.
+    The sigset() function shall modify signal dispositions. The sig argument
+    specifies the signal, which may be any signal except SIGKILL and SIGSTOP.
+    The disp argument specifies the signal's disposition, which may be SIG_DFL
+    , SIG_IGN, or the address of a signal handler. If sigset() is used, and
+    disp is the address of a signal handler, the system shall add sig to the
+    calling process' signal mask before executing the signal handler; when the
+    signal handler returns, the system shall restore the calling process'
+    signal mask to its state prior to the delivery of the signal. In addition,
+    if sigset() is used, and disp is equal to SIG_HOLD, sig shall be added to
+    the calling process' signal mask and sig's disposition shall remain
+    unchanged. If sigset() is used, and disp is not equal to SIG_HOLD, sig
+    shall be removed from the calling process' signal mask.
+    The sighold() function shall add sig to the calling process' signal mask.
+    The sigrelse() function shall remove sig from the calling process' signal
+    mask.
+    The sigignore() function shall set the disposition of sig to SIG_IGN.
+    The sigpause() function shall remove sig from the calling process' signal
+    mask and suspend the calling process until a signal is received. The
+    sigpause() function shall restore the process' signal mask to its original
+    state before returning.
+    If the action for the SIGCHLD signal is set to SIG_IGN, child processes of
+    the calling processes shall not be transformed into zombie processes when
+    they terminate. If the calling process subsequently waits for its children
+    , and the process has no unwaited-for children that were transformed into
+    zombie processes, it shall block until all of its children terminate, and
+    wait(), waitid(), and waitpid() shall fail and set errno to [ECHILD].
+
+RETURN VALUE
+
+    Upon successful completion, sigset() shall return SIG_HOLD if the signal
+    had been blocked and the signal's previous disposition if it had not been
+    blocked. Otherwise, SIG_ERR shall be returned and errno set to indicate
+    the error.
+    The sigpause() function shall suspend execution of the thread until a
+    signal is received, whereupon it shall return -1 and set errno to [EINTR].
+    For all other functions, upon successful completion, 0 shall be returned.
+    Otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    These functions shall fail if:
+
+    [EINVAL]
+    The sig argument is an illegal signal number.
+    The sigset() and sigignore() functions shall fail if:
+
+    [EINVAL]
+    An attempt is made to catch a signal that cannot be caught, or to ignore a
+    signal that cannot be ignored.
+*/
+specification
+IntT sigrelse_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    pre
+    {
+        /*
+         * Use of any of these functions is unspecified in a multi-threaded process.
+         */
+        REQ("app.sigrelse.01", "", TODO_REQ());
+
+        return true;
+    }
+    coverage sigrelse_coverage = CoverageForSignal( context, sig );
+    post
+    {
+        ThreadState * threadState = getThreadState_CallContext( context );
+        Set * signalMask = get_List( threadState->signal_masks_stack, 0 );
+
+        /*
+         * Otherwise, -1 shall be returned and errno set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_SIGRELSE, "sigrelse.04", sigrelse_spec == -1, * errno )
+            /*
+             * These functions shall fail if:
+             *
+             * [EINVAL] The sig argument is an illegal signal number.
+             */
+            ERROR_SHALL( POSIX_SIGRELSE, EINVAL, "sigrelse.10.01", sigrelse_coverage == CoverageForSignal.UnknownSignal )
+        ERROR_END()
+
+        /*
+         * The sigrelse() function shall remove sig from the calling process' signal mask
+         */
+        REQ( "sigrelse.02", "sigrelse() remove sig from signal mask",
+                            ! contains_Set( signalMask, create_SignalObj( sig ) )
+           );
+
+        /*
+         * For all other functions, upon successful completion, 0 shall be returned
+         */
+        REQ( "sigrelse.03", "upon successful completion, 0 shall be returned", sigrelse_spec == 0 );
+
+        return true;
+    }
+}
+
+void onSigrelese( CallContext context, IntT sig )
+{
+    ThreadState* thrSt;
+    Set* cur_mask;
+    SignalObj* sigobj;
+    thrSt = getThreadState_CallContext(context);
+    cur_mask = get_List(thrSt->signal_masks_stack, 0);
+    sigobj = create_SignalObj(sig);
+
+    remove_Set(cur_mask, sigobj);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sighold, sigignore, sigpause, sigrelse, sigset - signal management
+
+SYNOPSIS
+
+    [XSI]  #include <signal.h>
+
+    int sighold(int sig);
+    int sigignore(int sig);
+    int sigpause(int sig);
+    int sigrelse(int sig);
+    void (*sigset(int sig, void (*disp)(int)))(int);
+
+DESCRIPTION
+
+    Use of any of these functions is unspecified in a multi-threaded process.
+    The sighold(), sigignore(), sigpause(), sigrelse(), and sigset() functions
+    provide simplified signal management.
+    The sigset() function shall modify signal dispositions. The sig argument
+    specifies the signal, which may be any signal except SIGKILL and SIGSTOP.
+    The disp argument specifies the signal's disposition, which may be SIG_DFL
+    , SIG_IGN, or the address of a signal handler. If sigset() is used, and
+    disp is the address of a signal handler, the system shall add sig to the
+    calling process' signal mask before executing the signal handler; when the
+    signal handler returns, the system shall restore the calling process'
+    signal mask to its state prior to the delivery of the signal. In addition,
+    if sigset() is used, and disp is equal to SIG_HOLD, sig shall be added to
+    the calling process' signal mask and sig's disposition shall remain
+    unchanged. If sigset() is used, and disp is not equal to SIG_HOLD, sig
+    shall be removed from the calling process' signal mask.
+    The sighold() function shall add sig to the calling process' signal mask.
+    The sigrelse() function shall remove sig from the calling process' signal
+    mask.
+    The sigignore() function shall set the disposition of sig to SIG_IGN.
+    The sigpause() function shall remove sig from the calling process' signal
+    mask and suspend the calling process until a signal is received. The
+    sigpause() function shall restore the process' signal mask to its original
+    state before returning.
+    If the action for the SIGCHLD signal is set to SIG_IGN, child processes of
+    the calling processes shall not be transformed into zombie processes when
+    they terminate. If the calling process subsequently waits for its children
+    , and the process has no unwaited-for children that were transformed into
+    zombie processes, it shall block until all of its children terminate, and
+    wait(), waitid(), and waitpid() shall fail and set errno to [ECHILD].
+
+RETURN VALUE
+
+    Upon successful completion, sigset() shall return SIG_HOLD if the signal
+    had been blocked and the signal's previous disposition if it had not been
+    blocked. Otherwise, SIG_ERR shall be returned and errno set to indicate
+    the error.
+    The sigpause() function shall suspend execution of the thread until a
+    signal is received, whereupon it shall return -1 and set errno to [EINTR].
+    For all other functions, upon successful completion, 0 shall be returned.
+    Otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    These functions shall fail if:
+
+    [EINVAL]
+    The sig argument is an illegal signal number.
+    The sigset() and sigignore() functions shall fail if:
+
+    [EINVAL]
+    An attempt is made to catch a signal that cannot be caught, or to ignore a
+    signal that cannot be ignored.
+*/
+specification
+SignalHandler sigset_spec( CallContext context, IntT sig, SignalHandler disp, ErrorCode * errno )
+{
+    pre
+    {
+        /*
+         * Use of any of these functions is unspecified in a multi-threaded process.
+         */
+        REQ("app.sigset.01", "", TODO_REQ());
+
+        /*
+         * The sig argument specifies the signal, which may be any signal except SIGKILL
+         * and SIGSTOP
+         */
+        REQ( "app.sigset.03", "sig may be any signal except SIGKILL and SIGSTOP",
+                              sig != SUT_SIGKILL && sig != SUT_SIGSTOP
+           );
+
+        return true;
+    }
+    coverage sigset_coverage = CoverageForSignal( context, sig );
+    post
+    {
+        ThreadState * threadState = getThreadState_CallContext( context );
+        Set * signalMask = get_List( threadState->signal_masks_stack, 0 );
+
+        /*
+         * Otherwise, SIG_ERR shall be returned and errno set to indicate the error
+         */
+        ERROR_BEGIN( POSIX_SIGSET, "sigset.09", sigset_spec == SUT_SIG_ERR, * errno )
+            /*
+             * These functions shall fail if:
+             *
+             * [EINVAL] The sig argument is an illegal signal number.
+             */
+            /*
+             * The sigset() and sigignore() functions shall fail if:
+             *
+             * [EINVAL] An attempt is made to catch a signal that cannot be caught, or to
+             * ignore a signal that cannot be ignored.
+             */
+            ERROR_SHALL( POSIX_SIGSET, EINVAL, "sigset.10.01;sigignore.11.01",
+                                               sigset_coverage == CoverageForSignal.UnknownSignal
+                       )
+        ERROR_END()
+
+        /*
+         * The sigset() function shall modify signal dispositions
+         *
+         * The disp argument specifies the signal's disposition, which may be SIG_DFL,
+         * SIG_IGN, or the address of a signal handler
+         */
+        REQ("sigset.02.01", "", TODO_REQ());
+
+        /*
+         * If sigset() is used, and disp is the address of a signal handler, the system
+         * shall add sig to the calling process' signal mask before executing the signal
+         * handler
+         */
+        REQ("sigset.04", "", TODO_REQ());
+
+        /*
+         * when the signal handler returns, the system shall restore the calling process'
+         * signal mask to its state prior to the delivery of the signal
+         */
+        REQ("sigset.05", "", TODO_REQ());
+
+        if ( disp == SUT_SIG_HOLD ) {
+            /*
+             * In addition, if sigset() is used, and disp is equal to SIG_HOLD, sig shall be
+             * added to the calling process' signal mask and sig's disposition shall remain
+             * unchanged
+             */
+            REQ( "sigset.06", "sig added to the signal mask", contains_Set( signalMask, create_SignalObj( sig ) ) );
+        } else {
+            /*
+             * If sigset() is used, and disp is not equal to SIG_HOLD, sig shall be removed
+             * from the calling process' signal mask
+             */
+            REQ( "sigset.07", "sig removed from  signal mask", ! contains_Set( signalMask, create_SignalObj( sig ) ) );
+        }
+
+        /*
+         * Upon successful completion, sigset() shall return
+         *
+         * SIG_HOLD if the signal had been blocked
+         */
+        REQ("sigset.08.01", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, sigset() shall return
+         *
+         * the signal's previous disposition if it had not been blocked
+         */
+        REQ("sigset.08.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onSigset( CallContext context, IntT sig, SignalHandler disp )
+{
+    ProcessState* prSt;
+    SigAction* new_action;
+
+    ThreadState* thrSt;
+    Set* cur_mask;
+    SignalObj* sigobj;
+
+    thrSt = getThreadState_CallContext(context);
+    cur_mask = get_List(thrSt->signal_masks_stack, 0);
+    sigobj = create_SignalObj(sig);
+
+    if (disp == SUT_SIG_HOLD)
+    {
+        //set signal mask for sig
+        add_Set(cur_mask, sigobj);
+    }
+    else
+    {
+        //remove sig from signal mask
+        remove_Set(cur_mask, sigobj);
+
+        //set new handler for this signal
+        new_action = create_SigAction();
+        new_action->m_sa_handler = disp;
+
+        prSt = getProcessState_CallContext(context);
+        put_Map(prSt->signal_actions,  create_SignalObj(sig), new_action);
+    }
+}
+
+/********************************************************************/
+/**                       SigCtrl Types                            **/
+/********************************************************************/
+
+specification typedef struct SigpauseReactionType  SigpauseReactionType = {};
+specification typedef struct SigpauseBlockedType  SigpauseBlockedType = {};
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+SigpauseReactionType* create_SigpauseReactionType(CallContext context, IntT res, IntT sig, ErrorCode* errno)
+{
+    return create(&type_SigpauseReactionType, context, sig, res, errno);
+}
+
+SigpauseBlockedType* create_SigpauseBlockedType(CallContext context, IntT sig, IntT was_set)
+{
+    return create(&type_SigpauseBlockedType, context, sig, was_set);
+}

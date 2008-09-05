@@ -1,0 +1,279 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#ifndef PTHREAD_SEM_MODEL_SEH
+#define PTHREAD_SEM_MODEL_SEH
+
+#include "common/common_model.seh"
+#include "atl/multiset.h"
+#include "common/cstring.seh"
+#include "io/file/file_model.seh"
+#include "data/errno_model.seh"
+
+/********************************************************************/
+/**                      Defines                                   **/
+/********************************************************************/
+
+#define SLASH_CODE '/'
+
+/********************************************************************/
+/**                      Semaphore                                 **/
+/********************************************************************/
+typedef VoidTPtr PThreadSemaphoreTPtr;
+
+/* TODO: wipe out this definitions to 'suitable' place */
+
+#define SUT_PATH_MAX 4096
+#define SUT_NAME_MAX 128
+
+/*
+13.10.2. semaphore.h
+
+
+
+typedef struct
+{
+  struct _pthread_fastlock __sem_lock;
+  int __sem_value;
+  _pthread_descr __sem_waiting;
+}
+sem_t;
+#define SEM_FAILED((sem_t*)0)
+
+#define SEM_VALUE_MAX((int)((~0u)>>1))
+
+Based on the above definitions we define 
+*/
+
+#define SUT_SEM_FAILED NULL_VoidTPtr
+#define SUT_SEM_VALUE_MAX ((~(UIntT)0)>>(sizeof(IntT)-sizeof_IntT+1))
+
+/*
+    Determines boundaries for abs_timeout in sem_timedwait
+*/
+#define MIN_ABS_TIMEOUT 0
+#define MAX_ABS_TIMEOUT  1000000000
+
+#define NAMED_SEMAPHORE     1
+#define UNNAMED_SEMAPHORE   2
+
+bool isValidSemaphoreName(CString* name);
+
+specification typedef
+struct Semaphore
+{
+    int sem_id;                 // Unique number of semaphore
+    List* addresses;            // List of addresses of the semaphore in each process
+    List* wait_list;            // List of threads blocked on the semaphore
+    IntT counter;               // Semaphore counter
+    IntT type;                  // Semaphore type: NAMED or UNNAMED
+    CString* name;              // Semaphore name    
+    Set* openers;               // Threads that have opened the semaphore
+    bool should_removed;        // If sem_unlink is called for the semaphore this variable is equal to true.
+    IntT pshared;               // Semaphore type: shared or nor shared
+} Semaphore;
+
+Semaphore * create_Semaphore(
+    int sem_id,
+    List* addresses,
+    List* wait_list,
+    IntT counter,
+    IntT type,
+    CString* name,
+    Set* openers,
+    bool should_removed,
+    IntT pshared
+);
+
+void printfSemaphoreModel(Semaphore* sem_m);
+
+Semaphore *createSemaphore(PThreadSemaphoreTPtr psemaphore, IntT counter_value, CString* name, IntT type);
+void registerSemaphore(PThreadSemaphoreTPtr psemaphore, IntT value, CString* name, IntT type);
+void unregisterSemaphore(PThreadSemaphoreTPtr psemaphore);
+Semaphore *getSemaphore(PThreadSemaphoreTPtr psemaphore, CallContext context);
+Semaphore *findSemaphore(ObjectsInMemory* objects, PThreadSemaphoreTPtr psemaphore);
+ObjectsInMemory *getAllSemaphores(void);
+
+Semaphore *getVitalSemaphoreByName(CString* sem_name);
+Semaphore *getSemaphoreByCopy(Semaphore *copy);
+
+/* The functions for checking semaphore state */
+bool isTheSameSemaphore(Semaphore *genuine, Semaphore *fake);
+bool isSemaphoreChangedState(Semaphore *virgin, Semaphore *exposed);
+
+bool isSemaphoreFree(Semaphore* sem_m);
+bool isSemaphoreOpened(Semaphore* sem_m);
+bool isThreadSemaphoreOpener(Semaphore* sem_m, CallContext thread);
+bool isDeadlockIfThreadBlocked(ThreadId thread, Semaphore *sem_m);
+bool doesWaitedThreadExist(Semaphore *sem_m);
+int free_Semaphore(Semaphore* sem_m);
+int lock_Semaphore(Semaphore* sem_m);
+bool isNameTooLong(CString* cstring);
+void printVoidTPtr1(VoidTPtrObj* ptr);
+
+
+void removeSemaphoreIfPossible(Semaphore* sem_m);
+
+bool isAddressValidInContext(VoidTPtr t_ptr, CallContext context);
+
+String* append_To_String(String *str, const char * what, ...);
+void appendVoidTPtr(String *str, VoidTPtrObj* ptr);
+String *semaphore_To_String(struct Semaphore* sem_m);
+
+specification typedef
+struct SemaphoreLockCall
+{
+    CallContext      context;
+    PThreadSemaphoreTPtr semaphore;
+    Semaphore* pre_semaphore;
+} SemaphoreLockCall;
+SemaphoreLockCall* create_SemaphoreLockCall(CallContext context, PThreadSemaphoreTPtr semaphore, Semaphore* pre_semaphore);
+
+specification typedef
+struct SemaphoreTimedLockCall
+{
+    CallContext      context;
+    PThreadSemaphoreTPtr semaphore;
+    Semaphore* pre_semaphore;
+    TimeInterval      t_stamp;
+    TimeUnit          delta;
+} SemaphoreTimedLockCall;
+SemaphoreTimedLockCall* create_SemaphoreTimedLockCall(CallContext context, PThreadSemaphoreTPtr semaphore, Semaphore* pre_semaphore, TimeInterval t_stamp, TimeUnit delta);
+
+specification typedef
+struct SemaphoreUnlockCall
+{ 
+    CallContext      context;
+    PThreadSemaphoreTPtr semaphore;
+    Semaphore *pre_semaphore;
+} SemaphoreUnlockCall;
+
+SemaphoreUnlockCall* create_SemaphoreUnlockCall(CallContext context, PThreadSemaphoreTPtr semaphore, Semaphore *pre_semaphore);
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+specification typedef
+struct SemaphoreLockReturnType
+{
+    CallContext context;
+    ErrorCode*  returned_value;
+    ErrorCode*  errno_value;
+} SemaphoreLockReturnType;
+
+SemaphoreLockReturnType * create_SemaphoreLockReturnType(
+    CallContext context,
+    ErrorCode*  returned_value,
+    ErrorCode*  errno_value
+);
+
+/** sem_close_spec **/
+
+specification
+IntT sem_close_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno);
+
+void onPThreadSemClose( CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_close_spec);
+
+/** sem_destroy_spec **/
+specification
+IntT sem_destroy_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno);
+void onPThreadSemDestroy( CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_destroy_spec);
+
+/** sem_getvalue_spec **/
+specification
+IntT sem_getvalue_spec( CallContext context, PThreadSemaphoreTPtr semaphore, IntT* sval, ErrorCode* errno);
+
+/** sem_init_spec **/
+specification
+IntT sem_init_spec(CallContext context, PThreadSemaphoreTPtr semaphore, IntT pshared, UIntT value, ErrorCode* errno);
+void onPThreadSemInit(CallContext context, PThreadSemaphoreTPtr semaphore, IntT pshared, UIntT value, IntT sem_init_spec);
+
+/** sem_open_spec **/
+specification
+PThreadSemaphoreTPtr sem_open_spec( CallContext context, StringTPtr name,  OpenFlags oflag, FilePermissions* mode,
+                                    UIntT value, ErrorCode* errno);
+
+void onPThreadSemOpen(CallContext context, IntT value, StringTPtr name,  OpenFlags oflag, PThreadSemaphoreTPtr semaphore);
+
+/** sem_post_spec **/
+specification
+IntT sem_post_spec( CallContext context, PThreadSemaphoreTPtr semaphore);
+void onPThreadSemPost(CallContext context, PThreadSemaphoreTPtr semaphore);
+
+reaction SemaphoreLockReturnType* pthread_sem_post_return(void);
+void onPThreadSemPostReturn(CallContext context, ErrorCode* pthread_sem_post_spec);
+
+specification typedef
+struct SemTimedLockCall
+{
+  CallContext       context;
+  PThreadSemaphoreTPtr  semaphore;
+  TimeInterval      t_stamp;
+  TimeUnit          delta;
+} SemTimedLockCall;
+
+SemTimedLockCall * create_SemTimedLockCall(
+  CallContext       context,
+  PThreadSemaphoreTPtr  semaphore,
+  TimeInterval      t_stamp,
+  TimeUnit          delta
+);
+
+SemTimedLockCall* create_SemTimedLockCall(CallContext context, PThreadSemaphoreTPtr semaphore, TimeInterval t_stamp, TimeUnit delta);
+
+specification
+void sem_timedwait_spec(CallContext context, PThreadSemaphoreTPtr semaphore, TimeUnit delta);
+
+void onSemTimedWait(CallContext context, PThreadSemaphoreTPtr semaphore, TimeInterval timestamp, TimeUnit delta);
+
+reaction SemaphoreLockReturnType* sem_timedwait_return(void);
+void onSemTimedWaitReturn(CallContext context, ErrorCode* sem_timedwait_spec);
+
+/*
+specification
+ErrorCode* pthread_rwlock_timedrdlock_bad_spec(CallContext context, PThreadRwlockTPtr rwlock, IntT nsec);
+*/
+
+/** sem_trywait_spec **/
+specification
+IntT sem_trywait_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno);
+void onPThreadSemTryWait(CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_trywait_spec);
+
+/** sem_unlink_spec **/
+specification
+IntT sem_unlink_spec( CallContext context, StringTPtr sem_name, ErrorCode* errno);
+void onPThreadSemUnlink(CallContext context, StringTPtr sem_name, IntT sem_unlink_spec);
+
+/** sem_wait_spec **/
+specification
+IntT sem_wait_spec( CallContext context, PThreadSemaphoreTPtr semaphore);
+
+void onPThreadSemWait(CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_wait_spec);
+
+reaction SemaphoreLockReturnType* pthread_sem_wait_return(void);
+void onPThreadSemWaitReturn(CallContext context, ErrorCode* pthread_sem_wait_spec);
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+#endif
+

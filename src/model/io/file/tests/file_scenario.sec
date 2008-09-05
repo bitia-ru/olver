@@ -1,0 +1,461 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "io/file/file_media.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+#include "fs/dir/dir_model.seh"
+
+#include "process/meta/fs_model.seh"
+#include "io/file/tests/file_scenario.seh"
+
+
+static CallContext context;
+static CString *rootpath;
+static bool isInit=false;
+
+// makes full path string from local path
+#define FP(path) (concat_Path(rootpath, create_CString(path)))
+
+#define   MAX_SIZE 100
+
+
+static void update_cwd(CallContext context)
+{
+    SizeT size = 1024;
+    StringTPtr buf = allocateMemoryBlock(context, size);
+    ProcessState* pstate= getProcessState_CallContext(context);
+    
+    getcwd_spec(context, buf, size, requestErrorCode());
+    rootpath=getPath_File(getFileSystem(context), getFile_FileId(pstate->meta.workdir));
+    deallocateMemoryBlock(context, buf);
+}
+
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_io_file_scenario(int argc,char** argv)
+{
+    context = getContext();
+
+    isInit=false; 
+    initPathSystemConfiguration();   
+
+    return true;
+
+}
+
+
+static void finish_io_file_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(io_file_scenario);
+    recursive_remove(context, rootpath);
+
+}
+
+
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool io_file_scen()
+{
+    FileDescId  fildes, newFildes, fildes2;
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(true, true, false);
+    FilePermission* other = create_FilePermission(true, true, false);
+    FilePermissions *perms = create_FilePermissions(owner, group, other, 
+        Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+    FcntlArgument* arg3=create_FcntlArgument( 1, NULL, true);
+    VoidTPtr buf;
+    
+    SizeT nsize=50;
+
+    List* iov=create_List(&type_IOvec);
+    OpenFlags oflag = { ReadWrite, Blocking, true, false, false, false, false,
+        false };
+    Flock* lock;
+    CallContext newProcess;
+
+    UCharT xBuff[MAX_SIZE];
+
+
+    if (!isInit)
+    {
+        update_cwd(context);
+        
+        // create test root
+        MKDIR_A(FP("iofile"),"rwxrwxrwx");    
+        setUptodate_Directory(getFile_FileSystem(getFileSystem(context), FP("iofile")), true);
+
+        rootpath=FP("iofile/");
+        
+        isInit=true;
+    }
+    
+
+    buf=allocateMemoryBlock(context, nsize);
+    {
+        UCharT refBuff[MAX_SIZE];
+        SizeT i;
+    
+        for(i=0;i<MAX_SIZE;i++)
+        {
+            refBuff[i] = (CharT)i;
+            xBuff[i] = (CharT)100;
+        }
+        
+        writeCByteArray_VoidTPtr(buf, create_CByteArray(refBuff, nsize) );
+    }
+
+    append_List(iov, create_IOvec( allocateMemoryBlock(context, 10), (SizeT)10));
+    append_List(iov, create_IOvec( allocateMemoryBlock(context, 20), (SizeT)20));
+
+
+    oflag.creat=true;
+    oflag.trunc=true;
+    oflag.append=false;
+    fildes=open_spec(context, FP("filename2"), oflag, perms, 
+        requestErrorCode(), false);
+    writev_spec(context, fildes, create_List(&type_IOvec), requestErrorCode());
+    pwrite_spec(context, fildes,  buf, nsize, 5 ,requestErrorCode(), false);
+    writeCByteArray_VoidTPtr(buf, create_CByteArray(xBuff, nsize) );
+    pread_spec(context, fildes, buf, nsize-10, 2, requestErrorCode(), 
+        false);
+    pread_spec(context, fildes, buf, nsize-10, nsize+20, requestErrorCode(), 
+        false);
+    pwrite_spec(context, fildes,  buf, nsize,  nsize+10, requestErrorCode(), false);
+    pread_spec(context, fildes, buf,   nsize, nsize-10, requestErrorCode(), 
+        false);
+    pread_spec(context, fildes, buf, 0, nsize-10, requestErrorCode(), 
+        false);
+    read_spec(context, fildes, buf, 0, requestErrorCode());
+    read_spec(context, fildes, buf, nsize, requestErrorCode());
+    read_spec(context, fildes, buf, nsize, requestErrorCode());
+    read_spec(context, fildes, buf, nsize, requestErrorCode());
+    read_spec(context, fildes, buf, nsize, requestErrorCode());
+    pwrite_spec(context, fildes,  buf, 0,  nsize+10, requestErrorCode(), false);
+    write_spec(context, fildes,  buf, 0, requestErrorCode());
+
+    lseek_spec(context, fildes, 5, SEEK_SET, requestErrorCode(), false);
+    lseek_spec(context, fildes, -3, SEEK_CUR, requestErrorCode(), false);
+    lseek_spec(context, fildes, 3, SEEK_END, requestErrorCode(), false);
+
+    lockf_F_TLOCK_spec(context, fildes, 10, requestErrorCode(), false);
+    lockf_F_UNLOCK_spec(context, fildes, 5, requestErrorCode(), false);
+    lockf_F_TEST_spec(context, fildes, 7, requestErrorCode(), false);
+
+    newProcess=createProcess();
+    oflag.creat=false;
+    oflag.trunc=false;
+    newFildes=open_spec(newProcess, FP("filename2"), oflag, perms, 
+        requestErrorCode(), false);
+    lockf_F_TLOCK_spec(newProcess, newFildes, 0, requestErrorCode(), false);
+    lockf_F_TEST_spec(newProcess, newFildes, 0, requestErrorCode(), false);
+    lockf_F_TLOCK_spec(context, fildes, 0, requestErrorCode(), false);
+    close_spec(newProcess, newFildes, requestErrorCode());
+
+    oflag.access_mode=ReadOnly;
+    newFildes=open_spec(newProcess, FP("filename2"), oflag, perms, 
+        requestErrorCode(), false);
+    lockf_F_TLOCK_spec(newProcess, newFildes, 4, requestErrorCode(), false);
+    close_spec(newProcess, newFildes, requestErrorCode());
+    oflag.access_mode=ReadWrite;
+    close_spec(context,  fildes, requestErrorCode());
+
+    oflag.creat=true;
+    oflag.trunc=true;
+    fildes=open_spec(context, FP("filename3"), oflag, perms, 
+        requestErrorCode(), false);
+    pwrite_spec(context, fildes,  buf, nsize, 3 ,requestErrorCode(), false);
+    readv_spec(context, fildes, iov, requestErrorCode());
+    writev_spec(context, fildes, iov, requestErrorCode());
+    readv_spec(context, fildes, iov, requestErrorCode());
+    close_spec(context,  fildes, requestErrorCode());
+
+    oflag.append=true;
+    oflag.creat=false;
+    oflag.trunc=false;
+    fildes=creat_spec(context, FP("filename"), perms, 
+        requestErrorCode(), false);
+    write_spec(context, fildes,  buf, nsize, requestErrorCode());
+    pwrite_spec(context, fildes,  buf, nsize, 3 ,requestErrorCode(), false);
+    close_spec(context,  fildes, requestErrorCode());
+
+    
+    fildes=open_spec(context, FP("filename"), oflag, perms, 
+        requestErrorCode(), false);
+    write_spec(context, fildes,  buf, nsize, requestErrorCode());
+    dup_spec(context, fildes, requestErrorCode());
+    dup2_spec(context, fildes, fildes, requestErrorCode());
+    fcntl_F_DUPFD_spec(context, fildes, fildes, requestErrorCode());
+    fcntl_F_SETFD_spec(context, fildes, true, requestErrorCode());
+    fcntl_F_GETFD_spec(context, fildes, requestErrorCode());
+    fcntl_F_SETFL_spec(context, fildes, Nonblocking, true, requestErrorCode());
+    fcntl_F_GETFL_spec(context, fildes, requestErrorCode());
+//    fcntl_F_SETOWN_spec(context, fildes, 0, requestErrorCode());
+//    fcntl_F_GETOWN_spec(context, fildes, requestErrorCode());
+
+    lock=create_Flock( SUT_F_WRLCK, SEEK_SET, (OffT)0, (OffT)5, 0);
+    fcntl_F_GETLCK_spec(context, fildes, lock, requestErrorCode());
+    lock=create_Flock( SUT_F_RDLCK, SEEK_SET, (OffT)2, (OffT)10, context.process);
+    fcntl_F_SETLCK_spec(context, fildes, lock, requestErrorCode());
+
+    newProcess=createProcess();
+    newFildes=open_spec(newProcess, FP("filename"), oflag, perms, 
+        requestErrorCode(), false);
+    lock=create_Flock( SUT_F_WRLCK, SEEK_SET, (OffT)0, (OffT)200, newProcess.process);
+    fcntl_F_SETLCK_spec(newProcess, newFildes, lock, requestErrorCode());
+    fcntl_F_GETLCK_spec(newProcess, newFildes, lock, requestErrorCode());
+    fdatasync_spec(context, fildes, requestErrorCode());
+//    flock_spec(context, fildes, 2, requestErrorCode());
+    fsync_spec(context, fildes, requestErrorCode());
+    close_spec(context,  fildes, requestErrorCode());
+    close_spec(newProcess,  newFildes, requestErrorCode());
+
+
+    fildes=open_spec(context, FP("filename"), oflag, perms, 
+        requestErrorCode(), false);
+    write_spec(context, fildes,  buf, nsize, requestErrorCode());
+    pwrite_spec(context, fildes,  buf, nsize, 60, requestErrorCode(),
+        false);
+    ftruncate_spec(context, fildes, 5, requestErrorCode(), false);
+    sync_spec(context);
+    read_spec(context, fildes, buf, nsize, requestErrorCode());
+    readv_spec(context, fildes, iov, requestErrorCode());
+    truncate_spec(context, FP("filename"), 200, 
+        requestErrorCode(), false);
+    writev_spec(context, fildes, iov, requestErrorCode());
+    close_spec(context,  fildes, requestErrorCode());
+
+    ftruncate_spec(context, fildes, 5, requestErrorCode(), false);
+
+    oflag.access_mode=ReadOnly;
+    oflag.creat=true;
+    fildes=open_spec(context, FP("filename5"), oflag, perms, 
+        requestErrorCode(), false);
+    ftruncate_spec(context, fildes, 50, requestErrorCode(), false);
+    close_spec(context,  fildes, requestErrorCode());
+
+    return true;
+}
+
+
+
+scenario
+bool io_file64_scen()
+{
+    FileDescId  fildes, newFildes, fildes2;
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(true, true, false);
+    FilePermission* other = create_FilePermission(true, true, false);
+    FilePermissions *perms = create_FilePermissions(owner, group, other, 
+        Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+    FcntlArgument* arg3=create_FcntlArgument( 1, NULL, true);
+    VoidTPtr buf;
+    
+    SizeT nsize=50;
+
+    List* iov=create_List(&type_IOvec);
+    OpenFlags oflag = { ReadWrite, Blocking, true, false, false, false, false,
+        false };
+    Flock* lock;
+    CallContext newProcess;
+
+    UCharT xBuff[MAX_SIZE];
+
+    buf=allocateMemoryBlock(context, nsize);
+    {
+        UCharT refBuff[MAX_SIZE];
+        SizeT i;
+    
+        for(i=0;i<MAX_SIZE;i++)
+        {
+            refBuff[i] = (CharT)i;
+            xBuff[i] = (CharT)100;
+        }
+        
+        writeCByteArray_VoidTPtr(buf, create_CByteArray(refBuff, nsize) );
+    }
+
+    append_List(iov, create_IOvec( allocateMemoryBlock(context, 10), (SizeT)10));
+    append_List(iov, create_IOvec( allocateMemoryBlock(context, 20), (SizeT)20));
+
+
+    oflag.creat=true;
+    oflag.trunc=true;
+    oflag.append=false;
+    fildes=open_spec(context, FP("filename2_64"), oflag, perms, 
+        requestErrorCode(), true);
+    pwrite_spec(context, fildes,  buf, nsize, 5 ,requestErrorCode(), true);
+    writeCByteArray_VoidTPtr(buf, create_CByteArray(xBuff, nsize) );
+    pread_spec(context, fildes, buf, nsize-10, 2, requestErrorCode(), 
+        true);
+    pread_spec(context, fildes, buf, nsize-10, nsize+20, requestErrorCode(), 
+        true);
+    pwrite_spec(context, fildes,  buf, nsize,  nsize+10, requestErrorCode(), true);
+    pread_spec(context, fildes, buf,   nsize, nsize-10, requestErrorCode(), 
+        true);
+    pread_spec(context, fildes, buf, 0, nsize-10, requestErrorCode(), 
+        true);
+    pwrite_spec(context, fildes,  buf, 0,  nsize+10, requestErrorCode(), true);
+
+    lseek_spec(context, fildes, 5, SEEK_SET, requestErrorCode(), true);
+    lseek_spec(context, fildes, -3, SEEK_CUR, requestErrorCode(), true);
+    lseek_spec(context, fildes, 3, SEEK_END, requestErrorCode(), true);
+
+    lockf_F_TLOCK_spec(context, fildes, 10, requestErrorCode(), true);
+    lockf_F_UNLOCK_spec(context, fildes, 5, requestErrorCode(), true);
+    lockf_F_TEST_spec(context, fildes, 7, requestErrorCode(), true);
+
+    newProcess=createProcess();
+    oflag.creat=false;
+    oflag.trunc=false;
+    newFildes=open_spec(newProcess, FP("filename2_64"), oflag, perms, 
+        requestErrorCode(), true);
+    lockf_F_TLOCK_spec(newProcess, newFildes, 0, requestErrorCode(), true);
+    lockf_F_TEST_spec(newProcess, newFildes, 0, requestErrorCode(), true);
+    lockf_F_TLOCK_spec(context, fildes, 0, requestErrorCode(), true);
+    close_spec(newProcess, newFildes, requestErrorCode());
+
+    oflag.access_mode=ReadOnly;
+    newFildes=open_spec(newProcess, FP("filename2_64"), oflag, perms, 
+        requestErrorCode(), true);
+    lockf_F_TLOCK_spec(newProcess, newFildes, 4, requestErrorCode(), true);
+    close_spec(newProcess, newFildes, requestErrorCode());
+    oflag.access_mode=ReadWrite;
+    close_spec(context,  fildes, requestErrorCode());
+
+    oflag.creat=true;
+    oflag.trunc=true;
+    fildes=open_spec(context, FP("filename3_64"), oflag, perms, 
+        requestErrorCode(), true);
+    pwrite_spec(context, fildes,  buf, nsize, 3 ,requestErrorCode(), true);
+    close_spec(context,  fildes, requestErrorCode());
+
+    oflag.append=true;
+    oflag.creat=false;
+    oflag.trunc=false;
+    fildes=creat_spec(context, FP("filename_64"), perms, 
+        requestErrorCode(), true);
+    pwrite_spec(context, fildes,  buf, nsize, 3 ,requestErrorCode(), true);
+    close_spec(context,  fildes, requestErrorCode());
+
+
+    fildes=open_spec(context, FP("filename_64"), oflag, perms, 
+        requestErrorCode(), true);
+    pwrite_spec(context, fildes,  buf, nsize, 60, requestErrorCode(),
+        true);
+    ftruncate_spec(context, fildes, 5, requestErrorCode(), true);
+    truncate_spec(context, FP("filename_64"), 200, 
+        requestErrorCode(), true);
+    close_spec(context,  fildes, requestErrorCode());
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm io_file_scenario =
+{
+    .init = init_io_file_scenario,
+        .finish = finish_io_file_scenario,
+        .actions = {
+            io_file_scen,
+            io_file64_scen,
+            NULL
+    }
+};
+
+bool main_io_file_local( int argc, char** argv )
+{
+    // Run test scenario
+    io_file_scenario(argc,argv);
+    io_file_lock_scenario(argc,argv);
+    io_file_lockf_scenario(argc,argv);
+    io_file_flock_scenario(argc,argv);
+    return true;
+}
+
+#ifdef IO_FILE_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "process/meta/fs_media.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+    
+    initIoFileSubsystem();
+    initProcessMetaFsSubsystem();
+    initFsDirSubsystem();
+    initProcessProcessSubsystem();
+    initReqFilters();
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile("trace.xml");
+
+    main_io_file_local(argc, argv);
+
+    //  unloadSUT();
+    return 0;
+}
+#endif

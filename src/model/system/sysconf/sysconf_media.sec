@@ -1,0 +1,367 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "system/sysconf/sysconf_media.seh"
+#include "common/common_media.seh"
+#include "io/file/file_model.seh"
+#include "config/system_config.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSystemSysconfSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_sysconf_spec(sysconf_media);
+    set_mediator___sysconf_spec(__sysconf_media);
+    set_mediator_confstr_spec(confstr_media);
+    set_mediator_getpagesize_spec(getpagesize_media);
+    set_mediator___getpagesize_spec(__getpagesize_media);
+    set_mediator_pathconf_spec(pathconf_media);
+    set_mediator_fpathconf_spec(fpathconf_media);
+
+    /* [Init sysconf] */
+    if(!init_sc())
+        traceUserInfo("init_sc() failed");                
+
+    /* [Init confstr] */
+    if(!init_cs())
+        traceUserInfo("init_cs() failed");                
+
+    /* [Init pathconf] */
+   
+    if(!init_pc())
+        traceUserInfo("init_pc() failed");                
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** sysconf_spec **/
+mediator sysconf_media for specification
+LongT sysconf_spec( CallContext context, IntT name, ErrorCode * errno )
+{
+    Object * val;
+    
+    call
+    {
+        TSCommand command = create_TSCommand();
+        LongT res = 0;
+    
+        format_TSCommand( &command, "sysconf:$(int)$(int)", create_IntTObj(name), errno);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        if( name>=0 && name<SC_MAX_NAME)
+        {
+            setSystemConfigurationValue(context,name,sysconf_spec);   
+
+            if(sysconf_spec<=0)
+            {
+                #define SYSCONF_MEDIA_REMOVE_MAP_REQ(name) {val = get_Map(sc_map, create_IntTObj(name)); \
+                                                                if(val!=NULL) ((SCData *)val)->cmp_type=CMPT_SKIP;}
+
+                #define PATHCONF_MEDIA_REMOVE_MAP_REQ(name) {val = get_Map(pc_map, create_IntTObj(name)); \
+                                                                if(val!=NULL) ((PCData *)val)->pc_cmp_type=CMPT_SKIP;}
+
+                /* [switching off extensions depended checks] */
+                switch(name)
+                {
+                case SUT_SC_ADVISORY_INFO: /*[ADV]*/
+                    PATHCONF_MEDIA_REMOVE_MAP_REQ(SUT_PC_ALLOC_SIZE_MIN);
+                    PATHCONF_MEDIA_REMOVE_MAP_REQ(SUT_PC_REC_INCR_XFER_SIZE);
+                    PATHCONF_MEDIA_REMOVE_MAP_REQ(SUT_PC_REC_MAX_XFER_SIZE);
+                    PATHCONF_MEDIA_REMOVE_MAP_REQ(SUT_PC_REC_MIN_XFER_SIZE);
+                    PATHCONF_MEDIA_REMOVE_MAP_REQ(SUT_PC_REC_XFER_ALIGN);
+                    break;
+                case SUT_SC_ASYNCHRONOUS_IO: /*[AIO]*/
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_AIO_LISTIO_MAX);
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_AIO_MAX);
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_AIO_PRIO_DELTA_MAX);
+                    break;
+                case SUT_SC_MESSAGE_PASSING: /*[MSG]*/
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_MQ_OPEN_MAX);
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_MQ_PRIO_MAX);
+                    break;
+/* [RTS required in LSB 18.1] */
+//                case SUT_SC_REALTIME_SIGNALS: /*[RTS]*/
+//                    getSCData(SUT_SC_RTSIG_MAX)->cmp_type = CMPT_SKIP;
+//                    getSCData(SUT_SC_SIGQUEUE_MAX)->cmp_type = CMPT_SKIP;
+//                    break;
+/* [SEM required in LSB (unistd.h) ] */
+//                case SUT_SC_SEMAPHORES: /*[SEM]*/
+//                    getSCData(SUT_SC_SEM_NSEMS_MAX)->cmp_type = CMPT_SKIP;
+//                    getSCData(SUT_SC_SEM_VALUE_MAX)->cmp_type = CMPT_SKIP;
+//                    break;
+/* [THR required in LSB 18.1] */
+//                case SUT_SC_THREADS: /*[THR]*/
+//                    getSCData(SUT_SC_READER_WRITER_LOCKS)->cmp_type = CMPT_SKIP;
+//                    getSCData(SUT_SC_THREAD_DESTRUCTOR_ITERATIONS)->cmp_type = CMPT_SKIP;
+//                    getSCData(SUT_SC_THREAD_KEYS_MAX)->cmp_type = CMPT_SKIP;
+//                    getSCData(SUT_SC_THREAD_STACK_MIN)->cmp_type = CMPT_SKIP;
+//                    getSCData(SUT_SC_THREAD_THREADS_MAX)->cmp_type = CMPT_SKIP;
+//                    break;
+/* [TMR required in LSB (unistd.h) ] */
+//                case SUT_SC_TIMERS: /*[TMR]*/
+//                    getSCData(SUT_SC_DELAYTIMER_MAX)->cmp_type = CMPT_SKIP;
+//                    getSCData(SUT_SC_TIMER_MAX)->cmp_type = CMPT_SKIP;
+//                    break;
+                case SUT_SC_TRACE: /*[TRC]*/
+                    // names marked with //nf// do not exist at Fedora
+                    //nf//    getSCData(SUT_SC_TRACE_EVENT_NAME_MAX)->cmp_type = CMPT_SKIP;
+                    //nf//    getSCData(SUT_SC_TRACE_NAME_MAX)->cmp_type = CMPT_SKIP;
+                    //nf//    getSCData(SUT_SC_TRACE_SYS_MAX)->cmp_type = CMPT_SKIP;
+                    //nf//    getSCData(SUT_SC_TRACE_USER_EVENT_MAX)->cmp_type = CMPT_SKIP;
+                    break;
+                case SUT_SC_XOPEN_UNIX: /*[XSI]*/
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_ATEXIT_MAX);
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_IOV_MAX);
+                    SYSCONF_MEDIA_REMOVE_MAP_REQ(SUT_SC_PAGE_SIZE);
+                    
+                    #define CONFSTR_MEDIA_REMOVE_MAP_REQ(name) {val = get_Map(cs_name_map, create_IntTObj(name)); \
+                                                                if(val!=NULL) ((CSData *)val)->req_support=0;}
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_ILP32_OFF32_LDFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_ILP32_OFF32_LIBS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_ILP32_OFF32_LINTFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_ILP32_OFFBIG_CFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_ILP32_OFFBIG_LDFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_ILP32_OFFBIG_LIBS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_ILP32_OFFBIG_LINTFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LP64_OFF64_CFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LP64_OFF64_LDFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LP64_OFF64_LIBS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LP64_OFF64_LINTFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LPBIG_OFFBIG_CFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LPBIG_OFFBIG_LDFLAGS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LPBIG_OFFBIG_LIBS);
+                    CONFSTR_MEDIA_REMOVE_MAP_REQ(SUT_CS_XBS5_LPBIG_OFFBIG_LINTFLAGS);
+
+                    /* {limits.40} Minimum Acceptable Value: {_POSIX_NAME_MAX} */
+                    val = get_Map(cs_name_map, create_IntTObj(name));
+                    if(val!=NULL) ((PCData *)val)->pc_lim=14;
+                    
+                    break;
+                default:  ;  
+                }
+            }
+        }
+    }
+}
+
+/** __sysconf_spec **/
+mediator __sysconf_media for specification
+LongT __sysconf_spec( CallContext context, IntT name, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        LongT res = 0;
+    
+        format_TSCommand( &command, "__sysconf:$(int)$(int)", create_IntTObj(name), errno);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        setSystemConfigurationValue(context,name, __sysconf_spec);   
+    }
+}
+
+/** confstr_spec **/
+mediator confstr_media for specification
+SizeT confstr_spec( CallContext context, IntT name, StringTPtr buf, SizeT len, ErrorCode * errno )
+{
+    CSData * val;
+    
+    call
+    {
+        TSCommand command = create_TSCommand();
+        SizeT res = 0;
+
+        format_TSCommand( &command, "confstr:$(int)$(ptr)$(size)$(int)", 
+             create_IntTObj(name),create_VoidTPtrObj(buf), create_SizeTObj(len), errno );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readSize_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        val = get_Map(cs_name_map, create_IntTObj(name));
+        
+        if(val == NULL)
+        {
+            val = create_CSData(0, NULL, 0, NULL);
+            put_Map(cs_name_map,create_IntTObj(name),val);
+        }
+        
+        if( isNULL_VoidTPtr(buf) && len == 0 ) 
+        {   
+            val->str_size = confstr_spec;           
+        }
+        if( !isNULL_VoidTPtr(buf) && len == confstr_spec )
+        {
+            val->str = readCString_VoidTPtr(buf);
+        }    
+    }
+}
+
+/** pathconf_spec **/
+mediator pathconf_media for specification
+LongT pathconf_spec( CallContext context, CString * path, IntT name, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        LongT res = 0;
+
+        format_TSCommand( &command, "pathconf:$(str)$(int)$(int)", path,create_IntTObj(name), errno);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        if(pathconf_spec!=-1)
+        {
+            setPathSystemConfigurationValue(context, path, name, pathconf_spec);
+        }
+    }
+}
+
+/** fpathconf_spec **/
+mediator fpathconf_media for specification
+LongT fpathconf_spec( CallContext context, FileDescId fildes, IntT name, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        LongT res = 0;
+        
+        format_TSCommand( &command, "fpathconf:$(int)$(int)$(int)", create_IntTObj(fildes.filedesc), 
+                            create_IntTObj(name), errno );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        CString * str_path;
+        if(fpathconf_spec!=-1)
+        {
+            str_path = getPath_FileDescId(fildes);
+            setPathSystemConfigurationValue(context,str_path, name, fpathconf_spec);
+        }
+    }
+}
+
+/** getpagesize_spec **/
+mediator getpagesize_media for specification
+IntT getpagesize_spec( CallContext context, ErrorCode * errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "getpagesize:$(int)", errno );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+
+/** __getpagesize_spec **/
+mediator __getpagesize_media for specification
+IntT __getpagesize_spec( CallContext context, ErrorCode * errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "__getpagesize:$(int)", errno );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+}

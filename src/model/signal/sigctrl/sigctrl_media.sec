@@ -1,0 +1,215 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "signal/sigctrl/sigctrl_media.seh"
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void sigpause_react_processor(ThreadId threadId, TSStream* stream,
+                                     TSMetaData* meta)
+{
+    IntT sig;
+    IntT res;
+    ErrorCode* err;
+
+    res = readInt_TSStream(stream);
+    sig = readInt_TSStream(stream);
+    err = create_ErrorCode(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        sigpause_react,
+        create_SigpauseReactionType(threadId, res, sig, err),
+        meta->timestamp);
+    VERBOSE("sigpause_react reaction registered...\n");
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initSignalSigctrlSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_sighold_spec  ( sighold_media        );
+    set_mediator_sigignore_spec( sigignore_media      );
+    set_mediator_sigpause_spec ( sigpause_media       );
+    set_mediator_sigpause_react( sigpause_react_media );
+    set_mediator_sigrelse_spec ( sigrelse_media       );
+    set_mediator_sigset_spec   ( sigset_media         );
+
+    registerDRProcessor( "sigpause_react", sigpause_react_processor );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** sighold_spec **/
+mediator sighold_media for specification
+IntT sighold_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "sighold:$(int)", create_IntTObj(sig));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onSighold(context, sig);
+    }
+}
+
+
+/** sigignore_spec **/
+mediator sigignore_media for specification
+IntT sigignore_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "sigignore:$(int)", create_IntTObj(sig));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onSigignore(context, sig);
+    }
+}
+
+/** sigpause_spec **/
+mediator sigpause_media for specification
+void sigpause_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    call
+    {
+        String* str;
+        TSCommand command = create_TSCommand();
+
+        // of parameters
+        format_TSCommand( &command, "sigpause:$(int)", create_IntTObj(sig));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            str = readString_TSStream(&command.response);
+            // Process response
+        }
+
+        destroy_TSCommand(&command);
+
+        return; // Return needed value
+    }
+    state
+    {
+        onSigpause(context, sig);
+    }
+}
+
+mediator sigpause_react_media for
+reaction SigpauseReactionType* sigpause_react( void )
+{
+    state
+    {
+        onSigpauseReact(sigpause_react);
+    }
+}
+
+/** sigrelse_spec **/
+mediator sigrelse_media for specification
+IntT sigrelse_spec( CallContext context, IntT sig, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "sigrelse:$(int)", create_IntTObj(sig));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onSigrelese(context, sig);
+    }
+}
+
+/** sigset_spec **/
+mediator sigset_media for specification
+SignalHandler sigset_spec( CallContext context, IntT sig, SignalHandler disp, ErrorCode * errno )
+{
+    call
+    {
+        SignalHandler res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "sigset:$(int)$(int)",
+                          create_IntTObj(sig), create_IntTObj((IntT) disp));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onSigset(context, sig, disp);
+    }
+}

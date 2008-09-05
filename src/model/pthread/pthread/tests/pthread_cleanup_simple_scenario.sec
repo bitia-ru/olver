@@ -1,0 +1,115 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/pthread/tests/pthread_scenario.seh"
+
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext     context;
+
+static int currBrace=0;
+
+#define MAX_NUM_OF_BRACES 20
+/*********************************   Cleanup  Simple**************************/
+
+static bool init_cleanup_simple_scenario(int argc, char** argv)
+{
+    context = createProcess();//getContext();
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(false);
+    setWTimeMSec(SERIALIZATION_TIME*10);
+
+    return true;
+}
+
+static void finish_cleanup_simple_scenario(void)
+{
+    terminateProcess(context);
+    TEST_SCENARIO_VERDICT_VERBOSE(pthread_cleanup_simple_scenario);    
+}
+
+static Object* getPThreadCleanupState(void)
+{  
+    ThreadState* ret=getThreadState_CallContext(context);
+    int num=(ret->numberOfPopPushBraces);    
+
+    return create_Integer(num);    
+}
+
+static bool isPThreadCleanupModelStateStationary(void)
+{
+    ThreadState* ret=getThreadState_CallContext(context);    
+    int num=(ret->numberOfExecutableFunctions);
+
+    VERBOSE("Executables==%d\n", num);
+
+
+    return num==0;
+}
+
+scenario
+bool pthread_cleanup_pop_scen()
+{
+    ThreadState* ret;
+    iterate(int i=0;i<2;i++;    
+        ret=getThreadState_CallContext(context),
+        ret->numberOfPopPushBraces>0    
+        )
+    {       
+            VERBOSE("braces pop==%d\n", ret->numberOfPopPushBraces);
+        _pthread_cleanup_pop_spec(context, i);
+    }
+
+    return true;
+}
+scenario
+bool pthread_cleanup_push_scen()
+{
+    
+    ThreadState* ret = getThreadState_CallContext(context);
+
+    if (ret->numberOfPopPushBraces<MAX_NUM_OF_BRACES)
+    {
+         VERBOSE("braces push==%d\n", ret->numberOfPopPushBraces);
+ 
+        _pthread_cleanup_push_spec(context, 
+                                createVirtualPointer(context, currBrace++));
+    }
+
+    return true;
+}
+scenario dfsm pthread_cleanup_simple_scenario =
+{
+    .init = init_cleanup_simple_scenario,
+    .finish = finish_cleanup_simple_scenario,
+    .getState = getPThreadCleanupState,
+    .saveModelState = (PtrSaveModelState)savePThreadModelState,
+    .restoreModelState = (PtrRestoreModelState)restorePThreadModelState,
+    .isStationaryState =
+                    (PtrIsStationaryState)isPThreadCleanupModelStateStationary,
+    .actions = {
+      pthread_cleanup_push_scen,
+      pthread_cleanup_pop_scen,
+      NULL
+  }
+};

@@ -1,0 +1,183 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+
+#include "io/syslog/syslog_media.seh"
+
+#include "io/syslog/tests/syslog_scenario.seh"
+
+static CallContext context;
+static CString* LogPts[9];
+
+static IntT Facs[] =
+{
+    SUT_LOG_LOCAL0
+,   SUT_LOG_LOCAL1
+,   SUT_LOG_LOCAL2
+,   SUT_LOG_LOCAL3
+,   SUT_LOG_LOCAL4
+,   SUT_LOG_LOCAL5
+,   SUT_LOG_LOCAL6
+,   SUT_LOG_LOCAL7
+,   SUT_LOG_USER
+};
+    
+static IntT Masks[] =
+{
+    SUT_LOG_MASK(SUT_LOG_EMERG)
+,   SUT_LOG_MASK(SUT_LOG_ALERT)
+,   SUT_LOG_MASK(SUT_LOG_CRIT)
+,   SUT_LOG_MASK(SUT_LOG_ERR)
+,   SUT_LOG_MASK(SUT_LOG_WARNING)
+,   SUT_LOG_MASK(SUT_LOG_NOTICE)
+,   SUT_LOG_MASK(SUT_LOG_INFO)
+,   SUT_LOG_MASK(SUT_LOG_DEBUG)
+,   0
+,   -1
+};
+
+static IntT Stats[] =
+{
+    SUT_LOG_PID
+,   SUT_LOG_CONS
+,   SUT_LOG_ODELAY
+,   SUT_LOG_NDELAY
+,   SUT_LOG_NOWAIT
+,   SUT_LOG_PERROR
+,   -1
+};
+
+static bool init_syslog_scenario(int argc,char** argv)
+{
+    context = getContext();
+    initReqFilters();
+
+    LogPts[0] = create_CString("EMERG Message");
+    LogPts[1] = create_CString("ALERT Message");
+    LogPts[2] = create_CString("CRIT Message");
+    LogPts[3] = create_CString("ERR Message");
+    LogPts[4] = create_CString("WARNING Message");
+    LogPts[5] = create_CString("NOTICE Message");
+    LogPts[6] = create_CString("INFO Message");
+    LogPts[7] = create_CString("DEBUG Message");
+    LogPts[8] = create_CString("DEBUG Message");
+
+    return true;
+}
+
+static void finish_syslog_scenario(void)
+{
+}
+
+scenario
+bool syslog_scen()
+{
+    closelog_spec(context);
+
+    syslog_spec(context, Masks[0], LogPts[0], NULL, false);
+    syslog_spec(context, Masks[1], LogPts[1], NULL, true);
+
+    iterate(int iStat = 0; iStat < sizeof(Stats)/sizeof(Stats[0]); iStat++;)
+    {
+        iterate(int i = 0; i < sizeof(Facs)/sizeof(Facs[0]); i++;)
+        {
+            CString* sIdent = create_CString("test");
+
+            openlog_spec(context, sIdent, Stats[iStat], Facs[i]);
+            
+            setlogmask_spec(context, Masks[i]);
+            syslog_spec(context, Masks[i], LogPts[i], NULL, false);
+
+            setlogmask_spec(context, Masks[i]);
+            syslog_spec(context, Masks[i], LogPts[i], NULL, true);
+
+            closelog_spec(context);
+        }
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm syslog_scenario =
+{
+        .init = init_syslog_scenario,
+        .finish = finish_syslog_scenario,
+        .actions = {
+            syslog_scen,
+            NULL
+        }
+};
+
+#ifdef IO_SYSLOG_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initIoSyslogSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+    
+    // Set up tracer
+    // setTraceEncoding("windows-1251");
+    
+    addTraceToFile("trace.xml");
+    
+    // Run test scenario
+    if(syslog_scenario(argc, argv) == 0) verbose("PASS\n");
+    else verbose("FAIL\n");
+    
+    // unloadSUT();
+    return 0;
+}
+
+#endif

@@ -1,0 +1,286 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#ifndef SYSTEM_SYSCONF_SYSCONF_SPEC
+#pragma SEC subsystem sysconf "system.sysconf"
+#endif
+
+#define SYSTEM_SYSCONF_SYSCONF_SPEC
+
+#include "system/sysconf/sysconf_config.h"
+
+/* [Errno is assumed to be in/out parameter] */
+specification
+LongT sysconf_spec( CallContext context, IntT name, ErrorCode * errno )
+{
+    pre
+    {
+        /*
+         * If the variable corresponding to name is dependent on an unsupported
+         * option, the results are unspecified.
+         */
+        switch(name)
+        {
+        case SUT_SC_AIO_LISTIO_MAX:
+        case SUT_SC_AIO_MAX:
+        case SUT_SC_AIO_PRIO_DELTA_MAX:
+            REQ("app.sysconf.06;app.__sysconf.sysconf.06","[AIO] extension required",
+                getSystemConfigurationValue(context,SUT_SC_ASYNCHRONOUS_IO)>0
+               );
+            break;
+        case SUT_SC_MQ_OPEN_MAX:
+        case SUT_SC_MQ_PRIO_MAX:
+            REQ("app.sysconf.06;app.__sysconf.sysconf.06","[MSG] extension required",
+                getSystemConfigurationValue(context,SUT_SC_MESSAGE_PASSING)>0
+               );
+            break;
+        case SUT_SC_RTSIG_MAX:
+        case SUT_SC_SIGQUEUE_MAX:
+            REQ("app.sysconf.06;app.__sysconf.sysconf.06","[RTS] extension required",
+                getSystemConfigurationValue(context,SUT_SC_REALTIME_SIGNALS)>0
+               );
+            break;
+        case SUT_SC_SEM_NSEMS_MAX:
+        case SUT_SC_SEM_VALUE_MAX:
+            REQ("app.sysconf.06;app.__sysconf.sysconf.06","[SEM] extension required",
+                getSystemConfigurationValue(context,SUT_SC_SEMAPHORES)>0
+               );
+            break;
+        case SUT_SC_READER_WRITER_LOCKS:
+        case SUT_SC_THREAD_DESTRUCTOR_ITERATIONS:
+        case SUT_SC_THREAD_KEYS_MAX:
+        case SUT_SC_THREAD_STACK_MIN:
+        case SUT_SC_THREAD_THREADS_MAX:
+            REQ("app.sysconf.06;app.__sysconf.sysconf.06","[THR] extension required",
+                getSystemConfigurationValue(context,SUT_SC_THREADS)>0
+               );
+            break;
+        case SUT_SC_DELAYTIMER_MAX:
+        case SUT_SC_TIMER_MAX:
+            REQ("app.sysconf.06;app.__sysconf.sysconf.06","[TMR] extension required",
+                getSystemConfigurationValue(context,SUT_SC_TIMERS)>0
+               );
+            break;
+        case SUT_SC_ATEXIT_MAX:
+        case SUT_SC_IOV_MAX:
+        case SUT_SC_PAGE_SIZE:
+            REQ("app.sysconf.06;app.__sysconf.sysconf.06","[XSI] extension required",
+                getSystemConfigurationValue(context,SUT_SC_XOPEN_UNIX)>0
+               );
+            break;
+        default:;
+        }
+        return true;
+    }
+    coverage C
+    {
+        SCData * data = getSCData(name);
+#ifdef NewCTesK
+        if ( ! data || data->cmp_type == CMPT_UNKN )
+        {
+            return {br_other, "Other values"};
+        }
+        else
+        {
+            return {br_std_val, "Standart values"};
+        }
+#else
+        if( data )
+        {
+            switch(data->cmp_type)
+            {
+            case CMPT_MIN:
+            case CMPT_EQORM1:
+            case CMPT_EQUALS:
+            case CMPT_NO:
+                return {br_std_val, "Standart values"};
+                break;
+            case CMPT_UNKN:
+                return {br_other, "Other values"};
+                break;
+            }
+        }
+        else
+        {
+            return {br_other, "Other values"};
+        }
+#endif // NewCTesK
+    }
+    post
+    {
+        LongT Res,Res2;
+        SCData * data = getSCData(name);
+
+        /* If name is an invalid value, sysconf() shall
+         * return -1 and set errno to indicate the error.
+         */
+
+        ERROR_BEGIN(POSIX_SYSCONF, "sysconf.02;__sysconf.sysconf.02", (sysconf_spec == -1) && (*errno != SUT_EOK) , *errno)
+        /*
+         * The sysconf() function shall fail if:
+         * [EINVAL]
+         *     The value of the name argument is invalid.
+         */
+
+        /* {sysconf.01}
+         * The implementation shall support all of the
+         * variables listed in the following table and may support others.
+         */
+
+            ERROR_SHALL3(
+                POSIX_SYSCONF, EINVAL,
+                ( data != NULL ? (char *)toCharArray_CString( data->req_id ) : "sysconf.10.01;__sysconf.sysconf.10.01" ),
+                ( data != NULL && data->cmp_type != CMPT_UNKN ? False_Bool3 : Unknown_Bool3 )
+            )
+
+        /* [LSB: 18.1.1. Special Requirements]
+         * A value of -1 shall be an invalid "_SC..." value for sysconf().
+         */
+
+            ERROR_SHALL3(POSIX_SYSCONF, EINVAL,"sysconf.08;__sysconf.sysconf.08",
+                         ( (name == -1)?True_Bool3: Unknown_Bool3 )
+                        )
+        ERROR_END()
+
+         if(data!=NULL)
+         {
+             /* The implementation shall support all of the variables listed in the following
+              * table and may support others.
+              */
+             if(data->req_id !=NULL)
+             {
+                 REQCS(create_String(toCharArray_CString(data->req_id)), create_String("shall support all of the variables listed"),true);
+             }
+
+            /* The value returned shall not be more restrictive
+             * than the corresponding value described to the application when
+             * it was compiled with the implementation's <limits.h> or <unistd.h>.
+             */
+             switch(data->cmp_type)
+             {
+             case CMPT_MIN:
+                 REQCS(create_String(toCharArray_CString(data->lim_id)),
+                     create_String("Result shall be not less than minimal value"),
+                     (sysconf_spec>=data->sc_lim)||(sysconf_spec == -1) /* [-1 means no limit ] */
+                    );
+                 break;
+             case CMPT_EQORM1:
+                 REQCS(create_String(toCharArray_CString(data->lim_id)),
+                     create_String("Result shall equals the certain value or -1"),
+                     (sysconf_spec==data->sc_lim) || (sysconf_spec==-1)
+                    );
+                 break;
+             case CMPT_EQUALS:
+                 REQCS(create_String(toCharArray_CString(data->lim_id)),
+                     create_String("Result shall equals the certain value"),
+                     sysconf_spec==data->sc_lim
+                    );
+                 break;
+             case CMPT_NO:
+                 /* [no restrictions on the returned value] */
+                 break;
+             case CMPT_UNKN:
+                 /* [not specified value] */
+                 /* The implementation ... may support other variables */
+                 break;
+             default:
+                 traceUserInfo("Unhandled CmpT");
+                 return false;
+             }
+             REQ("sysconf.04;__sysconf.sysconf.04","The value returned shall not be more restrictive",true);
+         }
+
+        /* The value shall not change during the lifetime of the calling process
+         */
+        /* [Comparing with the stored result, if exists] */
+        /* [Notice, that we set up this value in the mediator, so we use @ operator] */
+        Res = @getSystemConfigurationValue(context, name);
+
+        if( Res != SC_VALUE_UNKNOWN)
+        {
+            if(!(getSystemConfigurationValue(context,SUT_SC_XOPEN_UNIX)>0 && (name==SUT_SC_OPEN_MAX) ))
+            {
+               /* [XSI]
+                * except that sysconf(_SC_OPEN_MAX) may return different values
+                */
+                REQ("sysconf.05;__sysconf.sysconf.05","The value shall not change during the lifetime of the calling process",
+                    sysconf_spec == Res );
+            }
+            else
+            {
+                REQ("sysconf.09;__sysconf.sysconf.09","except that sysconf(_SC_OPEN_MAX) may return different values",true);
+            }
+
+            if( getSystemConfigurationValue(context,SUT_SC_XOPEN_UNIX)>0 )
+            {
+                /* limits.h: [XSI] {page_size.01}
+                 * {PAGE_SIZE} Equivalent to {PAGESIZE}. If either {PAGESIZE} or
+                 * {PAGE_SIZE} is defined,the other is defined with the same value.
+                 */
+                if( name == SUT_SC_PAGE_SIZE)
+                {
+                    Res2=@getSystemConfigurationValue(context, SUT_SC_PAGESIZE);
+                    if ( Res2 != SC_VALUE_UNKNOWN)
+                    {
+                        REQ("limits.15","{PAGE_SIZE} Equivalent to {PAGESIZE}",
+                            Res2 == Res );
+                    }
+                }
+                else if (name == SUT_SC_PAGESIZE)
+                {
+                    Res2=@getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+                    if ( Res2 != SC_VALUE_UNKNOWN)
+                    {
+                        REQ("limits.15","{PAGE_SIZE} Equivalent to {PAGESIZE}",
+                            Res2 == Res );
+                    }
+                }
+            }
+        }
+
+         if(sysconf_spec == -1)
+         {
+             /* If the variable corresponding to name has no limit, sysconf() shall return -1
+              * without changing the value of errno.
+              */
+             REQ("sysconf.03;__sysconf.sysconf.03", "If the variable has no limit, shall return -1 without errno.", true);
+         }
+         else
+         {
+             /* Otherwise, sysconf() shall return the current variable value on the system.
+              */
+             REQ("sysconf.07;__sysconf.sysconf.07", "Otherwise, shall return the current variable value on the system.", true);
+
+         }
+
+        /*
+         * __sysconf() gets configuration information at runtime.
+         */
+        REQ("__sysconf.11", "", TODO_REQ());
+
+        /*
+         * __sysconf() is weak alias to sysconf().
+         *
+         * __sysconf() has the same specification as sysconf().
+         */
+        REQ("__sysconf.12;__sysconf.13",
+        "__sysconf() has the same specification as sysconf()",
+        GENERAL_REQ("__sysconf.sysconf.*"));
+
+        return true;
+    }
+}

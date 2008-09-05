@@ -1,0 +1,905 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "signal/sigwait/sigwait_config.h"
+#include "signal/sigwait/sigwait_model.seh"
+
+
+#pragma SEC subsystem sigwait "signal.sigwait"
+
+/*
+   The group of functions 'signal.sigwait' consists of:
+       sigtimedwait [2]
+       sigwait [2]
+       sigwaitinfo [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sigtimedwait, sigwaitinfo - wait for queued signals (REALTIME)
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int sigtimedwait(const sigset_t *restrict set,
+           siginfo_t *restrict info,
+           const struct timespec *restrict timeout);
+    int sigwaitinfo(const sigset_t *restrict set,
+           siginfo_t *restrict info);
+
+DESCRIPTION
+
+    The sigtimedwait() function shall be equivalent to sigwaitinfo() except
+    that if none of the signals specified by set are pending, sigtimedwait()
+    shall wait for the time interval specified in the timespec structure
+    referenced by timeout. If the timespec structure pointed to by timeout is
+    zero-valued and if none of the signals specified by set are pending, then
+    sigtimedwait() shall return immediately with an error. If timeout is the
+    NULL pointer, the behavior is unspecified. [MON]   If the Monotonic Clock
+    option is supported, the CLOCK_MONOTONIC clock shall be used to measure
+    the time interval specified by the timeout argument.
+    The sigwaitinfo() function selects the pending signal from the set
+    specified by set. Should any of multiple pending signals in the range
+    SIGRTMIN to SIGRTMAX be selected, it shall be the lowest numbered one. The
+    selection order between realtime and non-realtime signals, or between
+    multiple pending non-realtime signals, is unspecified. If no signal in set
+    is pending at the time of the call, the calling thread shall be suspended
+    until one or more signals in set become pending or until it is interrupted
+    by an unblocked, caught signal.
+    The sigwaitinfo() function shall be equivalent to the sigwait() function
+    if the info argument is NULL. If the info argument is non-NULL, the
+    sigwaitinfo() function shall be equivalent to sigwait(), except that the
+    selected signal number shall be stored in the si_signo member, and the
+    cause of the signal shall be stored in the si_code member. If any value is
+    queued to the selected signal, the first such queued value shall be
+    dequeued and, if the info argument is non-NULL, the value shall be stored
+    in the si_value member of info. The system resource used to queue the
+    signal shall be released and returned to the system for other use. If no
+    value is queued, the content of the si_value member is undefined. If no
+    further signals are queued for the selected signal, the pending indication
+    for that signal shall be reset.
+
+RETURN VALUE
+
+    Upon successful completion (that is, one of the signals specified by set
+    is pending or is generated) sigwaitinfo() and sigtimedwait() shall return
+    the selected signal number. Otherwise, the function shall return a value
+    of -1 and set errno to indicate the error.
+
+ERRORS
+
+    The sigtimedwait() function shall fail if:
+
+    [EAGAIN]
+    No signal specified by set was generated within the specified timeout
+    period.
+
+    The sigtimedwait() and sigwaitinfo() functions may fail if:
+
+    [EINTR]
+    The wait was interrupted by an unblocked, caught signal. It shall be
+    documented in system documentation whether this error causes these
+    functions to fail.
+
+    The sigtimedwait() function may also fail if:
+
+    [EINVAL]
+    The timeout argument specified a tv_nsec value less than zero or greater
+    than or equal to 1000 million.
+    An implementation should only check for this error if no signal is pending
+    in set and it is necessary to wait.
+
+*/
+specification
+void sigtimedwait_spec( CallContext context, SigSetTPtr set, SigInfoTPtr info, TimeUnit delta )
+{
+    pre
+    {
+        /*
+         * If timeout is the NULL pointer, the behavior is unspecified
+         */
+        REQ( "app.sigtimedwait.03", "If timeout is the NULL pointer, the behavior is unspecified", true );
+
+        /*
+         * The selection order between realtime and non-realtime signals, or between
+         * multiple pending non-realtime signals, is unspecified.
+         */
+        REQ("app.sigtimedwait.07", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onSigtimedwait(CallContext context, SigSetTPtr set, SigInfoTPtr info, TimeInterval t_stamp, TimeUnit delta)
+{
+    ThreadState* thrSt;
+    thrSt = getThreadState_CallContext(context);
+    thrSt->is_waiting_for_signal = 1;
+    startBlockedCall(context, create_SigtimedwaitBlockedType(context, set, info, t_stamp, delta));
+}
+
+reaction SigtimedwaitReactionType* sigtimedwait_react(void)
+{
+    post
+    {
+        SigtimedwaitBlockedType * blocked_call_params = findBlockedCall(@getBlockedCalls(), sigtimedwait_react->context);
+        Set /* SignalObj */ * pendingSignals = getPendingSignals( sigtimedwait_react->context );
+
+        /*
+         * Otherwise, the function shall return a value of -1 and set errno to indicate
+         * the error.
+         */
+        ERROR_BEGIN( POSIX_SIGTIMEDWAIT, "sigtimedwait.17",
+                     sigtimedwait_react->return_value == -1, * (sigtimedwait_react->errno)
+                   )
+            /*
+             * The sigtimedwait() function shall fail if:
+             *
+             * [EAGAIN] No signal specified by set was generated within the specified
+             * timeout period.
+             */
+            ERROR_SHALL(POSIX_SIGTIMEDWAIT, EAGAIN, "sigtimedwait.18.01", TODO_ERR(EAGAIN) )
+
+            /*
+             * The sigtimedwait() and sigwaitinfo() functions may fail if:
+             *
+             * [EINTR] The wait was interrupted by an unblocked, caught signal. It shall be
+             * documented in system documentation whether this error causes these functions to
+             * fail.
+             */
+            ERROR_MAY(POSIX_SIGTIMEDWAIT, EINTR, "sigtimedwait.19.01", TODO_ERR(EINTR))
+
+            /*
+             * The sigtimedwait() function may also fail if:
+             *
+             * [EINVAL] The timeout argument specified a tv_nsec value less than zero or
+             * greater than or equal to 1000 million.
+             */
+            ERROR_MAY(POSIX_SIGTIMEDWAIT, EINVAL, "sigtimedwait.20.01", TODO_ERR(EINVAL))
+
+            /*
+             * If the timespec structure pointed to by timeout is zero-valued and if none of
+             * the signals specified by set are pending, then sigtimedwait() shall return
+             * immediately with an error.
+             */
+            REQ("sigtimedwait.02", "", TODO_REQ());
+        ERROR_END()
+
+        if ( size_Set( pendingSignals ) == 0 ) {
+            /*
+             * The sigtimedwait() function shall be equivalent to sigwaitinfo() except that if
+             * none of the signals specified by set are pending, sigtimedwait() shall wait for
+             * the time interval specified in the timespec structure referenced by timeout.
+             */
+            REQ("sigtimedwait.01", "", TODO_REQ());
+
+            /*
+             * If no signal in set is pending at the time of the call
+             *
+             * the calling thread shall be suspended until one or more signals in set become
+             * pending
+             */
+            REQ("sigtimedwait.08.01", "", TODO_REQ());
+
+            /*
+             * If no signal in set is pending at the time of the call
+             *
+             * or until it is interrupted by an unblocked, caught signal
+             */
+            REQ("sigtimedwait.08.02", "", TODO_REQ());
+        } else {
+            bool checkResult = contains_Set( pendingSignals, create_SignalObj( sigtimedwait_react->return_value ) );
+            /*
+             * The sigwaitinfo() function selects the pending signal from the set specified by
+             * set.
+             */
+            REQ( "sigtimedwait.05", "sigwaitinfo() selects the pending signal from the set", checkResult );
+
+            /*
+             * Upon successful completion (that is, one of the signals specified by set is
+             * pending or is generated) sigwaitinfo() and sigtimedwait() shall return the
+             * selected signal number.
+             */
+            REQ( "sigtimedwait.16", "return the selected signal number", checkResult );
+
+            /*
+             * Should any of multiple pending signals in the range SIGRTMIN to SIGRTMAX be
+             * selected, it shall be the lowest numbered one.
+             */
+            REQ("sigtimedwait.06", "", TODO_REQ());
+        }
+
+        /*
+         * If the Monotonic Clock option is supported, the CLOCK_MONOTONIC clock shall be
+         * used to measure the time interval specified by the timeout argument
+         */
+        REQ("sigtimedwait.04", "", TODO_REQ());
+
+        /*
+         * The sigwaitinfo() function shall be equivalent to the sigwait() function if the
+         * info argument is NULL
+         */
+        REQ("sigtimedwait.09", "", TODO_REQ());
+
+        /*
+         * If the info argument is non-NULL, the sigwaitinfo() function shall be
+         * equivalent to sigwait(), except that the selected signal number shall be stored
+         * in the si_signo member, and the cause of the signal shall be stored in the
+         * si_code member.
+         */
+        REQ("sigtimedwait.10", "", TODO_REQ());
+
+        /*
+         * If any value is queued to the selected signal, the first such queued value
+         * shall be dequeued and
+         */
+        REQ("sigtimedwait.11", "", TODO_REQ());
+
+        /*
+         * if the info argument is non-NULL, the value shall be stored in the si_value
+         * member of info
+         */
+        REQ("sigtimedwait.12", "", TODO_REQ());
+
+        /*
+         * The system resource used to queue the signal shall be released and returned to
+         * the system for other use
+         */
+        REQ("sigtimedwait.13", "", TODO_REQ());
+
+        /*
+         * If no value is queued, the content of the si_value member is undefined
+         */
+        REQ("sigtimedwait.14", "", TODO_REQ());
+
+        /*
+         * If no further signals are queued for the selected signal, the pending
+         * indication for that signal shall be reset
+         */
+        REQ("sigtimedwait.15", "", TODO_REQ());
+
+        /*
+         * An implementation should only check for this error if no signal is pending in
+         * set and it is necessary to wait.
+         */
+        REQ("sigtimedwait.21", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onSigtimedwaitReact(SigtimedwaitReactionType* reaction_params)
+{
+    ThreadState* thrSt;
+    ProcessState* prSt;
+    SigtimedwaitBlockedType* blocked_call_params;
+    SigInfo* info_model;
+    List* temp_list;
+
+    thrSt = getThreadState_CallContext(reaction_params->context);
+    prSt = getProcessState_CallContext(reaction_params->context);
+    blocked_call_params = finishBlockedCall(reaction_params->context);
+
+    info_model = getObjectInMemory(blocked_call_params->info);
+    thrSt->is_waiting_for_signal = 0;
+    if (reaction_params->return_value == 0) //then remove one signal from pending queue
+    { //TODO realize if signal can be in thread queue and not in process queue
+        temp_list = get_Map(prSt->signal_queue, create_SignalObj(info_model->m_si_signo));
+        if ((temp_list != NULL) && (size_List(temp_list) > 0))
+        {
+            remove_List(temp_list, 0);
+        }
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sigwait - wait for queued signals
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int sigwait(const sigset_t *restrict set, int *restrict sig);
+
+DESCRIPTION
+
+    The sigwait() function shall select a pending signal from set, atomically
+    clear it from the system's set of pending signals, and return that signal
+    number in the location referenced by sig. If prior to the call to sigwait
+    () there are multiple pending instances of a single signal number, it is
+    implementation-defined whether upon successful return there are any
+    remaining pending signals for that signal number. [RTS]   If the
+    implementation supports queued signals and there are multiple signals
+    queued for the signal number selected, the first such queued signal shall
+    cause a return from sigwait() and the remainder shall remain queued.  If
+    no signal in set is pending at the time of the call, the thread shall be
+    suspended until one or more becomes pending. The signals defined by set
+    shall have been blocked at the time of the call to sigwait(); otherwise,
+    the behavior is undefined. The effect of sigwait() on the signal actions
+    for the signals in set is unspecified.
+    If more than one thread is using sigwait() to wait for the same signal, no
+    more than one of these threads shall return from sigwait() with the signal
+    number. If more than a single thread is blocked in sigwait() for a signal
+    when that signal is generated for the process, it is unspecified which of
+    the waiting threads returns from sigwait(). If the signal is generated for
+    a specific thread, as by pthread_kill(), only that thread shall return.
+    Should any of the multiple pending signals in the range SIGRTMIN to
+    SIGRTMAX be selected, it shall be the lowest numbered one. The selection
+    order between realtime and non-realtime signals, or between multiple
+    pending non-realtime signals, is unspecified.
+
+RETURN VALUE
+
+    Upon successful completion, sigwait() shall store the signal number of the
+    received signal at the location referenced by sig and return zero.
+    Otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The sigwait() function may fail if:
+
+    [EINVAL]
+    The set argument contains an invalid or unsupported signal number.
+
+*/
+specification
+void sigwait_spec( CallContext context, SigSetTPtr set, VoidTPtr signo)
+{
+    pre
+    {
+        verbose( "sigwait_spec : pre\n" );
+        /*
+         * If prior to the call to sigwait() there are multiple pending instances of a
+         * single signal number, it is implementation-defined whether upon successful
+         * return there are any remaining pending signals for that signal number.
+         */
+        REQ("app.sigwait.02", "", TODO_REQ());
+
+        /*
+         * The effect of sigwait() on the signal actions for the signals in set is
+         * unspecified
+         */
+        REQ("app.sigwait.06", "", TODO_REQ());
+
+        /*
+         * If more than a single thread is blocked in sigwait() for a signal when that
+         * signal is generated for the process, it is unspecified which of the waiting
+         * threads returns from sigwait().
+         */
+        REQ("app.sigwait.08", "", TODO_REQ());
+
+        /*
+         * The selection order between realtime and non-realtime signals, or between
+         * multiple pending non-realtime signals, is unspecified
+         */
+        REQ("app.sigwait.11", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        verbose( "sigwait_spec : post\n" );
+        return true;
+    }
+}
+
+void onSigwait(CallContext context, SigSetTPtr set, VoidTPtr signo)
+{
+    ThreadState* thrSt;
+ //   SigSet* sset;
+    verbose( "onSigwait\n" );
+    thrSt = getThreadState_CallContext(context);
+    thrSt->is_waiting_for_signal = 1;
+ //   sset = getSigSet(set);
+ //   startBlockedCall(context, create_BlockedSigtimedwaitParams(sset));
+}
+
+reaction SigwaitReactionType* sigwait_react(void)
+{
+    post
+    {
+        SigwaitReactionType * blocked_call_params = findBlockedCall( @getBlockedCalls(), sigwait_react->context );
+        Set /* SignalObj */ * pendingSignals = getPendingSignals( sigwait_react->context );
+        verbose( "sigwait_react : post\n" );
+        showSignalsInfoInProcessState( sigwait_react->context );
+        /*
+         * Otherwise, an error number shall be returned to indicate the error
+         */
+        ERROR_BEGIN( POSIX_SIGWAIT, "sigwait.13",
+                     ( sigwait_react->return_value != 0 ) && ( sigwait_react->return_value = * (sigwait_react->errno) ),
+                     * (sigwait_react->errno)
+                   )
+            /*
+             * The sigwait() function may fail if:
+             *
+             * [EINVAL] The set argument contains an invalid or unsupported signal number.
+             */
+            ERROR_MAY(POSIX_SIGWAIT, EINVAL, "sigwait.14.01", TODO_ERR(EINVAL))
+        ERROR_END()
+
+        /*
+         * The sigwait() function shall select a pending signal from set, atomically clear
+         * it from the system's set of pending signals, and return that signal number in
+         * the location referenced by sig.
+         */
+        REQ( "sigwait.01", "Check if at least one signal was deleted", sigwait_react->has_delete == 1 );
+
+        /*
+         * If the implementation supports queued signals and there are multiple signals
+         * queued for the signal number selected, the first such queued signal shall cause
+         * a return from sigwait() and the remainder shall remain queued.
+         */
+        REQ("sigwait.03", "", TODO_REQ());
+
+        /*
+         * If no signal in set is pending at the time of the call, the thread shall be
+         * suspended until one or more becomes pending.
+         */
+        REQ("sigwait.04", "", TODO_REQ());
+
+        /*
+         * The signals defined by set shall have been blocked at the time of the call to
+         * sigwait(); otherwise, the behavior is undefined.
+         */
+        REQ("sigwait.05", "", TODO_REQ());
+
+        /*
+         * If more than one thread is using sigwait() to wait for the same signal, no more
+         * than one of these threads shall return from sigwait() with the signal number.
+         */
+        REQ("sigwait.07", "", TODO_REQ());
+
+        /*
+         * If the signal is generated for a specific thread, as by pthread_kill(), only
+         * that thread shall return.
+         */
+        REQ("sigwait.09", "", TODO_REQ());
+
+        /*
+         * Should any of the multiple pending signals in the range SIGRTMIN to SIGRTMAX be
+         * selected, it shall be the lowest numbered one.
+         */
+        REQ("sigwait.10", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, sigwait() shall
+         *
+         * store the signal number of the received signal at the location referenced by
+         * sig
+         */
+        REQ( "sigwait.12.01", "store the signal number of the received signal",
+                              contains_Set( pendingSignals, create_SignalObj( sigwait_react->signo ) )
+           );
+
+        /*
+         * Upon successful completion, sigwait() shall
+         *
+         * return zero
+         */
+        REQ( "sigwait.12.02", "return zero", sigwait_react->return_value == 0 );
+
+        return true;
+    }
+}
+
+void onSigwaitReact(SigwaitReactionType* react_params)
+{
+    ThreadState* thrSt;
+    ProcessState* prSt;
+    List* temp_list;
+    verbose( "onSigwaitReact\n" );
+    thrSt = getThreadState_CallContext(react_params->context);
+    prSt = getProcessState_CallContext(react_params->context);
+    thrSt->is_waiting_for_signal = 0;
+    if (react_params->return_value == 0) //then remove one signal from pending queue
+    { //TODO realize if signal can be in thread queue and not in process queue
+        temp_list = get_Map(prSt->signal_queue, create_SignalObj(react_params->signo));
+        if ((temp_list != NULL) && (size_List(temp_list) > 0))
+        {
+            remove_List(temp_list, 0);
+            react_params->has_delete = 1;
+        }
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sigtimedwait, sigwaitinfo - wait for queued signals (REALTIME)
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int sigtimedwait(const sigset_t *restrict set,
+           siginfo_t *restrict info,
+           const struct timespec *restrict timeout);
+    int sigwaitinfo(const sigset_t *restrict set,
+           siginfo_t *restrict info);
+
+DESCRIPTION
+
+    The sigtimedwait() function shall be equivalent to sigwaitinfo() except
+    that if none of the signals specified by set are pending, sigtimedwait()
+    shall wait for the time interval specified in the timespec structure
+    referenced by timeout. If the timespec structure pointed to by timeout is
+    zero-valued and if none of the signals specified by set are pending, then
+    sigtimedwait() shall return immediately with an error. If timeout is the
+    NULL pointer, the behavior is unspecified. [MON]   If the Monotonic Clock
+    option is supported, the CLOCK_MONOTONIC clock shall be used to measure
+    the time interval specified by the timeout argument.
+    The sigwaitinfo() function selects the pending signal from the set
+    specified by set. Should any of multiple pending signals in the range
+    SIGRTMIN to SIGRTMAX be selected, it shall be the lowest numbered one. The
+    selection order between realtime and non-realtime signals, or between
+    multiple pending non-realtime signals, is unspecified. If no signal in set
+    is pending at the time of the call, the calling thread shall be suspended
+    until one or more signals in set become pending or until it is interrupted
+    by an unblocked, caught signal.
+    The sigwaitinfo() function shall be equivalent to the sigwait() function
+    if the info argument is NULL. If the info argument is non-NULL, the
+    sigwaitinfo() function shall be equivalent to sigwait(), except that the
+    selected signal number shall be stored in the si_signo member, and the
+    cause of the signal shall be stored in the si_code member. If any value is
+    queued to the selected signal, the first such queued value shall be
+    dequeued and, if the info argument is non-NULL, the value shall be stored
+    in the si_value member of info. The system resource used to queue the
+    signal shall be released and returned to the system for other use. If no
+    value is queued, the content of the si_value member is undefined. If no
+    further signals are queued for the selected signal, the pending indication
+    for that signal shall be reset.
+
+RETURN VALUE
+
+    Upon successful completion (that is, one of the signals specified by set
+    is pending or is generated) sigwaitinfo() and sigtimedwait() shall return
+    the selected signal number. Otherwise, the function shall return a value
+    of -1 and set errno to indicate the error.
+
+ERRORS
+
+    The sigtimedwait() function shall fail if:
+
+    [EAGAIN]
+    No signal specified by set was generated within the specified timeout
+    period.
+
+    The sigtimedwait() and sigwaitinfo() functions may fail if:
+
+    [EINTR]
+    The wait was interrupted by an unblocked, caught signal. It shall be
+    documented in system documentation whether this error causes these
+    functions to fail.
+
+    The sigtimedwait() function may also fail if:
+
+    [EINVAL]
+    The timeout argument specified a tv_nsec value less than zero or greater
+    than or equal to 1000 million.
+    An implementation should only check for this error if no signal is pending
+    in set and it is necessary to wait.
+*/
+specification
+void sigwaitinfo_spec(CallContext context, SigSetTPtr set, SigInfoTPtr info)
+{
+    pre
+    {
+        /*
+         * The selection order between realtime and non-realtime signals, or between
+         * multiple pending non-realtime signals, is unspecified.
+         */
+        REQ("app.sigwaitinfo.07", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onSigwaitinfo(CallContext context, SigSetTPtr set, SigInfoTPtr info)
+{
+    ThreadState* thrSt;
+    thrSt = getThreadState_CallContext(context);
+    thrSt->is_waiting_for_signal = 1;
+}
+
+reaction SigwaitinfoReactionType * sigwaitinfo_react(void)
+{
+    post
+    {
+        SigtimedwaitBlockedType * blocked_call_params = findBlockedCall( @getBlockedCalls(), sigwaitinfo_react->context );
+        Set /* SignalObj */ * pendingSignals = getPendingSignals( sigwaitinfo_react->context );
+        verbose("sigwaitinfo reaction post\n");
+        /*
+         * Otherwise, the function shall return a value of -1 and set errno to indicate
+         * the error.
+         */
+        ERROR_BEGIN(SIGWAITINFO, "sigwaitinfo.17", sigwaitinfo_react->return_value == -1, *(sigwaitinfo_react->errno))
+            /*
+             * The sigtimedwait() and sigwaitinfo() functions may fail if:
+             *
+             * [EINTR] The wait was interrupted by an unblocked, caught signal. It shall be
+             * documented in system documentation whether this error causes these functions to
+             * fail.
+             */
+            ERROR_MAY(SIGWAITINFO, EINTR, "sigwaitinfo.19.01", TODO_ERR(EINTR))
+        ERROR_END()
+
+        if ( size_Set( pendingSignals ) == 0 ) {
+            /*
+             * If no signal in set is pending at the time of the call
+             *
+             * the calling thread shall be suspended until one or more signals in set become
+             * pending
+             */
+            REQ("sigwaitinfo.08.01", "", TODO_REQ());
+
+            /*
+             * If no signal in set is pending at the time of the call
+             *
+             * or until it is interrupted by an unblocked, caught signal
+             */
+            REQ("sigwaitinfo.08.02", "", TODO_REQ());
+        } else {
+            bool checkResult = contains_Set( pendingSignals, create_SignalObj( sigwaitinfo_react->return_value ) );
+            /*
+             * The sigwaitinfo() function selects the pending signal from the set specified by
+             * set.
+             */
+            REQ( "sigwaitinfo.05", "sigwaitinfo() selects the pending signal", checkResult );
+
+            /*
+             * Upon successful completion (that is, one of the signals specified by set is
+             * pending or is generated) sigwaitinfo() and sigtimedwait() shall return the
+             * selected signal number.
+             */
+            REQ( "sigwaitinfo.16", "return the selected signal number", checkResult );
+        }
+
+        /*
+         * Should any of multiple pending signals in the range SIGRTMIN to SIGRTMAX be
+         * selected, it shall be the lowest numbered one.
+         */
+        REQ("sigwaitinfo.06", "", TODO_REQ());
+
+        /*
+         * The sigwaitinfo() function shall be equivalent to the sigwait() function if the
+         * info argument is NULL
+         */
+        REQ("sigwaitinfo.09", "", TODO_REQ());
+
+        /*
+         * If the info argument is non-NULL, the sigwaitinfo() function shall be
+         * equivalent to sigwait(), except that the selected signal number shall be stored
+         * in the si_signo member, and the cause of the signal shall be stored in the
+         * si_code member.
+         */
+        REQ("sigwaitinfo.10", "", TODO_REQ());
+
+        /*
+         * If any value is queued to the selected signal, the first such queued value
+         * shall be dequeued and
+         */
+        REQ("sigwaitinfo.11", "", TODO_REQ());
+
+        /*
+         * if the info argument is non-NULL, the value shall be stored in the si_value
+         * member of info
+         */
+        REQ("sigwaitinfo.12", "", TODO_REQ());
+
+        /*
+         * The system resource used to queue the signal shall be released and returned to
+         * the system for other use
+         */
+        REQ("sigwaitinfo.13", "", TODO_REQ());
+
+        /*
+         * If no value is queued, the content of the si_value member is undefined
+         */
+        REQ("sigwaitinfo.14", "", TODO_REQ());
+
+        /*
+         * If no further signals are queued for the selected signal, the pending
+         * indication for that signal shall be reset
+         */
+        REQ("sigwaitinfo.15", "", TODO_REQ());
+
+        /*
+         * An implementation should only check for this error if no signal is pending in
+         * set and it is necessary to wait.
+         */
+        REQ("sigwaitinfo.21", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onSigwaitinfoReact(SigwaitinfoReactionType* react_params)
+{
+    ThreadState* thrSt;
+    ProcessState* prSt;
+    SigInfo* info_model;
+    List* temp_list;
+
+    thrSt = getThreadState_CallContext(react_params->context);
+    prSt = getProcessState_CallContext(react_params->context);
+    info_model = getObjectInMemory(react_params->info);
+    thrSt->is_waiting_for_signal = 0;
+    if (react_params->return_value == 0) //then remove one signal from pending queue
+    { //TODO realize if signal can be in thread queue and not in process queue
+        temp_list = get_Map(prSt->signal_queue, create_SignalObj(info_model->m_si_signo));
+        if ((temp_list != NULL) && (size_List(temp_list) > 0))
+        {
+            remove_List(temp_list, 0);
+        }
+    }
+}
+
+/********************************************************************/
+/**                       Sigwait Types                            **/
+/********************************************************************/
+
+specification typedef struct SigtimedwaitBlockedType SigtimedwaitBlockedType = {};
+specification typedef struct SigtimedwaitReactionType SigtimedwaitReactionType = {};
+
+//specification typedef struct BlockedSigwaitParams BlockedSigwaitParams = {};
+specification typedef struct SigwaitReactionType SigwaitReactionType = {};
+
+specification typedef struct SigwaitinfoReactionType SigwaitinfoReactionType = {};
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+SigtimedwaitBlockedType* create_SigtimedwaitBlockedType(CallContext context,
+                         SigSetTPtr set, SigInfoTPtr info,
+                         TimeInterval t_stamp, TimeUnit delta)
+{
+    return create(&type_SigtimedwaitBlockedType, context, set, info, t_stamp, delta);
+}
+
+SigtimedwaitReactionType* create_SigtimedwaitReactionType(CallContext context,
+                          IntT return_value, ErrorCode* errno)
+{
+    return create(&type_SigtimedwaitReactionType, context, return_value, errno);
+}
+
+
+SigwaitReactionType* create_SigwaitReactionType(CallContext context, SigSetTPtr set,
+                        IntT signo, IntT return_value, ErrorCode* errno, IntT has_delete)
+{
+    return create(&type_SigwaitReactionType, context, set, signo, return_value, errno, has_delete);
+}
+
+SigwaitinfoReactionType* create_SigwaitinfoReactionType(CallContext context, SigSetTPtr set,
+                        SigInfoTPtr info, IntT return_value, ErrorCode* errno)
+{
+    return create(&type_SigwaitinfoReactionType, context, set, info, return_value, errno);
+}
+
+static void showSignalsInfoInProcessState_signalActions( Map /* SignalObj +> SigAction */ * signalActions ) {
+    int i;
+    verbose( "    size_Map( signalActions ) is %d\n", size_Map( signalActions ) );
+    for ( i = 0; i < size_Map( signalActions ); i++ ) {
+        String * keyAsString   = toString(                         key_Map( signalActions, i )   );
+        String * valueAsString = toString( get_Map( signalActions, key_Map( signalActions, i ) ) );
+        verbose( "        signalActions( %s ) is %s\n",
+                 toCharArray_String( keyAsString ), toCharArray_String( valueAsString )
+               );
+    }
+}
+
+static void showSignalsInfoInProcessState_signalQueue( Map /* SignalObj +> List */ * signalQueue ) {
+    int i;
+    verbose( "    size_Map( signalQueue ) is %d\n", size_Map( signalQueue ) );
+    for ( i = 0; i < size_Map( signalQueue ); i++ ) {
+        String * keyAsString   = toString(                       key_Map( signalQueue, i )   );
+        String * valueAsString = toString( get_Map( signalQueue, key_Map( signalQueue, i ) ) );
+        verbose( "        signalQueue( %s ) is %s\n",
+                 toCharArray_String( keyAsString ), toCharArray_String( valueAsString )
+               );
+    }
+}
+
+static void showSignalsInfoInProcessState_processedSignals( Map /* SignalObj +> List */ * processedSignals ) {
+    int i;
+    verbose( "    size_Map( processedSignals ) is %d\n", size_Map( processedSignals ) );
+    for ( i = 0; i < size_Map( processedSignals ); i++ ) {
+        String * keyAsString   = toString(                            key_Map( processedSignals, i )   );
+        String * valueAsString = toString( get_Map( processedSignals, key_Map( processedSignals, i ) ) );
+        verbose( "        processedSignals( %s ) is %s\n",
+                 toCharArray_String( keyAsString ), toCharArray_String( valueAsString )
+               );
+    }
+}
+
+void showSignalsInfoInProcessState( CallContext context ) {
+    ProcessState * processState = getProcessState_CallContext( context );
+    verbose( "showSignalsInfoInProcessState : begin\n" );
+        showSignalsInfoInProcessState_signalActions   ( processState->signal_actions    );
+        showSignalsInfoInProcessState_signalQueue     ( processState->signal_queue      );
+        showSignalsInfoInProcessState_processedSignals( processState->processed_signals );
+        verbose( "    currentUniqueSigid is %d\n", processState->current_unique_sigid );
+    verbose( "showSignalsInfoInProcessState : end\n" );
+}
+
+Set /* SignalObj */ * getPendingSignals( CallContext context ) {
+    Set /* SignalObj */ * res = create_Set( & type_IntTObj );
+    ProcessState * processState = getProcessState_CallContext( context );
+    Map /* SignalObj +> List */ * signalQueue = processState->signal_queue;
+    int i;
+    for ( i = 0; i < size_Map( signalQueue ); i++ ) {
+        IntTObj * key = key_Map( signalQueue, i );
+        add_Set( res, key );
+    }
+    return res;
+}

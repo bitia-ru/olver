@@ -1,0 +1,366 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_model.seh"
+#include "system/user/user_media.seh"
+#include "time/clock/clock_model.seh"
+#include "time/clock/clock_media.seh"
+#include "config/system_config.seh"
+#include "config/test_system_config.h"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/control_center.seh"
+#include "process/meta/user_model.seh"
+#include "process/meta/user_media.seh"
+#include "process/environ/environ_media.seh"
+#include "fs/meta/access_media.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "time/clock/tests/clock_scenario.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+bool needOnlyFirstPriority;
+bool needConformanceTestQuality;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+List /* NULL */ * functionData;
+
+TimeSpecT maxSuspend;
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    //needOnlyFirstPriority = false;
+    needOnlyFirstPriority = true;
+    needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    DISABLE_DEFERRED_REACTIONS
+        if ( ( functionData = createContexts() ) == NULL ) { return false; }
+        setFinishMode( UNTIL_END );
+        maxSuspend.sec  = 2;
+        maxSuspend.nsec = 0;
+        setWTimeMSec( /*maxSuspend.sec * 1000 + maxSuspend.nsec / 1000000 + */SERIALIZATION_TIME );
+    ENABLE_DEFERRED_REACTIONS
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init_time_clock_scenario( int argc, char ** argv ) { return init_scenario( "time clock" ); }
+
+static void finish_time_clock_scenario( void ) finish_scenario( time_clock )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool clock_getcpuclockid_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int j = 1; j <= 2; j++; )
+        {
+            ProcessId pid;
+            ClockidTObj * clock_id = create_ClockidTObj( 0 );
+            pid.system = contextObj->system;
+            switch ( j ) {
+                case 1: pid.process = 0                  ; break;
+                case 2: pid.process = contextObj->process; break;
+            }
+            dotPrint( 10, 100 );
+            clock_getcpuclockid_spec( * contextObj, pid, clock_id );
+        } // iterate j
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool clock_getres_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    int contextI; 
+    int j, k;
+    for (contextI = 0; contextI <= maxContextI; contextI++)
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        for (j = 1; j <= 3; j++)
+        //iterate ( int j = 2; j <= 2; j++; )
+        {
+            ClockidTObj * clock_id;
+            SystemState * systemState = getSystemState_CallContext( * contextObj );
+            switch ( j ) {
+                case 1: clock_id = key_Map( systemState->clocks, 0                                   ); break;
+                case 2: clock_id = key_Map( systemState->clocks, size_Map( systemState->clocks ) - 1 ); break;
+                case 3: clock_id = create_ClockidTObj( -1 )                                           ; break;
+            }
+            for (k = 1; k <= 2; k++)
+            //iterate ( int k = 2; k <= 2; k++; )
+            {
+                TimeSpecTObj * res;
+                TimeSpecT tmpForRes = default_TimeSpecT;
+                tmpForRes.sec = 0;
+                tmpForRes.nsec = 0;
+                switch ( k ) {
+                    case 1: res = NULL                            ; break;
+                    case 2: res = create_TimeSpecTObj( tmpForRes ); break;
+                }
+                dotPrint( 10, 100 );
+                if(clock_getres_spec( * contextObj, clock_id, res, requestErrorCode() )==-10)
+                {
+                    return true;
+                }
+            } // iterate k
+        } // iterate j
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool clock_gettime_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int j = 1; j <= 3; j++; )
+        {
+            ClockidTObj * clock_id;
+            SystemState * systemState = getSystemState_CallContext( * contextObj );
+            TimeSpecT tmpForTp = default_TimeSpecT;
+            TimeSpecTObj * tp = create_TimeSpecTObj( tmpForTp );
+            switch ( j ) {
+                case 1: clock_id = key_Map( systemState->clocks, 0                                   ); break;
+                case 2: clock_id = key_Map( systemState->clocks, size_Map( systemState->clocks ) - 1 ); break;
+                case 3: clock_id = create_ClockidTObj( -1 )                                           ; break;
+            }
+            dotPrint( 10, 100 );
+            clock_gettime_spec( * contextObj, clock_id, tp, requestErrorCode() );
+        } // iterate j
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool clock_nanosleep_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int j = 1; j <= ( needConformanceTestQuality ? 1 : 3 ); j++; )
+        {
+            ClockidTObj * clock_id;
+            SystemState * systemState = getSystemState_CallContext( * contextObj );
+            switch ( j ) {
+                case 1: clock_id = key_Map( systemState->clocks, 0                                   ); break;
+                case 2: clock_id = key_Map( systemState->clocks, size_Map( systemState->clocks ) - 1 ); break;
+                case 3: clock_id = create_ClockidTObj( -1 )                                           ; break;
+            }
+            iterate ( int k = 1; k <= 2; k++; )
+            {
+                IntT flags;
+                switch ( k ) {
+                    case 1: flags = SUT_TIMER_ABSTIME; break;
+                    case 2: flags = 0                ; break;
+                }
+                iterate ( int l = 1; l <= ( j == 2 ? 1 : 2 ); l++; )
+                {
+                    TimeSpecT tmpForRqtp;
+                    TimeSpecTObj * rqtp;
+                    switch ( l ) {
+                        case 1: tmpForRqtp.sec = 1;  tmpForRqtp.nsec = 1000000000; break;
+                        case 2: tmpForRqtp.sec = 1;  tmpForRqtp.nsec = 0         ; break;
+                    }
+                    rqtp = create_TimeSpecTObj( tmpForRqtp );
+                    iterate ( int m = 1; m <= ( needConformanceTestQuality ? 1 : 2 ); m++; )
+                    {
+                        TimeSpecTObj * rmtp;
+                        TimeSpecT tmpForRmtp = default_TimeSpecT;
+                        switch ( m ) {
+                            case 1: rmtp = NULL                             ; break;
+                            case 2: rmtp = create_TimeSpecTObj( tmpForRmtp ); break;
+                        }
+                        dotPrint( 10, 100 );
+                        // verbose( "n" );
+                        clock_nanosleep_spec( * contextObj, clock_id, flags, rqtp, rmtp );
+                    } // iterate m
+                } // iterate l
+            } // iterate k
+        } // iterate j
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool clock_settime_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int j = 1; j <= 3; j++; )
+        {
+            ClockidTObj * clock_id;
+            SystemState * systemState = getSystemState_CallContext( * contextObj );
+            switch ( j ) {
+                case 1: clock_id = key_Map( systemState->clocks, 0                                   ); break;
+                case 2: clock_id = key_Map( systemState->clocks, size_Map( systemState->clocks ) - 1 ); break;
+                case 3: clock_id = create_ClockidTObj( -1 )                                           ; break;
+            }
+            // iterate ( int k = 1; k <= ( j == 1 ? 1 : 2 ); k++; )
+            iterate ( int k = 1; k <= ( j != 3 ? 1 : 2 ); k++; )
+            {
+                TimeSpecT tmpForTp;
+                TimeSpecTObj * tp;
+                switch ( k ) {
+                    case 1: tmpForTp.sec = 1;  tmpForTp.nsec = 1000000000; break;
+                    case 2: tmpForTp.sec = 1;  tmpForTp.nsec = 0         ; break;
+                }
+                tp = create_TimeSpecTObj( tmpForTp );
+                dotPrint( 10, 100 );
+                // verbose( "s" );
+                clock_settime_spec( * contextObj, clock_id, tp, requestErrorCode() );
+            } // iterate k
+        } // iterate j
+    } // iterate contextI
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+static Map * saveSingleModelState( void ) { return clone( systems ); }
+
+static void restoreSingleModelState( Map * saved_state ) { systems = saved_state; }
+
+static bool isSingleModelStateStationary( void ) { return true; }
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm time_clock_scenario =
+{
+    .init              = init_time_clock_scenario                          ,
+    .finish            = finish_time_clock_scenario                        ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { clock_getcpuclockid_scen,
+                           clock_gettime_scen      ,
+                           clock_nanosleep_scen    ,
+                           clock_settime_scen      ,
+                           clock_getres_scen       ,
+                           NULL
+                         }
+};
+
+#ifdef TIME_CLOCK_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initTimeClockSubsystem();
+}
+
+bool main_time_clock_local( int argc, char** argv )
+{
+    time_clock_scenario( argc, argv );
+    return true;
+}
+
+int main( int argc, char** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    main_time_clock_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

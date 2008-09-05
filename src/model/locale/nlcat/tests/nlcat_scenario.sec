@@ -1,0 +1,346 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#define NEWREQ
+
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "locale/nlcat/tests/nlcat_scenario.seh"
+#include "locale/nlcat/nlcat_media.seh"
+#include "process/environ/environ_media.seh"
+#include "config/test_system_config.h"
+
+static CallContext context;
+static Map* mapCatalogs;
+static Map* mapErrCatalogs;
+
+/********************************************************************/
+/**                      Test Scenario Functions                   **/
+/********************************************************************/
+
+static void LoadTestDataCatalogs(void);
+
+static bool init_scen(int argc, char* argv[])
+{
+    CString* sNLSPATH;
+
+    context = getContext();
+
+    initProcessEnvironment(context);
+    sNLSPATH = format_CString("%s/locale.nlcat/%%N.cat", TEST_DATA_PATH);
+    setenv_spec(context, _CS("NLSPATH"), sNLSPATH, 1, requestErrorCode());
+
+    LoadTestDataCatalogs();
+
+    return true;
+}
+
+static void finish_scen(void)
+{
+}
+
+scenario
+bool nlcat_scen(void)
+{
+    Map *mapCat, *mapSet;
+    nl_catd openRes;
+    CString *getsRes, *errMsg;
+
+    errMsg = _CS("Error message");
+
+    iterate(int i = 0; i < size_Map(mapCatalogs); i++;)
+    {
+        CString* CatName = key_Map(mapCatalogs, i);
+        mapCat = get_Map(mapCatalogs, CatName);
+
+        //verbose("catname: %s\n", CatName->data);
+        openRes = catopen_spec(context, CatName, 0, requestErrorCode());
+
+        if(indexOfChar_CString(CatName, '/') != -1)
+        {
+            /*
+             * The name argument specifies the name of the message catalog to be opened.
+             *
+             * If name contains a '/', then name specifies a complete name for the message 
+             * catalog.
+             */
+            REQ("catopen.02.01", "name specifies a complete name", !isInvalid_VoidTPtr(openRes));
+        }
+        else
+        {
+            /*
+             * The name argument specifies the name of the message catalog to be opened.
+             *
+             * Otherwise, the environment variable NLSPATH is used with name substituted for 
+             * the %N conversion specification (see the Base Definitions volume of IEEE Std 
+             * 1003.1-2001, Chapter 8, Environment Variables).
+             */
+            REQ("catopen.02.02", "name specifies the msg cat by NLSPATH", !isInvalid_VoidTPtr(openRes));
+        }
+
+        iterate(int i2 = 0; i2 < size_Map(mapCat); i2++;)
+        {
+            mapSet = get_Map(mapCat, key_Map(mapCat, i2));
+
+            iterate(int i3 = 0; i3 < size_Map(mapSet); i3++;)
+            {
+                IntTObj* set_id = key_Map(mapCat, i2);
+                IntTObj* msg_id = key_Map(mapSet, i3);
+                CString* needStr = get_Map(mapSet, msg_id);
+                CString* name = get_Map(mapSet, key_Map(mapSet, i3));
+
+                getsRes = catgets_spec(context, openRes, *set_id, *msg_id, errMsg, requestErrorCode());
+
+                //verbose("address: %x\n", isInvalid_VoidTPtr(openRes));
+                //verbose("message: %d %d\n", *set_id, *msg_id);
+                //verbose("n:%s^\n", needStr->data);
+                //verbose("e:%s^\n", getsRes->data);
+                //verbose("%d\n", compare(getsRes, needStr));
+
+                /*
+                 * If the identified message is retrieved successfully, catgets() shall return a 
+                 * pointer to an internal buffer area containing the null-terminated message 
+                 * string.
+                 */
+                REQ("catgets.03", "shall succesfull complete", getsRes && getsRes != errMsg &&
+                    compare(getsRes, needStr) == 0);
+            }
+        }
+
+        catclose_spec(context, openRes, requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool nlcat_err_scen(void)
+{
+    Map *mapCat, *mapSet;
+    nl_catd openRes;
+    CString *getsRes, *errMsg;
+
+    errMsg = _CS("Error message");
+
+    iterate(int i = 0; i < size_Map(mapErrCatalogs); i++;)
+    {
+        CString* CatName = key_Map(mapErrCatalogs, i);
+        mapCat = get_Map(mapErrCatalogs, CatName);
+
+        openRes = catopen_spec(context, CatName, 0, requestErrorCode());
+
+        if(!containsKey_Map(mapCatalogs, CatName))
+        /*
+         * Otherwise, catopen() shall return ( nl_catd) -1 and {MAY?} set errno to indicate the 
+         * error.
+         */
+        REQ("catopen.09", "shall return -1 and set errno", isInvalid_VoidTPtr(openRes));
+
+        iterate(int i2 = 0; i2 < size_Map(mapCat); i2++;)
+        {
+            mapSet = get_Map(mapCat, key_Map(mapCat, i2));
+
+            iterate(int i3 = 0; i3 < size_Map(mapSet); i3++;)
+            {
+                IntTObj* set_id = key_Map(mapCat, i2);
+                IntTObj* msg_id = key_Map(mapSet, i3);
+                CString* needStr = get_Map(mapSet, msg_id);
+                CString* name = get_Map(mapSet, key_Map(mapSet, i3));
+
+                getsRes = catgets_spec(context, openRes, *set_id, *msg_id, errMsg, requestErrorCode());
+
+                //verbose("n:%s^\n", needStr->data);
+                //verbose("e:%s^\n", getsRes->data);
+                //verbose("%d\n", compare(getsRes, needStr));
+
+                /*
+                 * If the call is unsuccessful for any reason, s shall be returned and errno may 
+                 * be set to indicate the error.
+                 */
+                REQ("catgets.04", "shall return s", getsRes == errMsg);
+            }
+        }
+
+        catclose_spec(context, openRes, requestErrorCode());
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                           Test Scenario                        **/
+/********************************************************************/
+
+scenario dfsm nlcat_scenario =
+{
+    .init = init_scen,
+    .finish = finish_scen,
+    .actions = {
+        nlcat_scen,
+        nlcat_err_scen,
+        NULL
+    }
+};
+
+#ifdef LOCALE_NLCAT_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initProcessEnvironSubsystem();
+
+    initLocaleNlcatSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    int res;
+    initTestSystem();
+    loadSUT();
+    
+    // Set up tracer
+    // setTraceEncoding("windows-1251");
+    
+    addTraceToFile("trace.xml");
+    
+    // Run test scenario
+    nlcat_scenario(argc, argv) != 0 ? verbose("PASS\n") : verbose("FAIL\n");
+    
+    // unloadSUT();
+    return 0;
+}
+
+#endif
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+static void LoadTestDataCatalogs(void)
+{
+    Map *mapCat, *mapSet;
+
+    mapCatalogs = create_Map(&type_CString, &type_Map);
+    mapErrCatalogs = create_Map(&type_CString, &type_Map);
+
+    put_Map(mapCatalogs, _CS("catfirst"), create_Map(&type_IntTObj, &type_Map));
+    put_Map(mapCatalogs, _CS("catsecond"), create_Map(&type_IntTObj, &type_Map));
+    put_Map(mapCatalogs, _CS("catthird"), create_Map(&type_IntTObj, &type_Map));
+    put_Map(mapErrCatalogs, _CS("catfirst"), create_Map(&type_IntTObj, &type_Map));
+    put_Map(mapErrCatalogs, _CS("abracadabra"), create_Map(&type_IntTObj, &type_Map));
+
+    mapCat = get_Map(mapCatalogs, _CS("catfirst"));
+    put_Map(mapCat, create_IntTObj(12345), create_Map(&type_IntTObj, &type_CString));
+    put_Map(mapCat, create_IntTObj(54321), create_Map(&type_IntTObj, &type_CString));
+
+    mapSet = get_Map(mapCat, create_IntTObj(12345));
+    put_Map(mapSet, create_IntTObj(123), _CS("The first message string"));
+    put_Map(mapSet, create_IntTObj(321), _CS("As children, everyone is taught the traditional "
+                                             "order of the nine planets in the solar system. However, "
+                                             "as we learn more about our neighboring planets and space "
+                                             "in general this may have to be changed. Between and "
+                                             "beyond Neptune and Pluto, thousands of small, somewhat "
+                                             "planet-like objects have been found. These have been "
+                                             "shown to occupy three distinct areas: the Kuiper belt, "
+                                             "the scattered disc, and the Oort cloud. The discoveries "
+                                             "have so far had two major implications:"));
+
+    mapSet = get_Map(mapCat, create_IntTObj(54321));
+    put_Map(mapSet, create_IntTObj(907), _CS("The last message string"));
+
+    mapCat = get_Map(mapCatalogs, _CS("catsecond"));
+    put_Map(mapCat, create_IntTObj(94758), create_Map(&type_IntTObj, &type_CString));
+    put_Map(mapCat, create_IntTObj(10283), create_Map(&type_IntTObj, &type_CString));
+
+    mapSet = get_Map(mapCat, create_IntTObj(94758));
+    put_Map(mapSet, create_IntTObj(333), _CS("In the early- to mid-1950s, Dr. Paul "
+                                             "Kuroda from the University of Arkansas described "
+                                             "the possibility of naturally occurring nuclear "
+                                             "reactors lurking in the crust of ancient Earth. "
+                                             "The key is an isotope of Uranium called U-235, "
+                                             "which occurs naturally in small amounts. If enough "
+                                             "of this isotope were pooled together under "
+                                             "specific circumstances, Kuroda theorized, the "
+                                             "natural reactor would go critical, and self-sustaining "
+                                             "fission would occur."));
+
+    mapSet = get_Map(mapCat, create_IntTObj(10283));
+    put_Map(mapSet, create_IntTObj(628), _CS("The other message string"));
+
+    mapCat = get_Map(mapCatalogs, _CS("catthird"));
+    put_Map(mapCat, create_IntTObj(32145), create_Map(&type_IntTObj, &type_CString));
+    put_Map(mapCat, create_IntTObj(94758), create_Map(&type_IntTObj, &type_CString));
+
+    mapSet = get_Map(mapCat, create_IntTObj(32145));
+    put_Map(mapSet, create_IntTObj(951), _CS("Error message"));
+    put_Map(mapSet, create_IntTObj(952), _CS("klasdfkladsklfkl 2435 2vmkd 1 453sjdk5 345 fiw345 "
+                                             "345e45 4o4j kd klalkfjdiweo kw239 9034 iw j"));
+    put_Map(mapSet, create_IntTObj(953), _CS("Color film was non-existent in 1909 Russia, yet in that year "
+                                             "a photographer named Sergei Mikhailovich Prokudin-Gorskii embarked "
+                                             "on a photographic survey of his homeland and captured hundreds of "
+                                             "photos in full, vivid color. His photographic plates were black and "
+                                             "white, but he had developed an ingenious photographic technique which "
+                                             "allowed him to use them to produce accurate color images."));
+
+    mapSet = get_Map(mapCat, create_IntTObj(94758));
+    put_Map(mapSet, create_IntTObj(333), _CS("The one message string"));
+
+    mapCat = get_Map(mapErrCatalogs, _CS("catfirst"));
+    put_Map(mapCat, create_IntTObj(12345), create_Map(&type_IntTObj, &type_CString));
+    put_Map(mapCat, create_IntTObj(1), create_Map(&type_IntTObj, &type_CString));
+
+    mapSet = get_Map(mapCat, create_IntTObj(12345));
+    put_Map(mapSet, create_IntTObj(1), _CS("The one err message string"));
+
+    mapSet = get_Map(mapCat, create_IntTObj(1));
+    put_Map(mapSet, create_IntTObj(1), _CS("The second err message string"));
+
+    mapCat = get_Map(mapErrCatalogs, _CS("abracadabra"));
+    put_Map(mapCat, create_IntTObj(12345), create_Map(&type_IntTObj, &type_CString));
+    put_Map(mapCat, create_IntTObj(1), create_Map(&type_IntTObj, &type_CString));
+
+    mapSet = get_Map(mapCat, create_IntTObj(12345));
+    put_Map(mapSet, create_IntTObj(1), _CS("The one err message string"));
+
+    mapSet = get_Map(mapCat, create_IntTObj(1));
+    put_Map(mapSet, create_IntTObj(1), _CS("The second err message string"));
+}

@@ -1,0 +1,1520 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "process/meta/user_media.seh"
+#include "process/meta/user_model.seh"
+#include "process/process/process_common.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+#include "system/user/user_media.seh"
+#include "system/user/user_model.seh"
+
+#include "atl/stringbuffer.h"
+#include "config/test_system_config.h"
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+IntTObj * readIntValueByName( CallContext context, const char * name ) {
+    if ( equals( create_String( name ), create_String( "EXIT_FAILURE" ) ) ) {
+        return create_IntTObj( 2 );
+    } else if ( equals( create_String( name ), create_String( "WCONTINUED" ) ) ) {
+        return NULL;
+    } else {
+        return NULL;
+    }
+}
+
+List * environMapAsList( Map * environ ) {
+    List * result = create_List( & type_CString );
+    int i;
+    for ( i = 0; i < size_Map( environ ); i++ ) {
+        CString * key   = key_Map( environ, i )  ;
+        CString * value = get_Map( environ, key );
+        append_List( result, concat_CString( concat_CString( key, create_CString( "=" ) ), value ) );
+    }
+    return result;
+}
+
+bool processReallyHaveHighPriority( CallContext context ) {
+    ProcessState * processState = getProcessState_CallContext( context );
+    if ( processState->meta.effective_userid == 0 ) { return true ; }
+                                               else { return false; }
+}
+
+bool processReallyHaveLowPriority( CallContext context ) {
+    SystemState * systemState = getSystemState_CallContext( context );
+    ProcessState * processState = getProcessState_CallContext( context );
+    int i;
+    if ( systemState->globalUsers == NULL ) { return false; }
+    for ( i = 0; i < size_Set( systemState->globalUsers ); i++ ) {
+        Passwd * user = get_Set( systemState->globalUsers, i );
+        if ( equals( create_CString( (char*)USER_NAME_TESTER ), user->pw_name ) ) {
+            if ( processState->meta.effective_userid == user->pw_uid ) { return true ; }
+                                                                  else { return false; }
+        }
+    }
+    return false;
+}
+
+static bool init_some_system_conviguration_values( CallContext context ) {
+    // NGROUPS_MAX, OPEN_MAX
+    LongT nGroupsMax = sysconf_spec( context, SUT_SC_NGROUPS_MAX, requestErrorCode() );
+    LongT openMax    = sysconf_spec( context, SUT_SC_OPEN_MAX   , requestErrorCode() );
+    if ( nGroupsMax == -1 ) {
+        traceUserInfo( "init_some_system_conviguration_values : sysconf_spec for SUT_SC_NGROUPS_MAX failed" );
+        return false;
+    }
+    if ( openMax == -1 ) {
+        traceUserInfo( "init_some_system_conviguration_values : sysconf_spec for SUT_SC_OPEN_MAX failed" );
+        return false;
+    }
+    setSystemConfigurationValue( context, SUT_SC_NGROUPS_MAX, nGroupsMax );
+    setSystemConfigurationValue( context, SUT_SC_OPEN_MAX   , openMax    );
+    return true;
+}
+
+static Passwd * findNotRootUser( CallContext context, const char * userName, bool needEquals ) {
+    SystemState * systemState = getSystemState_CallContext( context );
+    CString * name = create_CString( (char *)userName );
+    int i;
+    for ( i = 0; i < size_Set( systemState->globalUsers ); i++ ) {
+        Passwd * user = get_Set( systemState->globalUsers, i );
+        if ( user->pw_uid != 0 && user->pw_gid != 0 && ( equals( user->pw_name, name ) == needEquals ) ) { return user; }
+    }
+    return NULL;
+}
+
+UidT maxUserId( CallContext context ) {
+    SystemState * systemState = getSystemState_CallContext( context );
+    UidT result = 0;
+    int i;
+    for ( i = 0; i < size_Set( systemState->globalUsers ); i++ ) {
+        Passwd * user = get_Set( systemState->globalUsers, i );
+        if ( user->pw_uid > result ) { result = user->pw_uid; }
+    }
+    return result;
+}
+
+GidT maxGroupId( CallContext context ) {
+    SystemState * systemState = getSystemState_CallContext( context );
+    GidT result = 0;
+    int i;
+    for ( i = 0; i < size_Set( systemState->globalUsers ); i++ ) {
+        Passwd * user = get_Set( systemState->globalUsers, i );
+        if ( user->pw_gid > result ) { result = user->pw_gid; }
+    }
+    return result;
+}
+
+static bool changeRealIds( CallContext context, const char * userName, bool needEquals ) {
+    Passwd * user = findNotRootUser( context, userName, needEquals );
+    if ( user == NULL ) {
+        traceUserInfo( "changeRealIds : findNotRootUser failed" );
+        return false;
+    }
+    if ( setreuid_spec( context, user->pw_uid, -1, requestErrorCode() ) != 0 ) {
+        traceUserInfo( "changeRealIds : setreuid_spec failed" );
+        return false;
+    }
+    if ( setregid_spec( context, user->pw_gid, -1, requestErrorCode() ) != 0 ) {
+        traceUserInfo( "changeRealIds : setregid_spec failed" );
+        return false;
+    }
+    return true;
+}
+
+static bool changeEffectiveIds( CallContext context, const char * userName, bool needEquals ) {
+    Passwd * user = findNotRootUser( context, userName, needEquals );
+    if ( user == NULL ) {
+        traceUserInfo( "changeEffectiveIds : findNotRootUser failed" );
+        return false;
+    }
+    if ( setregid_spec( context, -1, user->pw_gid, requestErrorCode() ) != 0 ) {
+        traceUserInfo( "changeEffectiveIds : setregid_spec failed" );
+        return false;
+    }
+    if ( setreuid_spec( context, -1, user->pw_uid, requestErrorCode() ) != 0 ) { // ! user last, after group !
+        traceUserInfo( "changeEffectiveIds : setreuid_spec failed" );
+        return false;
+    }
+    return true;
+}
+
+static bool trySetSomeAttributes( ThreadId threadId, bool needGetpwentSpecCalls ) {
+    ErrorCode * errno = requestErrorCode();
+    if ( ! init_some_system_conviguration_values( threadId ) ) {
+        traceUserInfo( "createProcessAndSetSomeAttributes : init_some_system_conviguration_values failed" );
+        return false;
+    }
+    if ( needGetpwentSpecCalls ) { while ( getpwent_spec( threadId, errno, cancel_status ) != NULL ) {} } // users
+    if ( ! changeRealIds( threadId, USER_NAME_TESTER, true ) ) {
+        traceUserInfo( "createProcessAndSetSomeAttributes : changeRealIds failed" );
+        return false;
+    }
+    if ( setuid_spec( threadId, 0, errno ) != 0 ) {
+        traceUserInfo( "createProcessAndSetSomeAttributes : setuid_spec failed" );
+        return false;
+    }
+    if ( setgid_spec( threadId, 0, errno ) != 0 ) {
+        traceUserInfo( "createProcessAndSetSomeAttributes : setgid_spec failed" );
+        return false;
+    }
+    if ( getuid_spec( threadId ) != 0 ) {
+        traceUserInfo( "createProcessAndSetSomeAttributes : getuid_spec return not 0" );
+        return false;
+    }
+    if ( getgid_spec( threadId ) != 0 ) {
+        traceUserInfo( "createProcessAndSetSomeAttributes : getgid_spec return not 0" );
+        return false;
+    }
+    return true;
+} // trySetSomeAttributes
+
+List * createProcesses( bool needGetpwentSpecCalls ) {
+    const int repeat = 1;//3;
+    List * result = create_List( & type_ThreadIdObj );
+    int i, j;
+    for ( i = 1; i <= 9; i++ ) {
+        for ( j = 1; j <= repeat; j++ ) {
+            bool willBeAppend;
+            ThreadId threadId = createProcess();
+            if ( equals_ThreadId( threadId, WrongThreadId ) ) {
+                traceUserInfo( "createProcesses : createProcess failed" );
+                willBeAppend = false;
+            } else {
+                if ( ! trySetSomeAttributes( threadId, needGetpwentSpecCalls && i == 1 && j == 1 ) ) {
+                    willBeAppend = true;
+                } else {
+                    switch ( i ) {
+                       case 1: // Change nothing.
+                               willBeAppend = true;
+                               break;
+                       case 2: // Change real_userid and real_groupid to no tester.
+                               willBeAppend = changeRealIds( threadId, USER_NAME_TESTER, false );
+                               break;
+                       case 3: // Change real_userid and real_groupid to tester.
+                               willBeAppend = changeRealIds( threadId, USER_NAME_TESTER, true );
+                               break;
+                       case 4: // Change effective_userid and effective_groupid to no tester.
+                               willBeAppend = changeEffectiveIds( threadId, USER_NAME_TESTER, false );
+                               break;
+                       case 5: // Change effective_userid and effective_groupid to tester.
+                               willBeAppend = changeEffectiveIds( threadId, USER_NAME_TESTER, true );
+                               break;
+                       case 6: // Change real_userid      and real_groupid      to no tester.
+                               // Change effective_userid and effective_groupid to no tester.
+                               willBeAppend = changeRealIds     ( threadId, USER_NAME_TESTER, false ) &&
+                                              changeEffectiveIds( threadId, USER_NAME_TESTER, false );
+                               break;
+                       case 7: // Change real_userid      and real_groupid      to no tester.
+                               // Change effective_userid and effective_groupid to    tester.
+                               willBeAppend = changeRealIds     ( threadId, USER_NAME_TESTER, false ) &&
+                                              changeEffectiveIds( threadId, USER_NAME_TESTER, true  );
+                               break;
+                       case 8: // Change real_userid      and real_groupid      to    tester.
+                               // Change effective_userid and effective_groupid to no tester.
+                               willBeAppend = changeRealIds     ( threadId, USER_NAME_TESTER, true  ) &&
+                                              changeEffectiveIds( threadId, USER_NAME_TESTER, false );
+                               break;
+                       case 9: // Change real_userid      and real_groupid      to tester.
+                               // Change effective_userid and effective_groupid to tester.
+                               willBeAppend = changeRealIds     ( threadId, USER_NAME_TESTER, true ) &&
+                                              changeEffectiveIds( threadId, USER_NAME_TESTER, true );
+                               break;
+                    } // switch i
+                } // if ! trySetSomeAttributes
+            } // if equals_ThreadId( threadId, WrongThreadId )
+            if ( willBeAppend ) {
+                append_List( result, create_ThreadIdObj( threadId ) );
+            } else {
+                traceUserInfo( "createProcesses : skip threadId" );
+                return NULL; // - for compatibility
+            }
+        } // for j
+    } // for i
+    return result;
+} // createProcesses
+
+bool terminateProcesses( List * threadIdsOrPars ) {
+   int i;
+   if ( threadIdsOrPars == NULL ) { return true; }
+   for ( i = 0; i < size_List( threadIdsOrPars ); i++ ) {
+      ThreadIdObj * threadIdObj;
+      if ( elemType_List( threadIdsOrPars ) == & type_ThreadIdObj ) {
+         threadIdObj = get_List( threadIdsOrPars, i );
+      } else if ( elemType_List( threadIdsOrPars ) == & type_Map ) {
+         Map * par = get_List( threadIdsOrPars, i );
+         threadIdObj = get_Map( par, create_String( "context" ) );
+      } else {
+         return false;
+      }
+      terminateProcess( * threadIdObj );
+   }
+   return true;
+}
+
+void dotPrint( int group, int line ) {
+    static int dotPrinted = 0;
+    if ( group == 0 || line == 0 ) {
+        dotPrinted = 0;
+    } else {
+        verbose( "." );
+        if      ( ( ++dotPrinted ) % line  == 0 ) { verbose( " %5d\n", dotPrinted ); }
+        else if (     dotPrinted   % group == 0 ) { verbose( " "                  ); }
+    }
+}
+
+CallContext getWorkedContext_CallContext( CallContext context ) {
+    if ( getProcessState_CallContext( context ) != NULL ) {
+        return context;
+    } else {
+        SystemState * systemState = getSystemState( context.system );
+        ProcessState * processState = get_Map( systemState->processes, key_Map( systemState->processes, 0 ) );
+        ThreadIdObj * threadIdObj = key_Map( processState->threads, 0 );
+        return * threadIdObj;
+    }
+}
+
+/********************************************************************/
+/**                           CString                              **/
+/********************************************************************/
+
+int indexOfCStringC_String( CString * cs, CString * csToFind ) {
+    return indexOfString_String( toString( cs ), toString( csToFind ) );
+}
+
+int lastIndexOfCharC_String( CString * cs, int ch ) { return lastIndexOfChar_String( toString( cs ), ch ); }
+
+CString * replaceC_String( CString * cs, char oldChar, char newChar ) {
+    String * s = replace_String( toString( cs ), oldChar, newChar );
+    return create_CString( (char *)toCharArray_String( s ) );
+}
+
+bool startsWithC_String( CString * cs, CString * pref ) { return startsWith_String( toString( cs ), toString( pref ) ); }
+
+CString * valueOfCharC_String( char c ) {
+    String * s = valueOfChar_String( c );
+    return create_CString( (char *)toCharArray_String( s ) );
+}
+
+bool equalsToCreatedFrom2C_String( CString * cs, char * s1, char * s2 ) {
+    return equals( cs, create_CString( s1 ) ) || equals( cs, create_CString( s2 ) );
+}
+
+bool equalsToCreatedFrom3C_String( CString * cs, char * s1, char * s2, char * s3 ) {
+    return equals( cs, create_CString( s1 ) ) || equals( cs, create_CString( s2 ) ) || equals( cs, create_CString( s3 ) );
+}
+
+void printC_String( const char * prefix, /* const */ CString * cs ) {
+    String * tmp = toString( cs );
+    verbose( "%s%s\n", prefix == NULL ? "" : prefix, toCharArray_String( tmp ) );
+}
+
+/********************************************************************/
+/**                           WString                              **/
+/********************************************************************/
+
+WString * createW_String( char * s ) { return createFromCharArray_WString( s ); }
+//    WString * res = createFromCharArray_WString( s );
+//    VERBOSE( "createW_String : s is %s\n"          , s           );
+//    VERBOSE( "createW_String : res->length is %d\n", res->length );
+//    return res;
+//}
+
+WString * substringW_String( WString * ws, int first, int last ) {
+    WString * cloneWs;
+    WCharT * place;
+    if ( first < 0 ) { first = 0; } else if ( first > length_WString( ws ) ) { first = length_WString( ws ); }
+    if ( last  < 0 ) { last  = 0; } else if ( last  > length_WString( ws ) ) { last  = length_WString( ws ); }
+    if ( last < first ) { last = first; }
+    cloneWs = clone( ws );
+    place = toWCharArray_WString( cloneWs );
+    place[ last ] = 0;
+    return create_WString( place + first );
+}
+
+WString * valueOfWCharW_String( WCharT wc ) {
+    WCharT buf[ 2 ];
+    buf[ 0 ] = wc;
+    buf[ 1 ] = 0 ;
+    return create_WString( buf );
+}
+
+void printW_String( const char * prefix, /* const */ WString * ws ) {
+    String * tmp = toString( ws );
+    verbose( "%s%s\n", prefix == NULL ? "" : prefix, toCharArray_String( tmp ) );
+}
+
+/********************************************************************/
+/**                           Pointers                             **/
+/********************************************************************/
+
+VoidTPtrObj * make_VoidTPtrObj( SystemId system, PidT process, sut_ptr_t address ) {
+    VoidTPtr ptr;
+    ptr.system  = system ;
+    ptr.process = process;
+    ptr.address = address;
+    return create_VoidTPtrObj( ptr );
+}
+
+List /* ByteTObj */ * readByteList_VoidTPtr( VoidTPtr ptr, SizeT size ) {
+    List /* ByteTObj */ * res = create_List( & type_ByteTObj );
+    SizeT shift;
+    for ( shift = 0; shift < size; shift++ ) {
+        CharT cur = readChar_VoidTPtr( add_VoidTPtr( ptr, shift ) );
+        append_List( res, create_ByteTObj( cur ) );
+    }
+    return res;
+}
+
+/********************************************************************/
+/**                        read text file                          **/
+/********************************************************************/
+
+CString * getFileContents( CallContext context, CString * fileName ) {
+    CString * res;
+    TSCommand command = create_TSCommand();
+    format_TSCommand( & command, "getFileContents:$(str)", fileName );
+    executeCommandInContext( context, & command );
+    if ( ! isBadVerdict() ) {
+        if ( readInt_TSStream( & command.response ) == 1 ) { res = NULL                                      ; }
+                                                      else { res = readCString_TSStream( & command.response ); }
+    }
+    destroy_TSCommand( & command );
+    return res;
+}
+
+CString * freadFile( CallContext context, FILETPtr * file, CString * fileName, CString * fileMode ) {
+    CString * res;
+    TSCommand command = create_TSCommand();
+    format_TSCommand( & command, "freadFile:$(ptr)$(str)$(str)", create_VoidTPtrObj( * file ), fileName, fileMode );
+    executeCommandInContext( context, & command );
+    if ( ! isBadVerdict() ) {
+        res    = readCString_TSStream(          & command.response );
+        * file = readPointer_TSStream( context, & command.response );
+    }
+    destroy_TSCommand( & command );
+    return res;
+}
+
+CString * readFile( CallContext context, FileDescId * fd, CString * fileName, OpenFlags fileOflag ) {
+    CString * res;
+    TSCommand command = create_TSCommand();
+    format_TSCommand( & command, "readFile:$(int)$(str)$(openflags)",
+                                 create_IntTObj( fd->filedesc ), fileName, create_OpenFlagsObj( fileOflag )
+                    );
+    executeCommandInContext( context, & command );
+    if ( ! isBadVerdict() ) {
+        res          = readCString_TSStream( & command.response );
+        fd->filedesc = readInt_TSStream    ( & command.response );
+    }
+    destroy_TSCommand( & command );
+    return res;
+}
+
+WString * fwreadFile( CallContext context, FILETPtr * file, CString * fileName, CString * fileMode ) {
+    WString * res;
+    TSCommand command = create_TSCommand();
+    format_TSCommand( & command, "fwreadFile:$(ptr)$(str)$(str)", create_VoidTPtrObj( * file ), fileName, fileMode );
+    executeCommandInContext( context, & command );
+    if ( ! isBadVerdict() ) {
+        res    = readWString_TSStream(          & command.response );
+        * file = readPointer_TSStream( context, & command.response );
+    }
+    destroy_TSCommand( & command );
+    return res;
+}
+
+/********************************************************************/
+/**                  execute function with ...                     **/
+/********************************************************************/
+
+specification typedef struct ArgumentDescriptor ArgumentDescriptor = {};
+
+ArgumentDescriptor * create_ArgumentDescriptor( String * declaration, String * initialization, String * parameter )
+{
+    return create( & type_ArgumentDescriptor, declaration, initialization, parameter );
+}
+
+ArgumentDescriptor * fromChars_ArgumentDescriptor
+                         ( const char * declaration, const char * initialization, const char * parameter ) {
+    String * declarationAsString   ;
+    String * initializationAsString;
+    String * parameterAsString     ;
+    if ( declaration    == NULL ) { declarationAsString    = NULL                           ; }
+                             else { declarationAsString    = create_String( declaration    ); }
+    if ( initialization == NULL ) { initializationAsString = NULL                           ; }
+                             else { initializationAsString = create_String( initialization ); }
+    if ( parameter      == NULL ) { parameterAsString      = NULL                           ; }
+                             else { parameterAsString      = create_String( parameter      ); }
+    return create_ArgumentDescriptor( declarationAsString, initializationAsString, parameterAsString );
+}
+
+String * functionWithDotsText
+             ( const char * funcName, List /* ArgumentDescriptor */ * argumentDescriptors, String * outputOperator ) {
+    int i;
+    const char * resultAndErrnoOutput[ 5 ] = {
+        "    functionWithDotsErrno = errno;\n"                                                                        ,
+        "    functionWithDotsResultAndErrno = fopen( \"functionWithDots.result_errno\", \"w\" );\n"                   ,
+        "    fprintf( functionWithDotsResultAndErrno, \"functionWithDotsResult : %d\\n\", functionWithDotsResult );\n",
+        "    fprintf( functionWithDotsResultAndErrno, \"functionWithDotsErrno  : %d\\n\", functionWithDotsErrno  );\n",
+        "    fclose( functionWithDotsResultAndErrno );\n"
+    };
+    String * result = create_String( "" );
+    result = concat_String( result, create_String( "#include <stdio.h>;\n" ) );
+    result = concat_String( result, create_String( "#include <errno.h>;\n" ) );
+    result = concat_String( result, create_String( "\n" ) );
+    result = concat_String( result, create_String( "int main() {\n" ) );
+    for ( i = 0; i < size_List( argumentDescriptors ); i++ ) {
+        ArgumentDescriptor * argumentDescriptor = get_List( argumentDescriptors, i );
+        if ( argumentDescriptor->declaration != NULL ) {
+            result = concat_String( result, create_String( "    " ) );
+            result = concat_String( result, argumentDescriptor->declaration );
+            result = concat_String( result, create_String( "\n" ) );
+        }
+    }
+    result = concat_String( result, create_String( "    int functionWithDotsResult;\n" ) );
+    result = concat_String( result, create_String( "    int functionWithDotsErrno ;\n" ) );
+    result = concat_String( result, create_String( "    FILE * functionWithDotsResultAndErrno;\n" ) );
+    for ( i = 0; i < size_List( argumentDescriptors ); i++ ) {
+        ArgumentDescriptor * argumentDescriptor = get_List( argumentDescriptors, i );
+        if ( argumentDescriptor->initialization != NULL ) {
+            result = concat_String( result, create_String( "    " ) );
+            result = concat_String( result, argumentDescriptor->initialization );
+            result = concat_String( result, create_String( "\n" ) );
+        }
+    }
+    result = concat_String( result, create_String( "    errno = 0;\n" ) );
+    result = concat_String( result, create_String( "    functionWithDotsResult = " ) );
+    result = concat_String( result, create_String( funcName ) );
+    result = concat_String( result, create_String( "(\n" ) );
+    for ( i = 0; i < size_List( argumentDescriptors ); i++ ) {
+        ArgumentDescriptor * argumentDescriptor = get_List( argumentDescriptors, i );
+        result = concat_String( result, create_String( "                                 " ) );
+        result = concat_String( result, argumentDescriptor->parameter );
+        if ( i != size_List( argumentDescriptors ) - 1 ) { result = concat_String( result, create_String( "," ) ); }
+        result = concat_String( result, create_String( "\n" ) );
+    }
+    result = concat_String( result, create_String( "                             );\n" ) );
+    if ( outputOperator != NULL ) {
+        result = concat_String( result, create_String( "    " ) );
+        result = concat_String( result, outputOperator );
+        result = concat_String( result, create_String( "\n" ) );
+    }
+    for ( i = 0; i < sizeof( resultAndErrnoOutput ) / sizeof( resultAndErrnoOutput[ 0 ] ); i++ ) {
+        result = concat_String( result, create_String( resultAndErrnoOutput[ i ] ) );
+    }
+    result = concat_String( result, create_String( "}\n" ) );
+    return result;
+}
+
+IntT executeFunctionWithDots( CallContext context,
+                              const char * funcName, List /* ArgumentDescriptor */ * argumentDescriptors,
+                              String * outputOperator, CString * output, ErrorCode * errno,
+                              TimeInterval * stimulTime
+                            ) {
+    String * funcText = functionWithDotsText( funcName, argumentDescriptors, outputOperator );
+    IntT res;
+    TSCommand command = create_TSCommand();
+    format_TSCommand( & command, "executeFunctionWithDots:$(str)", funcText );
+    executeCommandInContext( context, & command );
+    if ( ! isBadVerdict() ) {
+        * stimulTime = command.meta.timestamp;
+        res = readInt_TSStream      ( & command.response )          ;
+        copy( readCString_TSStream  ( & command.response ), output );
+        copy( readErrorCode_TSStream( & command.response ), errno  );
+    }
+    destroy_TSCommand( & command );
+    return res;
+}
+
+static void functionWithDotsTypedValuesCall( CallContext context, TSCommand * commandPtr, char * funcName,
+                                             List /* NULL */ * arguments, CString * input, WString * wInput
+                                           ) {
+    int preSize = size_List( arguments );
+    format_TSCommand( commandPtr, "functionWithDotsCall:$(str)$(str)$(typedlist)$(str)$(wstr)",
+                                  create_CString( "TypedValues" ), create_CString( funcName ), arguments, input, wInput
+                    );
+    executeCommandInContext( context, commandPtr );
+    assertion( preSize == readTypedList_TSStream( context, & commandPtr->response, arguments ),
+               "functionWithDotsTypedValuesCall : preSize != readTypedList_TSStream"
+             );
+} // functionWithDotsTypedValuesCall
+
+/* one is CString * or WString * */
+static List /* LongTObj */ * createAndWriteForStringOne_DotsArguments( CallContext context, Object * one ) {
+    const Type * oneType = type( one );
+    if ( oneType == & type_CString ) {
+        List /* LongTObj */ * longArgumentsForStringOne = create_List( & type_LongTObj );
+        CString * text = one;
+        VoidTPtr textPtr = allocateMemoryBlock( context, length_CString( text ) + 1 );
+        writeCString_VoidTPtr( textPtr, text );
+        append_List( longArgumentsForStringOne, create_LongTObj( textPtr.address ) );
+        return longArgumentsForStringOne;
+    } else if ( oneType == & type_WString ) {
+        List /* LongTObj */ * longArgumentsForStringOne = create_List( & type_LongTObj );
+        WString * text = one;
+        VoidTPtr textPtr = allocateMemoryBlock( context, ( length_WString( text ) + 1 ) * sizeof( int ) );
+        writeWString_VoidTPtr( textPtr, text );
+        append_List( longArgumentsForStringOne, create_LongTObj( textPtr.address ) );
+        return longArgumentsForStringOne;
+    } else {
+        return NULL;
+    }
+} // createAndWriteForStringOne_DotsArguments
+
+/* one is FloatTObj * */
+static List /* LongTObj */ * createAndWriteForFloatOne_DotsArguments( CallContext context, Object * one, bool allByPtr ) {
+    const Type * oneType = type( one );
+    if ( oneType != & type_FloatTObj ) { return NULL; }
+    if ( allByPtr ) {
+        List /* LongTObj */ * longArgumentsForFloatOne = create_List( & type_LongTObj );
+        char * basePtr = (char *)one;
+        SizeT sizeOneType = size_Type( oneType );
+        CByteArray * byteArray = create_CByteArray( (ByteT *)basePtr, sizeOneType );
+        VoidTPtr dataPtr = allocateMemoryBlock( context, sizeOneType );
+        writeCByteArray_VoidTPtr( dataPtr, byteArray );
+        append_List( longArgumentsForFloatOne, create_LongTObj( dataPtr.address ) );
+        return longArgumentsForFloatOne;
+    } else {
+        verbose( "createAndWriteForFloatOne_DotsArguments : FloatTObj allowed only if allByPtr == true\n" );
+        return NULL;
+    }
+} // createAndWriteForFloatOne_DotsArguments
+
+/* sizeof( * one ) <= sizeof( LongT ) */
+static List /* LongTObj */ * createAndWriteForSmallOne_DotsArguments( CallContext context, Object * one, bool allByPtr ) {
+    List /* LongTObj */ * longArgumentsForSmallOne;
+    const Type * oneType = type( one );
+    LongT oneValue;
+    SizeT oneSize;
+    if      ( oneType == & type_CharTObj   ) { CharTObj   * tmp = one; oneValue = * tmp; oneSize = sizeof( CharT   ); }
+    else if ( oneType == & type_UCharTObj  ) { UCharTObj  * tmp = one; oneValue = * tmp; oneSize = sizeof( UCharT  ); }
+    else if ( oneType == & type_SCharTObj  ) { SCharTObj  * tmp = one; oneValue = * tmp; oneSize = sizeof( SCharT  ); }
+    else if ( oneType == & type_ShortTObj  ) { ShortTObj  * tmp = one; oneValue = * tmp; oneSize = sizeof( ShortT  ); }
+    else if ( oneType == & type_UShortTObj ) { UShortTObj * tmp = one; oneValue = * tmp; oneSize = sizeof( UShortT ); }
+    else if ( oneType == & type_IntTObj    ) { IntTObj    * tmp = one; oneValue = * tmp; oneSize = sizeof( IntT    ); }
+    else if ( oneType == & type_UIntTObj   ) { UIntTObj   * tmp = one; oneValue = * tmp; oneSize = sizeof( UIntT   ); }
+    else if ( oneType == & type_WIntTObj   ) { WIntTObj   * tmp = one; oneValue = * tmp; oneSize = sizeof( WIntT   ); }
+    else                                     { return NULL;                                                           }
+    longArgumentsForSmallOne = create_List( & type_LongTObj );
+    if ( allByPtr ) {
+        VoidTPtr dataPtr = allocateMemoryBlock( context, oneSize );
+        // writeUChar_VoidTPtr  - no such funtion
+        // writeSChar_VoidTPtr  - no such funtion
+        // writeShort_VoidTPtr  - no such funtion
+        // writeUShort_VoidTPtr - no such funtion
+        // writeUInt_VoidTPtr   - no such funtion
+        // writeWInt_VoidTPtr   - no such funtion (but typedef UIntT WIntT;)
+        if      ( oneType == & type_CharTObj   ) { writeChar_VoidTPtr( dataPtr, (CharT  )oneValue ); }
+        else if ( oneType == & type_UCharTObj  ) { writeChar_VoidTPtr( dataPtr, (UCharT )oneValue ); }
+        else if ( oneType == & type_SCharTObj  ) { writeChar_VoidTPtr( dataPtr, (SCharT )oneValue ); }
+        else if ( oneType == & type_ShortTObj  ) { writeInt_VoidTPtr ( dataPtr, (ShortT )oneValue ); } // !!! danger !!!
+        else if ( oneType == & type_UShortTObj ) { writeInt_VoidTPtr ( dataPtr, (UShortT)oneValue ); } // !!! danger !!!
+        else if ( oneType == & type_IntTObj    ) { writeInt_VoidTPtr ( dataPtr, (IntT   )oneValue ); }
+        else if ( oneType == & type_UIntTObj   ) { writeInt_VoidTPtr ( dataPtr, (UIntT  )oneValue ); }
+        else if ( oneType == & type_WIntTObj   ) { writeInt_VoidTPtr ( dataPtr, (WIntT  )oneValue ); }
+        else                                     { return NULL;                                      }
+        append_List( longArgumentsForSmallOne, create_LongTObj( dataPtr.address ) );
+    } else {
+        append_List( longArgumentsForSmallOne, create_LongTObj( oneValue ) );
+    }
+    return longArgumentsForSmallOne;
+} // createAndWriteForSmallOne_DotsArguments
+
+/* sizeof( * one ) >= sizeof( LongT ) */
+static List /* LongTObj */ * createAndWriteForBigOne_DotsArguments( CallContext context, Object * one, bool allByPtr ) {
+    List /* LongTObj */ * longArgumentsForBigOne = create_List( & type_LongTObj );
+    char * basePtr = (char *)one;
+    SizeT sizeOneType = size_Type( type( one ) );
+    if ( sizeOneType < sizeof( LongT ) ) {
+        verbose( "createAndWriteForBigOne_DotsArguments : sizeOneType     is [%zi]\n", sizeOneType     );
+        verbose( "createAndWriteForBigOne_DotsArguments : sizeof( LongT ) is [%zi]\n", sizeof( LongT ) );
+        return NULL;
+    }
+    if ( allByPtr ) {
+        CByteArray * byteArray = create_CByteArray( (ByteT *)basePtr, sizeOneType );
+        VoidTPtr dataPtr = allocateMemoryBlock( context, sizeOneType );
+        writeCByteArray_VoidTPtr( dataPtr, byteArray );
+        append_List( longArgumentsForBigOne, create_LongTObj( dataPtr.address ) );
+    } else {
+        int i;
+        if ( 0 ) {
+            // long double ld = 12.7777777;
+            // char * ldPtr = (char *)& ld;
+            verbose( "createAndWriteForBigOne_DotsArguments\n" );
+            verbose( "createAndWriteForBigOne_DotsArguments : sizeof( LongT )            is [%d]\n", sizeof( LongT )       );
+            verbose( "createAndWriteForBigOne_DotsArguments : sizeof( double )           is [%d]\n", sizeof( double )      );
+            verbose( "createAndWriteForBigOne_DotsArguments : sizeof( long double )      is [%d]\n", sizeof( long double ) );
+            verbose( "createAndWriteForBigOne_DotsArguments : sizeOneType                is [%d]\n", sizeOneType           );
+        }
+        for ( i = 0; i < (int)sizeOneType; i += sizeof( LongT ) ) {
+            if ( 0 ) {
+                LongT cur = * (LongT *)( basePtr + i );
+                verbose( "createAndWriteForBigOne_DotsArguments : * (LongT *)( basePtr + i ) is [%016lX]\n", cur );
+                verbose( "                                                                   or [%ld]\n"   , cur );
+                verbose( "                                                                   or [%f]\n"    , cur );
+                // verbose( "createAndWriteForBigOne_DotsArguments : * (LongT *)( ldPtr   + i ) is [%ld]\n", * (LongT *)( ldPtr   + i ) );
+            }
+            append_List( longArgumentsForBigOne, create_LongTObj( * (LongT *)( basePtr + i ) ) );
+        }
+    }
+    return longArgumentsForBigOne;
+} // createAndWriteForBigOne_DotsArguments
+
+static List /* LongTObj */ * createAndWriteForOne_DotsArguments( CallContext context, Object * one, bool allByPtr ) {
+    const Type * oneType = type( one );
+    // String * oneAsString = toString( one );
+    // verbose( "createAndWriteForOne_DotsArguments : one is [%s]\n", toCharArray_String( oneAsString ) );
+    if ( one == NULL ) {
+        List /* LongTObj */ * longArgumentsForOne = create_List( & type_LongTObj );
+        append_List( longArgumentsForOne, create_LongTObj( 0 ) );
+        return longArgumentsForOne;
+    } else if ( oneType == & type_VoidTPtrObj ) {
+        List /* LongTObj */ * longArgumentsForOne = create_List( & type_LongTObj );
+        VoidTPtrObj * ptr = one;
+        append_List( longArgumentsForOne, create_LongTObj( ptr->address ) );
+        return longArgumentsForOne;
+    } else if ( oneType == & type_CString || oneType == & type_WString ) {
+        return createAndWriteForStringOne_DotsArguments( context, one );
+    } else if ( oneType == & type_FloatTObj ) {
+        return createAndWriteForFloatOne_DotsArguments( context, one, allByPtr );
+    } else if ( oneType == & type_CharTObj  || oneType == & type_UCharTObj  || oneType == & type_SCharTObj ||
+                oneType == & type_ShortTObj || oneType == & type_UShortTObj ||
+                oneType == & type_IntTObj   || oneType == & type_UIntTObj   ||
+                oneType == & type_WIntTObj
+              ) {
+        return createAndWriteForSmallOne_DotsArguments( context, one, allByPtr );
+    } else {
+        return createAndWriteForBigOne_DotsArguments( context, one, allByPtr );
+    }
+} // createAndWriteForOne_DotsArguments
+
+List /* LongTObj */ * createAndWrite_DotsArguments( CallContext context, List /* NULL */ * allArguments, bool allByPtr ) {
+    List /* LongTObj */ * longArguments = create_List( & type_LongTObj );
+    int i;
+    for ( i = 0; i < size_List( allArguments ); i++ ) {
+        Object * cur = get_List( allArguments, i );
+        List /* LongTObj */ * longArgumentsForOne = createAndWriteForOne_DotsArguments( context, cur, allByPtr );
+        assertion( longArgumentsForOne != NULL, "createAndWrite_DotsArguments : i is %i, longArgumentsForOne is NULL", i );
+        appendAll_List( longArguments, longArgumentsForOne );
+    } // for i
+    return longArguments;
+}
+
+/* get_List( allArguments, allArgumentsI ) is CString * or WString * */
+static bool readAndFreeForStringOne_DotsArguments
+                ( CallContext context, LongTObj * address, List /* NULL */ * allArguments, int allArgumentsI ) {
+    const Type * oneType = type( get_List( allArguments, allArgumentsI ) );
+    VoidTPtr textPtr;
+    textPtr.system  = context.system ;
+    textPtr.process = context.process;
+    textPtr.address = * address      ;
+    if ( oneType == & type_CString ) {
+        CString * text = readCString_VoidTPtr( textPtr );
+        if ( text == NULL ) {
+            String * textPtrAsString = toString( create_VoidTPtrObj( textPtr ) );
+            text = create_CString( "Error read from textPtr [" );
+            text = concat_CString( text, create_CString( (char *)toCharArray_String( textPtrAsString ) ) );
+            text = concat_CString( text, create_CString( "]" ) );
+        }
+        set_List( allArguments, allArgumentsI, text );
+    } else if ( oneType == & type_WString ) {
+        WString * text = readWString_VoidTPtr( textPtr );
+        if ( text == NULL ) {
+            String * textPtrAsString = toString( create_VoidTPtrObj( textPtr ) );
+            text = createW_String( "Error read from textPtr [" );
+            text = concat_WString( text, createW_String( (char *)toCharArray_String( textPtrAsString ) ) );
+            text = concat_WString( text, createW_String( "]" ) );
+        }
+        set_List( allArguments, allArgumentsI, text );
+    } else {
+        return false;
+    }
+    deallocateMemoryBlock( context, textPtr );
+    return true;
+} // readAndFreeForStringOne_DotsArguments
+
+/* get_List( allArguments, allArgumentsI ) is FloatTObj * */
+static bool readAndFreeForFloatOne_DotsArguments( CallContext context, LongTObj * address,
+                                                  List /* NULL */ * allArguments, int allArgumentsI, bool allByPtr
+                                                ) {
+    Object * one = get_List( allArguments, allArgumentsI );
+    const Type * oneType = type( one );
+    if ( oneType != & type_FloatTObj ) { return false; }
+    if ( allByPtr ) {
+        SizeT sizeOneType = size_Type( oneType );
+        char * basePtr = (char *)one;
+        VoidTPtr dataPtr;
+        CByteArray * byteArray;
+        dataPtr.system  = context.system ;
+        dataPtr.process = context.process;
+        dataPtr.address = * address      ;
+        byteArray = readCByteArray_VoidTPtr( dataPtr, sizeOneType );
+        memcpy( basePtr, byteArray_CByteArray( byteArray ), sizeOneType );
+        deallocateMemoryBlock( context, dataPtr );
+        return true;
+    } else {
+        verbose( "readAndFreeForFloatOne_DotsArguments : FloatTObj allowed only if allByPtr == true\n" );
+        return false;
+    }
+} // readAndFreeForFloatOne_DotsArguments
+
+/* sizeof( * get_List( allArguments, allArgumentsI ) ) <= sizeof( LongT ) */
+static bool readAndFreeForSmallOne_DotsArguments
+                ( CallContext context, LongTObj * address, List /* NULL */ * allArguments, int allArgumentsI ) {
+    const Type * oneType = type( get_List( allArguments, allArgumentsI ) );
+    List /* NULL */ * list = allArguments ; // short synonym
+    int               i    = allArgumentsI; // short synonym
+    VoidTPtr dataPtr;
+    dataPtr.system  = context.system ;
+    dataPtr.process = context.process;
+    dataPtr.address = * address      ;
+    // "read_ushort:$(ptr)" - Unsupported test agent command: read_ushort
+    // "read_uint:$(ptr)"   - Unsupported test agent command: read_uint
+    // readWInt_VoidTPtr    - no such funtion (but typedef UIntT WIntT;)
+    if      ( oneType == & type_CharTObj   ) { set_List( list, i, create_CharTObj  ( readChar_VoidTPtr ( dataPtr ) ) ); }
+    else if ( oneType == & type_UCharTObj  ) { set_List( list, i, create_UCharTObj ( readUChar_VoidTPtr( dataPtr ) ) ); }
+    else if ( oneType == & type_SCharTObj  ) { set_List( list, i, create_SCharTObj ( readSChar_VoidTPtr( dataPtr ) ) ); }
+    else if ( oneType == & type_ShortTObj  ) { set_List( list, i, create_ShortTObj ( readShort_VoidTPtr( dataPtr ) ) ); }
+    else if ( oneType == & type_UShortTObj ) { set_List( list, i, create_UShortTObj( readShort_VoidTPtr( dataPtr ) ) ); }
+    else if ( oneType == & type_IntTObj    ) { set_List( list, i, create_IntTObj   ( readInt_VoidTPtr  ( dataPtr ) ) ); }
+    else if ( oneType == & type_UIntTObj   ) { set_List( list, i, create_UIntTObj  ( readInt_VoidTPtr  ( dataPtr ) ) ); }
+    else if ( oneType == & type_WIntTObj   ) { set_List( list, i, create_WIntTObj  ( readInt_VoidTPtr  ( dataPtr ) ) ); }
+    else                                     { return false;                                                            }
+    deallocateMemoryBlock( context, dataPtr );
+    return true;
+} // readAndFreeForSmallOne_DotsArguments
+
+/* sizeof( * get_List( allArguments, allArgumentsI ) ) >= sizeof( LongT ) */
+static bool readAndFreeForBigOne_DotsArguments
+                ( CallContext context, LongTObj * address, List /* NULL */ * allArguments, int allArgumentsI ) {
+    Object * one = get_List( allArguments, allArgumentsI );
+    SizeT sizeOneType = size_Type( type( one ) );
+    char * basePtr = (char *)one;
+    VoidTPtr dataPtr;
+    CByteArray * byteArray;
+    if ( sizeOneType < sizeof( LongT ) ) { return false; }
+    dataPtr.system  = context.system ;
+    dataPtr.process = context.process;
+    dataPtr.address = * address      ;
+    byteArray = readCByteArray_VoidTPtr( dataPtr, sizeOneType );
+    memcpy( basePtr, byteArray_CByteArray( byteArray ), sizeOneType );
+    deallocateMemoryBlock( context, dataPtr );
+    return true;
+} // readAndFreeForBigOne_DotsArguments
+
+static bool readAndFree_DotsArguments( CallContext context,
+                                       List /* LongTObj */ * longArguments, List /* NULL */ * allArguments, bool allByPtr
+                                     ) {
+    int longArgumentsI = 0;
+    int i;
+    //verbose( "readAndFree_DotsArguments\n" );
+    for ( i = 0; i < size_List( allArguments ); i++ ) {
+        Object * cur = get_List( allArguments, i );
+        const Type * curType = type( cur );
+        //String * curAsString = toString( cur );
+        //verbose( "readAndFree_DotsArguments : i %d\n", i );
+        //verbose( "readAndFree_DotsArguments : cur %s\n", toCharArray_String( curAsString ) );
+        if ( longArgumentsI >= size_List( longArguments ) ) { return false; }
+        if ( cur == NULL || curType == & type_VoidTPtrObj ) {
+            longArgumentsI++;
+        } else if ( curType == & type_CString || curType == & type_WString ) {
+            LongTObj * address = get_List( longArguments, longArgumentsI );
+            if ( ! readAndFreeForStringOne_DotsArguments( context, address, allArguments, i ) ) { return false; }
+            longArgumentsI++;
+        } else if ( curType == & type_FloatTObj ) {
+            LongTObj * address = get_List( longArguments, longArgumentsI );
+            if ( ! readAndFreeForFloatOne_DotsArguments( context, address, allArguments, i, allByPtr ) ) { return false; }
+            longArgumentsI++;
+        } else {
+            SizeT sizeCurType = size_Type( curType );
+            if ( ! allByPtr ) {
+                longArgumentsI += ( sizeCurType < sizeof( LongT ) ? 1 : sizeCurType / sizeof( LongT ) );
+            } else {
+                LongTObj * address = get_List( longArguments, longArgumentsI );
+                if ( curType == & type_CharTObj  || curType == & type_UCharTObj  || curType == & type_SCharTObj ||
+                     curType == & type_ShortTObj || curType == & type_UShortTObj ||
+                     curType == & type_IntTObj   || curType == & type_UIntTObj   ||
+                     curType == & type_WIntTObj
+                   ) {
+                    if ( ! readAndFreeForSmallOne_DotsArguments( context, address, allArguments, i ) ) { return false; }
+                } else {
+                    if ( ! readAndFreeForBigOne_DotsArguments( context, address, allArguments, i ) ) { return false; }
+                }
+                longArgumentsI++;
+            }
+        }
+    } // for i
+    //verbose( "readAndFree_DotsArguments : return\n" );
+    return longArgumentsI == size_List( longArguments );
+} // readAndFree_DotsArguments
+
+static void functionWithDotsLongValuesCall( CallContext context, TSCommand * commandPtr, char * funcName,
+                                            List /* NULL */ * arguments, bool allByPtr, CString * input, WString * wInput
+                                          ) {
+    List /* LongTObj */ * longArguments = createAndWrite_DotsArguments( context, arguments, allByPtr );
+    format_TSCommand( commandPtr, "functionWithDotsCall:$(str)$(str)$(dotsarguments)$(str)$(wstr)",
+                                  create_CString( "LongValues" ), create_CString( funcName ), longArguments, input, wInput
+                    );
+    executeCommandInContext( context, commandPtr );
+    assertion( readAndFree_DotsArguments( context, longArguments, arguments, allByPtr ),
+               "functionWithDotsLongValuesCall : readAndFree_DotsArguments return false"
+             );
+} // functionWithDotsLongValuesCall
+
+IntT functionWithDotsCall( CallContext context, char * funcName, List /* NULL */ * arguments, bool allByPtr,
+                           CString * input, WString * wInput, ErrorCode * errno, CString * output, WString * wOutput,
+                           CString * errput, TimeInterval * stimulTime
+                         ) {
+    IntT res;
+    TSCommand command = create_TSCommand();
+    CString * notNullInput ;
+    WString * notNullWInput;
+    if ( input != NULL ) { notNullInput = input               ; }
+                    else { notNullInput = create_CString( "" ); }
+    if ( wInput != NULL ) { notNullWInput = wInput              ; }
+                     else { notNullWInput = createW_String( "" ); }
+    if ( size_List( arguments ) <= 6 ) {
+        // typed values list : safe, but small lenth
+        functionWithDotsTypedValuesCall( context, & command, funcName, arguments, notNullInput, notNullWInput );
+    } else {
+        // lond values list : unsafe, but big lenth
+        functionWithDotsLongValuesCall( context, & command, funcName, arguments, allByPtr, notNullInput, notNullWInput );
+    }
+    if ( ! isBadVerdict() ) {
+        ErrorCode * eTmp;
+        CString   * tmp ;
+        WString   * wTmp;
+        * stimulTime = command.meta.timestamp;
+        res =  readInt_TSStream      ( & command.response );
+        eTmp = readErrorCode_TSStream( & command.response );    if ( errno   != NULL ) { copy( eTmp, errno   ); }
+        tmp  = readCString_TSStream  ( & command.response );    if ( output  != NULL ) { copy( tmp , output  ); }
+        wTmp = readWString_TSStream  ( & command.response );
+        assertion( wTmp != NULL, "functionWithDotsCall : wTmp is NULL" );
+                                                                if ( wOutput != NULL ) { copy( wTmp, wOutput ); }
+        tmp  = readCString_TSStream  ( & command.response );    if ( errput  != NULL ) { copy( tmp , errput  ); }
+    }
+    destroy_TSCommand( & command );
+    return res;
+} // functionWithDotsCall
+
+/********************************************************************/
+/**                  expected result and reqIds                    **/
+/********************************************************************/
+
+static String            * currentFuncName      ;
+static Object            * currentExpectedResult;
+static List /* String */ * currentExpectedReqIds;
+
+void setExpectedResultAndReqIds( const char * funcName, Object * expectedResult, List /* String */ * expectedReqIds ) {
+    currentFuncName = create_String( (char *)funcName );
+    currentExpectedResult = expectedResult;
+    currentExpectedReqIds = expectedReqIds;
+}
+
+bool checkExpectedResult( const char * funcName, Object * result, const char * prefixForCommonReq ) {
+    String * reqPrefix       = concat_String( create_String( (char *)funcName           ), create_String( "." ) );
+    String * commonReqPrefix = concat_String( create_String( (char *)prefixForCommonReq ), create_String( "." ) );
+    bool verdict;
+    int i;
+    assertion( equals( currentFuncName, create_String( (char *)funcName ) ), "checkExpectedResult : funcName" );
+    verdict = equals( currentExpectedResult, result );
+    if ( ! verdict ) {
+        String * expectedResultAsString = toString( currentExpectedResult );
+        String * resultAsString         = toString( result                );
+        traceFormattedUserInfo( "checkExpectedResult\n"                                                                         );
+        traceFormattedUserInfo( "checkExpectedResult : expectedResult is [%s]\n" , toCharArray_String( expectedResultAsString ) );
+        traceFormattedUserInfo( "checkExpectedResult : result         is [%s]\n" , toCharArray_String( resultAsString         ) );
+        for ( i = 0; i < size_List( currentExpectedReqIds ); i++ ) {
+            String * reqId = get_List( currentExpectedReqIds, i );
+            traceFormattedUserInfo( "checkExpectedResult : reqId %2d       is [%s]\n", i, toCharArray_String( reqId ) );
+        }
+    }
+    for ( i = 0; i < size_List( currentExpectedReqIds ); i++ ) {
+        String * reqId = get_List( currentExpectedReqIds, i );
+        char * reqIdAsCharArray;
+        // prefixForCommonReq.postfix +> funcName.postfix
+        if ( startsWith_String( reqId, commonReqPrefix ) ) {
+            reqId = clone( reqId );
+            reqId = substringFrom_String( reqId, length_String( commonReqPrefix ) );
+            reqId = concat_String( reqPrefix, reqId );
+        }
+        reqIdAsCharArray = (char *)toCharArray_String( reqId );
+        if ( startsWith_String( reqId, reqPrefix ) ) { traceRequirements( reqIdAsCharArray ); }
+    }
+    // assertion( verdict, "checkExpectedResult : stop" ); // for debug purpose
+    return verdict;
+} // checkExpectedResult
+
+Object * getExpectedResult( const char * funcName ) {
+    if ( ! equals( currentFuncName, create_String( (char *)funcName ) ) ) { return NULL                 ; }
+                                                                     else { return currentExpectedResult; }
+}
+
+List /* String */ * getExpectedReqIds( const char * funcName ) {
+    if ( ! equals( currentFuncName, create_String( (char *)funcName ) ) ) { return NULL                 ; }
+                                                                     else { return currentExpectedReqIds; }
+}
+
+void clearExpectedResultAndReqIds( const char * funcName ) {
+    currentFuncName = create_String( (char *)funcName );
+    currentExpectedResult = NULL;
+    currentExpectedReqIds = NULL;
+}
+
+/********************************************************************/
+/**                     advanced reactions                         **/
+/********************************************************************/
+
+specification typedef struct CallsList CallsList = {};
+
+CallsList * create_CallsList( void ) {
+    return create( & type_CallsList, create_List( & type_String ), create_List( NULL ) );
+}
+
+bool isEmpty_CallsList( CallsList * callsList ) { return isEmpty_List( callsList->names ); }
+
+CallsList * addToTail_CallsList( CallsList * callsList, const char * name, Object * data ) {
+    append_List( callsList->names, create_String( name ) );
+    append_List( callsList->datas, data                  );
+    return callsList;
+}
+
+Object * showDataForName_CallsList( CallsList * callsList, const char * name ) {
+    int i;
+    if ( callsList == NULL ) { return NULL; }
+    for ( i = 0; i < size_List( callsList->names ); i++ ) {
+        if ( equals( get_List( callsList->names, i ), create_String( name ) ) ) { return get_List( callsList->datas, i ); }
+    }
+    return NULL;
+}
+
+Object * removeForName_CallsList( CallsList * callsList, const char * name ) {
+    Object * data = NULL;
+    int i;
+    for ( i = 0; i < size_List( callsList->names ); i++ ) {
+        if ( equals( get_List( callsList->names, i ), create_String( name ) ) ) {
+            data = get_List( callsList->datas, i );
+            remove_List( callsList->names, i );
+            remove_List( callsList->datas, i );
+            break;
+        }
+    }
+    return data;
+}
+
+void startCommand( CallContext context, const char * name, Object * data ) {
+    CallsList * callsList = getBlockedCall( context );
+    if ( callsList == NULL ) { startBlockedCall( context, addToTail_CallsList( create_CallsList(), name, data ) ); }
+                        else {                            addToTail_CallsList( callsList         , name, data )  ; }
+}
+
+Object * showCommand( Map * blockedCalls, CallContext context, const char * name ) {
+    CallsList * callsList = findBlockedCall( blockedCalls, context );
+    return showDataForName_CallsList( callsList, name );
+}
+
+Object * endCommand( CallContext context, const char * name ) {
+    CallsList * callsList = getBlockedCall( context );
+    Object * data = removeForName_CallsList( callsList, name );
+    if ( isEmpty_CallsList( callsList ) ) { finishBlockedCall( context ); }
+    return data;
+}
+
+/********************************************************************/
+/**                     byte chain with id                         **/
+/********************************************************************/
+
+String * toString_MarkedByteChain( struct MarkedByteChain * mbc ) {
+    StringBuffer * res = create_StringBuffer();
+    int i;
+    appendFormat_StringBuffer( res, "MarkedByteChain { id : %d, data : < %d :", mbc->id, size_List( mbc->data ) );
+    for ( i = 0; i < size_List( mbc->data ); i++ ) {
+        ByteTObj * c = get_List( mbc->data, i );
+        appendFormat_StringBuffer( res, " %02X", * c );
+    }
+    append_StringBuffer( res, " > }" );
+    return toString( res );
+}
+
+specification typedef struct MarkedByteChain MarkedByteChain = { .to_string = (ToString)toString_MarkedByteChain };
+
+MarkedByteChain * create_MarkedByteChain( int id, List /* ByteTObj */ * data ) {
+    return create( & type_MarkedByteChain, id, data );
+}
+
+MarkedByteChain * createEmpty_MarkedByteChain( int id ) {
+    return create_MarkedByteChain( id, create_List( & type_ByteTObj ) );
+}
+
+/* $(markedbytechain) */
+void writeMarkedByteChain_TSStream( TSStream * stream, MarkedByteChain * value ) {
+    writeTypeHeaderTSStream( stream, "markedbytechain" );
+    writeInt_TSStream     ( stream, value->id   );
+    writeByteList_TSStream( stream, value->data );
+}
+
+void markedbytechain_formatter( TSStream * stream, MarkedByteChain * value ) {
+    VERIFY_TYPE( markedbytechain_formatter, & type_MarkedByteChain, value );
+    writeMarkedByteChain_TSStream( stream, value );
+}
+
+void readMarkedByteChain_TSStream( TSStream * stream, MarkedByteChain * value ) {
+    value->id = readInt_TSStream( stream );
+    readByteList_TSStream( stream, value->data );
+}
+
+/********************************************************************/
+/**                  write-read for int array                      **/
+/********************************************************************/
+
+/*
+ * any data may be sended or received as int array
+ * DANGER : byte and int order
+ */
+void writeIntArray_TSStream( TSStream * stream, const int * array, int size ) {
+    int i;
+    writeTypeHeaderTSStream( stream, "intarray" );
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) { writeInt_TSStream( stream, array[ i ] ); }
+}
+
+void readIntArray_TSStream( TSStream * stream, int * array, int size ) {
+    int sended, i;
+    sended = readInt_TSStream( stream );
+    assertion( sended == size, "readIntArray_TSStream : sended is %d, but size is %d", sended, size );
+    for ( i = 0; i < size; i++ ) { array[ i ] = readInt_TSStream( stream ); }
+}
+
+/********************************************************************/
+/**                  write-read for user types                     **/
+/********************************************************************/
+
+/* $(strnullterminatedlist) */
+void writeStringNullTerminatedList_TSStream( TSStream * stream, List * value ) {
+    int size, i;
+    writeTypeHeaderTSStream( stream, "strnullterminatedlist" );
+    size = ( value == NULL ? -1 : size_List( value ) );
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) {
+        CString * cur = get_List( value, i );
+        writeCString_TSStream( stream, cur );
+    }
+}
+
+void strnullterminated_list_formatter( TSStream * stream, List * value ) {
+    VERIFY_TYPE( strnullterminated_list_formatter, & type_List, value );
+    writeStringNullTerminatedList_TSStream( stream, value );
+}
+
+int readStringNullTerminatedList_TSStream( TSStream * stream, List * list ) {
+    int size, i;
+    if ( ( size = readInt_TSStream( stream ) ) >= 0 ) {
+        if ( list == NULL ) {
+            setBadVerdict( "readStringNullTerminatedList_TSStream : try to work with not -1 as size and NULL as list" );
+        } else {
+            clear_List( list );
+            for ( i = 1; i <= size; i++ ) { append_List( list, readCString_TSStream( stream ) ); }
+        }
+    } else {
+        if ( list != NULL ) {
+            setBadVerdict( "readStringNullTerminatedList_TSStream : try to work with -1 as size and not NULL as list" );
+        }
+    }
+    return size;
+}
+
+/* $(uintlist) */
+void writeUintList_TSStream( TSStream * stream, List * value ) {
+    int i, size;
+    writeTypeHeaderTSStream( stream, "uintlist" );
+    size = ( value == NULL ? -1 : size_List( value ) );
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) {
+        UIntTObj * int_value = get_List( value, i );
+        writeUInt_TSStream( stream, * int_value );
+    }
+}
+
+void uint_list_formatter( TSStream * stream, List * value ) {
+    VERIFY_TYPE( uint_list_formatter, & type_List, value );
+    writeUintList_TSStream( stream, value );
+}
+
+int readUintList_TSStream( TSStream * stream, List * list ) {
+    int size, i;
+    if ( ( size = readInt_TSStream( stream ) ) >= 0 ) {
+        if ( list == NULL ) {
+            setBadVerdict( "readUintList_TSStream : try to work with not -1 as size and NULL as list" );
+        } else {
+            clear_List( list );
+            for ( i = 1; i <= size; i++ ) { append_List( list, create_UIntTObj( readUInt_TSStream( stream ) ) ); }
+        }
+    } else {
+        if ( list != NULL ) {
+            setBadVerdict( "readUintList_TSStream : try to work with -1 as size and not NULL as list" );
+        }
+    }
+    return size;
+}
+
+/* $(charlist) */
+void writeCharList_TSStream( TSStream * stream, List /* CharTObj */ * value ) {
+    int i, size;
+    writeTypeHeaderTSStream( stream, "charlist" );
+    size = ( value == NULL ? -1 : size_List( value ) );
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) {
+        CharTObj * char_value = get_List( value, i );
+        writeChar_TSStream( stream, * char_value );
+    }
+}
+
+void char_list_formatter( TSStream * stream, List /* CharTObj */ * value ) {
+    VERIFY_TYPE( char_list_formatter, & type_List, value );
+    writeCharList_TSStream( stream, value );
+}
+
+int readCharList_TSStream( TSStream * stream, List /* CharTObj */ * list ) {
+    int size, i;
+    if ( ( size = readInt_TSStream( stream ) ) >= 0 ) {
+        if ( list == NULL ) {
+            setBadVerdict( "readCharList_TSStream : try to work with not -1 as size and NULL as list" );
+        } else {
+            clear_List( list );
+            for ( i = 1; i <= size; i++ ) { append_List( list, create_CharTObj( readChar_TSStream( stream ) ) ); }
+        }
+    } else {
+        if ( list != NULL ) {
+            setBadVerdict( "readCharList_TSStream : try to work with -1 as size and not NULL as list" );
+        }
+    }
+    return size;
+}
+
+/* $(bytelist) */
+void writeByteList_TSStream( TSStream * stream, List /* ByteTObj */ * value ) {
+    int i, size;
+    writeTypeHeaderTSStream( stream, "bytelist" );
+    size = ( value == NULL ? -1 : size_List( value ) );
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) {
+        ByteTObj * byte_value = get_List( value, i );
+        writeUChar_TSStream( stream, * byte_value );
+    }
+}
+
+void byte_list_formatter( TSStream * stream, List /* ByteTObj */ * value ) {
+    VERIFY_TYPE( byte_list_formatter, & type_List, value );
+    writeByteList_TSStream( stream, value );
+}
+
+int readByteList_TSStream( TSStream * stream, List /* ByteTObj */ * list ) {
+    int size, i;
+    if ( ( size = readInt_TSStream( stream ) ) >= 0 ) {
+        if ( list == NULL ) {
+            setBadVerdict( "readByteList_TSStream : try to work with not -1 as size and NULL as list" );
+        } else {
+            clear_List( list );
+            for ( i = 1; i <= size; i++ ) { append_List( list, create_ByteTObj( readUChar_TSStream( stream ) ) ); }
+        }
+    } else {
+        if ( list != NULL ) {
+            setBadVerdict( "readByteList_TSStream : try to work with -1 as size and not NULL as list" );
+        }
+    }
+    return size;
+}
+
+/* $(timeval) */
+void writeTimeVal_TSStream( TSStream * stream, TimeValTObj * value )
+{
+    if(value == NULL) {
+        writeTypeHeaderTSStream(stream, "null");
+        return;
+    }
+
+    writeTypeHeaderTSStream( stream, "timeval" );
+    writeInt_TSStream( stream, value->sec  );
+    writeInt_TSStream( stream, value->usec );
+}
+
+void timeval_formatter( TSStream * stream, TimeValTObj * value ) {
+    if(value != NULL) VERIFY_TYPE( timeval_formatter, & type_TimeValTObj, value );
+    writeTimeVal_TSStream( stream, value );
+}
+
+TimeValTObj * readTimeVal_TSStream( TSStream * stream ) {
+    IntT sec  = readInt_TSStream( stream );
+    IntT usec = readInt_TSStream( stream );
+    return create_TimeValTObj( sec, usec );
+}
+
+/* $(itimerval) */
+void writeITimerVal_TSStream( TSStream * stream, ITimerValTObj * value ) {
+    writeTypeHeaderTSStream( stream, "itimerval" );
+    writeTimeVal_TSStream( stream, value->value    );
+    writeTimeVal_TSStream( stream, value->interval );
+}
+
+void itimerval_formatter( TSStream * stream, ITimerValTObj * value ) {
+    VERIFY_TYPE( itimerval_formatter, & type_ITimerValTObj, value );
+    writeITimerVal_TSStream( stream, value );
+}
+
+ITimerValTObj * readITimerVal_TSStream( TSStream * stream ) {
+    TimeValTObj * value    = readTimeVal_TSStream( stream );
+    TimeValTObj * interval = readTimeVal_TSStream( stream );
+    return create_ITimerValTObj( value, interval );
+}
+
+/* $(itimerspec) */
+void writeITimerSpec_TSStream( TSStream * stream, ITimerSpecTObj * value ) {
+    writeTypeHeaderTSStream( stream, "itimerspec" );
+    writeInt_TSStream( stream, value->value   ->sec  );
+    writeInt_TSStream( stream, value->value   ->nsec );
+    writeInt_TSStream( stream, value->interval->sec  );
+    writeInt_TSStream( stream, value->interval->nsec );
+}
+
+void itimerspec_formatter( TSStream * stream, ITimerSpecTObj * value ) {
+    VERIFY_TYPE( itimerspec_formatter, & type_ITimerSpecTObj, value );
+    writeITimerSpec_TSStream( stream, value );
+}
+
+ITimerSpecTObj * readITimerSpec_TSStream( TSStream * stream ) {
+    TimeSpecT value   ;
+    TimeSpecT interval;
+    value.sec     = readInt_TSStream( stream );
+    value.nsec    = readInt_TSStream( stream );
+    interval.sec  = readInt_TSStream( stream );
+    interval.nsec = readInt_TSStream( stream );
+    return create_ITimerSpecTObj( create_TimeSpecTObj( value ), create_TimeSpecTObj( interval ) );
+}
+
+/* $(errorcode) - read only */
+ErrorCode * readErrorCode_TSStream( TSStream * stream ) { return create_ErrorCode( readInt_TSStream( stream ) ); }
+
+/* $(argumentdescriptor) - simple write only */
+void writeArgumentDescriptor_TSStream( TSStream * stream, ArgumentDescriptor * value ) {
+    writeTypeHeaderTSStream( stream, "argumentdescriptor" );
+    writeInt_TSStream( stream, value->declaration != NULL );
+    if ( value->declaration != NULL ) { writeString_TSStream( stream, value->declaration ); }
+    writeInt_TSStream( stream, value->initialization != NULL );
+    if ( value->initialization != NULL ) { writeString_TSStream( stream, value->initialization ); }
+    writeString_TSStream( stream, value->parameter );
+}
+
+/* $(argumentdescriptorlist) - write only */
+void writeArgumentDescriptorList_TSStream( TSStream * stream, List * value ) {
+    int i, size;
+    writeTypeHeaderTSStream( stream, "argumentdescriptorlist" );
+    size = ( value == NULL ? -1 : size_List( value ) );
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) {
+        ArgumentDescriptor * argumentDescriptor = get_List( value, i );
+        writeArgumentDescriptor_TSStream( stream, argumentDescriptor );
+    }
+}
+
+void argument_descriptor_list_formatter( TSStream * stream, List * value ) {
+    VERIFY_TYPE( argument_descriptor_list_formatter, & type_List, value );
+    writeArgumentDescriptorList_TSStream( stream, value );
+}
+
+/* $(dotsarguments) - write only */
+void writeDotsArguments_TSStream( TSStream * stream, List * value ) {
+    int i, size;
+    writeTypeHeaderTSStream( stream, "dotsarguments" );
+    size = size_List( value ); // dotsarguments : value != NULL
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) {
+        LongTObj * argument = get_List( value, i );
+        writeLong_TSStream( stream, * argument );
+    }
+}
+
+void dotsarguments_formatter( TSStream * stream, List * value ) {
+    VERIFY_TYPE( dotsarguments_formatter, & type_List, value );
+    writeDotsArguments_TSStream( stream, value );
+}
+
+/* $(typedlistelement) */
+#define TypedListElementSimpleCase( TypeCode, Func ) ( valueType == & type_##TypeCode ) \
+{ TypeCode * v = value; writeStringLiteral_TSStream( stream, #TypeCode ); write##Func##_TSStream( stream, * v ); }
+
+#define TypedListElementStringCase( TypeCode, Func ) ( valueType == & type_##TypeCode ) \
+{ writeStringLiteral_TSStream( stream, #TypeCode ); write##Func##_TSStream( stream, value ); }
+
+void writeTypedListElement_TSStream( TSStream * stream, Object * value ) {
+    const Type * valueType = type( value );
+    writeTypeHeaderTSStream( stream, "typedlistelement" );
+    if      TypedListElementSimpleCase( IntTObj    , Int     )
+    else if TypedListElementSimpleCase( CharTObj   , Char    )
+    else if TypedListElementSimpleCase( ShortTObj  , Short   )
+    else if TypedListElementSimpleCase( LongTObj   , Long    )
+    else if TypedListElementSimpleCase( LLongTObj  , LLong   )
+    else if TypedListElementSimpleCase( IntMaxTObj , IntMaxT )
+    else if TypedListElementSimpleCase( SizeTObj   , Size    )
+    else if TypedListElementSimpleCase( PtrDiffTObj, Long    )
+    else if TypedListElementSimpleCase( WIntTObj   , WChar   )
+    else if ( valueType == & type_FloatTObj ) {
+        FloatTObj * v = value;
+        FloatT x = * v;
+        writeStringLiteral_TSStream( stream, "FloatTObj" );
+        writeIntArray_TSStream( stream, (int *)& x, sizeof( FloatT ) / sizeof( IntT ) );
+    }
+    else if ( valueType == & type_DoubleTObj ) {
+        DoubleTObj * v = value;
+        DoubleT x = * v;
+        writeStringLiteral_TSStream( stream, "DoubleTObj" );
+        writeIntArray_TSStream( stream, (int *)& x, sizeof( DoubleT ) / sizeof( IntT ) );
+    }
+    else if ( valueType == & type_LongDoubleTObj ) {
+        LongDoubleTObj * v = value;
+        LongDoubleT x = * v;
+        writeStringLiteral_TSStream( stream, "LongDoubleTObj" );
+        writeIntArray_TSStream( stream, (int *)& x, sizeof( LongDoubleT ) / sizeof( IntT ) );
+    }
+    else if TypedListElementStringCase( CString    , CString )
+    else if TypedListElementStringCase( WString    , WString )
+    else if TypedListElementSimpleCase( VoidTPtrObj, Pointer )
+    else { assertion( false, "writeTypedListElement_TSStream : unsupported type" ); }
+} // writeTypedListElement_TSStream
+
+#undef TypedListElementSimpleCase
+
+#undef TypedListElementStringCase
+
+void typedlistelement_formatter( TSStream * stream, Object * value ) {
+    // VERIFY_TYPE( typedlistelement_formatter, NULL, value );
+    writeTypedListElement_TSStream( stream, value );
+}
+
+#define TypedListElementSimpleCase( TypeCode, Func ) ( equals( typeCode, create_String( #TypeCode ) ) ) \
+{ return create_##TypeCode( read##Func##_TSStream( stream ) ); }
+
+#define TypedListElementStringCase( TypeCode, Func ) ( equals( typeCode, create_String( #TypeCode ) ) ) \
+{ return read##Func##_TSStream( stream ); }
+
+Object * readTypedListElement_TSStream( CallContext context, TSStream * stream ) {
+    String * typeCode = readString_TSStream( stream );
+    if      TypedListElementSimpleCase( IntTObj    , Int     )
+    else if TypedListElementSimpleCase( CharTObj   , Char    )
+    else if TypedListElementSimpleCase( ShortTObj  , Short   )
+    else if TypedListElementSimpleCase( LongTObj   , Long    )
+    else if TypedListElementSimpleCase( LLongTObj  , LLong   )
+    else if TypedListElementSimpleCase( IntMaxTObj , IntMaxT )
+    else if TypedListElementSimpleCase( SizeTObj   , Size    )
+    else if TypedListElementSimpleCase( PtrDiffTObj, Long    )
+    else if TypedListElementSimpleCase( WIntTObj   , WChar   )
+    else if ( equals( typeCode, create_String( "FloatTObj" ) ) ) {
+        FloatT x;
+        readIntArray_TSStream( stream, (int *)& x, sizeof( FloatT ) / sizeof( IntT ) );
+        return create_FloatTObj( x );
+    }
+    else if ( equals( typeCode, create_String( "DoubleTObj" ) ) ) {
+        DoubleT x;
+        readIntArray_TSStream( stream, (int *)& x, sizeof( DoubleT ) / sizeof( IntT ) );
+        return create_DoubleTObj( x );
+    }
+    else if ( equals( typeCode, create_String( "LongDoubleTObj" ) ) ) {
+        LongDoubleT x;
+        readIntArray_TSStream( stream, (int *)& x, sizeof( LongDoubleT ) / sizeof( IntT ) );
+        return create_LongDoubleTObj( x );
+    }
+    else if TypedListElementStringCase( CString, CString )
+    else if TypedListElementStringCase( WString, WString )
+    else if ( equals( typeCode, create_String( "VoidTPtrObj" ) ) ) {
+        return create_VoidTPtrObj( readPointer_TSStream( context, stream ) );
+    }
+    else { assertion( false, "readTypedListElement_TSStream : unsupported type" ); }
+} // readTypedListElement_TSStream
+
+#undef TypedListElementSimpleCase
+
+#undef TypedListElementStringCase
+
+/* $(typedlist) */
+void writeTypedList_TSStream( TSStream * stream, List * value ) {
+    int i, size;
+    writeTypeHeaderTSStream( stream, "typedlist" );
+    size = ( value == NULL ? -1 : size_List( value ) );
+    writeInt_TSStream( stream, size );
+    for ( i = 0; i < size; i++ ) {
+        Object * listElement = get_List( value, i );
+        writeTypedListElement_TSStream( stream, listElement );
+    }
+}
+
+void typedlist_formatter( TSStream * stream, List * value ) {
+    VERIFY_TYPE( typedlist_formatter, & type_List, value );
+    writeTypedList_TSStream( stream, value );
+}
+
+int readTypedList_TSStream( CallContext context, TSStream * stream, List * list ) {
+    int size, i;
+    if ( ( size = readInt_TSStream( stream ) ) >= 0 ) {
+        assertion( list != NULL, "readTypedList_TSStream : try to work with not -1 as size and NULL as list" );
+        clear_List( list );
+        for ( i = 1; i <= size; i++ ) { append_List( list, readTypedListElement_TSStream( context, stream ) ); }
+    } else {
+        assertion( list == NULL, "readTypedList_TSStream : try to work with -1 as size and not NULL as list" );
+    }
+    return size;
+}
+
+/* $(tm) */
+void writeTm_TSStream( TSStream * stream, TmTObj * value ) {
+    writeTypeHeaderTSStream( stream, "tm" );
+    writeInt_TSStream( stream, value->sec   );
+    writeInt_TSStream( stream, value->min   );
+    writeInt_TSStream( stream, value->hour  );
+    writeInt_TSStream( stream, value->mday  );
+    writeInt_TSStream( stream, value->mon   );
+    writeInt_TSStream( stream, value->year  );
+    writeInt_TSStream( stream, value->wday  );
+    writeInt_TSStream( stream, value->yday  );
+    writeInt_TSStream( stream, value->isdst );
+}
+
+void tm_formatter( TSStream * stream, TmTObj * value ) {
+    VERIFY_TYPE( tm_formatter, & type_TmTObj, value );
+    writeTm_TSStream( stream, value );
+}
+
+TmTObj * readTm_TSStream( TSStream * stream ) {
+    if ( readInt_TSStream( stream ) ) {
+        return NULL;
+    } else {
+        IntT sec   = readInt_TSStream( stream );
+        IntT min   = readInt_TSStream( stream );
+        IntT hour  = readInt_TSStream( stream );
+        IntT mday  = readInt_TSStream( stream );
+        IntT mon   = readInt_TSStream( stream );
+        IntT year  = readInt_TSStream( stream );
+        IntT wday  = readInt_TSStream( stream );
+        IntT yday  = readInt_TSStream( stream );
+        IntT isdst = readInt_TSStream( stream );
+        return create_TmTObj( sec, min, hour, mday, mon, year, wday, yday, isdst );
+    }
+}

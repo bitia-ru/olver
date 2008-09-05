@@ -1,0 +1,399 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include <string.h>
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "data/errno_model.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "io/term/term_media.seh"
+#include "io/term/tests/rw_canon_scenario.seh"
+#include "io/term/tests/term_scenario.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static char* line[] = {
+    /*  0 */ "",
+    /*  1 */ " ",
+    /*  2 */ "\n",
+    /*  3 */ "\r",
+    /*  4 */ "\t",
+    /*  5 */ "\v",
+    /*  6 */ "\f",
+    /*  7 */ "\a",
+    /*  8 */ "\b",
+    /*  9 */ "\r\n",
+    /* 10 */ "\r\r",
+    /* 11 */ "\n\n",
+    /* 12 */ "Linux",
+    /* 13 */ "Linux\n",
+    /* 14 */ "Linux\r\n"
+};
+
+static int LINE_NUMBER = sizeof(line)/sizeof(char*);
+
+/********************************************************************/
+/**                      Test Scenario Debug                       **/
+/********************************************************************/
+#ifdef IO_TERM_LOCAL_MAIN
+
+static AssertionExit system_assertion_handler;
+
+void io_term_rw_canon_assertion_exit(const char *format, va_list arg_list)
+{
+    system_assertion_handler(format, arg_list);
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context1;
+static CallContext context2;
+static FileDescId ptm_desc_id;
+static FileDescId pts_desc_id;
+static VoidTPtr ptm_termp;
+static VoidTPtr pts_termp;
+static ErrorCode *error;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_rw_canon_scenario(int argc, char **argv)
+{
+#ifdef IO_TERM_LOCAL_MAIN
+
+    system_assertion_handler = atAssertion(io_term_rw_canon_assertion_exit);
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+    context1 = getContext();
+    initPathSystemConfiguration();
+    context2 = createThreadInContext(context1);
+
+    ptm_desc_id = WrongFileDescId;
+    pts_desc_id = WrongFileDescId;
+
+    ptm_termp = allocateMemoryBlock(context1, sizeof_Type(context1, "struct termios"));
+    pts_termp = allocateMemoryBlock(context1, sizeof_Type(context1, "struct termios"));
+
+    if(isNULL_VoidTPtr(ptm_termp) || isNULL_VoidTPtr(pts_termp))
+        return false;
+
+    error = create_ErrorCode(SUT_EOK);
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(150);
+
+    return true;
+}
+
+static void finish_rw_canon_scenario(void)
+{
+    deallocateMemoryBlock(context1, ptm_termp);
+    deallocateMemoryBlock(context1, pts_termp);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(rw_canon_scenario);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+/*
+static List* rw_canon_scenario_state(void) 
+{
+    TermIOS *pts_termios;
+    TermIOS *ptm_termios;
+
+    List* res = create_List(&type_CString);
+
+    if(isWrong_FileDescId(ptm_desc_id))
+    {
+        append_List(res, create_CString("Initial state"));
+        return res;
+    }
+
+    pts_termios = getTermIOS(pts_termp);
+    ptm_termios = getTermIOS(ptm_termp);
+
+    append_List(res, create_CString(ptm_termios->lflag->icanon ? "ICANON" : "!ICANON"));
+    append_List(res, create_CString(ptm_termios->iflag->icrnl  ? "ICRNL"  : "!ICRNL"));
+    append_List(res, create_CString(ptm_termios->iflag->igncr  ? "IGNCR"  : "!IGNCR"));
+    append_List(res, create_CString(ptm_termios->iflag->inlcr  ? "INLCR"  : "!INLCR"));
+    append_List(res, create_CString(ptm_termios->oflag->opost  ? "OPOST"  : "!OPOST"));
+    append_List(res, create_CString(ptm_termios->oflag->ocrnl  ? "OCRNL"  : "!OCRNL"));
+    append_List(res, create_CString(ptm_termios->oflag->onlcr  ? "ONLCR"  : "!ONLCR"));
+    append_List(res, create_CString(ptm_termios->oflag->onocr  ? "ONOCR"  : "!ONOCR"));
+    append_List(res, create_CString(ptm_termios->oflag->onlret ? "ONLRET" : "!ONLRET"));
+
+    return res;
+}
+*/
+
+static List* rw_canon_scenario_state(void) 
+{
+    List* res = create_List(&type_CString);
+    append_List(res, create_CString("term"));
+    return res;
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool openpty_tcgetattr_scen()
+{
+    if(isWrong_FileDescId(ptm_desc_id))
+    {
+        openpty_spec(context1, &ptm_desc_id, &pts_desc_id, NULL, ptm_termp, NULL, error);
+
+        tcgetattr_spec(context1, ptm_desc_id, ptm_termp, error);
+        tcgetattr_spec(context1, pts_desc_id, pts_termp, error);
+    }
+
+    return true;
+}
+
+scenario
+bool tcsetattr_rw_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        bool icanon, icrnl, igncr, inlcr;
+        bool opost, ocrnl, onlcr, onocr, onlret; 
+
+        TermIOS *ptm_termios = clone(getTermIOS(ptm_termp));
+
+        ptm_termios->lflag->icanon = true;
+
+        if(!ptm_termios->oflag->opost)
+            ptm_termios->oflag->opost  = true;
+        else if(!ptm_termios->oflag->ocrnl)
+            ptm_termios->oflag->ocrnl  = true;
+        else if(!ptm_termios->oflag->onlcr)
+            ptm_termios->oflag->onlcr  = true;
+        else if(!ptm_termios->oflag->onocr)
+            ptm_termios->oflag->onocr  = true;
+        else if(!ptm_termios->oflag->onlret)
+            ptm_termios->oflag->onlret = true;
+        else
+        {
+            if(!ptm_termios->iflag->icrnl)
+                ptm_termios->iflag->icrnl  = true;
+            else if(!ptm_termios->iflag->igncr)
+                ptm_termios->iflag->igncr  = true;
+            else if(!ptm_termios->iflag->inlcr)
+                ptm_termios->iflag->inlcr  = true;
+            else 
+                return true;
+
+            ptm_termios->oflag->opost  = false;
+            ptm_termios->oflag->ocrnl  = false;
+            ptm_termios->oflag->onlcr  = false;
+            ptm_termios->oflag->onocr  = false;
+            ptm_termios->oflag->onlret = false;
+        }
+
+        setControlCharacter_TermIOS(ptm_termios, SUT_VEOL, '-');
+
+        settermios_spec(context1, ptm_termp, ptm_termios);
+        tcsetattr_spec(context1, ptm_desc_id, SUT_TCSANOW, ptm_termp);
+
+        tcgetattr_spec(context1, ptm_desc_id, ptm_termp, error);
+        tcgetattr_spec(context1, pts_desc_id, pts_termp, error);
+    }
+
+    return true;
+}
+
+scenario
+bool read_write_1_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        TermIOS *ptm_termios = getTermIOS(ptm_termp);
+
+        if(ptm_termios->lflag->icanon)
+        {
+            CCT eol[1];
+
+            eol[0] = getControlCharacter_TermIOS(ptm_termios, SUT_VEOL);
+
+            iterate(int i = 0; i < LINE_NUMBER; i++;)
+            {
+                SizeT size = strlen(line[i]);
+
+                write_tty_spec(context1, ptm_desc_id, create_CByteArray((ByteT *)line[i], size), size);
+                write_tty_spec(context1, ptm_desc_id, create_CByteArray((ByteT *)eol, 1), 1);
+
+                read_tty_spec(context2, pts_desc_id, 256);
+            }
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool read_write_2_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        TermIOS *ptm_termios = getTermIOS(ptm_termp);
+
+        if(ptm_termios->lflag->icanon)
+        {
+            CCT eol[1];
+
+            eol[0] = getControlCharacter_TermIOS(ptm_termios, SUT_VEOL);
+
+            iterate(int i = 0; i < LINE_NUMBER; i++;)
+            {
+                SizeT size = strlen(line[i]);
+
+                write_tty_spec(context2, pts_desc_id, create_CByteArray((ByteT *)line[i], size), size);
+                write_tty_spec(context2, pts_desc_id, create_CByteArray((ByteT *)eol, 1), 1);
+
+                read_tty_spec(context1, ptm_desc_id, 256);
+            }
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool reset_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        TermIOS *ptm_termios = clone(getTermIOS(ptm_termp));
+
+        if (ptm_termios->lflag->icanon &&
+            ptm_termios->iflag->icrnl  &&
+            ptm_termios->iflag->igncr  &&
+            ptm_termios->iflag->inlcr  &&
+            ptm_termios->oflag->opost  &&
+            ptm_termios->oflag->ocrnl  &&
+            ptm_termios->oflag->onlcr  &&
+            ptm_termios->oflag->onocr  &&
+            ptm_termios->oflag->onlret)
+        {
+            ptm_termios->lflag->icanon = false;
+            ptm_termios->iflag->icrnl  = false;
+            ptm_termios->iflag->igncr  = false;
+            ptm_termios->iflag->inlcr  = false;            
+            ptm_termios->oflag->opost  = false;
+            ptm_termios->oflag->ocrnl  = false;
+            ptm_termios->oflag->onlcr  = false;
+            ptm_termios->oflag->onocr  = false;
+            ptm_termios->oflag->onlret = false;
+
+            settermios_spec(context1, ptm_termp, ptm_termios);
+
+            tcsetattr_spec(context1, ptm_desc_id, SUT_TCSANOW, ptm_termp);
+
+            tcgetattr_spec(context1, ptm_desc_id, ptm_termp, error);
+            tcgetattr_spec(context1, pts_desc_id, pts_termp, error);
+
+            tcflush_spec(context1, ptm_desc_id, SUT_TCIOFLUSH);
+            tcflush_spec(context1, pts_desc_id, SUT_TCIOFLUSH);
+
+            close_tty_spec(context1, ptm_desc_id);
+            close_tty_spec(context1, pts_desc_id);
+
+            ptm_desc_id = WrongFileDescId;
+            pts_desc_id = WrongFileDescId;
+        }
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm rw_canon_scenario =
+{
+    .init = init_rw_canon_scenario,
+    .finish = finish_rw_canon_scenario,
+    .getState = (PtrGetState)rw_canon_scenario_state,
+    .saveModelState = (PtrSaveModelState)saveIoTermModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreIoTermModelState,
+    .isStationaryState = (PtrIsStationaryState)isIoTermModelStateStationary,
+    .actions = 
+    {
+        openpty_tcgetattr_scen,
+        tcsetattr_rw_scen,
+        read_write_1_scen,
+        read_write_2_scen,
+        reset_scen,
+        NULL
+    }
+};
+
+bool main_io_term_rw_canon(int argc, char **argv)
+{
+    rw_canon_scenario(argc, argv);
+    return true;
+}
+
+#ifdef IO_TERM_LOCAL_MAIN
+
+#include "common/init.seh"
+#include "common/control_center.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+    initIoFileSubsystem();
+    initIoTermSubsystem();
+}
+
+int main(int argc, char **argv)
+{
+    initTestSystem();
+    loadSUT();
+    addTraceToFile("trace.xml");
+    main_io_term_rw_canon(argc, argv);
+    
+    return 0;
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */

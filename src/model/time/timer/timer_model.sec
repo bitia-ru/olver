@@ -1,0 +1,2604 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "time/timer/timer_config.h"
+#include "process/fenv/fenv_model.seh"
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/meta/user_model.seh"
+#include "fs/meta/access_model.seh"
+#include "config/system_config.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "data/sys/time_model.seh"
+#include "process/process/process_common.seh"
+#include "time/clock/clock_model.seh"
+#include "time/timer/timer_model.seh"
+
+#pragma SEC subsystem timer "time.timer"
+
+/*
+   The group of functions 'time.timer' consists of:
+       alarm [2]
+       getitimer [2]
+       nanosleep [2]
+       setitimer [2]
+       sleep [2]
+       timer_create
+       timer_delete
+       timer_getoverrun
+       timer_gettime
+       timer_settime
+       ualarm [2]
+       usleep [1]
+ */
+
+// will be moved to data/sigmal_model
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** common for alarm, setitimer, timer_settime and ualarm **/
+specification typedef struct OrderSignal OrderSignal = {};
+
+OrderSignal * create_OrderSignal( String * funcName, CallContext context, UIntT nanoseconds, TimeInterval stimulTime,
+                                  ITimerValTObj * v_value, TimerTObj * timerid, ITimerSpecTObj * s_value
+                                )
+{
+    return create( & type_OrderSignal, funcName, context, nanoseconds, stimulTime, v_value, timerid, s_value );
+}
+
+void orderSignal( CallContext context, UIntT nanoseconds, Signal * signal, TimerTObj * timer,
+                  const char * funcName, TimeInterval stimulTime, ITimerValTObj * v_value, ITimerSpecTObj * s_value
+                )
+{
+    ProcessState * processState = getProcessState_CallContext( context );
+    append_List( processState->meta.waitedSignals, create_WaitedSignal( nanoseconds, signal, timer ) );
+
+    // verbose( "orderSignal     : size waitedSignals is %d\n", size_List( processState->meta.waitedSignals ) );
+    startCommand( context, "order signal",
+                  create_OrderSignal
+                      ( create_String( funcName ), context, nanoseconds, stimulTime, v_value, timer, s_value )
+                );
+}
+
+specification typedef struct SignalReceiveType SignalReceiveType = {};
+
+SignalReceiveType * create_SignalReceiveType(
+    String         * funcName      ,
+    CallContext      context       ,
+    IntT             returned_value,
+    String         * stage         ,
+    ITimerValTObj  * v_ovalue      ,
+    ITimerSpecTObj * s_ovalue      ,
+    ErrorCode      * error_code
+    )
+{
+    return create(&type_SignalReceiveType,
+        funcName      ,
+        context       ,
+        returned_value,
+        stage         ,
+        v_ovalue      ,
+        s_ovalue      ,
+        error_code
+        );
+}
+
+reaction SignalReceiveType * signal_receive( void )
+{
+    post
+    {
+        String         * funcName   = signal_receive->funcName      ;
+        CallContext      context    = signal_receive->context       ;
+        IntT             alarm_spec = signal_receive->returned_value;
+        String         * stage      = signal_receive->stage         ;
+        ITimerValTObj  * v_ovalue   = signal_receive->v_ovalue      ;
+        ITimerSpecTObj * s_ovalue   = signal_receive->s_ovalue      ;
+        ErrorCode      * errno      = signal_receive->error_code    ;
+
+        OrderSignal * blocked_call = showCommand( @getBlockedCalls(), context, "order signal" );
+        String         * name        = blocked_call->funcName   ;
+        UIntT            nanoseconds = blocked_call->nanoseconds;
+        TimeInterval     stimulTime  = blocked_call->stimulTime ;
+        ITimerValTObj  * v_value     = blocked_call->v_value    ;
+        TimerTObj      * timerid     = blocked_call->timerid    ;
+        ITimerSpecTObj * s_value     = blocked_call->s_value    ;
+
+        SystemState * preSystemState = findSystemState( @systems, context.system );
+        ProcessState * preProcessState = findProcessState
+                                             ( preSystemState->processes, getProcessId_CallContext( context ) );
+        WaitedSignal * waitedSignal = get_List( preProcessState->meta.waitedSignals, 0 );
+        TimeUnit sleepTime = diffTimeMarks( stimulTime.minMark, timestamp.maxMark );
+
+        bool checkResult;
+
+        traceFormattedUserInfo( "signal_receive : stimulTime is [%d|%I64d], [%d|%I64d]\n",
+            stimulTime.minMark.frame, stimulTime.minMark.timemark,
+            stimulTime.maxMark.frame, stimulTime.maxMark.timemark
+            );
+        traceFormattedUserInfo( "signal_receive : timestamp  is [%d|%I64d], [%d|%I64d]\n",
+            timestamp.minMark.frame , timestamp.minMark.timemark ,
+            timestamp.maxMark.frame , timestamp.maxMark.timemark
+            );
+        traceFormattedUserInfo( "signal_receive : nanoseconds is [%ld]\n"  , nanoseconds );
+        traceFormattedUserInfo( "signal_receive : sleepTime   is [%I64d]\n", sleepTime   );
+
+         /* [Consistency of test suite] */
+        REQ( "", "equals( funcName, name )", equals( funcName, name ) );
+
+        if ( equals( create_String( "setitimer" ), name ) )
+        {
+            /*
+             * [Upon successful completion, getitimer() or setitimer() shall return 0;]
+             * otherwise, -1 shall be returned and errno set to indicate the error
+             */
+            ERROR_BEGIN( POSIX_SETITIMER, "setitimer.06.02", alarm_spec == -1, * errno )
+                /*
+                 * The setitimer() function shall fail if:
+                 *
+                 * [EINVAL]
+                 * The value argument is not in canonical form. (In canonical form, the number of
+                 * microseconds is a non-negative integer less than 1000000 and the number of
+                 * seconds is a non-negative integer.)
+                 */
+                ERROR_SHALL( POSIX_SETITIMER, EINVAL,
+                             "setitimer.07.01",
+                             ( v_value->value->sec < 0 || v_value->value->usec < 0 || 1000000 <= v_value->value->usec ) ||
+                             ( v_value->value->sec != 0 && v_value->value->usec != 0 &&
+                               ( v_value->interval->sec < 0 ||
+                                 v_value->interval->usec < 0 || 1000000 <= v_value->interval->usec
+                               )
+                             )
+                           )
+
+                /*
+                 * The getitimer() and setitimer() functions may fail if:
+                 *
+                 * [EINVAL]
+                 * The which argument is not recognized.
+                 */
+                ERROR_MAY( POSIX_SETITIMER, EINVAL, "setitimer.08.01", *(waitedSignal->signal) == SUT_WRONG_SIGNAL_NUMBER )
+            ERROR_END()
+
+            /*
+             * The setitimer() function shall
+             *
+             * set the timer specified by which to the value specified in the structure
+             * pointed to by value
+             */
+            REQ( "setitimer.01.01", "set the timer specified by which to the value", true );
+
+            if ( v_ovalue != NULL )
+            {
+                /*
+                 * The setitimer() function shall
+                 *
+                 * if ovalue is not a null pointer, store the previous value of the timer in the
+                 * structure pointed to by ovalue
+                 */
+                REQ( "setitimer.01.02", "store the previous value of the timer in the ovalue", true );
+            }
+
+            /*
+             * Setting it_interval to 0 shall disable a timer after its next expiration
+             * (assuming it_value is non-zero).
+             */
+            REQ( "setitimer.03.02", "Setting it_interval to 0 shall disable a timer", true );
+
+            /*
+             * Implementations may place limitations on the granularity of timer values. For
+             * each interval timer, if the requested timer value requires a finer granularity
+             * than the implementation supports, the actual timer value shall be rounded up to
+             * the next supported value.
+             */
+            REQ( "setitimer.04", "", TODO_REQ() );
+
+            if ( *(waitedSignal->signal) == SUT_SIGALRM )
+            {
+                /*
+                 * An XSI-conforming implementation provides each process with at least three
+                 * interval timers, which are indicated by the which argument:
+                 *
+                 * ITIMER_REAL
+                 * Decrements in real time. A SIGALRM signal is delivered when this timer expires.
+                 */
+                REQ( "setitimer.05.01", "A SIGALRM signal is delivered", true );
+            }
+
+            if ( *(waitedSignal->signal) == SUT_SIGVTALRM )
+            {
+                /*
+                 * An XSI-conforming implementation provides each process with at least three
+                 * interval timers, which are indicated by the which argument:
+                 *
+                 * ITIMER_VIRTUAL
+                 * Decrements in process virtual time. It runs only when the process is executing.
+                 * A SIGVTALRM signal is delivered when it expires.
+                 */
+                REQ( "setitimer.05.02", "A SIGVTALRM signal is delivered", true );
+            }
+
+            if ( *(waitedSignal->signal) == SUT_SIGPROF )
+            {
+                /*
+                 * An XSI-conforming implementation provides each process with at least three
+                 * interval timers, which are indicated by the which argument:
+                 *
+                 * ITIMER_PROF
+                 * Decrements both in process virtual time and when the system is running on
+                 * behalf of the process. It is designed to be used by interpreters in
+                 * statistically profiling the execution of interpreted programs. Each time the
+                 * ITIMER_PROF timer expires, the SIGPROF signal is delivered.
+                 */
+                REQ( "setitimer.05.03", "the SIGPROF signal is delivered", true );
+            }
+        }
+        else if ( equals( create_String( "timer_settime" ), name ) )
+        {
+            /*
+             * If an error occurs for any of these functions, the value -1 shall be returned,
+             * and errno set to indicate the error.
+             */
+            ERROR_BEGIN(POSIX_TIMER_SETTIME, "timer_settime.06.02", alarm_spec == -1, * errno )
+                /*
+                 * The timer_settime() function shall fail if:
+                 *
+                 * [EINVAL]
+                 * A value structure specified a nanosecond value less than zero or greater than
+                 * or equal to 1000 million, and the it_value member of that structure did not
+                 * specify zero seconds and nanoseconds.
+                 */
+                ERROR_SHALL( POSIX_TIMER_SETTIME, EINVAL,
+                             "timer_settime.07.01",
+                             ( s_value->value->sec < 0 ||
+                               s_value->value->nsec < 0 || 1000000000 <= s_value->value->nsec
+                             )                                                                        ||
+                             ( s_value->value->sec != 0 && s_value->value->nsec != 0 &&
+                               ( s_value->interval->sec < 0 ||
+                                 s_value->interval->nsec < 0 || 1000000000 <= s_value->interval->nsec
+                               )
+                             )
+                           )
+
+                /*
+                 * These functions may fail if:
+                 *
+                 * [EINVAL]
+                 * The timerid argument does not correspond to an ID returned by timer_create()
+                 * but not yet deleted by timer_delete().
+                 */
+                ERROR_MAY( POSIX_TIMER_SETTIME, EINVAL, "timer_settime.08.01",
+                                                        ! containsKey_Map( preProcessState->meta.timersToSignals, timerid )
+                         )
+
+                /*
+                 * The timer_settime() function may fail if:
+                 *
+                 * [EINVAL]
+                 * The it_interval member of value is not zero and the timer was created with
+                 * notification by creation of a new thread ( sigev_sigev_notify was SIGEV_THREAD)
+                 * and a fixed stack address has been set in the thread attribute pointed to by
+                 * sigev_notify_attributes.
+                 */
+                ERROR_MAY( POSIX_TIMER_SETTIME, EINVAL, "timer_settime.10.01", TODO_ERR(EINVAL) )
+            ERROR_END()
+
+            if ( s_ovalue != NULL )
+            {
+                /*
+                 * If the argument ovalue is not NULL, the timer_settime() function shall store,
+                 * in the location referenced by ovalue, a value representing the previous amount
+                 * of time before the timer would have expired, or zero if the timer was
+                 * disarmed, together with the previous timer reload value. Timers shall not
+                 * expire before their scheduled time.
+                 */
+                REQ( "timer_settime.01.02", "store in the ovalue a value representing the timer", true );
+            }
+
+            /*
+             * Time values that are between two consecutive non-negative integer multiples of
+             * the resolution of the specified timer shall be rounded up to the larger
+             * multiple of the resolution. Quantization error shall not cause the timer to
+             * expire earlier than the rounded time value.
+             */
+            REQ( "timer_settime.04", "", TODO_REQ() );
+
+            /*
+             * If the flag TIMER_ABSTIME is not set in the argument flags, timer_settime()
+             * shall behave as if the time until next expiration is set to be equal to the
+             * interval specified by the it_value member of value. That is, the timer shall
+             * expire in it_value nanoseconds from when the call is made.
+             */
+            REQ( "timer_settime.09.01", "", TODO_REQ() );
+
+            /*
+             * If the flag TIMER_ABSTIME is set in the argument flags, timer_settime() shall
+             * behave as if the time until next expiration is set to be equal to the
+             * difference between the absolute time specified by the it_value member of value
+             * and the current value of the clock associated with timerid. That is, the timer
+             * shall expire when the clock reaches the value specified by the it_value member
+             * of value. If the specified time has already passed, the function shall succeed
+             * and the expiration notification shall be made.
+             */
+            REQ( "timer_settime.09.02", "", TODO_REQ() );
+
+            /*
+             * The effect of disarming or resetting a timer with pending expiration
+             * notifications is unspecified.
+             */
+            REQ( "timer_settime.11", "", TODO_REQ() );
+        }
+
+        /*
+         * The alarm() function shall cause the system to generate a SIGALRM signal for
+         * the process after the number of realtime seconds specified by seconds have
+         * elapsed.
+         *
+         * If it_value is non-zero, it shall indicate the time to the next timer
+         * expiration.
+         *
+         * If it_interval is non-zero, it shall specify a value to be used in reloading
+         * it_value when the timer expires.
+         *
+         * The timer_settime() function shall set the time until the next expiration of
+         * the timer specified by timerid from the it_value member of the value argument
+         * and arm the timer if the it_value member of value is non-zero. If the
+         * specified timer was already armed when timer_settime() is called, this call
+         * shall reset the time until next expiration to the value specified.
+         *
+         * The reload value of the timer shall be set to the value specified by the
+         * it_interval member of value. When a timer is armed with a non-zero
+         * it_interval, a periodic (or repetitive) timer is specified.
+         *
+         * The ualarm() function shall cause the SIGALRM signal to be generated for the
+         * calling process after the number of realtime microseconds specified by the
+         * useconds argument has elapsed.
+         */
+         {
+            SystemState * systemState = getSystemState_CallContext( context )   ;
+            ClockState  * clockState  = get_Map( systemState->clocks, create_ClockidTObj( SUT_CLOCK_REALTIME ));
+
+            REQ("", "Realtime clock shall be set up", clockState!=NULL && clockState->resolution!=NULL);
+
+            traceFormattedUserInfo( "signal_receive : resolution is [%ld]\n"  , clockState->resolution->nsec );
+
+            if(nanoseconds > sleepTime)
+            {
+                UIntT delta = nanoseconds - sleepTime;
+                if (delta > clockState->resolution->nsec)
+                {
+                    checkResult = false;
+                }
+                else
+                {
+                    checkResult =true;
+                }
+            }
+            else
+            {
+                checkResult = true;
+            }
+
+            req4( name, "alarm.01"           , "the number of realtime seconds have elapsed"                  , checkResult );
+            req4( name, "setitimer.02.01"    , "it_value shall indicate the time to the timer expiration"     , checkResult );
+            req4( name, "setitimer.03.01"    , "it_interval shall specify a value to be used in reloading"    , checkResult );
+            req4( name, "timer_settime.02.01", "arm the timer if the it_value member of value is non-zero"    , checkResult );
+            req4( name, "timer_settime.03"   , "The reload value of the timer shall be set to the it_interval", checkResult );
+            req4( name, "ualarm.01"          , "the number of realtime microseconds has elapsed"              , checkResult );
+         }
+
+        /*
+         * If seconds is 0, a pending alarm request, if any, is canceled.
+         *
+         * Setting it_value to 0 shall disable a timer, regardless of the value of
+         * it_interval.
+         *
+         * If the it_value member of value is zero, the timer shall be disarmed.
+         */
+        req4( name, "alarm.02"           , "", TODO_REQ() );
+        req4( name, "setitimer.02.02"    , "", TODO_REQ() );
+        req4( name, "timer_settime.02.02", "", TODO_REQ() );
+
+        /*
+         * Alarm requests are not stacked; only one SIGALRM generation can be scheduled in
+         * this manner. If the SIGALRM signal has not yet been generated, the call shall
+         * result in rescheduling the time at which the SIGALRM signal is generated.
+         *
+         * Alarm requests are not stacked; only one SIGALRM generation can be scheduled in
+         * this manner. If the SIGALRM signal has not yet been generated, the call shall
+         * result in rescheduling the time at which the SIGALRM signal is generated.
+         */
+        req4( name, "alarm.03" , "", TODO_REQ() );
+        req4( name, "ualarm.03", "", TODO_REQ() );
+
+        /*
+         * If there is a previous alarm() request with time remaining, alarm() shall
+         * return a non-zero value that is the number of seconds until the previous
+         * request would have generated a SIGALRM signal.
+         *
+         * The ualarm() function shall return the number of microseconds remaining from
+         * the previous ualarm() call.
+         */
+        req4( name, "alarm.04.01" , "", TODO_REQ() );
+        req4( name, "ualarm.04.01", "", TODO_REQ() );
+
+        /*
+         * Otherwise, alarm() shall return 0.
+         *
+         * Upon successful completion, getitimer() or setitimer() shall return 0;
+         *
+         * If the timer_gettime() or timer_settime() functions succeed, a value of 0 shall
+         * be returned.
+         *
+         * If no timeouts are pending or if ualarm() has not previously been called,
+         * ualarm() shall return 0.
+         */
+        checkResult = ( alarm_spec == 0 );
+        req4( name, "alarm.04.02"        , "alarm() shall return 0"        , checkResult );
+        req4( name, "setitimer.06.01"    , "setitimer() shall return 0"    , checkResult );
+        req4( name, "timer_settime.06.01", "a value of 0 shall be returned", checkResult );
+        req4( name, "ualarm.04.02"       , "ualarm() shall return 0"       , checkResult );
+
+        /*
+         * When the interval argument is non-zero, repeated timeout notification occurs
+         * with a period in microseconds specified by the interval argument.
+         */
+        req4( name, "ualarm.05", "repeated timeout notification occurs", nanoseconds <= sleepTime );
+
+        /*
+         * Implementations may place limitations on the granularity of timer values. For
+         * each interval timer, if the requested timer value requires a finer granularity
+         * than the implementation supports, the actual timer value shall be rounded up
+         * to the next supported value.
+         */
+        req4( name, "ualarm.06", "", TODO_REQ() );
+
+        return true;
+    }
+}
+
+void onSignalReceive( CallContext context, String * name )
+{
+    ProcessState * processState = getProcessState_CallContext( context );
+    if ( equals( create_String( "alarm"         ), name ) ||
+         equals( create_String( "setitimer"     ), name ) ||
+         equals( create_String( "timer_settime" ), name ) ||
+         equals( create_String( "ualarm"        ), name )
+       ) {
+        remove_List( processState->meta.waitedSignals, 0 );
+    } else {
+        REQTRACE( "onSignalReceive : unknown name" );
+    }
+
+    // verbose( "onSignalReceive : size waitedSignals is %d\n", size_List( processState->meta.waitedSignals ) );
+    endCommand( context, "order signal" );
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    alarm - schedule an alarm signal
+
+SYNOPSIS
+
+    #include <unistd.h>
+    unsigned alarm(unsigned seconds);
+
+DESCRIPTION
+
+    The alarm() function shall cause the system to generate a SIGALRM signal for
+    the process after the number of realtime seconds specified by seconds have
+    elapsed. Processor scheduling delays may prevent the process from handling
+    the signal as soon as it is generated.
+
+    If seconds is 0, a pending alarm request, if any, is canceled.
+
+    Alarm requests are not stacked; only one SIGALRM generation can be scheduled
+    in this manner. If the SIGALRM signal has not yet been generated, the call
+    shall result in rescheduling the time at which the SIGALRM signal is
+    generated.
+
+    Interactions between alarm() and any of setitimer(), ualarm(), or usleep()
+    are unspecified.
+
+RETURN VALUE
+
+    If there is a previous alarm() request with time remaining, alarm() shall
+    return a non-zero value that is the number of seconds until the previous
+    request would have generated a SIGALRM signal. Otherwise, alarm() shall
+    return 0.
+
+ERRORS
+
+    The alarm() function is always successful, and no return value is reserved
+    to indicate an error.
+*/
+specification
+void alarm_spec( CallContext context, UIntT seconds )
+{
+    pre
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", processState != NULL );
+
+        /*
+         * Interactions between alarm() and any of setitimer(), ualarm(), or
+         * usleep() are unspecified.
+         */
+        REQ( "app.alarm.01", "Interactions between similar functions", isEmpty_List( processState->meta.waitedSignals ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Seconds
+    {
+        if ( seconds == 0 )
+        {
+            return { SecondsIsZero, "seconds is zero" };
+        }
+        else
+        {
+            return { SecondsIsNotZero, "seconds is not zero" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onAlarm( CallContext context, UIntT seconds, TimeInterval stimulTime )
+{
+    orderSignal( context, 1000000000 * seconds, create_Signal(SUT_SIGALRM), NULL, "alarm", stimulTime, NULL, NULL );
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getitimer, setitimer - get and set value of interval timer
+
+SYNOPSIS
+
+    #include <sys/time.h>
+    int getitimer(int which, struct itimerval *value);
+    int setitimer(int which, const struct itimerval *restrict value,
+           struct itimerval *restrict ovalue);
+
+DESCRIPTION
+
+    The getitimer() function shall store the current value of the timer
+    specified by which into the structure pointed to by value. The setitimer()
+    function shall set the timer specified by which to the value specified in
+    the structure pointed to by value, and if ovalue is not a null pointer,
+    store the previous value of the timer in the structure pointed to by ovalue.
+
+    A timer value is defined by the itimerval structure, specified in
+    <sys/time.h>. If it_value is non-zero, it shall indicate the time to the
+    next timer expiration. If it_interval is non-zero, it shall specify a value
+    to be used in reloading it_value when the timer expires. Setting it_value to
+    0 shall disable a timer, regardless of the value of it_interval. Setting
+    it_interval to 0 shall disable a timer after its next expiration (assuming
+    it_value is non-zero).
+
+    Implementations may place limitations on the granularity of timer values.
+    For each interval timer, if the requested timer value requires a finer
+    granularity than the implementation supports, the actual timer value shall
+    be rounded up to the next supported value.
+
+    An XSI-conforming implementation provides each process with at least three
+    interval timers, which are indicated by the which argument:
+
+    ITIMER_REAL
+        Decrements in real time. A SIGALRM signal is delivered when this timer
+        expires.
+
+    ITIMER_VIRTUAL
+        Decrements in process virtual time. It runs only when the process is
+        executing. A SIGVTALRM signal is delivered when it expires.
+
+    ITIMER_PROF
+        Decrements both in process virtual time and when the system is running
+        on behalf of the process. It is designed to be used by interpreters in
+        statistically profiling the execution of interpreted programs. Each time
+        the ITIMER_PROF timer expires, the SIGPROF signal is delivered.
+
+    The interaction between setitimer() and any of alarm(), sleep(), or usleep()
+    is unspecified.
+
+RETURN VALUE
+
+    Upon successful completion, getitimer() or setitimer() shall return 0;
+    otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    The setitimer() function shall fail if:
+
+    [EINVAL]
+        The value argument is not in canonical form. (In canonical form, the
+        number of microseconds is a non-negative integer less than 1000000 and
+        the number of seconds is a non-negative integer.)
+
+    The getitimer() and setitimer() functions may fail if:
+
+    [EINVAL]
+        The which argument is not recognized.
+*/
+specification
+IntT getitimer_spec( CallContext context, IntT which, ITimerValTObj * value, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Which
+    {
+        if ( which == SUT_ITIMER_REAL )
+        {
+            return { WhichIsItimerReal, "which is ITIMER_REAL" };
+        }
+        else if ( which == SUT_ITIMER_VIRTUAL )
+        {
+            return { WhichIsItimerVirtual, "which is ITIMER_VIRTUAL" };
+        }
+        else if ( which == SUT_ITIMER_PROF )
+        {
+            return { WhichIsItimerProf, "which is ITIMER_PROF" };
+        }
+        else
+        {
+            return { WhichIsUnknown, "which is unknown" };
+        }
+    }
+    post
+    {
+        /*
+         * [Upon successful completion, getitimer() or setitimer() shall return 0;]
+         * otherwise, -1 shall be returned and errno set to indicate the error
+         */
+        ERROR_BEGIN( POSIX_GETITIMER, "getitimer.06.02", getitimer_spec == -1, * errno )
+            /*
+             * The getitimer() and setitimer() functions may fail if:
+             *
+             * [EINVAL]
+             * The which argument is not recognized.
+             */
+#ifdef NewCTesK
+            ERROR_MAY( POSIX_GETITIMER, EINVAL, "getitimer.08.01", C_Which == C_Which.WhichIsUnknown )
+#else
+            ERROR_MAY( POSIX_GETITIMER, EINVAL, "getitimer.08.01", coverage( C_Which ) == WhichIsUnknown )
+#endif // NewCTesK
+        ERROR_END()
+
+        /*
+         * The getitimer() function shall store the current value of the timer specified
+         * by which into the structure pointed to by value.
+         */
+        REQ( "getitimer.01",  "Shall store the current value of the timer", true );
+
+        /*
+         * Upon successful completion, getitimer() or setitimer() shall return 0;
+         */
+        REQ( "getitimer.06.01", "Upon successful completion, getitimer() shall return 0", getitimer_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    nanosleep - high resolution sleep (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int nanosleep(const struct timespec *rqtp, struct timespec *rmtp);
+
+DESCRIPTION
+
+    The nanosleep() function shall cause the current thread to be suspended from
+    execution until either the time interval specified by the rqtp argument has
+    elapsed or a signal is delivered to the calling thread, and its action is to
+    invoke a signal-catching function or to terminate the process. The
+    suspension time may be longer than requested because the argument value is
+    rounded up to an integer multiple of the sleep resolution or because of the
+    scheduling of other activity by the system. But, except for the case of
+    being interrupted by a signal, the suspension time shall not be less than
+    the time specified by rqtp, as measured by the system clock CLOCK_REALTIME.
+
+    The use of the nanosleep() function has no effect on the action or blockage
+    of any signal.
+
+RETURN VALUE
+
+    If the nanosleep() function returns because the requested time has elapsed,
+    its return value shall be zero.
+
+    If the nanosleep() function returns because it has been interrupted by a
+    signal, it shall return a value of -1 and set errno to indicate the
+    interruption. If the rmtp argument is non-NULL, the timespec structure
+    referenced by it is updated to contain the amount of time remaining in the
+    interval (the requested time minus the time actually slept). If the rmtp
+    argument is NULL, the remaining time is not returned.
+
+    If nanosleep() fails, it shall return a value of -1 and set errno to
+    indicate the error.
+
+ERRORS
+
+    The nanosleep() function shall fail if:
+
+    [EINTR]
+        The nanosleep() function was interrupted by a signal.
+
+    [EINVAL]
+        The rqtp argument specified a nanosecond value less than zero or greater
+        than or equal to 1000 million.
+*/
+specification
+void nanosleep_spec( CallContext context, TimeSpecTObj * rqtp, TimeSpecTObj * rmtp )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Rqtp
+    {
+        if ( 0 <= rqtp->nsec && rqtp->nsec < 1000000000 )
+        {
+            return { RqtpNsecIsCorrect, "rqtp->nsec is correct" };
+        }
+        else
+        {
+            return { RqtpNsecIsOutOfBounds, "rqtp->nsec is out of bounds" };
+        }
+    }
+    coverage C_Rmtp
+    {
+        if ( rmtp == NULL )
+        {
+            return { RmtpIsNull, "rmtp is null" };
+        }
+        else
+        {
+            return { RmtpIsNotNull, "rmtp is not null" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onNanosleep( CallContext context, TimeSpecTObj * rqtp, TimeSpecTObj * rmtp, TimeInterval stimulTime )
+{
+    startCommand( context, "sleep",
+                  create_SleepCall( create_String( "nanosleep" ), context, stimulTime, NULL, 0, rqtp, rmtp, 0 )
+                );
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getitimer, setitimer - get and set value of interval timer
+
+SYNOPSIS
+
+    #include <sys/time.h>
+    int getitimer(int which, struct itimerval *value);
+    int setitimer(int which, const struct itimerval *restrict value,
+           struct itimerval *restrict ovalue);
+
+DESCRIPTION
+
+    The getitimer() function shall store the current value of the timer
+    specified by which into the structure pointed to by value. The setitimer()
+    function shall set the timer specified by which to the value specified in
+    the structure pointed to by value, and if ovalue is not a null pointer,
+    store the previous value of the timer in the structure pointed to by ovalue.
+
+    A timer value is defined by the itimerval structure, specified in
+    <sys/time.h>. If it_value is non-zero, it shall indicate the time to the
+    next timer expiration. If it_interval is non-zero, it shall specify a value
+    to be used in reloading it_value when the timer expires. Setting it_value to
+    0 shall disable a timer, regardless of the value of it_interval. Setting
+    it_interval to 0 shall disable a timer after its next expiration (assuming
+    it_value is non-zero).
+
+    Implementations may place limitations on the granularity of timer values.
+    For each interval timer, if the requested timer value requires a finer
+    granularity than the implementation supports, the actual timer value shall
+    be rounded up to the next supported value.
+
+    An XSI-conforming implementation provides each process with at least three
+    interval timers, which are indicated by the which argument:
+
+    ITIMER_REAL
+        Decrements in real time. A SIGALRM signal is delivered when this timer
+        expires.
+
+    ITIMER_VIRTUAL
+        Decrements in process virtual time. It runs only when the process is
+        executing. A SIGVTALRM signal is delivered when it expires.
+
+    ITIMER_PROF
+        Decrements both in process virtual time and when the system is running
+        on behalf of the process. It is designed to be used by interpreters in
+        statistically profiling the execution of interpreted programs. Each time
+        the ITIMER_PROF timer expires, the SIGPROF signal is delivered.
+
+    The interaction between setitimer() and any of alarm(), sleep(), or usleep()
+    is unspecified.
+
+RETURN VALUE
+
+    Upon successful completion, getitimer() or setitimer() shall return 0;
+    otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    The setitimer() function shall fail if:
+
+    [EINVAL]
+        The value argument is not in canonical form. (In canonical form, the
+        number of microseconds is a non-negative integer less than 1000000 and
+        the number of seconds is a non-negative integer.)
+
+    The getitimer() and setitimer() functions may fail if:
+
+    [EINVAL]
+        The which argument is not recognized.
+*/
+specification
+void setitimer_spec( CallContext context, IntT which, ITimerValTObj * value, ITimerValTObj * ovalue )
+{
+    pre
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", processState != NULL );
+
+        /*
+         * The interaction between setitimer() and any of alarm(), sleep(), or usleep() is
+         * unspecified.
+         */
+        REQ( "app.setitimer.01", "Interactions between functions", isEmpty_List( processState->meta.waitedSignals ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Which
+    {
+        if ( which == SUT_ITIMER_REAL )
+        {
+            return { WhichIsItimerReal, "which is ITIMER_REAL" };
+        }
+        else if ( which == SUT_ITIMER_VIRTUAL )
+        {
+            return { WhichIsItimerVirtual, "which is ITIMER_VIRTUAL" };
+        }
+        else if ( which == SUT_ITIMER_PROF )
+        {
+            return { WhichIsItimerProf, "which is ITIMER_PROF" };
+        }
+        else
+        {
+            return { WhichIsUnknown, "which is unknown" };
+        }
+    }
+    coverage C_ValueValue
+    {
+        if ( value->value->sec == 0 && value->value->usec == 0 )
+        {
+            return { ValueValueIsZero, "value->value is zero" };
+        }
+        else
+        {
+            return { ValueValueIsNotZero, "value->value is not zero" };
+        }
+    }
+    coverage C_ValueInterval
+    {
+        if ( value->interval->sec == 0 && value->interval->usec == 0 )
+        {
+            return { ValueIntervalIsZero, "value->interval is zero" };
+        }
+        else
+        {
+            return { ValueIntervalIsNotZero, "value->interval is not zero" };
+        }
+    }
+    coverage C_OValue
+    {
+        if ( ovalue == NULL )
+        {
+            return { OValueIsNull, "ovalue is null" };
+        }
+        else
+        {
+            return { OValueIsNotNull, "ovalue is not null" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onSetitimer( CallContext context, IntT which, ITimerValTObj * value, TimeInterval stimulTime )
+{
+    UIntT nanovalue = 1000000000 * value->value->sec + 1000 * value->value->usec;
+
+    IntT signal;
+    Signal * sigObj;
+    switch ( which ) {
+        case SUT_ITIMER_REAL   : signal = SUT_SIGALRM            ; break;
+        case SUT_ITIMER_VIRTUAL: signal = SUT_SIGVTALRM          ; break;
+        case SUT_ITIMER_PROF   : signal = SUT_SIGPROF            ; break;
+        default                : signal = SUT_WRONG_SIGNAL_NUMBER; break;
+    }
+
+    sigObj = create_Signal(signal);
+    orderSignal( context, nanovalue, sigObj, NULL, "setitimer", stimulTime, value, NULL );
+    if ( ( which == SUT_ITIMER_REAL || which == SUT_ITIMER_VIRTUAL || which == SUT_ITIMER_PROF ) &&
+         ( value->value   ->sec != 0 || value->value   ->usec != 0                             ) &&
+         ( value->interval->sec != 0 || value->interval->usec != 0                             )
+       ) {
+        UIntT nanointerval = 1000000000 * value->interval->sec + 1000 * value->interval->usec;
+        orderSignal( context, nanovalue + nanointerval, sigObj, NULL, "setitimer", stimulTime, value, NULL );
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sleep - suspend execution for an interval of time
+
+SYNOPSIS
+
+    #include <unistd.h>
+    unsigned sleep(unsigned seconds);
+
+DESCRIPTION
+
+    The sleep() function shall cause the calling thread to be suspended from
+    execution until either the number of realtime seconds specified by the
+    argument seconds has elapsed or a signal is delivered to the calling thread
+    and its action is to invoke a signal-catching function or to terminate the
+    process. The suspension time may be longer than requested due to the
+    scheduling of other activity by the system.
+
+    If a SIGALRM signal is generated for the calling process during execution of
+    sleep() and if the SIGALRM signal is being ignored or blocked from delivery,
+    it is unspecified whether sleep() returns when the SIGALRM signal is
+    scheduled. If the signal is being blocked, it is also unspecified whether it
+    remains pending after sleep() returns or it is discarded.
+
+    If a SIGALRM signal is generated for the calling process during execution of
+    sleep(), except as a result of a prior call to alarm(), and if the SIGALRM
+    signal is not being ignored or blocked from delivery, it is unspecified
+    whether that signal has any effect other than causing sleep() to return.
+
+    If a signal-catching function interrupts sleep() and examines or changes
+    either the time a SIGALRM is scheduled to be generated, the action
+    associated with the SIGALRM signal, or whether the SIGALRM signal is blocked
+    from delivery, the results are unspecified.
+
+    If a signal-catching function interrupts sleep() and calls siglongjmp() or
+    longjmp() to restore an environment saved prior to the sleep() call, the
+    action associated with the SIGALRM signal and the time at which a SIGALRM
+    signal is scheduled to be generated are unspecified. It is also unspecified
+    whether the SIGALRM signal is blocked, unless the process' signal mask is
+    restored as part of the environment.
+
+    Interactions between sleep() and any of setitimer(), ualarm(), or usleep()
+    are unspecified.
+
+RETURN VALUE
+
+    If sleep() returns because the requested time has elapsed, the value
+    returned shall be 0. If sleep() returns due to delivery of a signal, the
+    return value shall be the "unslept" amount (the requested time minus the
+    time actually slept) in seconds.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+void sleep_spec( CallContext context, UIntT seconds )
+{
+    pre
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", processState != NULL );
+
+        /*
+         * Interactions between sleep() and any of setitimer(), ualarm(), or usleep() are
+         * unspecified.
+         */
+        REQ( "app.sleep.01", "Interactions between similar functions", isEmpty_List( processState->meta.waitedSignals ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Seconds
+    {
+        if ( seconds == 0 )
+        {
+            return { SecondsIsZero, "seconds is zero" };
+        }
+        else
+        {
+            return { SecondsIsNotZero, "seconds is not zero" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onSleep( CallContext context, UIntT seconds, TimeInterval stimulTime )
+{
+    startCommand( context, "sleep",
+                  create_SleepCall
+                      ( create_String( "sleep" ), context, stimulTime, NULL, 0, NULL, NULL, 1000000000 * seconds )
+                );
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    timer_create - create a per-process timer (REALTIME)
+
+SYNOPSIS
+
+    #include <signal.h>
+    #include <time.h>
+    int timer_create(clockid_t clockid, struct sigevent *restrict evp,
+           timer_t *restrict timerid);
+
+DESCRIPTION
+
+    The timer_create() function shall create a per-process timer using the
+    specified clock, clock_id, as the timing base. The timer_create() function
+    shall return, in the location referenced by timerid, a timer ID of type
+    timer_t used to identify the timer in timer requests. This timer ID shall be
+    unique within the calling process until the timer is deleted. The particular
+    clock, clock_id, is defined in <time.h>. The timer whose ID is returned
+    shall be in a disarmed state upon return from timer_create().
+
+    The evp argument, if non-NULL, points to a sigevent structure. This
+    structure, allocated by the application, defines the asynchronous
+    notification to occur as specified in Signal Generation and Delivery when
+    the timer expires. If the evp argument is NULL, the effect is as if the evp
+    argument pointed to a sigevent structure with the sigev_notify member having
+    the value SIGEV_SIGNAL, the sigev_signo having a default signal number, and
+    the sigev_value member having the value of the timer ID.
+
+    Each implementation shall define a set of clocks that can be used as timing
+    bases for per-process timers. All implementations shall support a clock_id
+    of CLOCK_REALTIME. If the Monotonic Clock option is supported,
+    implementations shall support a clock_id of CLOCK_MONOTONIC.
+
+    Per-process timers shall not be inherited by a child process across a fork()
+    and shall be disarmed and deleted by an exec.
+
+    If _POSIX_CPUTIME is defined, implementations shall support clock_id values
+    representing the CPU-time clock of the calling process.
+
+    If _POSIX_THREAD_CPUTIME is defined, implementations shall support clock_id
+    values representing the CPU-time clock of the calling thread.
+
+    It is implementation-defined whether a timer_create() function will succeed
+    if the value defined by clock_id corresponds to the CPU-time clock of a
+    process or thread different from the process or thread invoking the
+    function.
+
+    If evp->sigev_sigev_notify is SIGEV_THREAD and sev->sigev_notify_attributes
+    is not NULL, if the attribute pointed to by sev->sigev_notify_attributes has
+    a thread stack address specified by a call to pthread_attr_setstack() or
+    pthread_attr_setstackaddr(), the results are unspecified if the signal is
+    generated more than once.
+
+RETURN VALUE
+
+    If the call succeeds, timer_create() shall return zero and update the
+    location referenced by timerid to a timer_t, which can be passed to the
+    per-process timer calls. If an error occurs, the function shall return a
+    value of -1 and set errno to indicate the error. The value of timerid is
+    undefined if an error occurs.
+
+ERRORS
+
+    The timer_create() function shall fail if:
+
+    [EAGAIN]
+        The system lacks sufficient signal queuing resources to honor the
+        request.
+
+    [EAGAIN]
+        The calling process has already created all of the timers it is allowed
+        by this implementation.
+
+    [EINVAL]
+        The specified clock ID is not defined.
+
+    [ENOTSUP]
+        The implementation does not support the creation of a timer attached
+        to the CPU-time clock that is specified by clock_id and associated with
+        a process or thread different from the process or thread invoking
+        timer_create().
+*/
+specification
+IntT timer_create_spec
+         ( CallContext context, ClockidTObj * clock_id, Signal * evp, TimerTObj * timerid, ErrorCode * errno )
+{
+    int oldTimersToSignalsSize;
+
+    pre
+    {
+        SystemState  * systemState  = getSystemState_CallContext ( context );
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", processState != NULL );
+
+        oldTimersToSignalsSize = size_Map( processState->meta.timersToSignals );
+
+        /*
+         * Each implementation shall define a set of clocks that can be used as timing
+         * bases for per-process timers.
+         */
+        REQ("app.timer_create.01.01", "", TODO_REQ());
+
+        /*
+         * All implementations shall support a clock_id of CLOCK_REALTIME.
+         */
+        REQ( "app.timer_create.01.02", "All implementations shall support a clock_id of CLOCK_REALTIME",
+                                       containsKey_Map( systemState->clocks, create_ClockidTObj( SUT_CLOCK_REALTIME ) )
+           );
+
+        /*
+         * If the Monotonic Clock option is supported, implementations shall support a
+         * clock_id of CLOCK_MONOTONIC.
+         */
+        REQ("app.timer_create.01.03", "", TODO_REQ());
+
+        /*
+         * If _POSIX_CPUTIME is defined, implementations shall support clock_id values
+         * representing the CPU-time clock of the calling process.
+         */
+        REQ("app.timer_create.01.04", "", TODO_REQ());
+
+        /*
+         * If _POSIX_THREAD_CPUTIME is defined, implementations shall support clock_id
+         * values representing the CPU-time clock of the calling thread.
+         */
+        REQ("app.timer_create.01.05", "", TODO_REQ());
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_ClockId
+    {
+        SystemState * systemState = getSystemState_CallContext( context );
+
+        if ( * clock_id == SUT_CLOCK_REALTIME )
+        {
+            return { ClockIdIsClockRealtime, "clock_id is CLOCK_REALTIME" };
+        }
+        else if ( containsKey_Map( systemState->clocks, clock_id ) )
+        {
+            return { ClockIdIsForKnownClock, "clock_id is for known clock" };
+        }
+        else
+        {
+            return { ClockIdIsUnknown, "clock_id is unknown" };
+        }
+    }
+    coverage C_Evp
+    {
+        if ( evp == NULL )
+        {
+            return { EvpIsNull, "evp is null" };
+        }
+        else
+        {
+            return { EvpIsNotNull, "evp is not null" };
+        }
+    }
+    post
+    {
+        SystemState * systemState = getSystemState_CallContext( context );
+        ProcessState * processState = getProcessState_CallContext( context );
+        SignalObj * signal;
+
+        bool checkResult;
+        int i;
+
+        /*
+         * If an error occurs, the function shall return a value of -1 and set errno to
+         * indicate the error.
+         */
+        ERROR_BEGIN( POSIX_TIMER_CREATE, "timer_create.08.02", timer_create_spec == -1, * errno )
+            /*
+             * The timer_create() function shall fail if:
+             *
+             * [EAGAIN]
+             * The system lacks sufficient signal queuing resources to honor the request.
+             */
+            /*
+             * The timer_create() function shall fail if:
+             *
+             * [EAGAIN]
+             * The calling process has already created all of the timers it is allowed by this
+             * implementation.
+             */
+            ERROR_SHALL( POSIX_TIMER_CREATE, EAGAIN, "timer_create.09.01;timer_create.09.02",
+                           TODO_ERR(EAGAIN)
+                        )
+
+            /*
+             * The timer_create() function shall fail if:
+             *
+             * [EINVAL]
+             * The specified clock ID is not defined.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( POSIX_TIMER_CREATE, EINVAL, "timer_create.09.03", C_ClockId == C_ClockId.ClockIdIsUnknown )
+#else
+            ERROR_SHALL( POSIX_TIMER_CREATE, EINVAL, "timer_create.09.03", coverage( C_ClockId ) == ClockIdIsUnknown )
+#endif // NewCTesK
+
+            /*
+             * The timer_create() function shall fail if:
+             *
+             * [ENOTSUP]
+             * [CPT|TCT] The implementation does not support the creation of a timer attached
+             * to the CPU-time clock that is specified by clock_id and associated with a
+             * process or thread different from the process or thread invoking timer_create().
+             */
+            ERROR_SHALL( POSIX_TIMER_CREATE, ENOTSUP, "timer_create.09.04", TODO_ERR(ENOTSUP) )
+
+            if ( timer_create_spec == -1 )
+            {
+                /*
+                 * The value of timerid is undefined if an error occurs.
+                 */
+                REQ( "timer_create.08.03", "The value of timerid is undefined if an error occurs", true );
+            }
+        ERROR_END()
+
+        checkResult = size_Map( processState->meta.timersToSignals ) == oldTimersToSignalsSize + 1;
+        /*
+         * The timer_create() function shall create a per-process timer using the
+         * specified clock, clock_id, as the timing base.
+         *
+         * The particular clock, clock_id, is defined in <time.h>.
+         */
+        REQ( "timer_create.01", "The timer_create() function shall create a per-process timer", checkResult );
+
+        /*
+         * The timer_create() function shall return, in the location referenced by
+         * timerid, a timer ID of type timer_t used to identify the timer in timer
+         * requests.
+         */
+        REQ( "timer_create.02", "The timer_create() function shall return, in the timerid, a timer ID",
+                                containsKey_Map( processState->meta.timersToSignals, timerid )
+           );
+
+        /*
+         * This timer ID shall be unique within the calling process until the timer is
+         * deleted.
+         */
+        REQ( "timer_create.03", "This timer ID shall be unique within the calling process", checkResult );
+
+        /*
+         * The timer whose ID is returned shall be in a disarmed state upon return from
+         * timer_create().
+         */
+        checkResult = true;
+        for ( i = 0; i < size_List( processState->meta.waitedSignals ); i++ ) {
+            WaitedSignal * waitedSignal = get_List( processState->meta.waitedSignals, i );
+            if ( equals( waitedSignal->timer, timerid ) ) { checkResult = false; break; }
+        }
+        REQ( "timer_create.04", "The timer whose ID is returned shall be in a disarmed state", checkResult );
+
+        signal = get_Map( processState->meta.timersToSignals, timerid );
+        if ( evp != NULL )
+        {
+            /*
+             * The evp argument, if non-NULL, points to a sigevent structure. This structure,
+             * allocated by the application, defines the asynchronous notification to occur
+             * as specified in Signal Generation and Delivery when the timer expires.
+             */
+            REQ( "timer_create.05.01", "The evp argument is non-NULL", * signal == *evp );
+        }
+        else
+        {
+            /*
+             * If the evp argument is NULL, the effect is as if the evp argument pointed to a
+             * sigevent structure with the sigev_notify member having the value SIGEV_SIGNAL,
+             * the sigev_signo having a default signal number, and the sigev_value member
+             * having the value of the timer ID.
+             */
+            REQ( "timer_create.05.02", "the evp argument is NULL", * signal == SUT_SIGALRM );
+        }
+
+        /*
+         * It is implementation-defined whether a timer_create() function will succeed if
+         * the value defined by clock_id corresponds to the CPU-time clock of a process
+         * or thread different from the process or thread invoking the function.
+         */
+        REQ( "timer_create.06", "", TODO_REQ() );
+
+        /*
+         * If evp->sigev_sigev_notify is SIGEV_THREAD and sev->
+         * sigev_notify_attributes is not NULL, if the attribute pointed to by sev->
+         * sigev_notify_attributes has a thread stack address specified by a call to
+         * pthread_attr_setstack() or pthread_attr_setstackaddr(), the results are
+         * unspecified if the signal is generated more than once.
+         */
+        REQ( "timer_create.07", "", TODO_REQ() );
+
+        /*
+         * If the call succeeds, timer_create() shall return zero and update the location
+         * referenced by timerid to a timer_t, which can be passed to the per-process
+         * timer calls.
+         */
+        REQ( "timer_create.08.01", "If the call succeeds, timer_create() shall return zero", timer_create_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    timer_delete - delete a per-process timer (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int timer_delete(timer_t timerid);
+
+DESCRIPTION
+
+    The timer_delete() function deletes the specified timer, timerid, previously
+    created by the timer_create() function. If the timer is armed when
+    timer_delete() is called, the behavior shall be as if the timer is
+    automatically disarmed before removal. The disposition of pending signals
+    for the deleted timer is unspecified.
+
+RETURN VALUE
+
+    If successful, the timer_delete() function shall return a value of zero.
+    Otherwise, the function shall return a value of -1 and set errno to indicate
+    the error.
+
+ERRORS
+
+    The timer_delete() function may fail if:
+
+    [EINVAL]
+        The timer ID specified by timerid is not a valid timer ID.
+*/
+specification
+IntT timer_delete_spec( CallContext context, TimerTObj * timerid, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_TimerId
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        if ( containsKey_Map( processState->meta.timersToSignals, timerid ) )
+        {
+            return { TimerIdIsForKnownTimer, "timerid is for known timer" };
+        }
+        else
+        {
+            return { TimerIdIsUnknown, "timerid is unknown" };
+        }
+    }
+    post
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /*
+         * [If successful, the timer_delete() function shall return a value of zero.]
+         * Otherwise, the function shall return a value of -1 and set errno to indicate
+         * the error.
+         */
+        ERROR_BEGIN( POSIX_TIMER_DELETE, "timer_delete.04.02", timer_delete_spec == -1, * errno )
+            /*
+             * The timer_delete() function may fail if:
+             *
+             * [EINVAL]
+             * The timer ID specified by timerid is not a valid timer ID.
+             */
+#ifdef NewCTesK
+            ERROR_MAY( POSIX_TIMER_DELETE, EINVAL, "timer_delete.05.01", C_TimerId == C_TimerId.TimerIdIsUnknown )
+#else
+            ERROR_MAY( POSIX_TIMER_DELETE, EINVAL, "timer_delete.05.01", coverage( C_TimerId ) == TimerIdIsUnknown )
+#endif // NewCTesK
+        ERROR_END()
+
+        /*
+         * The timer_delete() function deletes the specified timer, timerid, previously
+         * created by the timer_create() function.
+         */
+        REQ( "timer_delete.01", "The timer_delete() function deletes the specified timer",
+                                ! containsKey_Map( processState->meta.timersToSignals, timerid )
+           );
+
+        /*
+         * If the timer is armed when timer_delete() is called, the behavior shall be as
+         * if the timer is automatically disarmed before removal.
+         */
+        REQ( "timer_delete.02", "", TODO_REQ() );
+
+        /*
+         * The disposition of pending signals for the deleted timer is unspecified.
+         */
+        REQ( "timer_delete.03", "", TODO_REQ() );
+
+        /*
+         * If successful, the timer_delete() function shall return a value of zero.
+         */
+        REQ( "timer_delete.04.01", "the timer_delete() function shall return a value of zero", timer_delete_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    timer_getoverrun, timer_gettime, timer_settime - per-process timers
+    (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int timer_getoverrun(timer_t timerid);
+    int timer_gettime(timer_t timerid, struct itimerspec *value);
+    int timer_settime(timer_t timerid, int flags,
+           const struct itimerspec *restrict value,
+           struct itimerspec *restrict ovalue);
+
+DESCRIPTION
+
+    The timer_gettime() function shall store the amount of time until the
+    specified timer, timerid, expires and the reload value of the timer into the
+    space pointed to by the value argument. The it_value member of this
+    structure shall contain the amount of time before the timer expires, or zero
+    if the timer is disarmed. This value is returned as the interval until timer
+    expiration, even if the timer was armed with absolute time. The it_interval
+    member of value shall contain the reload value last set by timer_settime().
+
+    The timer_settime() function shall set the time until the next expiration of
+    the timer specified by timerid from the it_value member of the value
+    argument and arm the timer if the it_value member of value is non-zero. If
+    the specified timer was already armed when timer_settime() is called, this
+    call shall reset the time until next expiration to the value specified. If
+    the it_value member of value is zero, the timer shall be disarmed. The
+    effect of disarming or resetting a timer with pending expiration
+    notifications is unspecified.
+
+    If the flag TIMER_ABSTIME is not set in the argument flags, timer_settime()
+    shall behave as if the time until next expiration is set to be equal to the
+    interval specified by the it_value member of value. That is, the timer shall
+    expire in it_value nanoseconds from when the call is made. If the flag
+    TIMER_ABSTIME is set in the argument flags, timer_settime() shall behave as
+    if the time until next expiration is set to be equal to the difference
+    between the absolute time specified by the it_value member of value and the
+    current value of the clock associated with timerid. That is, the timer shall
+    expire when the clock reaches the value specified by the it_value member of
+    value. If the specified time has already passed, the function shall succeed
+    and the expiration notification shall be made.
+
+    The reload value of the timer shall be set to the value specified by the
+    it_interval member of value. When a timer is armed with a non-zero
+    it_interval, a periodic (or repetitive) timer is specified.
+
+    Time values that are between two consecutive non-negative integer multiples
+    of the resolution of the specified timer shall be rounded up to the larger
+    multiple of the resolution. Quantization error shall not cause the timer to
+    expire earlier than the rounded time value.
+
+    If the argument ovalue is not NULL, the timer_settime() function shall
+    store, in the location referenced by ovalue, a value representing the
+    previous amount of time before the timer would have expired, or zero if the
+    timer was disarmed, together with the previous timer reload value. Timers
+    shall not expire before their scheduled time.
+
+    Only a single signal shall be queued to the process for a given timer at any
+    point in time. When a timer for which a signal is still pending expires, no
+    signal shall be queued, and a timer overrun shall occur. [RTS]   When a
+    timer expiration signal is delivered to or accepted by a process, if the
+    implementation supports the Realtime Signals Extension, the
+    timer_getoverrun() function shall return the timer expiration overrun count
+    for the specified timer. The overrun count returned contains the number of
+    extra timer expirations that occurred between the time the signal was
+    generated (queued) and when it was delivered or accepted, up to but not
+    including an implementation-defined maximum of {DELAYTIMER_MAX}. If the
+    number of such extra expirations is greater than or equal to
+    {DELAYTIMER_MAX}, then the overrun count shall be set to {DELAYTIMER_MAX}.
+    The value returned by timer_getoverrun() shall apply to the most recent
+    expiration signal delivery or acceptance for the timer. If no expiration
+    signal has been delivered for the timer, or if the Realtime Signals
+    Extension is not supported, the return value of timer_getoverrun() is
+    unspecified.
+
+RETURN VALUE
+
+    If the timer_getoverrun() function succeeds, it shall return the timer
+    expiration overrun count as explained above.
+
+    If the timer_gettime() or timer_settime() functions succeed, a value of 0
+    shall be returned.
+
+    If an error occurs for any of these functions, the value -1 shall be
+    returned, and errno set to indicate the error.
+
+ERRORS
+
+    The timer_settime() function shall fail if:
+
+    [EINVAL]
+        A value structure specified a nanosecond value less than zero or greater
+        than or equal to 1000 million, and the it_value member of that structure
+        did not specify zero seconds and nanoseconds.
+
+    These functions may fail if:
+
+    [EINVAL]
+        The timerid argument does not correspond to an ID returned by
+        timer_create() but not yet deleted by timer_delete().
+
+    The timer_settime() function may fail if:
+
+    [EINVAL]
+        The it_interval member of value is not zero and the timer was created
+        with notification by creation of a new thread ( sigev_sigev_notify was
+        SIGEV_THREAD) and a fixed stack address has been set in the thread
+        attribute pointed to by sigev_notify_attributes.
+*/
+specification
+IntT timer_getoverrun_spec( CallContext context, TimerTObj * timerid, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_TimerId
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        if ( containsKey_Map( processState->meta.timersToSignals, timerid ) )
+        {
+            return { TimerIdIsForKnownTimer, "timerid is for known timer" };
+        }
+        else
+        {
+            return { TimerIdIsUnknown, "timerid is unknown" };
+        }
+    }
+    post
+    {
+        /*
+         * If an error occurs for any of these functions, the value -1 shall be returned,
+         * and errno set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_TIMER_GETOVERRUN, "timer_getoverrun.06.02", timer_getoverrun_spec == -1, * errno )
+            /*
+             * These functions may fail if:
+             *
+             * [EINVAL]
+             * The timerid argument does not correspond to an ID returned by timer_create()
+             * but not yet deleted by timer_delete().
+             */
+#ifdef NewCTesK
+            ERROR_MAY( POSIX_TIMER_GETOVERRUN, EINVAL, "timer_getoverrun.08.01", C_TimerId == C_TimerId.TimerIdIsUnknown )
+#else
+            ERROR_MAY( POSIX_TIMER_GETOVERRUN, EINVAL, "timer_getoverrun.08.01",
+                                                       coverage( C_TimerId ) == TimerIdIsUnknown
+                     )
+#endif // NewCTesK
+        ERROR_END()
+
+        /*
+         * When a timer expiration signal is delivered to or accepted by a process, if
+         * the implementation supports the Realtime Signals Extension, the
+         * timer_getoverrun() function shall return the timer expiration overrun count for
+         * the specified timer.
+         */
+        REQ( "timer_getoverrun.01", "", TODO_REQ() );
+
+        /*
+         * The overrun count returned contains the number of extra timer expirations that
+         * occurred between the time the signal was generated (queued) and when it was
+         * delivered or accepted, up to but not including an implementation-defined
+         * maximum of {DELAYTIMER_MAX}.
+         */
+        REQ( "timer_getoverrun.02", "", TODO_REQ() );
+
+        /*
+         * If the number of such extra expirations is greater than or equal to {
+         * DELAYTIMER_MAX}, then the overrun count shall be set to {DELAYTIMER_MAX}.
+         */
+        REQ( "timer_getoverrun.03", "", TODO_REQ() );
+
+        /*
+         * The value returned by timer_getoverrun() shall apply to the most recent
+         * expiration signal delivery or acceptance for the timer.
+         */
+        REQ( "timer_getoverrun.04", "", TODO_REQ() );
+
+        /*
+         * If no expiration signal has been delivered for the timer, or if the Realtime
+         * Signals Extension is not supported, the return value of timer_getoverrun() is
+         * unspecified.
+         */
+        REQ( "timer_getoverrun.05", "", TODO_REQ() );
+
+        /*
+         * If the timer_getoverrun() function succeeds, it shall return the timer
+         * expiration overrun count as explained above.
+         */
+        REQ( "timer_getoverrun.06.01", "", TODO_REQ() );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    timer_getoverrun, timer_gettime, timer_settime - per-process timers
+    (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int timer_getoverrun(timer_t timerid);
+    int timer_gettime(timer_t timerid, struct itimerspec *value);
+    int timer_settime(timer_t timerid, int flags,
+           const struct itimerspec *restrict value,
+           struct itimerspec *restrict ovalue);
+
+DESCRIPTION
+
+    The timer_gettime() function shall store the amount of time until the
+    specified timer, timerid, expires and the reload value of the timer into the
+    space pointed to by the value argument. The it_value member of this
+    structure shall contain the amount of time before the timer expires, or zero
+    if the timer is disarmed. This value is returned as the interval until timer
+    expiration, even if the timer was armed with absolute time. The it_interval
+    member of value shall contain the reload value last set by timer_settime().
+
+    The timer_settime() function shall set the time until the next expiration of
+    the timer specified by timerid from the it_value member of the value
+    argument and arm the timer if the it_value member of value is non-zero. If
+    the specified timer was already armed when timer_settime() is called, this
+    call shall reset the time until next expiration to the value specified. If
+    the it_value member of value is zero, the timer shall be disarmed. The
+    effect of disarming or resetting a timer with pending expiration
+    notifications is unspecified.
+
+    If the flag TIMER_ABSTIME is not set in the argument flags, timer_settime()
+    shall behave as if the time until next expiration is set to be equal to the
+    interval specified by the it_value member of value. That is, the timer shall
+    expire in it_value nanoseconds from when the call is made. If the flag
+    TIMER_ABSTIME is set in the argument flags, timer_settime() shall behave as
+    if the time until next expiration is set to be equal to the difference
+    between the absolute time specified by the it_value member of value and the
+    current value of the clock associated with timerid. That is, the timer shall
+    expire when the clock reaches the value specified by the it_value member of
+    value. If the specified time has already passed, the function shall succeed
+    and the expiration notification shall be made.
+
+    The reload value of the timer shall be set to the value specified by the
+    it_interval member of value. When a timer is armed with a non-zero
+    it_interval, a periodic (or repetitive) timer is specified.
+
+    Time values that are between two consecutive non-negative integer multiples
+    of the resolution of the specified timer shall be rounded up to the larger
+    multiple of the resolution. Quantization error shall not cause the timer to
+    expire earlier than the rounded time value.
+
+    If the argument ovalue is not NULL, the timer_settime() function shall
+    store, in the location referenced by ovalue, a value representing the
+    previous amount of time before the timer would have expired, or zero if the
+    timer was disarmed, together with the previous timer reload value. Timers
+    shall not expire before their scheduled time.
+
+    Only a single signal shall be queued to the process for a given timer at any
+    point in time. When a timer for which a signal is still pending expires, no
+    signal shall be queued, and a timer overrun shall occur. [RTS]   When a
+    timer expiration signal is delivered to or accepted by a process, if the
+    implementation supports the Realtime Signals Extension, the
+    timer_getoverrun() function shall return the timer expiration overrun count
+    for the specified timer. The overrun count returned contains the number of
+    extra timer expirations that occurred between the time the signal was
+    generated (queued) and when it was delivered or accepted, up to but not
+    including an implementation-defined maximum of {DELAYTIMER_MAX}. If the
+    number of such extra expirations is greater than or equal to
+    {DELAYTIMER_MAX}, then the overrun count shall be set to {DELAYTIMER_MAX}.
+    The value returned by timer_getoverrun() shall apply to the most recent
+    expiration signal delivery or acceptance for the timer. If no expiration
+    signal has been delivered for the timer, or if the Realtime Signals
+    Extension is not supported, the return value of timer_getoverrun() is
+    unspecified.
+
+RETURN VALUE
+
+    If the timer_getoverrun() function succeeds, it shall return the timer
+    expiration overrun count as explained above.
+
+    If the timer_gettime() or timer_settime() functions succeed, a value of 0
+    shall be returned.
+
+    If an error occurs for any of these functions, the value -1 shall be
+    returned, and errno set to indicate the error.
+
+ERRORS
+
+    The timer_settime() function shall fail if:
+
+    [EINVAL]
+        A value structure specified a nanosecond value less than zero or greater
+        than or equal to 1000 million, and the it_value member of that structure
+        did not specify zero seconds and nanoseconds.
+
+    These functions may fail if:
+
+    [EINVAL]
+        The timerid argument does not correspond to an ID returned by
+        timer_create() but not yet deleted by timer_delete().
+
+    The timer_settime() function may fail if:
+
+    [EINVAL]
+        The it_interval member of value is not zero and the timer was created
+        with notification by creation of a new thread ( sigev_sigev_notify was
+        SIGEV_THREAD) and a fixed stack address has been set in the thread
+        attribute pointed to by sigev_notify_attributes.
+*/
+specification
+IntT timer_gettime_spec( CallContext context, TimerTObj * timerid, ITimerSpecTObj * value, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_TimerId
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        if ( containsKey_Map( processState->meta.timersToSignals, timerid ) )
+        {
+            return { TimerIdIsForKnownTimer, "timerid is for known timer" };
+        }
+        else
+        {
+            return { TimerIdIsUnknown, "timerid is unknown" };
+        }
+    }
+    post
+    {
+        /*
+         * If an error occurs for any of these functions, the value -1 shall be returned,
+         * and errno set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_TIMER_GETTIME, "timer_gettime.06.02", timer_gettime_spec == -1, * errno )
+            /*
+             * These functions may fail if:
+             *
+             * [EINVAL]
+             * The timerid argument does not correspond to an ID returned by timer_create()
+             * but not yet deleted by timer_delete().
+             */
+#ifdef NewCTesK
+            ERROR_MAY( POSIX_TIMER_GETTIME, EINVAL, "timer_gettime.08.01", C_TimerId == C_TimerId.TimerIdIsUnknown )
+#else
+            ERROR_MAY( POSIX_TIMER_GETTIME, EINVAL, "timer_gettime.08.01", coverage( C_TimerId ) == TimerIdIsUnknown )
+#endif // NewCTesK
+        ERROR_END()
+
+        /*
+         * The timer_gettime() function shall store the amount of time until the specified
+         * timer, timerid, expires and the reload value of the timer into the space
+         * pointed to by the value argument.
+         *
+         * This value is returned as the interval until timer expiration, even if the
+         * timer was armed with absolute time.
+         *
+         * The it_value member of this structure shall contain the amount of time before
+         * the timer expires, or zero if the timer is disarmed.
+         */
+        REQ( "timer_gettime.01.01", "", TODO_REQ() );
+
+        /*
+         * The timer_gettime() function shall store the amount of time until the specified
+         * timer, timerid, expires and the reload value of the timer into the space
+         * pointed to by the value argument.
+         *
+         * This value is returned as the interval until timer expiration, even if the
+         * timer was armed with absolute time.
+         *
+         * The it_interval member of value shall contain the reload value last set by
+         * timer_settime().
+         */
+        REQ( "timer_gettime.01.02", "", TODO_REQ() );
+
+        /*
+         * If the timer_gettime() or timer_settime() functions succeed, a value of 0 shall
+         * be returned.
+         */
+        REQ( "timer_gettime.06.01", "a value of 0 shall be returned", timer_gettime_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    timer_getoverrun, timer_gettime, timer_settime - per-process timers
+    (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int timer_getoverrun(timer_t timerid);
+    int timer_gettime(timer_t timerid, struct itimerspec *value);
+    int timer_settime(timer_t timerid, int flags,
+           const struct itimerspec *restrict value,
+           struct itimerspec *restrict ovalue);
+
+DESCRIPTION
+
+    The timer_gettime() function shall store the amount of time until the
+    specified timer, timerid, expires and the reload value of the timer into the
+    space pointed to by the value argument. The it_value member of this
+    structure shall contain the amount of time before the timer expires, or zero
+    if the timer is disarmed. This value is returned as the interval until timer
+    expiration, even if the timer was armed with absolute time. The it_interval
+    member of value shall contain the reload value last set by timer_settime().
+
+    The timer_settime() function shall set the time until the next expiration of
+    the timer specified by timerid from the it_value member of the value
+    argument and arm the timer if the it_value member of value is non-zero. If
+    the specified timer was already armed when timer_settime() is called, this
+    call shall reset the time until next expiration to the value specified. If
+    the it_value member of value is zero, the timer shall be disarmed. The
+    effect of disarming or resetting a timer with pending expiration
+    notifications is unspecified.
+
+    If the flag TIMER_ABSTIME is not set in the argument flags, timer_settime()
+    shall behave as if the time until next expiration is set to be equal to the
+    interval specified by the it_value member of value. That is, the timer shall
+    expire in it_value nanoseconds from when the call is made. If the flag
+    TIMER_ABSTIME is set in the argument flags, timer_settime() shall behave as
+    if the time until next expiration is set to be equal to the difference
+    between the absolute time specified by the it_value member of value and the
+    current value of the clock associated with timerid. That is, the timer shall
+    expire when the clock reaches the value specified by the it_value member of
+    value. If the specified time has already passed, the function shall succeed
+    and the expiration notification shall be made.
+
+    The reload value of the timer shall be set to the value specified by the
+    it_interval member of value. When a timer is armed with a non-zero
+    it_interval, a periodic (or repetitive) timer is specified.
+
+    Time values that are between two consecutive non-negative integer multiples
+    of the resolution of the specified timer shall be rounded up to the larger
+    multiple of the resolution. Quantization error shall not cause the timer to
+    expire earlier than the rounded time value.
+
+    If the argument ovalue is not NULL, the timer_settime() function shall
+    store, in the location referenced by ovalue, a value representing the
+    previous amount of time before the timer would have expired, or zero if the
+    timer was disarmed, together with the previous timer reload value. Timers
+    shall not expire before their scheduled time.
+
+    Only a single signal shall be queued to the process for a given timer at any
+    point in time. When a timer for which a signal is still pending expires, no
+    signal shall be queued, and a timer overrun shall occur. [RTS]   When a
+    timer expiration signal is delivered to or accepted by a process, if the
+    implementation supports the Realtime Signals Extension, the
+    timer_getoverrun() function shall return the timer expiration overrun count
+    for the specified timer. The overrun count returned contains the number of
+    extra timer expirations that occurred between the time the signal was
+    generated (queued) and when it was delivered or accepted, up to but not
+    including an implementation-defined maximum of {DELAYTIMER_MAX}. If the
+    number of such extra expirations is greater than or equal to
+    {DELAYTIMER_MAX}, then the overrun count shall be set to {DELAYTIMER_MAX}.
+    The value returned by timer_getoverrun() shall apply to the most recent
+    expiration signal delivery or acceptance for the timer. If no expiration
+    signal has been delivered for the timer, or if the Realtime Signals
+    Extension is not supported, the return value of timer_getoverrun() is
+    unspecified.
+
+RETURN VALUE
+
+    If the timer_getoverrun() function succeeds, it shall return the timer
+    expiration overrun count as explained above.
+
+    If the timer_gettime() or timer_settime() functions succeed, a value of 0
+    shall be returned.
+
+    If an error occurs for any of these functions, the value -1 shall be
+    returned, and errno set to indicate the error.
+
+ERRORS
+
+    The timer_settime() function shall fail if:
+
+    [EINVAL]
+        A value structure specified a nanosecond value less than zero or greater
+        than or equal to 1000 million, and the it_value member of that structure
+        did not specify zero seconds and nanoseconds.
+
+    These functions may fail if:
+
+    [EINVAL]
+        The timerid argument does not correspond to an ID returned by
+        timer_create() but not yet deleted by timer_delete().
+
+    The timer_settime() function may fail if:
+
+    [EINVAL]
+        The it_interval member of value is not zero and the timer was created
+        with notification by creation of a new thread ( sigev_sigev_notify was
+        SIGEV_THREAD) and a fixed stack address has been set in the thread
+        attribute pointed to by sigev_notify_attributes.
+*/
+specification
+void timer_settime_spec
+         ( CallContext context, TimerTObj * timerid, IntT flags, ITimerSpecTObj * value, ITimerSpecTObj * ovalue )
+{
+    pre
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", processState != NULL );
+
+        /* [Consistency of test suite] */
+        REQ( "", "timerid is for known timer", get_Map( processState->meta.timersToSignals, timerid ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Flags
+    {
+        if ( ( flags & SUT_TIMER_ABSTIME ) == 0 )
+        {
+            return { TimerAbstimeIsNotSetInFlags, "TIMER_ABSTIME is not set in the flags" };
+        }
+        else
+        {
+            return { TimerAbstimeIsSetInFlags, "TIMER_ABSTIME is set in the flags" };
+        }
+    }
+    coverage C_ValueValue
+    {
+        if ( value->value->sec == 0 && value->value->nsec == 0 )
+        {
+            return { ValueValueIsZero, "value->value is zero" };
+        }
+        else
+        {
+            return { ValueValueIsNotZero, "value->value is not zero" };
+        }
+    }
+    coverage C_ValueInterval
+    {
+        if ( value->interval->sec == 0 && value->interval->nsec == 0 )
+        {
+            return { ValueIntervalIsZero, "value->interval is zero" };
+        }
+        else
+        {
+            return { ValueIntervalIsNotZero, "value->interval is not zero" };
+        }
+    }
+    coverage C_OValue
+    {
+        if ( ovalue == NULL )
+        {
+            return { OValueIsNull, "ovalue is null" };
+        }
+        else
+        {
+            return { OValueIsNotNull, "ovalue is not null" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onTimerSettime
+         ( CallContext context, TimerTObj * timerid, IntT flags, ITimerSpecTObj * value, TimeInterval stimulTime )
+{
+    ProcessState * processState = getProcessState_CallContext( context );
+    SignalObj * signal = get_Map( processState->meta.timersToSignals, timerid );
+
+    UIntT nanovalue = 0; // 0 - low bound for TIMER_ABSTIME
+    if ( ( flags & SUT_TIMER_ABSTIME ) == 0 ) { nanovalue = 1000000000 * value->value->sec + value->value->nsec; }
+
+    orderSignal( context, nanovalue, signal, timerid, "timer_settime", stimulTime, NULL, value );
+    if ( ( value->value   ->sec != 0 || value->value   ->nsec != 0 ) &&
+         ( value->interval->sec != 0 || value->interval->nsec != 0 )
+       ) {
+        UIntT nanointerval = 1000000000 * value->interval->sec + value->interval->nsec;
+        orderSignal( context, nanovalue + nanointerval, signal, timerid, "timer_settime", stimulTime, NULL, value );
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    ualarm - set the interval timer
+
+SYNOPSIS
+
+    #include <unistd.h>
+    useconds_t ualarm(useconds_t useconds, useconds_t interval);
+
+DESCRIPTION
+
+    The ualarm() function shall cause the SIGALRM signal to be generated for the
+    calling process after the number of realtime microseconds specified by the
+    useconds argument has elapsed. When the interval argument is non-zero,
+    repeated timeout notification occurs with a period in microseconds specified
+    by the interval argument. If the notification signal, SIGALRM, is not caught
+    or ignored, the calling process is terminated.
+
+    Implementations may place limitations on the granularity of timer values.
+    For each interval timer, if the requested timer value requires a finer
+    granularity than the implementation supports, the actual timer value shall
+    be rounded up to the next supported value.
+
+    Interactions between ualarm() and any of the following are unspecified:
+
+        alarm()
+        nanosleep()
+        setitimer()
+        timer_create()
+        timer_delete()
+        timer_getoverrun()
+        timer_gettime()
+        timer_settime()
+        sleep()
+
+RETURN VALUE
+
+    The ualarm() function shall return the number of microseconds remaining from
+    the previous ualarm() call. If no timeouts are pending or if ualarm() has
+    not previously been called, ualarm() shall return 0.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+void ualarm_spec( CallContext context, USecondsT useconds, USecondsT interval )
+{
+    pre
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", processState != NULL );
+
+        /*
+         * Interactions between ualarm() and any of the following are unspecified:
+         * alarm() nanosleep() setitimer() timer_create() timer_delete()
+         * timer_getoverrun() timer_gettime() timer_settime() sleep()
+         */
+        REQ( "app.ualarm.01", "Interactions between similar functions", isEmpty_List( processState->meta.waitedSignals ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Useconds
+    {
+        if ( useconds == 0 )
+        {
+            return { UsecondsIsZero, "useconds is zero" };
+        }
+        else
+        {
+            return { UsecondsIsNotZero, "useconds is not zero" };
+        }
+    }
+    coverage C_Interval
+    {
+        if ( interval == 0 )
+        {
+            return { IntervalIsZero, "interval is zero" };
+        }
+        else
+        {
+            return { IntervalIsNotZero, "interval is not zero" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onUalarm( CallContext context, USecondsT useconds, USecondsT interval, TimeInterval stimulTime )
+{
+    orderSignal( context, 1000 * useconds, create_Signal(SUT_SIGALRM), NULL, "ualarm", stimulTime, NULL, NULL );
+    if ( useconds != 0 && interval != 0 ) {
+        orderSignal( context, 1000 * ( useconds + interval ), create_Signal(SUT_SIGALRM), NULL, "ualarm", stimulTime, NULL, NULL );
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    usleep - suspend execution for an interval
+
+SYNOPSIS
+
+    #include <unistd.h>
+    int usleep(useconds_t useconds);
+
+DESCRIPTION
+
+    The usleep() function shall cause the calling thread to be suspended from
+    execution until either the number of realtime microseconds specified by the
+    argument useconds has elapsed or a signal is delivered to the calling thread
+    and its action is to invoke a signal-catching function or to terminate the
+    process. The suspension time may be longer than requested due to the
+    scheduling of other activity by the system.
+
+    The useconds argument shall be less than one million. If the value of
+    useconds is 0, then the call has no effect.
+
+    If a SIGALRM signal is generated for the calling process during execution of
+    usleep() and if the SIGALRM signal is being ignored or blocked from
+    delivery, it is unspecified whether usleep() returns when the SIGALRM signal
+    is scheduled. If the signal is being blocked, it is also unspecified whether
+    it remains pending after usleep() returns or it is discarded.
+
+    If a SIGALRM signal is generated for the calling process during execution of
+    usleep(), except as a result of a prior call to alarm(), and if the SIGALRM
+    signal is not being ignored or blocked from delivery, it is unspecified
+    whether that signal has any effect other than causing usleep() to return.
+
+    If a signal-catching function interrupts usleep() and examines or changes
+    either the time a SIGALRM is scheduled to be generated, the action
+    associated with the SIGALRM signal, or whether the SIGALRM signal is blocked
+    from delivery, the results are unspecified.
+
+    If a signal-catching function interrupts usleep() and calls siglongjmp() or
+    longjmp() to restore an environment saved prior to the usleep() call, the
+    action associated with the SIGALRM signal and the time at which a SIGALRM
+    signal is scheduled to be generated are unspecified. It is also unspecified
+    whether the SIGALRM signal is blocked, unless the thread's signal mask is
+    restored as part of the environment.
+
+    Implementations may place limitations on the granularity of timer values.
+    For each interval timer, if the requested timer value requires a finer
+    granularity than the implementation supports, the actual timer value shall
+    be rounded up to the next supported value.
+
+    Interactions between usleep() and any of the following are unspecified:
+
+        nanosleep()
+        setitimer()
+        timer_create()
+        timer_delete()
+        timer_getoverrun()
+        timer_gettime()
+        timer_settime()
+        ualarm()
+        sleep()
+
+    The usleep() function need not be reentrant. A function that is not required
+    to be reentrant is not required to be thread-safe.
+
+RETURN VALUE
+
+    Upon successful completion, usleep() shall return 0; otherwise, it shall
+    return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The usleep() function may fail if:
+
+    [EINVAL]
+        The time interval specified one million or more microseconds.
+*/
+specification
+void usleep_spec( CallContext context, USecondsT useconds )
+{
+    pre
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", processState != NULL );
+
+        /*
+         * Interactions between usleep() and any of the following are unspecified:
+         * nanosleep() setitimer() timer_create() timer_delete() timer_getoverrun()
+         * timer_gettime() timer_settime() ualarm() sleep()
+         */
+        REQ( "app.usleep.01", "Interactions between similar functions", isEmpty_List( processState->meta.waitedSignals ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Useconds
+    {
+        if ( useconds == 0 )
+        {
+            return { UsecondsIsZero, "useconds is zero" };
+        }
+        else if ( useconds >= 1000000 )
+        {
+            return { UsecondsIsGreateOrEqualThan1000000, "useconds is greate or equal than 1000000" };
+        }
+        else
+        {
+            return { UsecondsIsFrom1To999999, "useconds is from 1 to 999999" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onUsleep( CallContext context, USecondsT useconds, TimeInterval stimulTime )
+{
+    startCommand( context, "sleep",
+                  create_SleepCall( create_String( "usleep" ), context, stimulTime, NULL, 0, NULL, NULL, 1000 * useconds )
+                );
+}

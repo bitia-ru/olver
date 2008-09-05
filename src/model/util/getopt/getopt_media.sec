@@ -1,0 +1,280 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/getopt/getopt_media.seh"
+#include "common/common_media.seh"
+
+void writeListStr_TSStream( TSStream* stream, List* value )
+{
+    int size=size_List(value), i=0;
+
+    writeTypeHeaderTSStream(stream,"list_str");
+    
+    writeInt_TSStream(stream, size);
+    
+    DUMP("Size==%d\n", size);
+    
+    for(i=0;i<size;i++)
+        writeCString_TSStream(stream, (CString*)get_List(value, i));
+}
+
+static void list_str_formatter(TSStream* stream, List* value)
+{
+    VERIFY_TYPE( list_str_formatter, &type_List, value );
+
+    writeListStr_TSStream( stream, value );
+}
+
+void writeListOpt_TSStream( TSStream* stream, List* value )
+{
+    int size=size_List(value), i=0;
+
+    writeTypeHeaderTSStream(stream,"list_opt");
+    
+    writeInt_TSStream(stream, size);
+    
+    for(i=0;i<size;i++)
+        writeOption_TSStream(stream, (Option*)get_List(value, i));
+}
+
+static void list_opt_formatter(TSStream* stream, List* value)
+{
+    VERIFY_TYPE( list_opt_formatter, &type_List, value );
+
+    writeListOpt_TSStream( stream, value );
+}
+
+void writeOption_TSStream( TSStream* stream, Option* value )
+{
+    writeTypeHeaderTSStream(stream,"option");
+
+    writeCString_TSStream(stream, value->name);
+    writeInt_TSStream(stream, value->has_arg);
+    writeInt_TSStream(stream, value->flag);
+    writeInt_TSStream(stream, (value->flag_null ? 1 : 0) );
+    if(!(value->flag_null))
+        writeInt_TSStream(stream, value->val);
+}
+
+static void option_formatter(TSStream* stream, Option* value)
+{
+    VERIFY_TYPE( option_formatter, &type_Option, value );
+
+    writeOption_TSStream( stream, value );
+}
+
+void readGetoptRet_TSStream(TSStream* stream, GetoptRet* res)
+{
+    res->optarg=clone(readCString_TSStream(stream));
+    res->opterr=readInt_TSStream(stream);
+    res->optind=readInt_TSStream(stream);
+    res->optopt=readInt_TSStream(stream);
+}
+
+void readLongopts_TSStream(TSStream* stream, List* longopts)
+{
+    IntT size, i;
+
+    size=readInt_TSStream(stream);
+
+    for(i=0;i<size;i++)
+    {
+        ((Option*)get_List(longopts, i))->flag_null=readInt_TSStream(stream);
+        if(!(((Option*)get_List(longopts, i))->flag_null))
+            ((Option*)get_List(longopts, i))->flag=readInt_TSStream(stream);
+    }
+}
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilGetoptSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_getopt_spec(getopt_media);
+    set_mediator_getopt_long_spec(getopt_long_media);
+    set_mediator_getopt_long_only_spec(getopt_long_only_media);
+    set_mediator_getsubopt_spec(getsubopt_media);
+
+    //Set up formatters
+    registerTSFormatter("list_str", 
+        (TSFormatterFuncType)list_str_formatter);
+    registerTSFormatter("list_opt", 
+        (TSFormatterFuncType)list_opt_formatter);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** getopt_spec **/
+
+mediator getopt_media for specification
+IntT getopt_spec( CallContext context, IntT argc, List* argv,
+                        CString* optstring)
+{
+    GetoptRet* getopt_post=create_emptyGetoptRet();
+
+    call
+    {
+        ProcessState* ps=getProcessState_CallContext(context);
+        TSCommand command = create_TSCommand();
+        IntT ret;
+
+        format_TSCommand( &command, "getopt:$(int)$(list_str)$(str)",
+            create_IntTObj(argc), argv, optstring);
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readGetoptRet_TSStream(&command.response, getopt_post);
+            ret=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return ret;
+    }
+    state
+    {
+        OnGetopt(context, argc, argv, optstring, getopt_spec,getopt_post);
+    }
+}
+
+
+
+/** getopt_long_spec **/
+//This mediator refers to: getopt, getopt_long
+mediator getopt_long_media for specification
+IntT getopt_long_spec( CallContext context, IntT argc, List* argv,
+                    CString* optstring, List* longopts, IntT* longindex)
+{
+    GetoptRet* getopt_post=create_emptyGetoptRet();
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command,
+            "getopt_long:$(int)$(list_str)$(str)$(list_opt)$(int)",
+            create_IntTObj(argc), argv, optstring,
+            longopts, create_IntTObj(*longindex));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            readGetoptRet_TSStream(&command.response, getopt_post);
+            readLongopts_TSStream(&command.response, longopts);
+            *longindex=readInt_TSStream(&command.response);                
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        OnGetoptLong(context, argc, argv, optstring, longopts,
+            longindex, getopt_long_spec, getopt_post);
+    }
+}
+
+
+
+/** getopt_long_only_spec **/
+mediator getopt_long_only_media for specification
+IntT getopt_long_only_spec( CallContext context, IntT argc, List* argv,
+                    CString* optstring, List* longopts, IntT* longindex)
+{
+    GetoptRet* getopt_post=create_emptyGetoptRet();
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command,
+            "getopt_long_only:$(int)$(list_str)$(str)$(list_opt)$(int)",
+            create_IntTObj(argc), argv, optstring,
+            longopts, create_IntTObj(*longindex));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            readGetoptRet_TSStream(&command.response, getopt_post);
+            readLongopts_TSStream(&command.response, longopts);
+            *longindex=readInt_TSStream(&command.response);                
+        }
+        
+        DUMP("res==%d\n", res);
+
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        OnGetoptLongOnly(context, argc, argv, optstring, longopts,
+            longindex, getopt_long_only_spec, getopt_post);
+    }
+}
+
+
+/** getsubopt_spec **/
+
+mediator getsubopt_media for specification
+IntT getsubopt_spec( CallContext context, StringTPtr* optionp, List* keylistp,
+                    StringTPtr *valuep)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        format_TSCommand( &command, "getsubopt:$(ptr)$(list_str)$(ptr)",
+            create_VoidTPtrObj(*optionp), keylistp,
+            create_VoidTPtrObj(*valuep));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            DUMP("Pre: optionp==%d, valuep==%d\n", optionp->address,
+                valuep->address);
+            *optionp=readPointer_TSStream(context, &command.response);
+            *valuep=readPointer_TSStream(context, &command.response);
+            DUMP("Post: optionp==%d, valuep==%d\n", optionp->address,
+                valuep->address);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+
+
+

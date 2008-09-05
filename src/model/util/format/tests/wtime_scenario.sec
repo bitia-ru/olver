@@ -1,0 +1,923 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/format/tests/wtime_scenario.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "util/format/wtime_model.seh"
+#include "util/format/time_model.seh"
+//#include "locale/locale/locale_media.seh"
+// TODO: Implement locale setup.
+
+#include "util/string/wcasecmp_model.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static int maxMSize = 32800;
+
+static char* formatters[] = {
+    "",
+    "%d %b %Y %H:%M:%S",
+    "%w %j %y %I:%M:%S",
+    "this_is! a? test_string...",
+    "1337",
+    "\this"
+};
+
+#define numStrings (sizeof(formatters)/sizeof(char*))
+#define numWStrings (2*sizeof(formatters)/sizeof(char*))
+
+static WCharT* wstrings[numWStrings];
+
+
+/********************************************************************/
+/**                  Test Static Data                              **/
+/********************************************************************/
+
+static CallContext context;
+WStringTPtr wcs, format;
+WString* wcs_a;
+
+/********************************************************************/
+/**                  Test Helper Functions                         **/
+/********************************************************************/
+
+/*
+ * Creates the wide-character string from a usual string on the Instrumental Machine
+ * by combining several usual characters into single wide characters.
+ */
+static WCharT* construct_wcstring(char* str)
+{
+    char* tmp;
+    size_t len = strlen(str);
+    size_t wlen = ((len + sizeof_WCharT - 1) / sizeof_WCharT) * sizeof_WCharT;
+
+    size_t i, j;
+
+    /* Allocate memory for the wide string. */
+    tmp = malloc(wlen + sizeof_WCharT);
+
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+    {
+        /* Little Endian, needs conversion. */
+        for (i = 0; i < wlen + sizeof_WCharT; i += sizeof_WCharT)
+        {
+            for (j = 0; j < sizeof_WCharT; j++)
+            {
+                if (i + j < len)
+                    tmp[i + sizeof_WCharT - j - 1] = str[i + j];
+                else
+                    tmp[i + sizeof_WCharT - j - 1] = '\0';
+            }
+        }
+    }
+    else if(__BYTE_ORDER == __BIG_ENDIAN)
+    {
+        /* Big Endian, no conversion needed. */
+        for (i = 0; i < len; i++)
+            tmp[i] = str[i];
+        for (i = len; i < wlen + sizeof_WCharT; i++)
+            tmp[i] = '\0';
+    }
+    else
+    {
+        traceUserInfo("Requirements failed: __BYTE_ORDER is undefined or has incorrect value");
+    }
+
+    return (WCharT*)tmp;
+}
+
+// Checks whether processed result is equal to corresponding expected result
+bool checkWcsFTime(WString* expRet, WString* format_arg, TmT* time)
+{
+    SizeT fret;
+
+    if(time == NULL)
+        return false;
+
+    writeWString_VoidTPtr(format, format_arg);
+
+    fret = wcsftime_spec(context, wcs, 100, format, time);
+    
+    wcs_a = readWString_VoidTPtr(wcs);
+
+    return equals(expRet, wcs_a);
+}
+
+bool checkWcsFTimeZero(WString* format_arg, TmT* time)
+{
+    SizeT fret;
+
+    if(time == NULL)
+        return false;
+    
+    writeWString_VoidTPtr(format, format_arg);
+
+    fret = wcsftime_spec(context, wcs, 1, format, time);
+    
+    return fret == 0;
+}
+
+bool checkWcsFTimeSize(SizeT size, WString* format_arg, TmT* time)
+{
+    SizeT fret;
+
+    if(time == NULL)
+        return false;
+    
+    writeWString_VoidTPtr(format, format_arg);
+
+    fret = wcsftime_spec(context, wcs, 100, format, time);
+
+    wcs_a = readWString_VoidTPtr(wcs);
+    
+    return length_WString(wcs_a) == fret;
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_util_format_wtime_scenario(int argc,char** argv)
+{
+    int i;
+
+    context = getContext();
+
+    format = allocateMemoryBlock(context, maxMSize * sizeof_WCharT);
+    if (isNULL_VoidTPtr(format))
+        return false;
+
+    wcs = allocateMemoryBlock(context, maxMSize * sizeof_WCharT);
+    if (isNULL_VoidTPtr(wcs))
+    {
+        deallocateMemoryBlock(context, format);
+        return false;
+    }
+
+    for (i=0; i<numStrings; i++)
+    {
+        wstrings[i] = construct_wcstring(formatters[i]);
+        wstrings[i + numStrings] = convert_to_wcstring(formatters[i]);
+    }
+
+//  Set POSIX locale
+//    setlocale_spec(context, SUT_LC_TIME, create_CString("POSIX"));
+
+    setFinishMode(UNTIL_END);
+    
+    return true;
+}
+
+
+static void finish_util_format_wtime_scenario(void)
+{
+    int i;
+
+    deallocateMemoryBlock(context, format);
+    deallocateMemoryBlock(context, wcs);
+
+    for (i=0; i<numWStrings; i++)
+        free(wstrings[i]);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(util_format_wtime_scenario);
+}
+
+/********************************************************************/
+/**                  Test Actions                                  **/
+/********************************************************************/
+
+scenario
+bool util_format_wtime_scen()
+{
+    TmT* gret;
+    int str_index = 0;
+
+    INIT_REQ_SCEN;
+    
+    gret = create_TmT(20, 15, 10, 14, 4, 107, 1, 133, 0, 0, create_CString("") );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %a Replaced by the locale's abbreviated weekday name. [ tm_wday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.01", "%%a Replaced by the locale's abbreviated weekday name",
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("Mon")),
+            create_WString(convert_to_wcstring("%a")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %A Replaced by the locale's full weekday name. [ tm_wday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.02", "%%A Replaced by the locale's full weekday name", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("Monday")),
+            create_WString(convert_to_wcstring("%A")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %b Replaced by the locale's abbreviated month name. [ tm_mon]
+     */
+    REQ_SCEN("wcsftime.strftime.11.03", "%%b Replaced by the locale's abbreviated month name", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("May")),
+            create_WString(convert_to_wcstring("%b")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %B Replaced by the locale's full month name. [ tm_mon]
+     */
+    REQ_SCEN("wcsftime.strftime.11.04", "%%B Replaced by the locale's full month name", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("May")),
+            create_WString(convert_to_wcstring("%B")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %c Replaced by the locale's appropriate date and time representation. (See the 
+     * Base Definitions volume of IEEE Std 1003.1-2001, <time.h>.)
+     */
+    REQ_SCEN("wcsftime.strftime.11.05", "%%c Replaced by the locale's appropriate date and time representation", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("Mon May 14 10:15:20 2007")),
+            create_WString(convert_to_wcstring("%c")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %C Replaced by the year divided by 100 and truncated to an integer, as a 
+     * decimal number [00,99]. [ tm_year]
+     */
+    REQ_SCEN("wcsftime.strftime.11.06", "%%C Replaced by the year divided by 100 and truncated to an integer", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("20")),
+            create_WString(convert_to_wcstring("%C")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %d Replaced by the day of the month as a decimal number [01,31]. [ tm_mday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.07", "%%d Replaced by the day of the month as a decimal number", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("14")),
+            create_WString(convert_to_wcstring("%d")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %D Equivalent to %m / %d / %y. [ tm_mon, tm_mday, tm_year]
+     */
+    REQ_SCEN("wcsftime.strftime.11.08", "%%D Equivalent to %%m / %%d / %%y", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("05/14/07")),
+            create_WString(convert_to_wcstring("%D")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %e Replaced by the day of the month as a decimal number [1,31]; a single digit 
+     * is preceded by a space. [ tm_mday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.09", "%%e Replaced by the day of the month as a decimal number, two digits", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("14")),
+            create_WString(convert_to_wcstring("%e")),
+            gret
+            )
+        );
+    gret = create_TmT(20, 15, 10, 4, 4, 107, 5, 133, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.09", "%%e Replaced by the day of the month as a decimal number, single digit", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring(" 4")),
+            create_WString(convert_to_wcstring("%e")),
+            gret
+            )
+        );
+        
+    gret = create_TmT(20, 15, 10, 14, 4, 107, 1, 133, 0, 0, create_CString("") );
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %F Equivalent to %Y - %m - %d (the ISO 8601:2000 standard date format). [ 
+     * tm_year, tm_mon, tm_mday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.10", "%%F Equivalent to %%Y - %%m - %%d", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("2007-05-14")),
+            create_WString(convert_to_wcstring("%F")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %g Replaced by the last 2 digits of the week-based year (see below) as a 
+     * decimal number [00,99]. [ tm_year, tm_wday, tm_yday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.11", "%%g Replaced by the last 2 digits of the week-based year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("07")),
+            create_WString(convert_to_wcstring("%g")),
+            gret
+            )
+        );
+
+    gret = create_TmT(20, 15, 10, 1, 0, 106, 0, 0, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.11", "%%g Replaced by the last 2 digits of the week-based year, shows previous year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("05")),
+            create_WString(convert_to_wcstring("%g")),
+            gret
+            )
+        );
+
+    gret = create_TmT(20, 15, 10, 2, 0, 106, 1, 1, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.11", "%%g Replaced by the last 2 digits of the week-based year, shows actual year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("06")),
+            create_WString(convert_to_wcstring("%g")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %G Replaced by the week-based year (see below) as a decimal number (for 
+     * example, 1977). [ tm_year, tm_wday, tm_yday]
+     */
+    gret = create_TmT(20, 15, 10, 14, 4, 107, 1, 133, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.12", "%%G Replaced by the week-based year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("2007")),
+            create_WString(convert_to_wcstring("%G")),
+            gret
+            )
+        );
+
+    gret = create_TmT(20, 15, 10, 1, 0, 106, 0, 0, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.12", "%%G Replaced by the week-based year, shows previous year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("2005")),
+            create_WString(convert_to_wcstring("%G")),
+            gret
+            )
+        );
+
+    gret = create_TmT(20, 15, 10, 2, 0, 106, 1, 1, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.12", "%%G Replaced by the week-based year, shows actual year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("2006")),
+            create_WString(convert_to_wcstring("%G")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %h Equivalent to %b. [ tm_mon]
+     */
+    gret = create_TmT(20, 15, 10, 14, 4, 107, 1, 133, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.13", "%%h Equivalent to %%b", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("May")),
+            create_WString(convert_to_wcstring("%h")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %H Replaced by the hour (24-hour clock) as a decimal number [00,23]. [ tm_hour]
+     */
+    REQ_SCEN("wcsftime.strftime.11.14", "%%H Replaced by the hour (24-hour clock)", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("10")),
+            create_WString(convert_to_wcstring("%H")),
+            gret
+            )
+        );
+
+    /*
+      * The following conversion specifications are supported:
+     *
+     * %I Replaced by the hour (12-hour clock) as a decimal number [01,12]. [ tm_hour]
+     */
+    REQ_SCEN("wcsftime.strftime.11.15", "%%I Replaced by the hour (12-hour clock), formally day", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("10")),
+            create_WString(convert_to_wcstring("%I")),
+            gret
+            )
+        );
+
+    gret = create_TmT(20, 15, 22, 14, 4, 107, 1, 133, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.15", "%%I Replaced by the hour (12-hour clock), formally night", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("10")),
+            create_WString(convert_to_wcstring("%I")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %j Replaced by the day of the year as a decimal number [001,366]. [ tm_yday]
+     */
+    gret = create_TmT(20, 15, 10, 14, 4, 107, 1, 133, 0, 0, create_CString("") );
+    REQ_SCEN("wcsftime.strftime.11.16", "%%j Replaced by the day of the year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("134")),
+            create_WString(convert_to_wcstring("%j")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %m Replaced by the month as a decimal number [01,12]. [ tm_mon]
+     */
+    REQ_SCEN("wcsftime.strftime.11.17", "%%m Replaced by the month", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("05")),
+            create_WString(convert_to_wcstring("%m")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %M Replaced by the minute as a decimal number [00,59]. [ tm_min]
+     */
+    REQ_SCEN("wcsftime.strftime.11.18", "%%M Replaced by the minute", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("15")),
+            create_WString(convert_to_wcstring("%M")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %n Replaced by a <newline>.
+     */
+    REQ_SCEN("wcsftime.strftime.11.19", "%%n Replaced by a <newline>", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("\n")),
+            create_WString(convert_to_wcstring("%n")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %p Replaced by the locale's equivalent of either a.m. or p.m. [ tm_hour]
+     */
+    REQ_SCEN("wcsftime.strftime.11.20", "%%p Replaced by the locale's equivalent of either a.m. or p.m.", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("AM")),
+            create_WString(convert_to_wcstring("%p")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %r Replaced by the time in a.m. and p.m. notation; [CX] in the POSIX locale 
+     * this shall be equivalent to %I : %M : %S %p. [ tm_hour, tm_min, tm_sec]
+     */
+    REQ_SCEN("wcsftime.strftime.11.21", "%%r Replaced by the time in a.m. and p.m. notation", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("10:15:20 AM")),
+            create_WString(convert_to_wcstring("%r")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %R Replaced by the time in 24-hour notation ( %H : %M ). [ tm_hour, tm_min]
+     */
+    REQ_SCEN("wcsftime.strftime.11.22", "%%R Replaced by the time in 24-hour notation", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("10:15")),
+            create_WString(convert_to_wcstring("%R")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %S Replaced by the second as a decimal number [00,60]. [ tm_sec]
+     */
+    REQ_SCEN("wcsftime.strftime.11.23", "%%S Replaced by the second", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("20")),
+            create_WString(convert_to_wcstring("%S")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %t Replaced by a <tab>.
+     */
+    REQ_SCEN("wcsftime.strftime.11.24", "%%t Replaced by a <tab>", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("\t")),
+            create_WString(convert_to_wcstring("%t")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %T Replaced by the time ( %H : %M : %S ). [ tm_hour, tm_min, tm_sec]
+     */
+    REQ_SCEN("wcsftime.strftime.11.25", "%%T Replaced by the time", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("10:15:20")),
+            create_WString(convert_to_wcstring("%T")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %u Replaced by the weekday as a decimal number [1,7], with 1 representing 
+     * Monday. [ tm_wday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.26", "%%u Replaced by the weekday", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("1")),
+            create_WString(convert_to_wcstring("%u")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %U Replaced by the week number of the year as a decimal number [00,53]. The 
+     * first Sunday of January is the first day of week 1; days in the new year before 
+     * this are in week 0. [ tm_year, tm_wday, tm_yday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.27", "%%U Replaced by the week number of the year, Sunday orientated, from 0", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("19")),
+            create_WString(convert_to_wcstring("%U")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %V Replaced by the week number of the year (Monday as the first day of the week) 
+     * as a decimal number [01,53]. If the week containing 1 January has four or more 
+     * days in the new year, then it is considered week 1. Otherwise, it is the last 
+     * week of the previous year, and the next week is week 1. Both January 4th and 
+     * the first Thursday of January are always in week 1. [ tm_year, tm_wday, tm_yday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.28", "%%V Replaced by the week number of the year, Monday orientated, from 1", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("20")),
+            create_WString(convert_to_wcstring("%V")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %w Replaced by the weekday as a decimal number [0,6], with 0 representing 
+     * Sunday. [ tm_wday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.29", "%%w Replaced by the weekday", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("1")),
+            create_WString(convert_to_wcstring("%w")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %W Replaced by the week number of the year as a decimal number [00,53]. The 
+     * first Monday of January is the first day of week 1; days in the new year before 
+     * this are in week 0. [ tm_year, tm_wday, tm_yday]
+     */
+    REQ_SCEN("wcsftime.strftime.11.30", "%%W Replaced by the week number of the year, Monday orientated, from 0", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("20")),
+            create_WString(convert_to_wcstring("%W")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %x Replaced by the locale's appropriate date representation. (See the Base 
+     * Definitions volume of IEEE Std 1003.1-2001, <time.h>.)
+     */
+    REQ_SCEN("wcsftime.strftime.11.31", "%%x Replaced by the locale's appropriate date representation", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("05/14/07")),
+            create_WString(convert_to_wcstring("%x")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %X Replaced by the locale's appropriate time representation. (See the Base 
+     * Definitions volume of IEEE Std 1003.1-2001, <time.h>.)
+     */
+    REQ_SCEN("wcsftime.strftime.11.32", "%%X Replaced by the locale's appropriate time representation", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("10:15:20")),
+            create_WString(convert_to_wcstring("%X")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %y Replaced by the last two digits of the year as a decimal number [00,99]. [ 
+     * tm_year]
+     */
+    REQ_SCEN("wcsftime.strftime.11.33", "%%y Replaced by the last two digits of the year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("07")),
+            create_WString(convert_to_wcstring("%y")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %Y Replaced by the year as a decimal number (for example, 1997). [ tm_year]
+     */
+    REQ_SCEN("wcsftime.strftime.11.34", "%%Y Replaced by the year", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("2007")),
+            create_WString(convert_to_wcstring("%Y")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %z Replaced by the offset from UTC in the ISO 8601:2000 standard format ( +hhmm 
+     * or -hhmm ), or by no characters if no timezone is determinable. For example, "- 
+     * 0430" means 4 hours 30 minutes behind UTC (west of Greenwich). [CX] If tm_isdst 
+     * is zero, the standard time offset is used. If tm_isdst is greater than zero, 
+     * the daylight savings time offset is used. If tm_isdst is negative, no 
+     * characters are returned. [ tm_isdst]
+     */
+    gret = create_TmT(20, 15, 9, 14, 4, 107, 1, 133, 0, 10800, create_CString("GMT+3") );
+    REQ_SCEN("wcsftime.strftime.11.35", "%%z Replaced by the offset from UTC, the standard time offset is used", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("+0300")),
+            create_WString(convert_to_wcstring("%z")),
+            gret
+            )
+        );
+
+    gret = create_TmT(20, 15, 9, 14, 4, 107, 1, 133, +1, 10800, create_CString("GMT+3") );
+    
+    REQ_SCEN("wcsftime.strftime.11.35", "%%z Replaced by the offset from UTC, the daylight savings time offset is used", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("+0400")),
+            create_WString(convert_to_wcstring("%z")),
+            gret
+            )
+        );
+    
+
+    gret = create_TmT(20, 15, 9, 14, 4, 107, 1, 133, -1, 10800, create_CString("GMT+3") );
+    REQ_SCEN("wcsftime.strftime.11.35", "%%z Replaced by the offset from UTC, no characters are returned", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("")),
+            create_WString(convert_to_wcstring("%z")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %Z Replaced by the timezone name or abbreviation, or by no bytes if no timezone 
+     * information exists. [ tm_isdst]
+     */
+    gret = create_TmT(20, 15, 10, 14, 4, 107, 1, 133, 0, 0, create_CString("GMT+3") );
+    REQ_SCEN("wcsftime.strftime.11.36", "%%Z Replaced by the timezone name or abbreviation, or by no bytes if no timezone information exists", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("GMT+3")),
+            create_WString(convert_to_wcstring("%Z")),
+            gret
+            )
+        );
+
+    /*
+     * The following conversion specifications are supported:
+     *
+     * %% Replaced by %.
+     */
+    REQ_SCEN("wcsftime.strftime.11.37", "%%%% Replaced by %%", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("%")),
+            create_WString(convert_to_wcstring("%%")),
+            gret
+            )
+        );
+
+    /*
+     * All ordinary characters (including the terminating null byte) are copied 
+     * unchanged into the array.
+     */
+    REQ_SCEN("wcsftime.strftime.05", "All ordinary characters (including the terminating null byte) are copied unchanged into the array", 
+        checkWcsFTime(
+            create_WString(convert_to_wcstring("test")),
+            create_WString(convert_to_wcstring("test")),
+            gret
+            )
+        );
+
+    /*
+     * Otherwise, zero is returned and the contents of the array are unspecified.
+     */
+    REQ("wcsftime.03.02", "Otherwise, zero is returned and the contents of the array are unspecified",
+        checkWcsFTimeZero(
+            create_WString(convert_to_wcstring("test")),
+            gret
+            )
+        );
+
+    for(str_index = 0; str_index < numWStrings; str_index++)
+        {
+            writeWString_VoidTPtr(format, create_WString(wstrings[str_index]));
+            wcsftime_spec(context, wcs, 100, format,
+                create_TmT(10, 5, 6, 8, 11, 27, 0, 234, -1, 0, create_CString("") ));
+        }
+        
+    VERDICT_REQ_SCEN;
+    
+    return true;
+}
+
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm util_format_wtime_scenario =
+{
+        .init = init_util_format_wtime_scenario,
+        .finish = finish_util_format_wtime_scenario,
+        .actions = {
+            util_format_wtime_scen,
+            NULL
+    }
+};
+
+
+#ifdef FORMAT_WTIME_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "process/process/process_media.seh"
+#include "system/sysconf/sysconf_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    
+    initSystemSysconfSubsystem();
+//    initLocaleLocaleSubsystem();
+
+    initUtilFormatWtimeSubsystem();
+
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+    
+    addTraceToFile("trace.xml");
+    
+    trace_all_requirements = true;
+    // Run test scenario
+    util_format_wtime_scenario(argc, argv);
+    
+    //  unloadSUT();
+    return 0;
+}
+
+#endif
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,339 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_media.seh"
+#include "process/meta/user_media.seh"
+#include "io/fstream/fstream_media.seh"
+#include "io/fstream/wstream_media.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "fs/dir/dir_media.seh"
+#include "process/process/process_media.seh"
+#include "process/meta/fs_media.seh"
+#include "util/format/tests/wprintf_scenario.seh"
+#include "util/format/tests/format_sheafs.seh"
+#include "util/format/tests/wprintf_scenario_data.seh"
+#include "util/format/wprintf_model.seh"
+#include "util/format/wprintf_media.seh"
+#include "config/test_system_config.h"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static bool needOnlyFirstPriority;
+static bool needConformanceTestQuality;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static List /* NULL */ * functionData;
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+static String * testingFuncName;
+
+enum CallSpecCode { fwprintfCode, swprintfCode, vfwprintfCode, vswprintfCode, vwprintfCode, wprintfCode };
+
+static void callSpec( CallContext context, WString * ws, SizeT n, WprintedSheaf * sheaf ) {
+    enum CallSpecCode callSpecCode;
+    ErrorCode * errno = requestErrorCode();
+    CString * fn;
+    CString * fm;
+    FILETPtr stream;
+    WString * output;
+    WString * expectedResult;
+    if      ( equals( create_String( "fwprintf"  ), testingFuncName ) ) { callSpecCode = fwprintfCode ; }
+    else if ( equals( create_String( "swprintf"  ), testingFuncName ) ) { callSpecCode = swprintfCode ; }
+    else if ( equals( create_String( "vfwprintf" ), testingFuncName ) ) { callSpecCode = vfwprintfCode; }
+    else if ( equals( create_String( "vswprintf" ), testingFuncName ) ) { callSpecCode = vswprintfCode; }
+    else if ( equals( create_String( "vwprintf"  ), testingFuncName ) ) { callSpecCode = vwprintfCode ; }
+    else if ( equals( create_String( "wprintf"   ), testingFuncName ) ) { callSpecCode = wprintfCode  ; }
+    else {
+        assertion( false, "callSpec : unknown testingFuncName" );
+    }
+    // pre-call
+    switch ( callSpecCode ) {
+        case fwprintfCode :
+        case vfwprintfCode:
+            fn = getTestScenarioSandboxPathCh( "fwprintf_vfwprintfOutput.txt" );
+            fm = create_CString( "w" );
+            stream = fopen_spec( context, fn, fm, errno, false );
+            fwide_spec( context, stream, 1, errno );
+            expectedResult = sheaf->result;
+            break;
+        case swprintfCode :
+        case vswprintfCode:
+            if ( n == 0 ) {
+                expectedResult = ws;
+            } else if ( length_WString( sheaf->result ) <= (int)n - 1 ) { // 1 - for 0 on end
+                expectedResult = sheaf->result;
+            } else {
+                expectedResult = substringW_String( sheaf->result, 0, (int)n - 1 ); // 1 - for 0 on end
+            }
+            break;
+        case vwprintfCode:
+        case wprintfCode :
+            output = createW_String( "" );
+            expectedResult = sheaf->result;
+            break;
+    }
+    setExpectedResultAndReqIds( toCharArray_String( testingFuncName ), expectedResult, sheaf->reqIds );
+    // call
+    dotPrint( 10, 100 );
+    switch ( callSpecCode ) {
+        case fwprintfCode : fwprintf_spec ( context, & stream, sheaf->format, sheaf->data,         errno, fn, fm ); break;
+        case swprintfCode : swprintf_spec ( context, ws, n,    sheaf->format, sheaf->data,         errno         ); break;
+        case vfwprintfCode: vfwprintf_spec( context, & stream, sheaf->format, sheaf->data,         errno, fn, fm ); break;
+        case vswprintfCode: vswprintf_spec( context, ws, n,    sheaf->format, sheaf->data,         errno         ); break;
+        case vwprintfCode : vwprintf_spec ( context,           sheaf->format, sheaf->data, output, errno         ); break;
+        case wprintfCode  : wprintf_spec  ( context,           sheaf->format, sheaf->data, output, errno         ); break;
+    }
+    // post-call
+    if ( callSpecCode == fwprintfCode || callSpecCode == vfwprintfCode ) { fclose_spec( context, stream, errno ); }
+} // callSpec
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_scenario( char * name )
+{
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir( getContext() ) );
+
+    //needOnlyFirstPriority = false;
+    needOnlyFirstPriority = true;
+    needConformanceTestQuality = false;
+    //needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    if ( ( functionData = createContexts() ) == NULL ) { return false; }
+    if ( ( wprintedSheafs = createWprintedSheafs() ) == NULL ) { return false; }
+    setFinishMode( UNTIL_END );
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    removeTestScenarioSandboxDir( getContext() ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+    terminateProcesses( functionData ); \
+}
+
+static bool init_fwprintf_scenario ( int argc, char ** argv ) { return init_scenario( "fwprintf"  ); }
+static bool init_swprintf_scenario ( int argc, char ** argv ) { return init_scenario( "swprintf"  ); }
+static bool init_vfwprintf_scenario( int argc, char ** argv ) { return init_scenario( "vfwprintf" ); }
+static bool init_vswprintf_scenario( int argc, char ** argv ) { return init_scenario( "vswprintf" ); }
+static bool init_vwprintf_scenario ( int argc, char ** argv ) { return init_scenario( "vwprintf"  ); }
+static bool init_wprintf_scenario  ( int argc, char ** argv ) { return init_scenario( "wprintf"   ); }
+
+static void finish_fwprintf_scenario ( void ) finish_scenario( fwprintf  )
+static void finish_swprintf_scenario ( void ) finish_scenario( swprintf  )
+static void finish_vfwprintf_scenario( void ) finish_scenario( vfwprintf )
+static void finish_vswprintf_scenario( void ) finish_scenario( vswprintf )
+static void finish_vwprintf_scenario ( void ) finish_scenario( vwprintf  )
+static void finish_wprintf_scenario  ( void ) finish_scenario( wprintf   )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool wprint_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        int maxWsnI;
+        if ( equals( create_String( "swprintf"  ), testingFuncName ) ||
+             equals( create_String( "vswprintf" ), testingFuncName )
+           ) {
+            maxWsnI = 5;
+        } else {
+            maxWsnI = 1;
+        }
+        iterate ( int wsnI = 1; wsnI <= maxWsnI; wsnI++; )
+        // iterate ( int wsnI = 5; wsnI <= 5; wsnI++; )
+        {
+            WString * ws;
+            SizeT     n ;
+            int maxWprintedSheafI;
+            switch ( wsnI ) {
+                case 1: ws = NULL                                                                         ; n =   0; break;
+                case 2: ws = createW_String( "#########################################################" ); n =   0; break;
+                case 3: ws = createW_String( "#########################################################" ); n =   1; break;
+                case 4: ws = createW_String( "#########################################################" ); n =  10; break;
+                case 5: ws = createW_String( "#########################################################" ); n = 100; break;
+            }
+            maxWprintedSheafI = ( needConformanceTestQuality ? 199 : size_List( wprintedSheafs ) - 1 );
+            iterate ( int wprintedSheafI = 0; wprintedSheafI <= maxWprintedSheafI; wprintedSheafI++; )
+            {
+                WprintedSheaf * wprintedSheaf = get_List( wprintedSheafs, wprintedSheafI );
+                callSpec( * contextObj, ws, n, wprintedSheaf );
+            } // iterate wprintedSheafI
+        } // iterate wsnI
+    } // iterate contextI
+    return true;
+} // wprint_scen
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm fwprintf_scenario =
+{
+    .init              = init_fwprintf_scenario  ,
+    .finish            = finish_fwprintf_scenario,
+    .actions           = { wprint_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm swprintf_scenario =
+{
+    .init              = init_swprintf_scenario  ,
+    .finish            = finish_swprintf_scenario,
+    .actions           = { wprint_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vfwprintf_scenario =
+{
+    .init              = init_vfwprintf_scenario  ,
+    .finish            = finish_vfwprintf_scenario,
+    .actions           = { wprint_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vswprintf_scenario =
+{
+    .init              = init_vswprintf_scenario  ,
+    .finish            = finish_vswprintf_scenario,
+    .actions           = { wprint_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vwprintf_scenario =
+{
+    .init              = init_vwprintf_scenario  ,
+    .finish            = finish_vwprintf_scenario,
+    .actions           = { wprint_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm wprintf_scenario =
+{
+    .init              = init_wprintf_scenario  ,
+    .finish            = finish_wprintf_scenario,
+    .actions           = { wprint_scen,
+                           NULL
+                         }
+};
+
+#ifdef UTIL_FORMAT_WPRINTF_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initIoFileSubsystem();
+    initProcessMetaFsSubsystem();
+    initFsDirSubsystem();
+    initProcessProcessSubsystem();
+    initIoFstreamSubsystem();
+    initIoFstreamWstreamSubsystem();
+
+    initUtilFormatWprintfSubsystem();
+}
+
+bool util_format_wprintf_local( int argc, char ** argv )
+{/**/
+    fwprintf_scenario ( argc, argv );
+    swprintf_scenario ( argc, argv );
+    vfwprintf_scenario( argc, argv );/**/
+    vswprintf_scenario( argc, argv );
+    vwprintf_scenario ( argc, argv );
+    wprintf_scenario  ( argc, argv );/**/
+    return true;
+}
+
+int main( int argc, char ** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    util_format_wprintf_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

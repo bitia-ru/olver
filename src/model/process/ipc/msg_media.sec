@@ -1,0 +1,247 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "process/ipc/msg_media.seh"
+#include "common/common_media.seh"
+#include "fs/fs/fs_media.seh"
+
+
+/********************************************************************/
+/**                    Formatters                                  **/
+/********************************************************************/
+
+void ipcperm_formatter(TSStream *stream, IpcPerm* perm)
+{
+    VERIFY_TYPE(ipcperm_formatter, &type_IpcPerm, perm);
+    
+    writeTypeHeaderTSStream(stream, "ipcperm");
+
+    writeUInt_TSStream(stream, perm->uid);
+    writeUInt_TSStream(stream, perm->gid);
+    writeUInt_TSStream(stream, perm->cuid);
+    writeUInt_TSStream(stream, perm->cgid);
+    permissions_formatter(stream, perm->mode);
+}
+
+
+void msqid_formatter(TSStream *stream, MsqidDs* data)
+{
+    VERIFY_TYPE(msqid_formatter, &type_MsqidDs, data);
+    
+    writeTypeHeaderTSStream(stream, "msqid");
+
+    ipcperm_formatter(stream, data->msg_perm);
+
+    writeUShort_TSStream(stream, data->msg_qnum);
+    writeUShort_TSStream(stream, data->msg_qbytes);
+    writeInt_TSStream(stream, data->msg_lspid);
+    writeInt_TSStream(stream, data->msg_lrpid);
+    writeLong_TSStream(stream, data->msg_stime);
+    writeLong_TSStream(stream, data->msg_rtime);
+    writeLong_TSStream(stream, data->msg_ctime);
+}
+
+
+FilePermissions* readFilePermissions_TSStream(TSStream* stream)
+{
+    FilePermissions* permissions=create_FilePermissions_String("rwxrwxrwx");
+
+    permissions->owner=create_FilePermission(false, false, false);
+    permissions->group=create_FilePermission(false, false, false);
+    permissions->other=create_FilePermission(false, false, false);
+    
+    permissions->owner->read=readInt_TSStream(stream);
+    permissions->owner->write=readInt_TSStream(stream);
+    permissions->owner->execute=readInt_TSStream(stream);
+    
+    permissions->group->read=readInt_TSStream(stream);
+    permissions->group->write=readInt_TSStream(stream);
+    permissions->group->execute=readInt_TSStream(stream);
+    
+    permissions->other->read=readInt_TSStream(stream);
+    permissions->other->write=readInt_TSStream(stream);
+    permissions->other->execute=readInt_TSStream(stream);
+    
+    permissions->set_uid=readInt_TSStream(stream);
+    permissions->set_gid=readInt_TSStream(stream);
+    permissions->set_vtx=readInt_TSStream(stream);
+
+    return permissions;
+}
+
+
+
+IpcPerm* readIpcPerm_TSStream(TSStream* stream)
+{
+    IpcPerm* res = create_IpcPerm(0, 0, 0, 0, create_FilePermissions_String("rwxrwxrwx"));
+    res->uid = readUInt_TSStream(stream);
+    res->gid = readUInt_TSStream(stream);
+    res->cuid = readUInt_TSStream(stream);
+    res->cgid = readUInt_TSStream(stream);
+
+    res->mode = readFilePermissions_TSStream(stream);
+
+    return res;
+}
+
+
+MsqidDs* readMsqidDs_TSStream(TSStream* stream)
+{
+    MsqidDs* res = create_MsqidDs(NULL, 0, 0,0, 0, 0, 0, 0);
+
+    res->msg_perm = readIpcPerm_TSStream(stream);
+    res->msg_qnum = readUShort_TSStream(stream);
+    res->msg_qbytes = readUShort_TSStream(stream);
+    res->msg_lspid  = readInt_TSStream(stream);
+    res->msg_lrpid = readInt_TSStream(stream);
+    res->msg_stime = readLong_TSStream(stream);
+    res->msg_rtime = readLong_TSStream(stream);
+    res->msg_ctime = readLong_TSStream(stream);
+
+    return res;
+}
+
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initProcessIpcMsgSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_msgctl_spec(msgctl_media);
+    set_mediator_msgget_spec(msgget_media);
+    set_mediator_msgrcv_spec(msgrcv_media);
+    set_mediator_msgsnd_spec(msgsnd_media);
+
+    // Set up formatters
+    registerTSFormatter("msqid",(TSFormatterFuncType)msqid_formatter);
+    registerTSFormatter("ipcperm",(TSFormatterFuncType)ipcperm_formatter);
+
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** msgctl_spec **/
+mediator msgctl_media for specification
+IntT msgctl_spec( CallContext context, IntT msqid, MsgCtlCommand cmd, MsqidDs* buf, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( &command, "msgctl:$(int)$(int)$(msqid)", create_IntTObj(msqid), create_IntTObj(cmd), buf );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+            buf=readMsqidDs_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+
+/** msgget_spec **/
+mediator msgget_media for specification
+IntT msgget_spec( CallContext context, KeyT key, IntT msgflg, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( &command, "msgget:$(int)$(int)", create_IntTObj(key), create_IntTObj(msgflg) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+  }
+}
+
+
+/** msgrcv_spec **/
+mediator msgrcv_media for specification
+MsgRcvReturnType* msgrcv_spec( CallContext context, IntT msqid, SizeT msgsz, LongT msgtyp, IntT msgflg, ErrorCode* errno)
+{
+    call
+    {
+        SSizeT funcRes=-1;
+        CByteArray* data=NULL;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( &command, "msgrcv:$(int)$(size)$(long)$(int)", create_IntTObj(msqid), create_SizeTObj(msgsz),
+            create_LongTObj(msgtyp), create_IntTObj(msgflg));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            funcRes=readSSize_TSStream(&command.response);
+            data=readCByteArray_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_MsgRcvReturnType(funcRes, data);
+    }
+}
+
+
+/** msgsnd_spec **/
+mediator msgsnd_media for specification
+IntT msgsnd_spec( CallContext context, IntT msgid, LongT mtype, CByteArray* mtext, IntT msgflag, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( &command, "msgsnd:$(int)$(long)$(ba)$(int)", create_IntTObj(msgid), create_LongTObj(mtype), mtext, create_IntTObj(msgflag));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+

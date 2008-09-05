@@ -1,0 +1,2 @@
+#define CTESK_VERSION    27260
+#define CTESK_BUILD      20080904UL

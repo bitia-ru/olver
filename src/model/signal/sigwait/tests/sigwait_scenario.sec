@@ -1,0 +1,166 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "signal/sigwait/tests/sigwait_scenario.seh"
+
+static CallContext context_thr1; //context of thread 1
+static CallContext context_thr2; //context of thread 2
+static SigSetTPtr  sset;   //pointer to sigset_t variable
+static SigSet*     msset;  //msset object corresponds to sset variable
+static VoidTPtr    pInt;   //pointer to int
+
+static SigSetTPtr  sset2;  //pointer to sigset_t variable
+static SigSet*     msset2; //msset object corresponds to sset variable
+static SigInfoTPtr info;   //pointer to siginfo_t variable
+static SigInfo*    minfo;  //model of siginfo_t variable
+
+static bool init_sigwait_subsystem_basic_scenario(int argc, char** argv)
+{
+    bool result;
+    result = true;
+    //create process for test
+    context_thr1 = createProcess();
+    if(isWrong_ThreadId(context_thr1)) result = false;
+
+    //create 2-nd thread in testing process
+    //context_thr2 = createThreadInContext(context_thr1);
+    //if(isWrong_ThreadId(context_thr2)) result = false;
+
+    //create process 2 for test
+    context_thr2 = createProcess();
+    if(isWrong_ThreadId(context_thr2)) result = false;
+
+    //create sigset variable sset
+    sset = allocateMemoryBlock(context_thr2, sizeof_SUTType("sigset_t"));
+    if(isNULL_VoidTPtr(sset)) result = false;
+    msset = create_SigSet(sset);
+    registerObjectInMemory(sset, 0, (Object*)msset);
+
+    //create siginfo_t variable
+    info = allocateMemoryBlock(context_thr2, sizeof_SUTType("siginfo_t"));
+    if(isNULL_VoidTPtr(info)) result = false;
+    minfo = create_SigInfo(info, 0, 0, 0, getProcessId_CallContext(context_thr2), 0, NULL_VoidTPtr,
+                           0,0, create_SignalValue(0, 1, NULL_VoidTPtr));
+    registerObjectInMemory(info, 0, (Object*)minfo);
+
+    pInt = allocateMemoryBlock(context_thr2, sizeof_SUTType("int"));
+    if(isNULL_VoidTPtr(pInt)) result = false;
+
+    sigemptyset_spec(context_thr2, sset, requestErrorCode());
+    sigaddset_spec(context_thr2, sset, SUT_SIGUSR1, requestErrorCode());
+    sigaddset_spec(context_thr2, sset, 39, requestErrorCode());
+    //verbose("aaaa\n");
+    //setTSTimeModel(NotUseTSTime);
+    setTSTimeModel( LinearTSTime );
+    setFindFirstSeriesOnly( true );
+    setWTimeMSec(SERIALIZATION_TIME*10);
+
+    initSignalToString( context_thr1 );
+
+    return result;
+}
+
+static void finish_sigwait_subsystem_basic_scenario(void)
+{
+    //TODO delete threads and processes
+    return;
+}
+
+bool isStationarySignalState(void)
+{
+    return true;
+}
+
+Map* saveSignalModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreSignalModelState(Map* st)
+{
+    systems = st;
+}
+
+scenario bool sigwait_scen()
+{
+    pthread_sigmask_spec(context_thr2, SUT_SIG_SETMASK, sset, NULL_VoidTPtr, false);
+    kill_spec(context_thr1, getProcessId_CallContext(context_thr2), create_Signal(SUT_SIGUSR1), false);
+    ts_sleep_msec(100);
+    ts_sleep_msec(100);
+    sigwait_spec(context_thr2, sset, pInt);
+    ts_sleep_msec(100);
+    ts_sleep_msec(100);
+    kill_spec(context_thr1, getProcessId_CallContext(context_thr2), create_Signal(SUT_SIGUSR1), false);
+    ts_sleep_msec(100);
+    ts_sleep_msec(100);
+    sigwait_spec(context_thr2, sset, pInt);
+    return true;
+}
+
+scenario bool sigtimedwait_scen()
+{
+    TimeUnit time_unit = 1;
+
+    pthread_sigmask_spec(context_thr2, SUT_SIG_SETMASK, sset, NULL_VoidTPtr, false);
+    kill_spec(context_thr1, getProcessId_CallContext(context_thr2), create_Signal(39), false);
+    ts_sleep_msec(100);
+    sigtimedwait_spec(context_thr2, sset, info, time_unit);
+
+    return true;
+}
+
+scenario bool sigwaitinfo_scen()
+{
+    pthread_sigmask_spec(context_thr2, SUT_SIG_SETMASK, sset, NULL_VoidTPtr, false);
+    kill_spec(context_thr1, getProcessId_CallContext(context_thr2), create_Signal(39), false);
+    ts_sleep_msec(100);
+    sigwaitinfo_spec(context_thr2, sset, info);
+    return true;
+}
+
+scenario dfsm sigwait_subsystem_basic_scenario =
+{
+    .init   = init_sigwait_subsystem_basic_scenario,
+    .finish = finish_sigwait_subsystem_basic_scenario,
+
+    .saveModelState = (PtrSaveModelState)saveSignalModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreSignalModelState,
+    .isStationaryState = (PtrIsStationaryState)isStationarySignalState,
+
+    .actions = {
+         sigwait_scen,
+         sigtimedwait_scen,
+         sigwaitinfo_scen,
+         NULL
+    }
+};
+
+scenario dfsm signal_sigwait_view_scenario =
+{
+    .init   = init_sigwait_subsystem_basic_scenario,
+    .finish = finish_sigwait_subsystem_basic_scenario,
+
+    .saveModelState = (PtrSaveModelState)saveSignalModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreSignalModelState,
+    .isStationaryState = (PtrIsStationaryState)isStationarySignalState,
+
+    .actions = { sigwait_scen,
+                 NULL
+    }
+};

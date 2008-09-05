@@ -1,0 +1,431 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/search/tree_media.seh"
+#include "common/common_media.seh"
+
+#include "util/search/tree_model.seh"
+#include "config/interpretation.seh"
+#include "util/search/tree_config.h"
+
+/********************************************************************/
+/**                        Helper Functions                        **/
+/********************************************************************/
+
+static TreeNodeCompareCall* readCompareCall_TSStream(CallContext context,
+                                    VoidTPtr key, TSStream *stream)
+{
+    VoidTPtr    v1, v2;
+    v1 = readPointer_TSStream(context, stream);
+    v2 = readPointer_TSStream(context, stream);
+
+    if( equals_VoidTPtr(v1, key) )
+    {
+        return create_TreeNodeCompareCall(v2, key);
+    } else if ( equals_VoidTPtr(v2, key) ) {
+        return create_TreeNodeCompareCall(v1, key);
+    } else {
+        // neither of compared nodes is equal to key
+        // probably the tree is being rebalanced
+        return create_TreeNodeCompareCall(v1, v2);
+    }
+}
+
+static List* readCompareCalls_TSStream(CallContext context, VoidTPtr key,
+                                       TSStream *stream)
+{
+    List *res;
+
+    res = create_List(&type_TreeNodeCompareCall);
+    for(;startsWith_TSStream(stream, "compare:");)
+    {
+        TreeNodeCompareCall *tncp;
+        verifyType_TSStream(stream, "compare");
+        tncp = readCompareCall_TSStream(context, key, stream);
+        append_List( res,  tncp );
+    }
+
+    return res;
+}
+
+static const char* strVisits[]=
+{
+    "preorder",
+    "postorder",
+    "endorder",
+    "leaf"
+
+};
+
+static TreeVisitCall* readTreeVisitCall_TSStream(CallContext context,
+                                                 TSStream *stream)
+{
+    TreeVisitCall *res = NULL;
+    VoidTPtr    resNode;
+    VoidTPtr    resData = NULL_VoidTPtr;
+    TreeVisitT  resVisit;
+    IntT        resLevel;
+    SearchTreeNode *resSearchTreeNode = NULL;
+    resNode = readPointer_TSStream(context, stream);
+    
+    if( !isNULL_VoidTPtr(resNode) )
+    {
+        resData = readPointer_TSStream(context, stream);
+        resSearchTreeNode = create_SearchTreeNode(resNode, resData);
+    } 
+
+    resVisit = (TreeVisitT)readInt_TSStream(stream);
+    resLevel = (IntT)readInt_TSStream(stream);
+
+    res = create_TreeVisitCall(resSearchTreeNode, resVisit, resLevel);
+
+    return res;
+}
+
+static List* readTreeVisitCalls_TSStream(CallContext context, TSStream *stream)
+{
+    List *res;
+
+    res = create_List(&type_TreeVisitCall);
+    for(;startsWith_TSStream(stream, "visit:");)
+    {
+        verifyType_TSStream(stream, "visit");
+        append_List( res, readTreeVisitCall_TSStream(context, stream) );
+    }
+
+    return res;
+}
+
+static Tree* buildTree(List* walk)
+{
+    if( size_List(walk) )
+    {
+        int pos = 0;
+        int level = 0;
+        TreeVisitCall *node;
+
+        TreeNode *root = NULL;
+        TreeNode *curr = NULL;
+
+        do
+        {
+            TreeVisitCall *nxt;
+            node = get_List(walk, pos);
+            if( node->visit == SUT_preorder || node->visit==SUT_leaf )
+            {
+                TreeNode *nnode;
+                nnode = create_TreeNode(node->node);
+
+                if( curr )
+                {
+                    addChild_TreeNode(curr, nnode);
+                } else {
+                    root = nnode;
+                    curr = nnode;
+                }
+
+                if( node->visit == SUT_preorder )
+                {
+                    curr = nnode;
+                }
+                
+            } else if( node->visit==SUT_endorder ) {
+                if(curr)
+                {
+                    if(curr->parent)
+                    {
+                        curr = curr->parent;
+                    } else {
+                        pos++;
+                        break;
+                    }
+                } else {
+                    setBadVerdict("Malformed trace: endorder without matching"
+                            " preorder or leaf");
+                }
+            }
+
+            pos++;
+        }
+        while(pos<size_List(walk));
+
+        if(pos!=size_List(walk))
+        {
+            setBadVerdict("Malformed trace: tree complete before trace ended");
+            return NULL;
+        } else if(root==NULL) {
+            setBadVerdict("Malformed trace: empty tree");
+            return NULL;
+        } else {
+            return create_Tree(root);
+        }
+    }
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilSearchTreeSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_tdelete_spec(tdelete_media);
+    set_mediator_tfind_spec(tfind_media);
+    set_mediator_tsearch_spec(tsearch_media);
+    set_mediator_twalk_spec(twalk_media);
+}
+
+/********************************************************************/
+/**     Helper Functions to read Implementation-Specific Types     **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** tdelete_spec **/
+mediator tdelete_media for specification
+TreeNodeFunctionResult* tdelete_spec( CallContext context, VoidTPtr key,
+                                     SearchTreePtr rootp )
+{
+    VoidTPtr ptrData = NULL_VoidTPtr;
+    call
+    {
+        TreeNodeFunctionResult* res=NULL;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "tdelete:$(ptr)$(ptr)",
+            create_VoidTPtrObj(key),
+            create_VoidTPtrObj(rootp)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            List *resList = readCompareCalls_TSStream(context, key,
+                &command.response);
+            VoidTPtr ptrRes = readPointer_TSStream(context, &command.response);
+            VoidTPtr ptrRoot = readPointer_TSStream(context,&command.response);
+            SearchTree *tree = getSearchTree(rootp);
+            SearchTreeNode *resNode = getNodeByAddress(tree, ptrRes);
+            
+            ptrData = readPointer_TSStream(context, &command.response);
+            
+            res = create_TreeNodeFunctionResult(resList, resNode, ptrRoot);
+            
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    
+    state
+    {
+        SearchTree *tree = getSearchTree(rootp);
+        SearchTreeNode *node = getNodeByKey(tree, key);
+        SearchTreeNode *newRootNode = getNodeByKey(tree, ptrData);
+
+        if(node)
+        {
+            remove_Set(tree->data, node);
+            if( size_Set(tree->data)==0 )
+            {
+                // unregister the tree after deleting the last node
+                unregisterObjectInMemory( rootp );
+            } else if( !equals_VoidTPtr(rootp, tdelete_spec->returned_proot) )
+            {
+                unregisterObjectInMemory(rootp);
+                tree->address = tdelete_spec->returned_proot;
+
+                registerObjectInMemory(tdelete_spec->returned_proot, 0, tree);
+            }
+            
+            if(newRootNode)
+                newRootNode->address = tdelete_spec->returned_proot;
+
+            // NULLify 
+            tree->tree = NULL;
+
+        }
+    }
+}
+
+
+/** tfind_spec **/
+mediator tfind_media for specification
+TreeNodeFunctionResult* tfind_spec( CallContext context, VoidTPtr key,
+                                   SearchTreePtr rootp )
+{
+    call
+    {
+        TreeNodeFunctionResult* res=NULL;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "tfind:$(ptr)$(ptr)",
+            create_VoidTPtrObj(key),
+            create_VoidTPtrObj(rootp)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            List *resList = readCompareCalls_TSStream(context, key,
+                &command.response);
+            VoidTPtr ptrRes = readPointer_TSStream(context, &command.response);
+            VoidTPtr ptrRoot = readPointer_TSStream(context,&command.response);
+            SearchTree *tree = getSearchTree(rootp);
+            SearchTreeNode *resNode = getNodeByAddress(tree, ptrRes);
+            res = create_TreeNodeFunctionResult(resList, resNode, ptrRoot);
+
+            timestamp = command.meta.timestamp;
+        }
+        
+        return res;
+    }
+}
+
+
+/** tsearch_spec **/
+mediator tsearch_media for specification
+TreeNodeFunctionResult* tsearch_spec( CallContext context, VoidTPtr key,
+                                     SearchTreePtr rootp )
+{
+    call
+    {
+        TreeNodeFunctionResult* res=NULL;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "tsearch:$(ptr)$(ptr)",
+            create_VoidTPtrObj(key),
+            create_VoidTPtrObj(rootp)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            List *resList = readCompareCalls_TSStream(context, key,
+                &command.response);
+            {
+                VoidTPtr ptrRes = readPointer_TSStream(context,
+                    &command.response);
+                VoidTPtr ptrRoot = readPointer_TSStream(context,
+                    &command.response);
+                SearchTreeNode *resNode = NULL;
+                
+                
+                if(isNULL_VoidTPtr(rootp))
+                {
+                    resNode = create_SearchTreeNode(ptrRoot, key);
+                } 
+                else 
+                {
+                    SearchTree *tree = getSearchTree(rootp);
+                    resNode = getNodeByAddress(tree, ptrRes);
+                    
+                    if(!resNode)
+                    {
+                        resNode = create_SearchTreeNode( ptrRes, key );
+                    }
+                }
+                res = create_TreeNodeFunctionResult(resList, resNode, ptrRoot);
+            }
+            
+            timestamp = command.meta.timestamp;
+        }
+        
+        return res;
+    }
+    
+    state
+    {
+        SearchTree *tree = NULL;
+        SearchTreeNode *node = NULL;
+        
+        if( isNULL_VoidTPtr(rootp) )
+        {
+            tree = create_SearchTree(tsearch_spec->returned_proot);
+            registerObjectInMemory(tsearch_spec->returned_proot, 0, tree);
+            
+        } else {
+            tree = getSearchTree(rootp);
+            
+            if( !equals_VoidTPtr(rootp, tsearch_spec->returned_proot) )
+            {
+                unregisterObjectInMemory(rootp);
+                tree->address = tsearch_spec->returned_proot;
+                registerObjectInMemory(tsearch_spec->returned_proot, 0, tree);
+            }
+        }
+        
+        node = getNodeByKey(tree, key);
+        if(!node && tsearch_spec->returned_value) 
+        {
+            //Node is not present in the tree. Insert it.
+            add_Set(tree->data, tsearch_spec->returned_value);
+            
+            // NULLify 
+            tree->tree = NULL;
+        }
+    }
+}
+
+/** twalk_spec **/
+mediator twalk_media for specification
+List* twalk_spec( CallContext context, SearchTreePtr rootp,
+                 SearchTreeNodePtr root )
+{
+    call
+    {
+        List* res=NULL;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "twalk:$(ptr)",
+            create_VoidTPtrObj(root)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            res = readTreeVisitCalls_TSStream(context, &command.response);
+            
+            timestamp = command.meta.timestamp;
+        }
+        
+        return res;
+    }
+    state
+    {
+        
+        if(equals_VoidTPtr(rootp, root))
+        {
+            Tree* resTree = buildTree(twalk_spec);
+            SearchTree *st = getSearchTree(rootp);
+            st->tree = resTree;
+        } else {
+            if( ((TreeVisitCall*)get_List(twalk_spec, 0))->level==0 )
+            {
+                // level == 0 for walking non-root node - local case
+                setPosixSearchTreeWalkLevelInterpretation(
+                    POSIX_SEARCH_TREE_WALK_LEVEL_LOCAL);
+            } else {
+                // level != 0 for walking non-root node - global case
+                setPosixSearchTreeWalkLevelInterpretation(
+                    POSIX_SEARCH_TREE_WALK_LEVEL_GLOBAL);
+            }
+        }
+    }
+}

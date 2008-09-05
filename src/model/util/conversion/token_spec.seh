@@ -1,0 +1,154 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#ifndef UTIL_CONVERSION_TOKEN_SPEC
+#pragma SEC subsystem conversion "util.conversion"
+#endif
+
+#define UTIL_CONVERSION_TOKEN_SPEC
+
+#ifndef a_name
+#define a_name 0
+#endif
+
+
+specification
+StringTPtr strtok_r_spec( CallContext context, StringTPtr stringp,
+                                        StringTPtr delim, StringTPtr* buffer)
+{
+    CString* delim_str;
+    StringTPtr buff=NULL_VoidTPtr;
+    CByteArray* byte_pre=NULL;
+    
+    if(a_name == 1)
+        FILTER("strtok_r");
+    else
+        FILTER("__strtok_r");
+
+    pre
+    {
+        REQ("", "[Implicit precondition]", !isNULL_VoidTPtr(delim));        
+        delim_str=readCString_VoidTPtr(delim);
+
+        /*
+         * __strtok_r() has the same specification as strtok_r().
+         */
+        IMPLEMENT_REQ("__strtok_r.01");
+    }
+    coverage C
+    {
+        if(isNULL_VoidTPtr(stringp))
+        {
+            buff=*buffer;
+            if(!isNULL_VoidTPtr(buff))
+                byte_pre=readCByteArray_MemoryBlock(getMemoryBlock(buff));
+            DUMP("stringp==NULL: buff==%d\n", buff.address);
+            return { Null_String, "Taking token from buffer" };
+        }
+        else
+        {
+            buff=stringp;
+            byte_pre=readCByteArray_MemoryBlock(getMemoryBlock(buff));
+            DUMP("stringp!=NULL: buff==%d\n", buff.address);
+            return { New_String, "Getting new string" };
+        }
+    }
+    post
+    {
+        StringTPtr ret=strtok_r_spec;
+        MemoryBlock* mb;
+        CByteArray* byte_past;
+        IntT begin;
+        CString* ret_str;
+
+        //Implemented in scenario
+        /*
+         * In the first call to strtok_r(), s points to a null-terminated
+         * string, sep to a null-terminated string of separator characters,
+         * and the value pointed to by lasts is ignored.
+         */
+        IMPLEMENT_REQ("__strtok_r.03;strtok_r.03");
+        
+        /*
+         * In subsequent calls, s is a NULL pointer and lasts shall be
+         * unchanged from the previous call so that subsequent calls shall
+         * move through the string s, returning successive tokens until no
+         * tokens remain. 
+         */
+        IMPLEMENT_REQ("__strtok_r.05;strtok_r.05");
+        /*
+         * The separator string sep may be different from call to call.
+         */
+        IMPLEMENT_REQ("__strtok_r.06;strtok_r.06");
+
+        if(isNULL_VoidTPtr(ret))
+        {            
+            /*
+             * When no token remains in s, a NULL pointer shall be returned. 
+             */
+            /*
+             * or a NULL pointer when no token is found.
+             */
+            REQ("__strtok_r.07;__strtok_r.09;strtok_r.07;strtok_r.09", "No tokens found", 
+                STRUCT_REQ());
+            DUMP("No tokens(post)\n");
+            return true;
+        }
+
+        DUMP("Non-null return value\n");
+
+        ret_str=readCString_VoidTPtr(ret);
+        if (!isNULL_VoidTPtr(*buffer))
+        {
+            mb=getMemoryBlock(*buffer);
+            byte_past=readCByteArray_MemoryBlock(mb);
+            DUMP("buff.address - mb->address.address==%d\n",
+                (IntT)(buff.address - mb->address.address));
+            begin=buff.address - mb->address.address;
+        
+
+            /*
+             * The strtok_r() function shall return a pointer to the first
+             * character of the first token, write a null character into s
+             * immediately following the returned token, and update the
+             * pointer to which lasts points.
+             */
+            REQ("__strtok_r.04;strtok_r.04", "Only correct changes of the buffer",
+                    CorrectBuffChange(byte_pre, byte_past, begin, delim_str));
+        
+            DUMP("Only correct changes of the buffer\n");
+
+            /*
+             * The strtok_r() function shall return a pointer to the token found,
+             */
+            REQ("__strtok_r.08;strtok_r.08", "Checking address correctness",
+                    mb->address.address
+                    +
+                    RetBeginPos(byte_pre, begin, delim_str)
+                    ==
+                    ret.address);
+
+            DUMP("Model's return shall be equal to real return\n");
+        }
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+#undef a_name
+
+//#endif

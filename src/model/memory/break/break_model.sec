@@ -1,0 +1,396 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#define NEWREQ
+
+#include "memory/break/break_config.h"
+#include "common/common_model.seh"
+#include "memory/break/break_model.seh"
+#include "process/process/process_model.seh"
+
+#pragma SEC subsystem break "memory.break"
+
+
+/*
+   The group of functions 'memory.break' consists of:
+       brk [4]
+       sbrk [4]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+    Linux Standard Base Core Specification 3.1
+    Copyright (c) 2004, 2005 Free Standards Group
+
+        refers
+
+    The Single UNIX (R) Specification, Version 2
+    Copyright (c) 1997 The Open Group
+
+    NAME
+
+    brk, sbrk - change space allocation (LEGACY)
+
+    SYNOPSIS
+
+
+     #include <unistd.h> int brk(void *addr); void *sbrk(intptr_t incr);
+
+
+    DESCRIPTION
+
+    The brk() and sbrk() functions are used to change the amount of space allocated
+    for the calling process. The change is made by resetting the process' break
+    value and allocating the appropriate amount of space. The amount of allocated
+    space increases as the break value increases. The newly-allocated space is set
+    to 0. However, if the application first decrements and then increments the
+    break value, the contents of the reallocated space are unspecified. The brk()
+    function sets the break value to addr and changes the allocated space
+    accordingly. The sbrk() function adds incr bytes to the break value and changes
+    the allocated space accordingly. If incr is negative, the amount of allocated
+    space is decreased by incr bytes. The current value of the program break is
+    returned by sbrk(0). The behaviour of brk() and sbrk() is unspecified if an
+    application also uses any other memory functions (such as malloc(), mmap(),
+    free()). Other functions may use these other memory functions silently. {app.
+    sbrk.05} It is unspecified whether the pointer returned by sbrk() is aligned
+    suitably for any purpose. These interfaces need not be reentrant.
+
+    RETURN VALUE
+
+    Upon successful completion, brk() returns 0. Otherwise, it returns -1 and sets
+    errno to indicate the error. Upon successful completion, sbrk() returns the
+    prior break value. Otherwise, it returns (void *)-1 and sets errno to indicate
+    the error.
+
+    ERRORS
+
+    The brk() and sbrk() functions will fail if: [ENOMEM] The requested change
+    would allocate more space than allowed.
+
+    The brk() and sbrk() functions may fail if: [EAGAIN] The total amount of system
+    memory available for allocation to this process is temporarily insufficient.
+    This may occur even though the space requested was less than the maximum data
+    segment size.
+
+    [ENOMEM] The requested change would be impossible as there is insufficient swap
+    space available, or would cause a memory allocation conflict.
+
+    EXAMPLES
+
+    None.
+*/
+
+specification
+IntT brk_spec(CallContext context, VoidTPtr addr, ErrorCode* errno)
+{
+    pre
+    {
+        /*
+         * The behaviour of brk() and sbrk() is unspecified if an application also uses
+         * any other memory functions (such as malloc(), mmap(), free()). Other functions
+         * may use these other memory functions silently.
+         */
+        REQ("app.brk.04", "behaviour is unspecified if mem-funcs used",
+            /*isBreakAllowed(context)*/true);
+
+        REQ("", "sbrk should be called prior to brk",
+            !isInvalid_VoidTPtr(getCurrentBreakValue(context)));
+
+        /*
+         * These interfaces need not be reentrant.
+         */
+        REQ("app.brk.05", "need not be reentrant", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        ERROR_BEGIN(LSB_BRK, "brk.08;brk.09;brk.07", *errno != 0, *errno)
+
+            /*
+             * The brk() and sbrk() functions will fail if:
+             *
+             * [ENOMEM] The requested change would allocate more space than allowed.
+             */
+            ERROR_SHALL(LSB_BRK, ENOMEM, "brk.08.01", TODO_ERR(ENOMEM))
+
+            /*
+             * The brk() and sbrk() functions may fail if:
+             *
+             * [EAGAIN] The total amount of system memory available for allocation to this
+             * process is temporarily insufficient. This may occur even though the space
+             * requested was less than the maximum data segment size.
+             */
+            ERROR_UNCHECKABLE(LSB_BRK, EAGAIN, "brk.09.01", "it's impossible to check")
+
+            /*
+             * The brk() and sbrk() functions may fail if:
+             *
+             * [ENOMEM] The requested change would be impossible as there is insufficient swap
+             * space available, or would cause a memory allocation conflict.
+             */
+            ERROR_UNCHECKABLE(LSB_BRK, ENOMEM, "brk.09.02", "it's impossible to check")
+
+        ERROR_END()
+
+        if(brk_spec == -1)
+            /*
+             * Otherwise, it returns -1 and sets errno to indicate the error.
+             */
+            REQ("brk.07", "it returns -1 and sets errno to indicate the error", *errno != 0);
+
+
+        if(@isInitBreakState(context))
+        {
+            PtrDiffT diff = diff_VoidTPtr(getCurrentBreakValue(context),
+                @getMaximumBreakValue(context));
+
+            if(diff > 0)
+                /*
+                 * The newly-allocated space is set to 0. However, if the application first
+                 * decrements and then increments the break value, the contents of the reallocated
+                 * space are unspecified.
+                 */
+                REQ("brk.02", "newly-allocated space is set to 0",
+                    isZeroArray(@getMaximumBreakValue(context), diff));
+
+            /*
+             * The brk() function sets the break value to addr and changes the allocated space
+             * accordingly.
+             */
+            REQ("?brk.03", "sets the break value",
+                equals_VoidTPtr(getCurrentBreakValue(context), addr));
+        }
+
+        /*
+         * Upon successful completion, brk() returns 0.
+         */
+        REQ("brk.06", "brk() returns 0", brk_spec == 0);
+
+
+
+        return true;
+    }
+}
+
+void onBrk(CallContext context, VoidTPtr addr, IntT res, ErrorCode* errno)
+{
+    if(!isInitBreakState(context)) return;
+
+    onSBrk(context, diff_VoidTPtr(addr, getCurrentBreakValue(context)), NULL_VoidTPtr, errno);
+}
+
+specification
+VoidTPtr sbrk_spec(CallContext context, IntPtrT incr, ErrorCode* errno)
+{
+    pre
+    {
+        /*
+         * The behaviour of brk() and sbrk() is unspecified if an application also uses
+         * any other memory functions (such as malloc(), mmap(), free()). Other functions
+         * may use these other memory functions silently.
+         */
+        REQ("app.sbrk.04", "behaviour is unspecified if mem-funcs used",
+            isBreakAllowed(context));
+
+        return true;
+    }
+
+    coverage Incr
+    {
+        if(incr > 0)
+            return { EXPANSION_OF_MEMORY, "Expansion of using memory" };
+        else if(incr < 0)
+            return { REDUCTION_OF_MEMORY, "Reduction of using memory" };
+
+        return { GET_BREAK_VALUE, "Get the break value" };
+    }
+
+    post
+    {
+        ERROR_BEGIN(LSB_SBRK, "sbrk.09;sbrk.10;sbrk.08", *errno, *errno)
+
+            /*
+             * The brk() and sbrk() functions will fail if:
+             *
+             * [ENOMEM] The requested change would allocate more space than allowed.
+             */
+            ERROR_SHALL(LSB_SBRK, ENOMEM, "sbrk.09.01", TODO_ERR(ENOMEM))
+
+            /*
+             * The brk() and sbrk() functions may fail if:
+             *
+             * [EAGAIN] The total amount of system memory available for allocation to this
+             * process is temporarily insufficient. This may occur even though the space
+             * requested was less than the maximum data segment size.
+             */
+            ERROR_UNCHECKABLE(LSB_SBRK, EAGAIN, "sbrk.10.01", "it's impossible to check")
+
+            /*
+             * The brk() and sbrk() functions may fail if:
+             *
+             * [ENOMEM] The requested change would be impossible as there is insufficient swap
+             * space available, or would cause a memory allocation conflict.
+             */
+            ERROR_UNCHECKABLE(LSB_SBRK, ENOMEM, "sbrk.10.02", "it's impossible to check")
+
+        ERROR_END()
+
+        if(isInvalid_VoidTPtr(sbrk_spec))
+            /*
+             * Otherwise, it returns (void *)-1 and sets errno to indicate the error.
+             */
+            REQ("sbrk.08", "are used to change the amount of space", *errno != 0);
+
+        if(@isInitBreakState(context))
+        {
+            PtrDiffT diff = diff_VoidTPtr(getCurrentBreakValue(context),
+                @getMaximumBreakValue(context));
+
+            /*
+             * The sbrk() function adds incr bytes to the break value and changes the
+             * allocated space accordingly. If incr is negative, the amount of allocated space
+             * is decreased by incr bytes.
+             */
+            REQ("?sbrk.03", "adds incr bytes to the break value",
+                equals_VoidTPtr(getCurrentBreakValue(context),
+                add_VoidTPtr(@getCurrentBreakValue(context), incr)));
+
+            /*
+             * Upon successful completion, sbrk() returns the prior break value.
+             */
+            REQ("sbrk.07", "returns the prior break value",
+                equals_VoidTPtr(sbrk_spec, @getCurrentBreakValue(context)));
+
+            if(diff > 0)
+                /*
+                 * The newly-allocated space is set to 0. However, if the application first
+                 * decrements and then increments the break value, the contents of the reallocated
+                 * space are unspecified.
+                 */
+                REQ("sbrk.02", "newly-allocated space is set to 0",
+                    isZeroArray(@getMaximumBreakValue(context), diff));
+        }
+
+
+
+        return true;
+    }
+}
+
+void onSBrk(CallContext context, IntPtrT incr, VoidTPtr res, ErrorCode* errno)
+{
+    /*if(StartBreakValue == (void*)-1)*/ initBreakState(context, res);
+
+    if(*errno == 0 && incr != 0)
+    {
+        setCurrentBreakValue(context,
+            add_VoidTPtr(getCurrentBreakValue(context), incr));
+    }
+}
+
+/********************************************************************/
+/**                          Model State                           **/
+/********************************************************************/
+
+specification typedef struct MemBrkState MemBrkState = { };
+
+Object* create_MemBrkStateDefault(void)
+{
+    return create(&type_MemBrkState, Invalid_VoidTPtr,
+        Invalid_VoidTPtr, Invalid_VoidTPtr);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+MemBrkState* getMemoryBreakState(CallContext context)
+{
+    registerProcessStaticData(context, _CS("memory.break"), create_MemBrkStateDefault());
+
+    return getProcessStaticData(context, _CS("memory.break"));
+}
+
+VoidTPtr getCurrentBreakValue(CallContext context)
+{
+    MemBrkState* stateMemBrk = getMemoryBreakState(context);
+    return stateMemBrk->CurPtr;
+}
+
+VoidTPtr getMaximumBreakValue(CallContext context)
+{
+    MemBrkState* stateMemBrk = getMemoryBreakState(context);
+    return stateMemBrk->MaxPtr;
+}
+
+void setCurrentBreakValue(CallContext context, VoidTPtr NewPtr)
+{
+    PtrDiffT diff;
+    MemBrkState* stateMemBrk = getMemoryBreakState(context);
+
+    if(!isInitBreakState(context)) return;
+
+    diff = diff_VoidTPtr(NewPtr, stateMemBrk->StartPtr);
+
+    // if(diff < 0) return; - error!!!
+
+    stateMemBrk->CurPtr = NewPtr;
+
+    if(diff > diff_VoidTPtr(stateMemBrk->MaxPtr, stateMemBrk->StartPtr))
+        stateMemBrk->MaxPtr = stateMemBrk->CurPtr;
+
+    diff = diff_VoidTPtr(stateMemBrk->CurPtr, stateMemBrk->StartPtr);
+}
+
+void initBreakState(CallContext context, VoidTPtr Ptr)
+{
+    MemBrkState* stateMemBrk = getMemoryBreakState(context);
+
+    if(!equals_VoidTPtr(stateMemBrk->StartPtr, Invalid_VoidTPtr)) return;
+
+    stateMemBrk->StartPtr   =
+    stateMemBrk->CurPtr     =
+    stateMemBrk->MaxPtr     = Ptr;
+}
+
+bool isInitBreakState(CallContext context)
+{
+    MemBrkState* stateMemBrk = getMemoryBreakState(context);
+    return !equals_VoidTPtr(stateMemBrk->StartPtr, Invalid_VoidTPtr);
+}
+
+bool isBreakAllowed(CallContext context)
+{
+    /*PMemMode* pmode = getMemoryMode(context);
+    MemMode* mode = *pmode;
+
+    return *mode != StandardMMode;
+*/
+    return true;
+}

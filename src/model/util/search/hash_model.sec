@@ -1,0 +1,512 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "util/search/hash_config.h"
+#include "util/search/hash_model.seh"
+#include "memory/heap/heap_model.seh"
+
+#include "data/errno_model.seh"
+
+#pragma SEC subsystem search "util.search"
+
+
+
+/* 
+   The group of functions 'util.search.hash' consists of: 
+       hcreate [1]
+       hdestroy [1]
+       hsearch [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    hcreate, hdestroy, hsearch - manage hash search table
+
+SYNOPSIS    
+
+    #include <search.h>
+    int hcreate(size_t nel);
+    void hdestroy(void);
+    ENTRY *hsearch(ENTRY item, ACTION action); 
+
+DESCRIPTION
+
+    The hcreate(), hdestroy(), and hsearch() functions shall manage hash search
+    tables.
+
+    The hcreate() function shall allocate sufficient space for the table, and 
+    the application shall ensure it is called before hsearch() is used. The nel 
+    argument is an estimate of the maximum number of entries that the table 
+    shall contain. This number may be adjusted upward by the algorithm in order 
+    to obtain certain mathematically favorable circumstances.
+
+    The hdestroy() function shall dispose of the search table, and may be 
+    followed by another call to hcreate(). After the call to hdestroy(), the 
+    data can no longer be considered accessible.
+
+    The hsearch() function is a hash-table search routine. It shall return a 
+    pointer into a hash table indicating the location at which an entry can be 
+    found. The item argument is a structure of type ENTRY (defined in the 
+    <search.h> header) containing two pointers: item.key points to the 
+    comparison key (a char *), and item.data (a void *) points to any other 
+    data to be associated with that key. The comparison function used by 
+    hsearch() is strcmp(). The action argument is a member of an 
+    enumeration type ACTION indicating the disposition of the entry if it 
+    cannot be found in the table. ENTER indicates that the item should be 
+    inserted in the table at an appropriate point. FIND indicates that no entry
+    should be made. Unsuccessful resolution is indicated by the return of a 
+    null pointer.
+
+    These functions need not be reentrant. A function that is not required to 
+    be reentrant is not required to be thread-safe.
+
+RETURN VALUE
+
+    The hcreate() function shall return 0 if it cannot allocate sufficient 
+    space for the table; otherwise, it shall return non-zero.
+
+    The hdestroy() function shall not return a value.
+
+    The hsearch() function shall return a null pointer if either the action is
+    FIND and the item could not be found or the action is ENTER and the table 
+    is full.
+
+ERRORS
+
+    The hcreate() and hsearch() functions may fail if:
+    [ENOMEM] 
+    Insufficient storage space is available. 
+  
+*/
+
+specification
+IntT hcreate_spec (CallContext context, SizeT nel, ErrorCode* errno)
+{
+    ProcessState* ps;
+    pre
+    {
+        /*
+         * The hcreate() function shall allocate sufficient space for the table
+         */
+        REQ_UNCHECKABLE("hcreate.02.01", "We don't know inner algorithm");
+
+        /* [Consistency with legacy memory management mode] */
+        REQ("app.brk.04;app.sbrk.04", "Consistency with legacy memory management mode",
+                    isMallocAllowed(context) );
+        
+        ps=getProcessState_CallContext(context);
+        
+        /* [Call context consistency]*/
+        REQ("", "ProcessState field shall not be NULL", ps!=NULL);
+        
+        /* [hash_search_table consistency] */
+        REQ("", "hash_search_table field shall not be NULL",
+                    ps->hash_search_table!=NULL );
+        
+        /* [Map pointer shall be NULL before hcreate()] */
+        /*
+         * The hdestroy() function
+         * 
+         * may be followed by another call to hcreate()
+         */
+        REQ("hdestroy.02.02", "hash_table field shall be NULL",
+                    ps->hash_search_table->hash_table==NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(nel==0)
+        {
+            return {Zero, "Zero table size case"};
+        }
+        else if(nel==1)
+        {
+            return {OneElement, "Table size = 1 case"};
+        }
+        else /* if(nel>1) */
+        {
+            return {BigTable, "Big table size case"};
+        }
+    }
+    post
+    {
+        Map* mp;
+
+        ps=getProcessState_CallContext(context);
+
+        /*
+         * The hcreate() function shall return 0 if it cannot allocate
+         * sufficient space for the table
+         */
+        ERROR_BEGIN(POSIX_HCREATE, "hcreate.11", hcreate_spec==0, *errno)
+        /*
+         * The hcreate() and hsearch() functions may fail if:
+         * 
+         * [ENOMEM] 
+         * 
+         * Insufficient storage space is available. 
+         */
+            ERROR_MAY(POSIX_HCREATE, ENOMEM, "hcreate.13.01", 
+                ps->hash_search_table->hash_table==NULL
+                &&
+                *errno==SUT_ENOMEM
+            )
+
+        ERROR_END()
+
+        /*
+         * otherwise, it shall return non-zero.
+         */
+        REQ("hcreate.12", "Function shall return non zero", hcreate_spec!=0);
+        
+        /* [Call context consistency]*/
+        REQ("", "ProcessState field shall not be NULL", ps!=NULL);
+        
+         /* [hash_search_table consistency] */
+        REQ("", "hash_search_table field shall not be NULL",
+                                    ps->hash_search_table!=NULL);
+
+        mp=ps->hash_search_table->hash_table;
+        
+        /* [Map pointer shall be not NULL after hcreate()] */
+        REQ("", "Map pointer shall not be NULL", mp!=NULL);
+        
+        /* [Map shall be empty after hcreate()] */
+        REQ("", "Map size shall be 0", isEmpty_Map(mp));
+
+      
+        return true;
+    }
+}
+
+
+specification
+void hdestroy_spec (CallContext context)
+{
+    ProcessState* ps;
+    pre
+    {
+        /* [Consistency with legacy memory management mode] */
+        REQ("", "Consistency with legacy memory management mode",
+                        isFreeAllowed(context) );
+        
+        
+        ps=getProcessState_CallContext(context);
+        
+        
+        /* [Call context consistency]*/
+        REQ("", "ProcessState field shall not be NULL", ps!=NULL);
+        
+        /* [hash_search_table consistency] */
+        REQ("", "hash_search_table field shall not be NULL",
+                        ps->hash_search_table!=NULL );
+        
+        /* [Map pointer shall be not NULL before hdestroy()] */
+        REQ("", "hash_table field shall not be NULL",
+                        ps->hash_search_table->hash_table!=NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        ps=getProcessState_CallContext(context);
+        
+ 
+        /* [Call context consistency] */
+        REQ("", "ProcessState field shall not be NULL", ps!=NULL);
+        
+         /* [hash_search_table consistency] */
+        REQ("", "hash_search_table field shall not be NULL",
+                                            ps->hash_search_table!=NULL );
+        /*
+         * After the call to hdestroy(), the data can no longer be
+         * considered accessible.
+         */
+        /*
+         * The hdestroy() function
+         * 
+         * shall dispose of the search table
+         */
+        REQ("hdestroy.02.01;hdestroy.03", "Hash table deleted",
+            ps->hash_search_table->hash_table==NULL);
+
+       
+        return true;
+    }
+}
+
+
+specification
+HashEntryT* hsearch_spec (CallContext context, HashEntryT* item,
+                                    HashActionT action, ErrorCode* errno)
+{
+    ProcessState* ps;
+    Map* mapPtr;
+    pre
+    {
+        ps=getProcessState_CallContext(context);
+        
+        
+        /* [Call context consistency]*/
+        REQ("", "ProcessState field shall not be NULL", ps!=NULL);
+        
+         /* [hash_search_table consistency] */
+        REQ("", "hash_search_table field shall not be NULL",
+                                ps->hash_search_table!=NULL);
+
+        /*
+         * the application shall ensure it is called before hsearch() is used
+         */
+        REQ("hcreate.02.02", "hash_table field shall not be NULL",
+                        ps->hash_search_table->hash_table!=NULL);
+        
+        mapPtr=ps->hash_search_table->hash_table;
+        /* [Implicit precondition] */
+        REQ("",  "item is not NULL", item!=NULL );
+        
+        /* [Implicit precondition] */
+        REQ("", "key is not NULL", item->key !=NULL );
+        
+        /* [Action is valid] */
+        REQ("", "Action is FIND or ENTER", action==SUT_FIND || action==SUT_ENTER);
+        
+        if(action==SUT_ENTER)
+        {
+            /* [Consistency with legacy memory management mode] */
+            REQ("app.brk.04;app.sbrk.04", "Consistency with legacy memory management mode",
+                                isMallocAllowed(context) );
+        }
+        
+        
+        return true;
+    }
+    coverage C
+    {
+        if(action==SUT_FIND)
+        {
+            if(containsKey_Map(mapPtr, item->key))
+            {
+                return { FindContains,
+                            "Operation is FIND, table contains item" };
+            }
+            else /* if(!containsKey_Map(mapPtr, item->key)) */
+            {
+                return { FindDoesNotContain,
+                            "Operation is FIND, table does not contain item" };
+            }
+        }
+        else /* if(action==SUT_ENTER) */
+        {
+            if(containsKey_Map(mapPtr, item->key))
+            {
+                VoidTPtrObj* tmpObj = (VoidTPtrObj*)get_Map(mapPtr, item->key);
+                VoidTPtr curValue=*(tmpObj);
+                if(equals_VoidTPtr(curValue, item->data))
+                {
+                    return { EnterContainsSame,
+                                "Operation is ENTER, table contains item with"
+                                " same key and same value" };
+                }
+                else /* if(!equals_VoidTPtr(curValue, item->data) */
+                {
+                    return { EnterContainsDiff,
+                        "Operation is ENTER, table contains item with same key"
+                        " and different value" };
+                }
+            }
+            else /* if(!containsKey_Map(mapPtr, item->key)) */
+            {
+                return { EnterDoesNotContain,
+                    "Operation is ENTER, table does not contain item" };
+            }
+        }
+    }
+    coverage C_keylen
+    {
+        if( length_CString(item->key)==0 )
+        {
+            return {EmptyKey, "Key size is 0"};
+        } else if( length_CString(item->key)==1 ) {
+            return {KeyOne, "Key size is 1"};
+        } else /*if( length_CString(item->key)>1 )*/ {
+            return {KeyLong, "Key size > 1"};
+        }
+    }
+    post
+    {
+        ps=getProcessState_CallContext(context);
+
+        ERROR_BEGIN(POSIX_HSEARCH, "hsearch.09",    hsearch_spec==NULL
+                                                &&  action==SUT_ENTER, *errno)
+        /*
+         * The hcreate() and hsearch() functions may fail if:
+         * 
+         * [ENOMEM] 
+         * 
+         * Insufficient storage space is available. 
+         */
+        /*
+         * The hsearch() function shall return a null pointer if
+         * 
+         * the action is ENTER and the table is full.
+         */
+            ERROR_MAY(POSIX_HSEARCH, ENOMEM, "hsearch.12.02;hsearch.13.01",
+                !containsKey_Map(mapPtr, item->key)
+                &&
+                size_Map(mapPtr) >= ps->hash_search_table->hash_table_nel)
+
+        ERROR_END()
+
+        /* [Call context consistency] */
+        REQ("", "ProcessState field shall not be NULL", ps!=NULL);
+        
+        /* [hash_search_table consistency] */
+        REQ("", "hash_search_table field shall not be NULL",
+                    ps->hash_search_table!=NULL );
+        
+        mapPtr=ps->hash_search_table->hash_table;
+        
+        /* [Map pointer shall not be NULL after hsearch()] */
+        REQ("", "Map pointer shall not be NULL", mapPtr!=NULL);
+        
+        
+        if(action==SUT_FIND)
+        {
+            if(containsKey_Map(mapPtr, item->key))
+            {
+                HashEntryT* hentry;
+                VoidTPtr    hsData;
+                VoidTPtr    mapData;
+                VoidTPtrObj* tmpObj;
+                
+                hentry=hsearch_spec;
+                
+                /* [NULL pointer check] */
+                REQ("", "Search shall return not NULL", hentry!=NULL); 
+
+                hsData=hentry->data;
+                tmpObj = (VoidTPtrObj*)get_Map(mapPtr, item->key);
+                mapData=*(tmpObj);
+                
+                /*
+                 * It shall return a pointer into a hash table indicating
+                 * the location at which an entry can be found.
+                 */
+                REQ("hsearch.03",
+                    "Search shall return valid value of the item;"
+                    "Search shall return valid key of the item",
+                    equals_VoidTPtr(hsData, mapData)
+                    &&
+                    equals(hsearch_spec->key, item->key));
+            }
+            else /* if(!containsKey_Map(mapPtr, item->key)) */
+            {
+                /*
+                 * The hsearch() function shall return a null pointer if
+                 * 
+                 * the action is FIND and the item could not be found
+                 */
+                REQ("hsearch.12.01", 
+                    "Shall return a null pointer if the action is FIND", 
+                    hsearch_spec==NULL);
+            }
+        }
+        else /*if(action==SUT_ENTER)*/
+        {
+            if(hsearch_spec!=NULL)
+            {
+                HashEntryT* hentry;
+                VoidTPtr    hsData;
+                VoidTPtr    mapData;
+                VoidTPtrObj* tmpObj;
+                
+                hentry=hsearch_spec;
+                
+                /* [NULL pointer check] */
+                REQ("", "Enter shall return not NULL", hentry!=NULL); 
+            
+                hsData=hentry->data;
+                tmpObj = (VoidTPtrObj*)get_Map(mapPtr, item->key);
+                mapData=*(tmpObj);
+                
+                
+                /*
+                 * It shall return a pointer into a hash table indicating
+                 * the location at which an entry can be found.
+                 */
+                REQ("hsearch.03", "Enter shall return valid key of the item;"
+                                  "Map shall contain valid value of the item",
+                                  equals(hsearch_spec->key, item->key)
+                                  &&
+                                  equals_VoidTPtr(mapData, hsearch_spec->data)
+                                  );
+            }
+        }
+
+      
+        return true;
+    }
+}
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+specification typedef struct HashEntryT HashEntryT = {};
+
+HashEntryT * create_HashEntryT(
+    CString* key,
+    VoidTPtr data
+)
+{
+    return create(&type_HashEntryT, key, data);
+}

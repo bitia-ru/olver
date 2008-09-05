@@ -1,0 +1,1029 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/process/process_media.seh"
+#include "process/process/process_common.seh"
+#include "common/common_media.seh"
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void abortCalledProcess_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        abortCalledProcess_return,
+        create_AbortReturnType(threadId ),
+        meta->timestamp
+    );
+}
+
+static void abort_processTerminated_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        abort_processTerminated,
+        create_AbortReturnType( threadId ),
+        meta->timestamp
+    );
+}
+
+static void execOldProcess_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    IntT        returned_value                      ;
+    CString   * path                                ;
+    List      * argv = create_List( & type_CString );
+    List      * envp = create_List( & type_CString );
+    ErrorCode * error_code                          ;
+
+    returned_value = readInt_TSStream( stream );
+    path = readCString_TSStream( stream );
+    readStringNullTerminatedList_TSStream( stream, argv );
+    readStringNullTerminatedList_TSStream( stream, envp );
+    error_code = create_ErrorCode( readInt_TSStream( stream ) );
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        execOldProcess_return,
+        create_ExecReturnType( threadId, returned_value, path, argv, envp, error_code ),
+        meta->timestamp
+    );
+}
+
+static void exitCalledProcess_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        exitCalledProcess_return,
+        create_ExitReturnType( readString_TSStream( stream ), threadId ),
+        meta->timestamp
+    );
+}
+
+static void exit_processTerminated_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        exit_processTerminated,
+        create_ExitReturnType(readString_TSStream( stream ), threadId ),
+        meta->timestamp
+    );
+}
+
+static void fork_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    String    * name           =                                    readString_TSStream( stream )  ;
+    ProcessId   returned_value = create_ProcessId( threadId.system, readInt_TSStream   ( stream ) );
+    ErrorCode * error_code     = create_ErrorCode(                  readInt_TSStream   ( stream ) );
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        fork_return,
+        create_ForkReturnType( name, threadId, returned_value, error_code, 0 ),
+        meta->timestamp
+    );
+}
+
+static void forkToChild_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    String    * name           =                                    readString_TSStream( stream )  ;
+    ProcessId   returned_value = create_ProcessId( threadId.system, readInt_TSStream   ( stream ) );
+    ErrorCode * error_code     = create_ErrorCode(                  readInt_TSStream   ( stream ) );
+    PThreadT    childThread    =                                    readULong_TSStream ( stream )  ;
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        forkToChild_return,
+        create_ForkReturnType( name, threadId, returned_value, error_code, childThread ),
+        meta->timestamp
+    );
+}
+
+static void pclose_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    IntT        returned_value =                   readInt_TSStream( stream )  ;
+    ErrorCode * error_code     = create_ErrorCode( readInt_TSStream( stream ) );
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        pclose_return,
+        create_PcloseReturnType( threadId, returned_value, error_code ),
+        meta->timestamp
+    );
+}
+
+static void popen_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    FILETPtr    returned_value =                   readPointer_TSStream( threadId, stream )  ;
+    ErrorCode * error_code     = create_ErrorCode( readInt_TSStream    (           stream ) );
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        popen_return,
+        create_PopenReturnType( threadId, returned_value, error_code ),
+        meta->timestamp
+    );
+}
+
+static void wait_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    ProcessId   returned_value;
+    ErrorCode * error_code    ;
+    IntT        stat_loc      ;
+    bool        isWIfExited   ;
+    IntT        WExitStatus   ;
+    bool        isWIfSignaled ;
+    IntT        WTermSig      ;
+    bool        isWIfStopped  ;
+    IntT        WStopSig      ;
+    bool        isWIfContinued;
+
+    returned_value = create_ProcessId( threadId.system, readInt_TSStream( stream ) )     ;
+    error_code     = create_ErrorCode(                  readInt_TSStream( stream ) )     ;
+    stat_loc       =                                    readInt_TSStream( stream )       ;
+    isWIfExited    = (                                  readInt_TSStream( stream ) != 0 );
+    WExitStatus    =                                    readInt_TSStream( stream )       ;
+    isWIfSignaled  = (                                  readInt_TSStream( stream ) != 0 );
+    WTermSig       =                                    readInt_TSStream( stream )       ;
+    isWIfStopped   = (                                  readInt_TSStream( stream ) != 0 );
+    WStopSig       =                                    readInt_TSStream( stream )       ;
+ // isWIfContinued = (                                  readInt_TSStream( stream ) != 0 );
+    isWIfContinued = (                                  0                          != 0 );
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        wait_return,
+        create_WaitReturnType(
+                threadId, returned_value, error_code, stat_loc,
+                isWIfExited, WExitStatus, isWIfSignaled, WTermSig, isWIfStopped, WStopSig, isWIfContinued
+              ),
+        meta->timestamp
+    );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initProcessProcessSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_exitCalledProcess_return( exitCalledProcess_return_media );
+    set_mediator_exit_processTerminated  ( exit_processTerminated_media   );
+
+    set_mediator__Exit_spec( _Exit_media );
+
+    set_mediator___cxa_atexit_spec( __cxa_atexit_media );
+
+    set_mediator___libc_start_main_spec( __libc_start_main_media );
+
+    set_mediator___register_atfork_spec( __register_atfork_media );
+
+    set_mediator__exit_spec( _exit_media );
+
+    set_mediator_abort_spec               ( abort_media                     );
+    set_mediator_abortCalledProcess_return( abortCalledProcess_return_media );
+    set_mediator_abort_processTerminated  ( abort_processTerminated_media   );
+
+    set_mediator_fork_return       ( fork_return_media        );
+    set_mediator_forkToChild_return( forkToChild_return_media );
+
+    set_mediator_daemon_spec( daemon_media );
+
+    set_mediator_execOldProcess_return( execOldProcess_return_media );
+    set_mediator_execNewProcess_return( execNewProcess_return_media );
+
+    set_mediator_execl_spec ( execl_media  );
+    set_mediator_execle_spec( execle_media );
+    set_mediator_execlp_spec( execlp_media );
+    set_mediator_execv_spec ( execv_media  );
+    set_mediator_execve_spec( execve_media );
+    set_mediator_execvp_spec( execvp_media );
+
+    set_mediator_exit_spec( exit_media );
+
+    set_mediator_fork_spec( fork_media );
+
+    set_mediator_forkpty_spec( forkpty_media );
+
+    set_mediator_pclose_spec  ( pclose_media        );
+    set_mediator_pclose_return( pclose_return_media );
+
+    set_mediator_popen_spec  ( popen_media        );
+    set_mediator_popen_return( popen_return_media );
+
+    set_mediator_return_from_main_spec( return_from_main_media );
+    set_mediator_system_spec(system_media);
+    set_mediator_vfork_spec( vfork_media );
+
+    set_mediator_wait_return( wait_return_media );
+
+    set_mediator_wait_spec   ( wait_media    );
+    set_mediator_wait4_spec  ( wait4_media   );
+    set_mediator_waitpid_spec( waitpid_media );
+
+    // Set up dr processors
+    registerDRProcessor( "abortCalledProcess_return", abortCalledProcess_return_processor );
+    registerDRProcessor( "abort_processTerminated"  , abort_processTerminated_processor   );
+
+    registerDRProcessor( "execOldProcess_return", execOldProcess_return_processor );
+
+    registerDRProcessor( "exitCalledProcess_return", exitCalledProcess_return_processor );
+    registerDRProcessor( "exit_processTerminated"  , exit_processTerminated_processor   );
+
+    registerDRProcessor( "fork_return"       , fork_return_processor        );
+    registerDRProcessor( "forkToChild_return", forkToChild_return_processor );
+
+    registerDRProcessor( "pclose_return", pclose_return_processor );
+
+    registerDRProcessor( "popen_return", popen_return_processor );
+
+    registerDRProcessor( "wait_return", wait_return_processor );
+
+    // Set up formatters
+    registerTSFormatter( "strnullterminatedlist", (TSFormatterFuncType)strnullterminated_list_formatter );
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** common for exit group and return_from_main **/
+mediator exitCalledProcess_return_media for reaction
+ExitReturnType * exitCalledProcess_return( void )
+{
+    state
+    {
+        onExitCalledProcessReturn( exitCalledProcess_return->context );
+    }
+}
+
+mediator exit_processTerminated_media for reaction
+ExitReturnType * exit_processTerminated( void )
+{
+    state
+    {
+        onExitProcessTerminated( exit_processTerminated->context );
+    }
+}
+
+/** _Exit_spec **/
+mediator _Exit_media for specification
+void _Exit_spec( CallContext context, IntT status )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "_Exit:$(int)", create_IntTObj( status ) );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onExit( context, status );
+    }
+}
+
+/** __cxa_atexit_spec **/
+mediator __cxa_atexit_media for specification
+IntT __cxa_atexit_spec( CallContext context, CString * func, VoidTPtr arg, VoidTPtr dso_handle )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__cxa_atexit:$(str)$(ptr)$(ptr)",
+                          func, create_VoidTPtrObj( arg ), create_VoidTPtrObj( dso_handle )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( __cxa_atexit_spec == 0 ) {
+            ProcessState * process_state = getProcessState_CallContext( context );
+            append_List( process_state->registeredForCallAtExit, func );
+        }
+    }
+}
+
+/** __libc_start_main_spec **/
+mediator __libc_start_main_media for specification
+IntT __libc_start_main_spec( CallContext context, CString * main, IntT argc, List /* CString */ * ubp_av,
+                                                  CString * init, CString * fini, CString * rtld_fini,
+                                                  VoidTPtr stack_end
+                           )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__libc_start_main:$(str)$(int)$(strnullterminatedlist)$(str)$(str)$(str)$(ptr)",
+                          main, create_IntTObj( argc ), ubp_av, init, fini, rtld_fini, create_VoidTPtrObj( stack_end )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            readStringNullTerminatedList_TSStream( & command.response, ubp_av );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** __register_atfork_spec **/
+mediator __register_atfork_media for specification
+IntT __register_atfork_spec( CallContext context,
+                             CString * prepare, CString * parent, CString * child, VoidTPtr __dso_handle
+                           )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__register_atfork:$(str)$(str)$(str)$(ptr)",
+                          prepare, parent, child, create_VoidTPtrObj( __dso_handle )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** _exit_spec **/
+mediator _exit_media for specification
+void _exit_spec( CallContext context, IntT status )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "_exit:$(int)", create_IntTObj( status ) );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onExit( context, status );
+    }
+}
+
+/** abort_spec **/
+mediator abort_media for specification
+void abort_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "abort" );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onAbort( context );
+    }
+}
+
+mediator abortCalledProcess_return_media for reaction
+AbortReturnType * abortCalledProcess_return( void )
+{
+    state
+    {
+        onAbortCalledProcessReturn( abortCalledProcess_return->context );
+    }
+}
+
+mediator abort_processTerminated_media for reaction
+AbortReturnType * abort_processTerminated( void )
+{
+    state
+    {
+        onAbortProcessTerminated( abort_processTerminated->context );
+    }
+}
+
+/** common for daemon, fork and vfork **/
+mediator fork_return_media for reaction
+ForkReturnType * fork_return( void )
+{
+    state
+    {
+        onForkReturn( fork_return->name, fork_return->context, fork_return->returned_value, fork_return->error_code );
+    }
+}
+
+mediator forkToChild_return_media for reaction
+ForkReturnType * forkToChild_return( void )
+{
+    state
+    {
+        onForkToChildReturn( forkToChild_return->context, forkToChild_return->childThread );
+    }
+}
+
+/** daemon_spec **/
+mediator daemon_media for specification
+void daemon_spec( CallContext context, IntT nochdir, IntT noclose )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "daemon:$(int)$(int)", create_IntTObj( nochdir ), create_IntTObj( noclose ) );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onFork( context );
+    }
+}
+
+/** common for exec group **/
+mediator execOldProcess_return_media for reaction
+ExecReturnType * execOldProcess_return( void )
+{
+    state
+    {
+        onExecOldProcessReturn( execOldProcess_return->context );
+    }
+}
+
+mediator execNewProcess_return_media for reaction
+ExecReturnType * execNewProcess_return( void )
+{
+    state
+    {
+        onExecNewProcessReturn( execNewProcess_return->context );
+    }
+}
+
+/** execl_spec **/
+mediator execl_media for specification
+void execl_spec( CallContext context, CString * path, List /* CString */ * argv )
+{
+    call
+    {
+        List /* CString */ * fictivEnvp = create_List( & type_CString );
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand
+            ( &command, "execl:$(str)$(strnullterminatedlist)$(strnullterminatedlist)", path, argv, fictivEnvp );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+        List /* CString */ * envp = environMapAsList( processState->environ );
+        onExec( create_String( "execl" ), context, path, argv, envp );
+    }
+}
+
+/** execle_spec **/
+mediator execle_media for specification
+void execle_spec( CallContext context, CString * path, List /* CString */ * argv, List /* CString */ * envp )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "execle:$(str)$(strnullterminatedlist)$(strnullterminatedlist)", path, argv, envp );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onExec( create_String( "execle" ), context, path, argv, envp );
+    }
+}
+
+/** execlp_spec **/
+mediator execlp_media for specification
+void execlp_spec( CallContext context, CString * file, List /* CString */ * argv )
+{
+    call
+    {
+        List /* CString */ * fictivEnvp = create_List( & type_CString );
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand
+            ( &command, "execlp:$(str)$(strnullterminatedlist)$(strnullterminatedlist)", file, argv, fictivEnvp );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+        List /* CString */ * envp = environMapAsList( processState->environ );
+        onExec( create_String( "execlp" ), context, file, argv, envp );
+    }
+}
+
+/** execv_spec **/
+mediator execv_media for specification
+void execv_spec( CallContext context, CString * path, List /* CString */ * argv )
+{
+    call
+    {
+        List /* CString */ * fictivEnvp = create_List( & type_CString );
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand
+            ( &command, "execv:$(str)$(strnullterminatedlist)$(strnullterminatedlist)", path, argv, fictivEnvp );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+        List /* CString */ * envp = environMapAsList( processState->environ );
+        onExec( create_String( "execv" ), context, path, argv, envp );
+    }
+}
+
+/** execve_spec **/
+mediator execve_media for specification
+void execve_spec( CallContext context, CString * path, List /* CString */ * argv, List /* CString */ * envp )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "execve:$(str)$(strnullterminatedlist)$(strnullterminatedlist)", path, argv, envp );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onExec( create_String( "execve" ), context, path, argv, envp );
+    }
+}
+
+/** execvp_spec **/
+mediator execvp_media for specification
+void execvp_spec( CallContext context, CString * file, List /* CString */ * argv )
+{
+    call
+    {
+        List /* CString */ * fictivEnvp = create_List( & type_CString );
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand
+            ( &command, "execvp:$(str)$(strnullterminatedlist)$(strnullterminatedlist)", file, argv, fictivEnvp );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        ProcessState * processState = getProcessState_CallContext( context );
+        List /* CString */ * envp = environMapAsList( processState->environ );
+        onExec( create_String( "execvp" ), context, file, argv, envp );
+    }
+}
+
+/** exit_spec **/
+mediator exit_media for specification
+void exit_spec( CallContext context, IntT status )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "exit:$(int)", create_IntTObj( status ) );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onExit( context, status );
+    }
+}
+
+/** fork_spec **/
+mediator fork_media for specification
+void fork_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "fork" );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onFork( context );
+    }
+}
+
+/** forkpty_spec **/
+mediator forkpty_media for specification
+void forkpty_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "forkpty" );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onFork( context );
+    }
+}
+
+/** pclose_spec **/
+mediator pclose_media for specification
+void pclose_spec( CallContext context, FILETPtr stream )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "pclose:$(ptr)", create_VoidTPtrObj( stream ) );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onPclose( context, stream );
+    }
+}
+
+mediator pclose_return_media for reaction
+PcloseReturnType * pclose_return( void )
+{
+    state
+    {
+        onPcloseReturn( pclose_return->context, pclose_return->returned_value, pclose_return->error_code );
+    }
+}
+
+/** popen_spec **/
+mediator popen_media for specification
+void popen_spec( CallContext context, CString * Command, CString * mode )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "popen:$(str)$(str)", Command, mode );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onPopen( context, Command, mode );
+    }
+}
+
+mediator popen_return_media for reaction
+PopenReturnType * popen_return( void )
+{
+    state
+    {
+        onPopenReturn( popen_return->context, popen_return->returned_value, popen_return->error_code );
+    }
+}
+
+/** return_from_main_spec **/
+mediator return_from_main_media for specification
+void return_from_main_spec( CallContext context, IntT status )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "return_from_main:$(int)", create_IntTObj( status ) );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onExit( context, status );
+    }
+}
+
+/** system_spec **/
+mediator system_media for specification
+IntT system_spec( CallContext context, CString *cmd, ErrorCode *errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        IntT res;
+
+        format_TSCommand( &command, "system:$(str)", cmd );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+  }
+}
+
+/** vfork_spec **/
+mediator vfork_media for specification
+void vfork_spec( CallContext context, CString * funcName )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "vfork:$(str)", funcName );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onFork( context );
+        if ( equals( funcName, create_CString( "_exit" ) ) ) {
+            onExit( context, 0 );
+        } else if ( equals( funcName, create_CString( "execl" ) ) ) {
+            ProcessState * processState = getProcessState_CallContext( context );
+            CString * path = create_CString( "./agent" );
+            List /* CString */ * argv = create_List( & type_CString );
+            List /* CString */ * envp = environMapAsList( processState->environ );
+            append_List( argv, create_CString( "agent" ) );
+            onExec( create_String( "execl" ), context, path, argv, envp );
+        }
+    }
+}
+
+/** common for wait group **/
+mediator wait_return_media for reaction
+WaitReturnType * wait_return( void )
+{
+    state
+    {
+        onWaitReturn( wait_return->context, wait_return->returned_value );
+    }
+}
+
+/** wait_spec **/
+mediator wait_media for specification
+void wait_spec( CallContext context, bool isStatLocNull )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "wait:$(int)", create_IntTObj( isStatLocNull ? 1 : 0 ) );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        ProcessId unused = WrongProcessId;
+        onWait( create_String( "wait" ), context, unused, isStatLocNull, 0 );
+    }
+}
+
+/** wait4_spec **/
+mediator wait4_media for specification
+void wait4_spec( CallContext context, ProcessId pid, bool isStatLocNull, IntT options, bool isRusageNull )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "wait4:$(int)$(int)$(int)$(int)", create_IntTObj( pid.process           ),
+                                                                      create_IntTObj( isStatLocNull ? 1 : 0 ),
+                                                                      create_IntTObj( options               ),
+                                                                      create_IntTObj( isRusageNull  ? 1 : 0 )
+                        );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onWait( create_String( "wait4" ), context, pid, isStatLocNull, options );
+    }
+}
+
+/** waitpid_spec **/
+mediator waitpid_media for specification
+void waitpid_spec( CallContext context, ProcessId pid, bool isStatLocNull, IntT options )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "waitpid:$(int)$(int)$(int)", create_IntTObj( pid.process           ),
+                                                                  create_IntTObj( isStatLocNull ? 1 : 0 ),
+                                                                  create_IntTObj( options               )
+                        );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onWait( create_String( "waitpid" ), context, pid, isStatLocNull, options );
+    }
+}

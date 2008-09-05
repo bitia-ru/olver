@@ -1,0 +1,356 @@
+  /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "signal/sigaction/tests/sigaction_scenario.seh"
+#include "signal/sigaction/sigaction_model.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+
+#define STACKSIZE 10000
+
+/********************************************************************/
+/**                  Tests Local Data                              **/
+/********************************************************************/
+
+static CallContext context, context1, context11, context12, context21, context22;
+static VoidTPtr ss_sp;
+static SigAction* s_oact;
+static SigAction* s_act;
+
+
+/********************************************************************/
+/**                  Scenario State Functions                      **/
+/********************************************************************/
+
+static Object* getSigactionNewState()
+{
+    return create_Integer( 0);
+}
+
+/********************************************************************/
+/**                  Test Scenarios Initialization                 **/
+/********************************************************************/
+
+static bool init_sigaction_new_scenario(int argc,char** argv)
+{
+
+    context = createProcess();
+    
+    context1 = createProcess();
+
+    context11 = createProcess();
+    context12 = createProcess();
+
+    context21 = createProcess();
+    context22 = createProcess();
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME*20);
+    
+    s_act = create_SigAction();
+    s_oact = create_SigAction();
+    
+    s_oact->m_sa_handler = SIG_USER_CATCHER;
+    s_oact->m_sa_sigaction = SIGACT_USER_CATCHER;
+    s_act->m_sa_handler = SIG_USER_CATCHER;
+    s_act->m_sa_sigaction = SIGACT_USER_CATCHER;
+    
+    
+    sigaction_spec(context, create_Signal(SUT_SIGUSR1),
+        s_act, s_oact, requestErrorCode());
+    sigaction_spec(context, create_Signal(SUT_SIGUSR2),
+        s_act, s_oact, requestErrorCode());
+    
+
+    ss_sp = allocateMemoryBlock(context, STACKSIZE);
+    return true;
+}
+
+/********************************************************************/
+/**                  Test Scenarios Finalization                   **/
+/********************************************************************/
+
+static void finish_sigaction_new_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(sigaction_new_scenario);
+    deallocateMemoryBlock(context, ss_sp);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+
+scenario
+bool altstack_scen()
+{
+    StackT* st1 = create_StackT(ss_sp, 0, STACKSIZE);
+    StackT* st2 = create_StackT(ss_sp, 0, STACKSIZE+30);
+    StackT* st3 = create_StackT(ss_sp, 0, STACKSIZE+300);
+    SigaltstackReturnType* rv1 = sigaltstack_spec(context, st1, requestErrorCode());
+    SigaltstackReturnType* rv2 = sigaltstack_spec(context, st2, requestErrorCode());
+    SigaltstackReturnType* rv3 = sigaltstack_spec(context, st3, requestErrorCode());
+
+
+    if(rv1->funcRes!=-1 && rv2->funcRes!=-1 && rv3->funcRes!=-1)
+    {
+        /*
+         * If oss is not a null pointer, on successful completion it shall point to a 
+         * stack_t structure that specifies the alternate signal stack that was in effect 
+         * prior to the call to sigaltstack()
+         */
+        REQ_SCEN("sigaltstack.07", "Old stack value shall be returned", equals(rv2->oldSs, st1) 
+            && equals(rv3->oldSs, st2));
+    }
+        
+    siginterrupt_spec(context, create_Signal(SUT_SIGUSR2), false, requestErrorCode());
+
+    sigaction_spec(context, create_Signal(SUT_SIGUSR2),
+        s_act, s_oact, requestErrorCode());
+
+    if (s_oact->m_sa_flag.SA_RESTART_Flag != true)
+    {
+        return false;
+    }
+
+    siginterrupt_spec(context, create_Signal(SUT_SIGUSR2), true, requestErrorCode());
+    
+    sigaction_spec(context, create_Signal(SUT_SIGUSR2),
+        s_act, s_oact, requestErrorCode());
+    
+    if (s_oact->m_sa_flag.SA_RESTART_Flag != false)
+    {
+        return false;
+    }
+
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SUT_SIG_DFL, requestErrorCode(), false);
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SIG_USER_CATCHER, requestErrorCode(), false);
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SUT_SIG_IGN, requestErrorCode(), false);
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SUT_SIG_HOLD, requestErrorCode(), false);
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SIG_USER_CATCHER, requestErrorCode(), false);
+
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SUT_SIG_HOLD, requestErrorCode(), true);
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SIG_USER_CATCHER, requestErrorCode(), true);
+    signal_spec(context, create_Signal(SUT_SIGUSR2), SUT_SIG_DFL, requestErrorCode(), true);
+
+    bsd_signal_spec(context, create_Signal(SUT_SIGUSR2), SIG_USER_CATCHER, requestErrorCode());
+    bsd_signal_spec(context, create_Signal(SUT_SIGUSR2), SUT_SIG_IGN, requestErrorCode());
+    bsd_signal_spec(context, create_Signal(SUT_SIGUSR2), SUT_SIG_HOLD, requestErrorCode());
+
+    return true;
+}
+
+
+scenario
+bool pause_scen()
+{
+     sigaction_spec(context1, create_Signal(SUT_SIGUSR1),
+        s_act, s_oact, requestErrorCode());
+
+    pause_spec(context1);
+    ts_sleep_msec(1000);
+    kill_spec(context, create_ProcessId(context1.system, context1.process), create_Signal(SUT_SIGUSR1), false);
+    
+    return true;
+}
+
+scenario
+bool sigpending_scen()
+{
+    SigSetTPtr set1, set2, set3;
+    SigSet *mset1, *mset2, *mset3;
+
+    set1 = allocateMemoryBlock(context12, sizeof_SUTType("sigset_t"));
+    mset1 = create_SigSet(set1);    
+    registerObjectInMemory(set1, 0, (Object*)mset1);
+    set2 = allocateMemoryBlock(context12, sizeof_SUTType("sigset_t"));
+    mset2 = create_SigSet(set2);    
+    registerObjectInMemory(set2, 0, (Object*)mset2);
+    set3 = allocateMemoryBlock(context12, sizeof_SUTType("sigset_t"));
+    mset3 = create_SigSet(set3);    
+    registerObjectInMemory(set3, 0, (Object*)mset3);
+
+    sigemptyset_spec(context12, set2, requestErrorCode());
+    sigemptyset_spec(context12, set3, requestErrorCode());
+
+    sigemptyset_spec(context12, set1, requestErrorCode());
+    sigaddset_spec(context12, set1, SUT_SIGUSR2, requestErrorCode());
+
+    pthread_sigmask_spec(context12, SUT_SIG_SETMASK, set1, set2, true);
+
+    sigaddset_spec(context12, set1, SUT_SIGUSR1, requestErrorCode());
+    pthread_sigmask_spec(context12, SUT_SIG_BLOCK, set1, set2, true);
+    pthread_sigmask_spec(context12, SUT_SIG_BLOCK, set1, set2, true);
+
+    sigpending_spec(context12, set3, requestErrorCode());
+    if (sigisemptyset_spec(context12, set3, requestErrorCode())<=0)
+    {
+        traceFormattedUserInfo("Fail 1");
+        return false;
+    }
+
+    if (sigismember_spec(context12, set2, SUT_SIGUSR1, requestErrorCode())!=1 || sigismember_spec(context12, set2, SUT_SIGUSR2, requestErrorCode())!=1)
+    {
+        traceFormattedUserInfo("Fail 2");
+        return false;
+    }
+    else
+    {
+        sigdelset_spec(context12, set2, SUT_SIGUSR1, requestErrorCode()); 
+        sigdelset_spec(context12, set2, SUT_SIGUSR2, requestErrorCode()); 
+        if (sigisemptyset_spec(context12, set2, requestErrorCode())<=0)
+        {
+            traceFormattedUserInfo("Fail 3");
+            return false;
+        }
+    }
+
+    ts_sleep_msec(300);
+    kill_spec(context11, create_ProcessId(context12.system, context12.process), create_Signal(SUT_SIGUSR1), false);
+    ts_sleep_msec(300);
+    sigpending_spec(context12, set3, requestErrorCode());
+
+    if (sigismember_spec(context12, set3, SUT_SIGUSR1, requestErrorCode())!=1)
+    {
+        traceFormattedUserInfo("Fail 4");
+        return false;
+    }
+    else
+    {
+        sigdelset_spec(context12, set3, SUT_SIGUSR1, requestErrorCode()); 
+        if (sigisemptyset_spec(context12, set3, requestErrorCode())<=0)
+        {
+            traceFormattedUserInfo("Fail 5");
+            return false;
+        }
+    }
+
+    ts_sleep_msec(300);
+    kill_spec(context11, create_ProcessId(context12.system, context12.process), create_Signal(SUT_SIGUSR2), false);
+    ts_sleep_msec(300);
+    sigpending_spec(context12, set3, requestErrorCode());
+    if (sigismember_spec(context12, set3, SUT_SIGUSR1, requestErrorCode())!=1 || sigismember_spec(context12, set3, SUT_SIGUSR2, requestErrorCode())!=1  )
+    {
+        traceFormattedUserInfo("Fail 6");
+        return false;
+    }
+    else
+    {
+        sigdelset_spec(context12, set3, SUT_SIGUSR1, requestErrorCode()); 
+        sigdelset_spec(context12, set3, SUT_SIGUSR2, requestErrorCode()); 
+        if (sigisemptyset_spec(context12, set3, requestErrorCode())<=0)
+        {
+            traceFormattedUserInfo("Fail 7");
+            return false;
+        }
+    }
+
+    pthread_sigmask_spec(context12, SUT_SIG_UNBLOCK, set1, set2, true);
+    ts_sleep_msec(300);
+    kill_spec(context11, create_ProcessId(context12.system, context12.process), create_Signal(SUT_SIGUSR2), false);
+
+    return true;
+}
+
+scenario
+bool sigsuspend_scen()
+{
+    SigSetTPtr blockSet, tmpSet;
+    SigSet *set1;
+
+    blockSet = allocateMemoryBlock(context22, sizeof_SUTType("sigset_t"));
+    set1 = create_SigSet(blockSet);    
+    registerObjectInMemory(blockSet, 0, (Object*)set1);
+
+    sigemptyset_spec(context22, blockSet, requestErrorCode());
+    sigaddset_spec(context22, blockSet, SUT_SIGUSR1, requestErrorCode());
+
+    s_oact->m_sa_handler = SIG_USER_CATCHER;
+    s_oact->m_sa_sigaction = SIGACT_USER_CATCHER;
+    s_act->m_sa_handler = SIG_USER_CATCHER;
+    s_act->m_sa_sigaction = SIGACT_USER_CATCHER;
+
+    sigaction_spec(context22, create_Signal(SUT_SIGUSR1),
+        s_act, s_oact, requestErrorCode());
+    sigaction_spec(context22, create_Signal(SUT_SIGUSR2),
+        s_act, s_oact, requestErrorCode());
+
+    ts_sleep_msec(300);
+
+    sigsuspend_spec(context22, blockSet);
+
+    ts_sleep_msec(1000);
+
+    kill_spec(context21, create_ProcessId(context22.system, context22.process), create_Signal(SUT_SIGUSR1), false);
+    ts_sleep_msec(300);
+    kill_spec(context21, create_ProcessId(context22.system, context22.process), create_Signal(SUT_SIGUSR2), false);
+    ts_sleep_msec(300);
+    kill_spec(context21, create_ProcessId(context22.system, context22.process), create_Signal(SUT_SIGUSR1), false);
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+Map* saveSigactionNewModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreSigactionNewModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+static bool isSigactionNewModelStateStationary(void)
+{
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenarios Definitions                  **/
+/********************************************************************/
+
+scenario dfsm sigaction_new_scenario =
+{
+    .init = init_sigaction_new_scenario,
+    .finish = finish_sigaction_new_scenario,
+    .getState = getSigactionNewState,
+    .saveModelState = (PtrSaveModelState)saveSigactionNewModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreSigactionNewModelState,
+    .isStationaryState=(PtrIsStationaryState)isSigactionNewModelStateStationary,
+    .actions = {
+            sigpending_scen,
+            altstack_scen,
+            sigsuspend_scen,
+            pause_scen,
+            NULL
+    }
+
+}; 
+

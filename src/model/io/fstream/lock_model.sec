@@ -1,0 +1,415 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "common/coverages.seh"
+#include "io/fstream/fstream_model.seh"
+#include "io/fstream/lock_model.seh"
+#include "system/system/system_model.seh"
+
+#pragma SEC subsystem fstream "io.fstream"
+
+/*
+   The group of functions 'io.fstream.lock' consists of:
+       flockfile [2]
+       ftrylockfile [1]
+       funlockfile [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    flockfile, ftrylockfile, funlockfile - stdio locking functions
+
+SYNOPSIS
+
+    [TSF]  #include <stdio.h>
+
+    void flockfile(FILE *file);
+    int ftrylockfile(FILE *file);
+    void funlockfile(FILE *file);
+
+DESCRIPTION
+
+    These functions shall provide for explicit application-level locking of
+    stdio ( FILE *) objects. These functions can be used by a thread to
+    delineate a sequence of I/O statements that are executed as a unit.
+
+    The flockfile() function shall acquire for a thread ownership of a
+    ( FILE *) object.
+
+    The ftrylockfile() function shall acquire for a thread ownership of a
+    ( FILE *) object if the object is available; ftrylockfile() is a
+    non-blocking version of flockfile().
+
+    The funlockfile() function shall relinquish the ownership granted to the
+    thread. The behavior is undefined if a thread other than the current owner
+    calls the funlockfile() function.
+
+    The functions shall behave as if there is a lock count associated with each
+    ( FILE *) object. This count is implicitly initialized to zero when the
+    ( FILE *) object is created. The ( FILE *) object is unlocked when the
+    count is zero. When the count is positive, a single thread owns the
+    ( FILE *) object. When the flockfile() function is called, if the count is
+    zero or if the count is positive and the caller owns the ( FILE *) object,
+    the count shall be incremented.Otherwise, the calling thread shall be
+    suspended, waiting for the count to return to zero. Each call to
+    funlockfile() shall decrement the count. This allows matching calls to
+    flockfile() (or successful calls to ftrylockfile()) and funlockfile() to be
+    nested.
+
+    All functions that reference ( FILE *) objects shall behave as if they use
+    flockfile() and funlockfile() internally to obtain ownership of these
+    ( FILE *) objects.
+
+RETURN VALUE
+
+    None for flockfile() and funlockfile().
+
+    The ftrylockfile() function shall return zero for success and non-zero to
+    indicate that the lock cannot be acquired.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+void flockfile_spec( CallContext context, FILETPtr file, bool * threadWasBlocked ) {
+    SystemState * preSystemState, * postSystemState;
+    StreamState * preStreamState, * postStreamState;
+    ThreadIdObj * preLocker     , * postLocker     ;
+    int           preLockCount  ,   postLockCount  ;
+
+    pre {
+        preSystemState = getSystemState_CallContext( context );
+        preStreamState = get_Map( preSystemState->streams, create_FILETPtrObj( file ) );
+        preLocker = locker_StreamState( preStreamState );
+        preLockCount = lockCount_StreamState( preStreamState );
+
+        return true;
+    }
+    coverage flockfile_coverage = CoverageForFILETPtr( file );
+    post {
+        postSystemState = getSystemState_CallContext( context );
+        postStreamState = get_Map( postSystemState->streams, create_FILETPtrObj( file ) );
+        postLocker = locker_StreamState( postStreamState );
+        postLockCount = lockCount_StreamState( postStreamState );
+
+        /*
+         * These functions shall provide for explicit application-level locking of stdio (
+         * FILE *) objects. These functions can be used by a thread to delineate a
+         * sequence of I/O statements that are executed as a unit.
+         */
+        REQ( "flockfile.01", "", TODO_REQ() );
+
+        /*
+         * The functions shall behave as if there is a lock count associated with each (
+         * FILE *) object.
+         */
+        REQ( "flockfile.04", "there is a lock count associated with each ( FILE * ) object", preLockCount >= 0 );
+
+        /*
+         * This count is implicitly initialized to zero when the ( FILE *) object is
+         * created.
+         */
+        REQ( "flockfile.05", "", TODO_REQ() );
+
+        /*
+         * The ( FILE *) object is unlocked when the count is zero.
+         */
+        REQ( "flockfile.06", "( FILE * ) object is unlocked when count is zero", preLockCount != 0 || preLocker == NULL );
+
+        /*
+         * When the count is positive, a single thread owns the ( FILE *) object.
+         */
+        REQ( "flockfile.07", "When the count is positive, a single thread owns the ( FILE *) object",
+                             preLockCount <= 0 || preLocker != NULL
+           );
+
+        if ( preLockCount == 0 || equals( preLocker, create_ThreadIdObj( context ) ) ) {
+            /*
+             * The flockfile() function shall acquire for a thread ownership of a ( FILE *)
+             * object.
+             */
+            REQ( "flockfile.02", "flockfile() function shall acquire for a thread ownership of a ( FILE *) object",
+                                 equals( postLocker, create_ThreadIdObj( context ) )
+               );
+
+            /*
+             * When the flockfile() function is called, if the count is zero or if the count
+             * is positive and the caller owns the ( FILE *) object, the count shall be
+             * incremented.
+             */
+            REQ( "flockfile.08.01", "count shall be incremented", preLockCount < postLockCount );
+
+            /*
+             * This allows matching calls to flockfile() (or successful calls to ftrylockfile()
+             * ) and funlockfile() to be nested.
+             */
+            REQ( "flockfile.09",
+                 "This allows matching calls to flockfile() (or successful calls to ftrylockfile()) and funlockfile() to be nested",
+                 true
+               );
+        } else {
+            /*
+             * Otherwise, the calling thread shall be suspended, waiting for the count to
+             * return to zero.
+             */
+            REQ( "flockfile.08.02", "calling thread shall be suspended", * threadWasBlocked );
+        }
+
+        /*
+         * All functions that reference ( FILE *) objects shall behave as if they use
+         * flockfile() and funlockfile() internally to obtain ownership of these ( FILE *)
+         * objects.
+         */
+        REQ( "flockfile.10", "", TODO_REQ() );
+
+        return true;
+    }
+}
+
+specification
+IntT ftrylockfile_spec( CallContext context, FILETPtr file ) {
+    SystemState * preSystemState, * postSystemState;
+    StreamState * preStreamState, * postStreamState;
+    ThreadIdObj * preLocker     , * postLocker     ;
+    int           preLockCount  ,   postLockCount  ;
+
+    pre {
+        preSystemState = getSystemState_CallContext( context );
+        preStreamState = get_Map( preSystemState->streams, create_FILETPtrObj( file ) );
+        preLocker = locker_StreamState( preStreamState );
+        preLockCount = lockCount_StreamState( preStreamState );
+
+        return true;
+    }
+    coverage ftrylockfile_coverage = CoverageForFILETPtr( file );
+    post {
+        postSystemState = getSystemState_CallContext( context );
+        postStreamState = get_Map( postSystemState->streams, create_FILETPtrObj( file ) );
+        postLocker = locker_StreamState( postStreamState );
+        postLockCount = lockCount_StreamState( postStreamState );
+
+        /*
+         * These functions shall provide for explicit application-level locking of stdio (
+         * FILE *) objects. These functions can be used by a thread to delineate a
+         * sequence of I/O statements that are executed as a unit.
+         */
+        REQ( "ftrylockfile.01", "", TODO_REQ() );
+
+        /*
+         * The functions shall behave as if there is a lock count associated with each (
+         * FILE *) object.
+         */
+        REQ( "ftrylockfile.04", "there is a lock count associated with each ( FILE * ) object", preLockCount >= 0 );
+
+        /*
+         * This count is implicitly initialized to zero when the ( FILE *) object is
+         * created.
+         */
+        REQ( "ftrylockfile.05", "", TODO_REQ() );
+
+        /*
+         * The ( FILE *) object is unlocked when the count is zero.
+         */
+        REQ( "ftrylockfile.06", "( FILE * ) object is unlocked when count is zero",
+                                preLockCount != 0 || preLocker == NULL
+           );
+
+        /*
+         * When the count is positive, a single thread owns the ( FILE *) object.
+         */
+        REQ( "ftrylockfile.07", "When the count is positive, a single thread owns the ( FILE *) object",
+                                preLockCount <= 0 || preLocker != NULL
+           );
+
+        if ( preLockCount == 0 || equals( preLocker, create_ThreadIdObj( context ) ) ) {
+            /*
+             * The ftrylockfile() function shall acquire for a thread ownership of a ( FILE *)
+             * object if the object is available; ftrylockfile() is a non-blocking version of
+             * flockfile().
+             */
+            REQ( "ftrylockfile.02", "ftrylockfile() function shall acquire for a thread ownership of a ( FILE * ) object",
+                                    equals( postLocker, create_ThreadIdObj( context ) )
+               );
+
+            /*
+             * When the flockfile() function is called, if the count is zero or if the count
+             * is positive and the caller owns the ( FILE *) object, the count shall be
+             * incremented.
+             */
+            REQ( "ftrylockfile.08.01", "count shall be incremented", preLockCount < postLockCount );
+
+            /*
+             * This allows matching calls to flockfile() (or successful calls to ftrylockfile()
+             * ) and funlockfile() to be nested.
+             */
+            REQ( "ftrylockfile.09",
+                 "This allows matching calls to flockfile() (or successful calls to ftrylockfile()) and funlockfile() to be nested",
+                 true
+               );
+
+            /*
+             * The ftrylockfile() function shall return zero for success
+             */
+            REQ( "ftrylockfile.11.01", "zero for success", ftrylockfile_spec == 0 );
+        } else {
+            /*
+             * The ftrylockfile() function shall acquire for a thread ownership of a ( FILE *)
+             * object if the object is available; ftrylockfile() is a non-blocking version of
+             * flockfile().
+             */
+            REQ( "ftrylockfile.02", "ftrylockfile() is a non-blocking version of flockfile()", true );
+
+            /*
+             * and non-zero to indicate that the lock cannot be acquired.
+             */
+            REQ( "ftrylockfile.11.02", "non-zero to indicate that the lock cannot be acquired", ftrylockfile_spec != 0 );
+        }
+
+        /*
+         * All functions that reference ( FILE *) objects shall behave as if they use
+         * flockfile() and funlockfile() internally to obtain ownership of these ( FILE *)
+         * objects.
+         */
+        REQ( "ftrylockfile.10", "", TODO_REQ() );
+
+        return true;
+    }
+}
+
+specification
+void funlockfile_spec( CallContext context, FILETPtr file ) {
+    SystemState * preSystemState, * postSystemState;
+    StreamState * preStreamState, * postStreamState;
+    ThreadIdObj * preLocker     , * postLocker     ;
+    int           preLockCount  ,   postLockCount  ;
+
+    pre {
+        preSystemState = getSystemState_CallContext( context );
+        preStreamState = get_Map( preSystemState->streams, create_FILETPtrObj( file ) );
+        preLocker = locker_StreamState( preStreamState );
+        preLockCount = lockCount_StreamState( preStreamState );
+
+        /*
+         * The behavior is undefined if a thread other than the current owner calls the
+         * funlockfile() function.
+         */
+        REQ( "app.funlockfile.03",
+             "The behavior is undefined if a thread other than the current owner calls the funlockfile() function",
+             equals( preLocker, create_ThreadIdObj( context ) )
+           );
+
+        return true;
+    }
+    coverage funlockfile_coverage = CoverageForFILETPtr( file );
+    post {
+        postSystemState = getSystemState_CallContext( context );
+        postStreamState = get_Map( postSystemState->streams, create_FILETPtrObj( file ) );
+        postLocker = locker_StreamState( postStreamState );
+        postLockCount = lockCount_StreamState( postStreamState );
+
+        /*
+         * These functions shall provide for explicit application-level locking of stdio (
+         * FILE *) objects. These functions can be used by a thread to delineate a
+         * sequence of I/O statements that are executed as a unit.
+         */
+        REQ( "funlockfile.01", "", TODO_REQ() );
+
+        /*
+         * The funlockfile() function shall relinquish the ownership granted to the thread.
+         */
+        REQ("funlockfile.02", "", TODO_REQ());
+
+        /*
+         * The functions shall behave as if there is a lock count associated with each (
+         * FILE *) object.
+         */
+        REQ( "funlockfile.04", "there is a lock count associated with each ( FILE * ) object", preLockCount >= 0 );
+
+        /*
+         * This count is implicitly initialized to zero when the ( FILE *) object is
+         * created.
+         */
+        REQ( "funlockfile.05", "", TODO_REQ() );
+
+        /*
+         * The ( FILE *) object is unlocked when the count is zero.
+         */
+        REQ( "funlockfile.06", "( FILE * ) object is unlocked when count is zero",
+                               preLockCount != 0 || preLocker == NULL
+           );
+
+        /*
+         * When the count is positive, a single thread owns the ( FILE *) object.
+         */
+        REQ( "funlockfile.07", "When the count is positive, a single thread owns the ( FILE *) object",
+                               preLockCount <= 0 || preLocker != NULL
+           );
+
+        /*
+         * Each call to funlockfile() shall decrement the count.
+         */
+        REQ( "funlockfile.08", "Each call to funlockfile() shall decrement the count", preLockCount > postLockCount );
+
+        /*
+         * This allows matching calls to flockfile() (or successful calls to ftrylockfile()
+         * ) and funlockfile() to be nested.
+         */
+        REQ( "funlockfile.09",
+             "This allows matching calls to flockfile() (or successful calls to ftrylockfile()) and funlockfile() to be nested",
+             true
+           );
+
+        /*
+         * All functions that reference ( FILE *) objects shall behave as if they use
+         * flockfile() and funlockfile() internally to obtain ownership of these ( FILE *)
+         * objects.
+         */
+        REQ( "funlockfile.10", "", TODO_REQ() );
+
+        return true;
+    }
+}

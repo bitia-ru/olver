@@ -1,0 +1,879 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "util/string/wmem_model.seh"
+#include "common/wchararray.seh"
+#include "config/system_config.seh"
+#include "data/wchar_model.seh"
+
+#pragma SEC subsystem string "util.string"
+
+/* 
+   The group of functions 'util.string.wmem' consists of: 
+       wmemchr [2]
+       wmemcmp [2]
+       wmemcpy [2]
+       wmemmove [2]
+       wmemset [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wmemchr - find a wide character in memory
+
+SYNOPSIS
+
+    #include <wchar.h>
+    wchar_t *wmemchr(const wchar_t *ws, wchar_t wc, size_t n);
+
+DESCRIPTION
+
+    The wmemchr() function shall locate the first occurrence of wc in the 
+    initial n wide characters of the object pointed to by ws. This function 
+    shall not be affected by locale and all wchar_t values shall be treated 
+    identically. The null wide character and wchar_t values not corresponding 
+    to valid characters shall not be treated specially.
+
+    If n is zero, the application shall ensure that ws is a valid pointer and 
+    the function behaves as if no valid occurrence of wc is found.
+
+RETURN VALUE
+
+    The wmemchr() function shall return a pointer to the located wide 
+    character, or a null pointer if the wide character does not occur in the 
+    object.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WCharTPtr wmemchr_spec( CallContext context, WCharTPtr ws, WCharT wc, SizeT n)
+{
+    WCharTPtr bytePt;
+    WCharTPtr lastCharPt;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws is not NULL", !isNULL_VoidTPtr(ws) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws is available in the context",
+                isValidPointer(context, ws) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws is enough",
+            sizeRMemoryAvailable(ws) >= n*sizeof_WCharT );
+
+        /* [ Init specification local data ] */
+        bytePt=wmemchr_model(ws, wc, n);
+        lastCharPt=wmemrchr_model(ws, wc, n);
+
+        return true;
+    }
+    coverage C
+    {
+        if(n == 0)
+        {
+            return {Zero, "n == 0 case"};
+        }
+        else if(isNULL_VoidTPtr(bytePt))
+        {
+            return { NotFound, "The character does not occur in the object" };
+        }
+        else if(equals_VoidTPtr(bytePt, lastCharPt)) 
+        {
+            return { OnlyOneFound,
+                "The character occurs only once in the object" };
+        }
+        else /* if(!equals_VoidTPtr(bytePt, lastCharPt))  */
+        {
+            return { SeveralFound,
+                "The character occurs several times in the object" };
+        }
+
+    }
+    coverage C_ZeroChar
+    {
+        if(wc==NULL_WCharT)
+        {
+            return {ZeroChar, "NULL character case"};
+        }
+        else if(wc==WEOF_WIntT)
+        {
+            /*
+             * Linux Standard Base Specific Assertion
+             *
+             * Assertion: sizeof(wchar_t) == sizeof(wint_t)
+             *   Always true within 
+             *     Linux Standard Base Core Specification 3.1
+             *     Copyright (c) 2004, 2005 Free Standards Group
+             *
+             *     See section 'Data Definitions for libc'.
+             */
+            return {WeofChar, "WEOF value case"};
+        }
+        else
+        {
+            return {ValidChar, "Valid wide character"};
+        }
+    }
+    ALIGNMENT_COVERAGE(ws)
+    post
+    {
+        if(!isNULL_VoidTPtr(bytePt))
+        {
+            /*
+             * The wmemchr() function shall return
+             * 
+             * a pointer to the located wide character
+             */
+            REQ("wmemchr.05.01",
+                        "The wmemchr() function shall return"
+                        " a pointer to the located character",
+                        equals_VoidTPtr(wmemchr_spec, bytePt));
+        }
+        else
+        {
+
+            /*
+             * The wmemchr() function shall return
+             * 
+             * null pointer if the wide character does not occur in the object.
+             */
+            REQ("wmemchr.05.02",
+                "The wmemchr() function shall return a null pointer if the"
+                " character does not occur in the object or n==0",
+                isNULL_VoidTPtr(wmemchr_spec));
+        }
+
+        /* [Nothing shall be changed in ws] */
+        REQ( "", "Nothing shall be changed in ws",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(ws)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(ws)))
+            );
+
+        /*
+         * This function shall not be affected by locale and all wchar_t
+         * values shall be treated identically.
+         */
+        REQ("wmemchr.02", "", TODO_REQ());
+
+
+
+        return true;
+    }
+}
+
+WCharTPtr wmemchr_model(WCharTPtr ws, WCharT wc, SizeT n)
+{
+    WCharArray* ar;
+    WCharT curChar;
+
+    SizeT i;
+
+    ar=readWCharArray_VoidTPtr(ws, n);
+
+
+    /*
+     * The wmemchr() function shall locate the first occurrence of wc
+     * in the initial n wide characters of the object pointed to by ws.
+     */
+    IMPLEMENT_REQ("wmemchr.01");
+
+    if(n>0)
+    {
+        /*
+         * The null wide character and wchar_t values not
+         * corresponding to valid characters shall not be treated specially.
+         */
+        IMPLEMENT_REQ("wmemchr.03");
+    }
+
+    for(i=0; i<n; i++)
+    {
+        curChar=wcharAt_WCharArray(ar, i);
+        if(curChar==wc)
+        {
+            return add_VoidTPtr(ws, i*sizeof_WCharT);
+        }
+    }
+    return NULL_VoidTPtr;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wmemcmp - compare wide characters in memory
+
+SYNOPSIS
+
+    #include <wchar.h>
+    int wmemcmp(const wchar_t *ws1, const wchar_t *ws2, size_t n);
+
+DESCRIPTION
+
+    The wmemcmp() function shall compare the first n wide characters of the 
+    object pointed to by ws1 to the first n wide characters of the object 
+    pointed to by ws2. This function shall not be affected by locale and all 
+    wchar_t values shall be treated identically. The null wide character and 
+    wchar_t values not corresponding to valid characters shall not be 
+    treated specially.
+
+    If n is zero, the application shall ensure that ws1 and ws2 are valid 
+    pointers, and the function shall behave as if the two objects compare equal.
+
+RETURN VALUE
+
+    The wmemcmp() function shall return an integer greater than, equal to, or 
+    less than zero, respectively, as the object pointed to by ws1 is greater 
+    than, equal to, or less than the object pointed to by ws2.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+
+specification
+IntT wmemcmp_spec(CallContext context, WCharTPtr ws1, WCharTPtr ws2, SizeT n )
+{
+    IntT result;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1) );
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context",
+                isValidPointer(context, ws1) );
+        REQ("", "Memory pointed to by ws2 is available in the context",
+                isValidPointer(context, ws2) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough",
+                sizeRMemoryAvailable(ws1) >= n*sizeof_WCharT );
+        REQ("", "Memory pointed to by ws2 is enough",
+                sizeRMemoryAvailable(ws2) >= n*sizeof_WCharT );
+
+        /* [ Init specification local data ] */
+        result=wmemcmp_model(ws1, ws2, n);
+
+
+        return true;
+    }
+    coverage C
+    {
+        if(n == 0)
+        {
+            return {Zero, "n == 0 case"};
+        }
+        else if(equals_VoidTPtr(ws1, ws2))
+        {
+            return {Same, "ws1 and ws2 are the same"};
+        }
+        else
+        {
+            if(result==0)
+            {
+                return {EQ, "ws1 and ws2 are identical"};
+            }
+            else if(result>0)
+            {
+                return {G12, "ws1 greater than ws2"};
+            }
+            else /* if(result<0) */
+            {
+                return {G21, "ws2 greater than ws1"};
+            }
+        }
+    }
+    SPECIAL_WCHAR_COVERAGE(ws1, n)
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+    post
+    {
+        /*
+         * The wmemcmp() function shall return an integer greater
+         * than, equal to, or less than zero, respectively, as
+         * the object pointed to by ws1 is greater than, 
+         * equal to, or less than the object pointed to by ws2.
+         */
+        REQ("wmemcmp.05", 
+            "Shall return A*sign(size(ws1)-size(ws2)),A>0(integer), sign(0)=0", 
+                result == 0 && wmemcmp_spec == 0
+            ||  result > 0 && wmemcmp_spec > 0
+            ||  result < 0 && wmemcmp_spec < 0
+            );
+
+        /* [Nothing shall be changed in ws1] */
+        REQ("", "Nothing shall be changed in ws1",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(ws1)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(ws1)))
+            );
+
+        /* [Nothing shall be changed in ws2] */
+        REQ("", "Nothing shall be changed in ws2",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(ws2)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(ws2)))
+            );
+
+        /*
+         * This function shall not be affected by locale
+         * and all wchar_t values shall be treated identically. 
+         */
+        REQ("wmemcmp.02", "", TODO_REQ());
+
+
+        return true;
+    }
+}
+
+IntT wmemcmp_model(WCharTPtr s1, WCharTPtr s2, SizeT n)
+{
+    WCharArray *ar1, *ar2;
+    WCharT b1, b2;
+    SizeT i;
+
+    ar1=readWCharArray_VoidTPtr(s1, n);
+    ar2=readWCharArray_VoidTPtr(s2, n);
+
+    
+    /*
+     * If n is zero, the application shall ensure that
+     * ws1 and ws2 are valid pointers, and the function
+     * shall behave as if the two objects compare equal.
+     */
+    IMPLEMENT_REQ("wmemcmp.04");
+
+    /*
+     * The wmemcmp() function shall compare the first n wide
+     * characters of the object pointed to by ws1 to the first
+     * n wide characters of the object pointed to by ws2.
+     */
+    IMPLEMENT_REQ("wmemcmp.01");
+
+    for(i=0; i<n; i++)
+    {
+        b1=wcharAt_WCharArray(ar1, i);
+        b2=wcharAt_WCharArray(ar2, i);
+
+        /*
+         * The null wide character and wchar_t values not
+         * corresponding to valid characters shall not be treated specially.
+         */
+        IMPLEMENT_REQ("wmemcmp.03");
+
+        if(b1!=b2)
+        {
+            return b1-b2;
+        }
+    }
+    return 0;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    wmemcpy - copy wide characters in memory
+
+SYNOPSIS
+
+    #include <wchar.h>
+    wchar_t *wmemcpy(wchar_t *restrict ws1, const wchar_t *restrict ws2,
+       size_t n);
+
+DESCRIPTION
+
+    The wmemcpy() function shall copy n wide characters from the object 
+    pointed to by ws2 to the object pointed to by ws1. This function shall 
+    not be affected by locale and all wchar_t values shall be treated 
+    identically. The null wide character and wchar_t values not corresponding 
+    to valid characters shall not be treated specially.
+
+    If n is zero, the application shall ensure that ws1 and ws2 are valid 
+    pointers, and the function shall copy zero wide characters.
+
+RETURN VALUE
+
+    The wmemcpy() function shall return the value of ws1.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+
+specification
+WCharTPtr wmemcpy_spec( CallContext context, WCharTPtr ws1, WCharTPtr ws2,
+                        SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1) );
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context",
+                isValidPointer(context, ws1) );
+        REQ("", "Memory pointed to by ws2 is available in the context",
+                isValidPointer(context, ws2) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough",
+                sizeWMemoryAvailable(ws1) >= n*sizeof_WCharT );
+        REQ( "","Memory pointed to by ws2 is enough",
+                sizeRMemoryAvailable(ws2) >= n*sizeof_WCharT );
+        
+       /*
+        * [ "restrict" keyword before ws1 and ws2 means that objects shall
+        * not overlap, so if copying takes place between objects that overlap,
+        * the behavior is undefined. ]
+        */
+        REQ("", "Objects are not overlapped",
+                !areObjectsOverlapped(ws1, n, ws2, n) );
+
+        return true;
+    }
+    coverage C
+    {
+        if (n == 0)
+            return { Zero, "Copy zero byte" };
+        else
+            return { NonZero, "Copy more than zero bytes" };
+    }
+    SPECIAL_WCHAR_COVERAGE(ws2, n)
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+    post
+    {
+        /*
+         * The wmemcpy() function shall copy n wide characters
+         * from the object pointed to by ws2 to the object
+         * pointed to by ws1.
+         */
+        /*
+         * The null wide character and wchar_t values not
+         * corresponding to valid characters shall not
+         * be treated specially.
+         */
+        REQ("wmemcpy.01;wmemcpy.03",
+            "ws1 contain n wide characters from ws2",
+            equals( readWCharArray_VoidTPtr(ws1, n),
+                @readWCharArray_VoidTPtr(ws2, n)));
+
+        
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws2 shall not be changed",
+            equals( readWCharArray_VoidTPtr(ws2,n),
+                    @readWCharArray_VoidTPtr(ws2,n) )
+            );
+
+        /*
+         * The wmemcpy() function shall return the value of ws1.
+         */
+        REQ("wmemcpy.05",
+            "wmemcpy() function shall return ws1",
+            equals_VoidTPtr(wmemcpy_spec, ws1) );
+        
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(ws1), ws1, n*sizeof_WCharT ),
+                    @readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(ws1), ws1, n*sizeof_WCharT )  )
+            );
+
+        /*
+         * This function shall not be affected by locale and
+         * all wchar_t values shall be treated identically.
+         */
+        REQ("wmemcpy.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+    
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    wmemmove - copy wide characters in memory with overlapping areas
+
+SYNOPSIS
+
+    #include <wchar.h>
+    wchar_t *wmemmove(wchar_t *ws1, const wchar_t *ws2, size_t n);
+
+DESCRIPTION
+
+    The wmemmove() function shall copy n wide characters from the object 
+    pointed to by ws2 to the object pointed to by ws1. Copying shall take 
+    place as if the n wide characters from the object pointed to by ws2 are 
+    first copied into a temporary array of n wide characters that does not 
+    overlap the objects pointed to by ws1 or ws2, and then the n wide 
+    characters from the temporary array are copied into the object pointed to
+    by ws1.
+
+    This function shall not be affected by locale and all wchar_t values 
+    shall be treated identically. The null wide character and wchar_t values 
+    not corresponding to valid characters shall not be treated specially.
+
+    If n is zero, the application shall ensure that ws1 and ws2 are valid 
+    pointers, and the function shall copy zero wide characters.
+
+RETURN VALUE
+
+    The wmemmove() function shall return the value of ws1.
+
+ERRORS
+
+    No errors are defined
+*/
+
+specification
+WCharTPtr wmemmove_spec( CallContext context, WCharTPtr ws1, WCharTPtr ws2,
+                            SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1) );
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context",
+                isValidPointer(context, ws1) );
+        REQ("", "Memory pointed to by ws2 is available in the context",
+                isValidPointer(context, ws2) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough",
+                sizeWMemoryAvailable(ws1) >= n*sizeof_WCharT);
+        REQ("", "Memory pointed to by ws2 is enough",
+                sizeRMemoryAvailable(ws2) >= n*sizeof_WCharT);
+
+        return true;
+    }
+    coverage C
+    {
+        if(n==0)
+            return { Zero, "Copy zero bytes"};
+        else if(areObjectsOverlapped(ws1, n*sizeof_WCharT, ws2,
+                            n*sizeof_WCharT))
+        {
+            if(diff_VoidTPtr(ws1, ws2)>0)
+                return {OG12, "Overlapped, ws1 greater than ws2"};
+            else if(diff_VoidTPtr(ws1, ws2)<0)
+                return {OG21, "Overlapped, ws2 greater than ws1"};
+            else /*if(diff_VoidTPtr(ws1, ws2)==0)*/
+                return {OE12, "Overlapped, ws2 equals to ws1"};
+        }
+        else
+        {
+            if(diff_VoidTPtr(ws1, ws2)>0)
+                return {G12, "Not overlapped, ws1 greater than ws2"};
+            else /*if(diff_VoidTPtr(ws1, ws2)<0)*/
+                return {G21, "Not overlapped, ws2 greater than ws1"};
+        }
+    }
+    SPECIAL_WCHAR_COVERAGE(ws1, n)
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+    post
+    {
+        /*
+         * The wmemmove() function shall return the value of ws1.
+         */
+        REQ("wmemmove.05", 
+            "The wmemmove() function shall return ws1",
+            equals_VoidTPtr(wmemmove_spec, ws1));
+
+         /*
+         * The wmemmove() function shall copy n wide characters from
+         * the object pointed to by ws2 to the object pointed to by ws1.
+         */
+        REQ("wmemmove.01",
+            "ws1 contains n bytes from ws2",
+            equals(@readWCharArray_VoidTPtr(ws2, n),
+                readWCharArray_VoidTPtr(ws1, n))
+            );
+
+        /* [Only n characters in ws1 are changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(ws1), ws1, n*sizeof_WCharT ),
+                    @readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(ws1), ws1, n*sizeof_WCharT ))
+            );
+
+        /* [Nothing changed in ws2 except the overlapping part] */
+        REQ( "","Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(ws2), ws1, n*sizeof_WCharT ),
+                    @readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(ws2), ws1, n*sizeof_WCharT ))
+            );
+
+        /*
+         * This function shall not be affected by locale and all
+         * wchar_t values shall be treated identically. The null
+         * wide character and wchar_t values not corresponding
+         * to valid characters shall not be treated specially.
+         */
+        REQ("wmemmove.03", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wmemset - set wide characters in memory
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wmemset(wchar_t *ws, wchar_t wc, size_t n);
+
+DESCRIPTION
+
+    The wmemset() function shall copy the value of wc into each of the first n 
+    wide characters of the object pointed to by ws. This function shall not be 
+    affected by locale and all wchar_t values shall be treated identically. 
+    The null wide character and wchar_t values not corresponding to valid 
+    characters shall not be treated specially.
+
+    If n is zero, the application shall ensure that ws is a valid pointer, and
+    the function shall copy zero wide characters.
+
+RETURN VALUE
+
+    The wmemset() functions shall return the value of ws.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+
+specification
+WCharTPtr wmemset_spec( CallContext context, WCharTPtr ws, WCharT wc, SizeT n )
+{
+    pre
+    {        
+        /* [Implicit precondition] */
+        REQ("", "ws is not NULL", !isNULL_VoidTPtr(ws) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws is available in the context",
+                isValidPointer(context, ws) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws is enough",
+                sizeWMemoryAvailable(ws) >= n*sizeof_WCharT );
+
+
+        return true;
+    }
+    coverage C
+    {
+        if( n==0 )
+        {
+            return { Zero, "Set zero wchars" };
+        } else if ( wc == NULL_WCharT ) {
+            return { SetNull, "Set with NULL wchar" };
+        } else if ( wc == (WCharT)WEOF_WIntT ) {
+            /*
+             * Linux Standard Base Specific Assertion
+             *
+             * Assertion: sizeof(wchar_t) == sizeof(wint_t)
+             *   Always true within 
+             *     Linux Standard Base Core Specification 3.1
+             *     Copyright (c) 2004, 2005 Free Standards Group
+             *
+             *     See section 'Data Definitions for libc'.
+             */
+            return { SetWeof, "Set with WEOF" };
+        } else /* Normal case */ {
+            return { SetNorma, "Set normal wchar" };
+        }
+    }
+    post
+    {
+        /*
+         * The wmemset() function shall copy the value of wc into each
+         * of the first n wide characters of the object pointed to by ws.
+         */
+        REQ("wmemset.01",
+            "The wmemset() function shall copy wc into each of the first n"
+            " wide characters of the object pointed to by ws", 
+            countWArrayWChars(ws, wc, n) == n);
+
+        /*
+         * The wmemset() functions shall return the value of ws.
+         */
+        REQ("wmemset.04", "The wmemset() function shall return ws",
+            equals_VoidTPtr(wmemset_spec, ws));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed", 
+              equals(   readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(ws), ws, n*sizeof_WCharT ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(ws), ws, n*sizeof_WCharT )
+                    )
+           );
+
+        /*
+         * This function shall not be affected by locale and
+         * all wchar_t values shall be treated identically.
+         * The null wide character and wchar_t values not 
+         * corresponding to valid characters shall not be treated specially.
+         */
+        REQ("wmemset.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+SizeT countWArrayWChars(WCharTPtr ws, WCharT wc,  SizeT n)
+{
+    WCharArray* ar;
+    SizeT i;
+    SizeT counter=0;
+    WCharT cur;
+
+    ar=readWCharArray_VoidTPtr(ws, n);
+    for(i=0; i<n; i++)
+    {
+        cur=wcharAt_WCharArray(ar, i);
+        if(cur==wc)
+            counter++;
+    }
+    return counter;
+}
+
+WCharTPtr wmemrchr_model(WCharTPtr ws, WCharT wc, SizeT n)
+{
+
+    WCharArray* ar;
+    WCharT curChar;
+
+    SizeT i;
+
+    ar=readWCharArray_VoidTPtr(ws, n);
+
+    
+    /*
+     * If n is zero, the application shall ensure that ws is
+     * a valid pointer and the function behaves as if no
+     * valid occurrence of wc is found.
+     */
+    IMPLEMENT_REQ("wmemchr.04");
+
+    for(i=0; i<n; i++)
+    {
+        curChar=wcharAt_WCharArray(ar, n-1-i);
+        if(curChar==wc)
+        {
+            return add_VoidTPtr(ws, (n-1-i)*sizeof_WCharT);
+        }
+    }
+    return NULL_VoidTPtr;
+}

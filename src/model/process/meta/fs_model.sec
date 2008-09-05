@@ -1,0 +1,1062 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "process/fenv/fenv_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/meta/user_model.seh"
+#include "fs/meta/access_model.seh"
+#include "config/system_config.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "process/meta/meta_fs_config.h"
+#include "process/meta/fs_model.seh"
+
+#pragma SEC subsystem meta "process.meta"
+
+/*
+   The group of functions 'process.meta.fs' consists of:
+       chdir [2]
+       chroot [4]
+       fchdir [2]
+       getcwd [1]
+       getwd [2]
+       umask [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    chdir - change working directory
+
+SYNOPSIS
+
+    #include <unistd.h>
+    int chdir(const char *path);
+
+DESCRIPTION
+
+    The chdir() function shall cause the directory named by the pathname pointed
+    to by the path argument to become the current working directory; that is,
+    the starting point for path searches for pathnames not beginning with '/'.
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned. Otherwise, -1 shall be
+    returned, the current working directory shall remain unchanged, and errno
+    shall be set to indicate the error.
+
+ERRORS
+
+    The chdir() function shall fail if:
+
+    [EACCES]
+        Search permission is denied for any component of the pathname.
+    [ELOOP]
+        A loop exists in symbolic links encountered during resolution of the
+        path argument.
+    [ENAMETOOLONG]
+        The length of the path argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+    [ENOENT]
+        A component of path does not name an existing directory or path is an
+        empty string.
+    [ENOTDIR]
+        A component of the pathname is not a directory.
+
+    The chdir() function may fail if:
+
+    [ELOOP]
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the path argument.
+    [ENAMETOOLONG]
+        As a result of encountering a symbolic link in resolution of the path
+        argument, the length of the substituted pathname string exceeded
+        {PATH_MAX}.
+*/
+specification
+IntT chdir_spec( CallContext context, CString * path, ErrorCode * errno )
+{
+    ProcessState * process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"  , process_state != NULL );
+        REQ( "", "path point to pathname", path          != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Path
+    {
+        if ( length_CString( path ) == 0 )
+        {
+            return { PathIsEmpty, "path is empty" };
+        }
+        else
+        {
+            return { PathIsNotEmpty, "path is not empty" };
+        }
+    }
+    post
+    {
+        FileSystem * fs  ;
+        File       * file;
+
+        /*
+         * [Upon successful completion, 0 shall be returned.]
+         * Otherwise, -1 shall be returned, the current working directory shall remain
+         * unchanged, and errno shall be set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_CHDIR, "chdir.02.02", chdir_spec == -1, * errno )
+            /*
+             * The chdir() function shall fail if:
+             *
+             * [EACCES]
+             * Search permission is denied for any component of the pathname.
+             */
+            ERROR_SHALL(POSIX_CHDIR, EACCES, "chdir.03.01", TODO_ERR(EACCES) )
+
+            /*
+             * The chdir() function shall fail if:
+             *
+             * [ELOOP]
+             * A loop exists in symbolic links encountered during resolution of the path
+             * argument.
+             */
+            ERROR_SHALL(POSIX_CHDIR, ELOOP, "chdir.03.02", TODO_ERR(ELOOP) )
+
+            /*
+             * The chdir() function shall fail if:
+             *
+             * [ENAMETOOLONG]
+             * The length of the path argument exceeds {PATH_MAX} or a pathname component is
+             * longer than {NAME_MAX}.
+             */
+            ERROR_SHALL(POSIX_CHDIR, ENAMETOOLONG, "chdir.03.03", TODO_ERR(ENAMETOOLONG) )
+
+            /*
+             * The chdir() function shall fail if:
+             *
+             * [ENOENT]
+             * A component of path does not name an existing directory or path is an empty
+             * string.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( POSIX_CHDIR, ENOENT, "chdir.03.04", C_Path == C_Path.PathIsEmpty || * errno == SUT_ENOENT )
+#else
+            ERROR_SHALL( POSIX_CHDIR, ENOENT, "chdir.03.04", coverage( C_Path ) == PathIsEmpty || * errno == SUT_ENOENT )
+#endif
+
+            /*
+             * The chdir() function shall fail if:
+             *
+             * [ENOTDIR]
+             * A component of the pathname is not a directory.
+             */
+            ERROR_SHALL(POSIX_CHDIR, ENOTDIR, "chdir.03.05", TODO_ERR(ENOTDIR) )
+
+            /*
+             * The chdir() function may fail if:
+             *
+             * [ELOOP]
+             * More than {SYMLOOP_MAX} symbolic links were encountered during resolution of
+             * the path argument.
+             */
+            ERROR_MAY(POSIX_CHDIR, ELOOP, "chdir.04.01", TODO_ERR(ELOOP))
+
+            /*
+             * The chdir() function may fail if:
+             *
+             * [ENAMETOOLONG]
+             * As a result of encountering a symbolic link in resolution of the path argument,
+             * the length of the substituted pathname string exceeded {PATH_MAX}.
+             */
+            ERROR_MAY(POSIX_CHDIR, ENAMETOOLONG, "chdir.04.02", TODO_ERR(ENAMETOOLONG))
+        ERROR_END()
+
+        /*
+         * The chdir() function shall cause the directory named by the pathname pointed to
+         * by the path argument to become the current working directory; that is, the
+         * starting point for path searches for pathnames not beginning with '/'.
+         */
+        fs = getFileSystem( context );
+        file = fileExist_FileSystem( fs, path, DirectoryFile );
+        REQ( "chdir.01", "path become the current working directory",
+                         equals_FileId( process_state->meta.workdir, file->fileid )
+           );
+
+        /*
+         * Upon successful completion, 0 shall be returned.
+         */
+        REQ( "chdir.02.01", "Upon successful completion, 0 shall be returned", chdir_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX (R) Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    chroot - change root directory (LEGACY)
+
+SYNOPSIS
+
+    #include <unistd.h> int chroot(const char *path);
+
+DESCRIPTION
+
+    The path argument points to a pathname naming a directory. The chroot()
+    function causes the named directory to become the root directory; that is, the
+    starting point for path searches for pathnames beginning with /. The process'
+    working directory is unaffected by chroot(). The process must have appropriate
+    privileges to change the root directory.
+
+    The dot-dot entry in the root directory is interpreted to mean the root
+    directory itself. Thus, dot-dot cannot be used to access files outside the
+    subtree rooted at the root directory.
+
+    This interface need not be reentrant.
+
+RETURN VALUE
+
+    Upon successful completion, 0 is returned. Otherwise, -1 is returned and errno
+    is set to indicate the error. If -1 is returned, no change is made in the root
+    directory.
+
+ERRORS
+
+    The chroot() function will fail if: [EACCES] Search permission is denied for a
+    component of path.
+
+    [ELOOP] Too many symbolic links were encountered in resolving path.
+
+    [ENAMETOOLONG] The length of the path argument exceeds {PATH_MAX} or a pathname
+    component is longer than {NAME_MAX}.
+
+    [ENOENT] A component of path does not name an existing directory or path is an
+    empty string.
+
+    [ENOTDIR] A component of the path name is not a directory.
+
+    [EPERM] The effective user ID does not have appropriate privileges.
+
+    The chroot() function may fail if:
+
+    [ENAMETOOLONG] Pathname resolution of a symbolic link produced an intermediate
+    result whose length exceeds {PATH_MAX}.
+
+EXAMPLES
+
+    None.
+*/
+specification
+IntT chroot_spec( CallContext context, CString * path, ErrorCode * errno )
+{
+    ProcessState * process_state;
+    FileId         old_root     ;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"  , process_state != NULL );
+        REQ( "", "path point to pathname", path          != NULL );
+
+        old_root = process_state->meta.root;
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Path
+    {
+        if ( length_CString( path ) == 0 )
+        {
+            return { PathIsEmpty, "path is empty" };
+        }
+        else
+        {
+            return { PathIsNotEmpty, "path is not empty" };
+        }
+    }
+    post
+    {
+        FileSystem * fs  ;
+        File       * file;
+
+        /*
+         * [Upon successful completion, 0 is returned.]
+         * Otherwise, -1 is returned and errno is set to indicate the error.
+         */
+        ERROR_BEGIN( SUSV2_CHROOT, "chroot.02.02", chroot_spec == -1, * errno )
+            /*
+             * The chroot() function will fail if:
+             *
+             * [EACCES] Search permission is denied for a component of path.
+             */
+            ERROR_SHALL(SUSV2_CHROOT, EACCES, "chroot.03.01", TODO_ERR(EACCES) )
+
+            /*
+             * The chroot() function will fail if:
+             *
+             * [ELOOP] Too many symbolic links were encountered in resolving path.
+             */
+            ERROR_SHALL(SUSV2_CHROOT, ELOOP, "chroot.03.02", TODO_ERR(ELOOP) )
+
+            /*
+             * The chroot() function will fail if:
+             *
+             * [ENAMETOOLONG]
+             * The length of the path argument exceeds {PATH_MAX} or a pathname component is
+             * longer than {NAME_MAX}.
+             */
+            ERROR_SHALL(SUSV2_CHROOT, ENAMETOOLONG, "chroot.03.03", TODO_ERR(ENAMETOOLONG) )
+
+            /*
+             * The chroot() function will fail if:
+             *
+             * [ENOENT] A component of path does not name an existing directory or path is
+             * an empty string.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( SUSV2_CHROOT, ENOENT, "chroot.03.04", C_Path == C_Path.PathIsEmpty || * errno == SUT_ENOENT )
+#else
+            ERROR_SHALL( SUSV2_CHROOT, ENOENT, "chroot.03.04", coverage( C_Path ) == PathIsEmpty || * errno == SUT_ENOENT )
+#endif
+
+            /*
+             * The chroot() function will fail if:
+             *
+             * [ENOTDIR] A component of the path name is not a directory.
+             *
+             * The path argument points to a pathname naming a directory.
+             */
+            ERROR_SHALL(SUSV2_CHROOT, ENOTDIR, "chroot.03.05", TODO_ERR(ENOTDIR) )
+
+            /*
+             * The chroot() function will fail if:
+             *
+             * [EPERM] The effective user ID does not have appropriate privileges.
+             *
+             * The process must have appropriate privileges to change the root directory.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( SUSV2_CHROOT, EPERM, "chroot.03.06",
+                                              C_Priority == C_Priority.PriorityIsReallyLow                        ||
+                                              ( C_Priority == C_Priority.PriorityIsUnknown && chroot_spec == -1 )
+                       )
+#else
+            ERROR_SHALL( SUSV2_CHROOT, EPERM, "chroot.03.06",
+                                              coverage( C_Priority ) == PriorityIsReallyLow                        ||
+                                              ( coverage( C_Priority ) == PriorityIsUnknown && chroot_spec == -1 )
+                       )
+#endif
+
+            /*
+             * The chroot() function may fail if:
+             *
+             * [ENAMETOOLONG]
+             * Pathname resolution of a symbolic link produced an intermediate result whose
+             * length exceeds {PATH_MAX}.
+             */
+            ERROR_MAY(SUSV2_CHROOT, ENAMETOOLONG, "chroot.04.01", TODO_ERR(ENAMETOOLONG))
+
+            if ( chroot_spec == -1 )
+            {
+                if ( ! equals_FileId( old_root, WrongFileId ) )
+                {
+                    /*
+                     * If -1 is returned, no change is made in the root directory.
+                     */
+                    REQ( "chroot.02.03", "no change is made in the root directory",
+                                         equals_FileId( process_state->meta.root, old_root )
+                       );
+                }
+            }
+        ERROR_END()
+
+        /*
+         * The chroot() function causes the named directory to become the root directory;
+         * that is, the starting point for path searches for pathnames beginning with /.
+         */
+        fs = getFileSystem( context );
+        file = fileExist_FileSystem( fs, path, DirectoryFile );
+        REQ( "chroot.01", "the named directory become the root directory",
+                          equals_FileId( process_state->meta.root, file->fileid )
+           );
+
+        /*
+         * Upon successful completion, 0 is returned.
+         */
+        REQ( "chroot.02.01", "Upon successful completion, 0 is returned", chroot_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    fchdir - change working directory
+
+SYNOPSIS
+
+    #include <unistd.h>
+    int fchdir(int fildes);
+
+DESCRIPTION
+
+    The fchdir() function shall be equivalent to chdir() except that the
+    directory that is to be the new current working directory is specified by
+    the file descriptor fildes.
+
+    A conforming application can obtain a file descriptor for a file of type
+    directory using open(), provided that the file status flags and access modes
+    do not contain O_WRONLY or O_RDWR.
+
+RETURN VALUE
+
+    Upon successful completion, fchdir() shall return 0. Otherwise, it shall
+    return -1 and set errno to indicate the error. On failure the current
+    working directory shall remain unchanged.
+
+ERRORS
+
+    The fchdir() function shall fail if:
+
+    [EACCES]
+        Search permission is denied for the directory referenced by fildes.
+    [EBADF]
+        The fildes argument is not an open file descriptor.
+    [ENOTDIR]
+        The open file descriptor fildes does not refer to a directory.
+
+    The fchdir() may fail if:
+
+    [EINTR]
+        A signal was caught during the execution of fchdir().
+    [EIO]
+        An I/O error occurred while reading from or writing to the file system.
+*/
+specification
+IntT fchdir_spec( CallContext context, FileDescId fildes, ErrorCode * errno )
+{
+    ProcessState * process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"         , process_state != NULL             );
+        REQ( "", "fildes belong to same system" , context.system  == fildes.system  );
+        REQ( "", "fildes belong to same process", context.process == fildes.process );
+
+        /*
+         * A conforming application can obtain a file descriptor for a file of type
+         * directory using open(), provided that the file status flags and access modes do
+         * not contain O_WRONLY or O_RDWR.
+         */
+        REQ("app.fchdir.01", "", TODO_REQ());
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        FileId fileId = create_FileId( context.system, fildes.filedesc );
+
+        /*
+         * [Upon successful completion, fchdir() shall return 0.]
+         * Otherwise, it shall return -1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_FCHDIR, "fchdir.02.02", fchdir_spec == -1, * errno )
+            /*
+             * The fchdir() function shall fail if:
+             *
+             * [EACCES]
+             * Search permission is denied for the directory referenced by fildes.
+             */
+            ERROR_SHALL(POSIX_FCHDIR, EACCES, "fchdir.03.01", TODO_ERR(EACCES) )
+
+            /*
+             * The fchdir() function shall fail if:
+             *
+             * [EBADF]
+             * The fildes argument is not an open file descriptor.
+             */
+            ERROR_SHALL(POSIX_FCHDIR, EBADF, "fchdir.03.02", TODO_ERR(EBADF) )
+
+            /*
+             * The fchdir() function shall fail if:
+             *
+             * [ENOTDIR]
+             * The open file descriptor fildes does not refer to a directory.
+             */
+            ERROR_SHALL(POSIX_FCHDIR, ENOTDIR, "fchdir.03.03", TODO_ERR(ENOTDIR) )
+
+            /*
+             * The fchdir() may fail if:
+             *
+             * [EINTR]
+             * A signal was caught during the execution of fchdir().
+             */
+            ERROR_MAY(POSIX_FCHDIR, EINTR, "fchdir.04.01", TODO_ERR(EINTR))
+
+            /*
+             * The fchdir() may fail if:
+             *
+             * [EIO]
+             * An I/O error occurred while reading from or writing to the file system.
+             */
+            ERROR_MAY(POSIX_FCHDIR, EIO, "fchdir.04.02", TODO_ERR(EIO))
+
+        ERROR_END()
+
+        /*
+         * The fchdir() function shall be equivalent to chdir() except that the directory
+         * that is to be the new current working directory is specified by the file
+         * descriptor fildes.
+         *
+         * On failure the current working directory shall remain unchanged.
+         */
+        REQ( "fchdir.01", "new current working directory is specified by the file descriptor fildes",
+                          equals_FileId( process_state->meta.workdir, fileId )
+           );
+
+        /*
+         * Upon successful completion, fchdir() shall return 0.
+         */
+        REQ( "fchdir.02.01", "Upon successful completion, fchdir() shall return 0", fchdir_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getcwd - get the pathname of the current working directory
+
+SYNOPSIS
+
+    #include <unistd.h>
+    char *getcwd(char *buf, size_t size);
+
+DESCRIPTION
+
+    The getcwd() function shall place an absolute pathname of the current
+    working directory in the array pointed to by buf, and return buf. The
+    pathname copied to the array shall contain no components that are symbolic
+    links. The size argument is the size in bytes of the character array pointed
+    to by the buf argument. If buf is a null pointer, the behavior of getcwd()
+    is unspecified.
+
+RETURN VALUE
+
+    Upon successful completion, getcwd() shall return the buf argument.
+    Otherwise, getcwd() shall return a null pointer and set errno to indicate
+    the error. The contents of the array pointed to by buf are then undefined.
+
+ERRORS
+
+    The getcwd() function shall fail if:
+
+    [EINVAL]
+        The size argument is 0.
+    [ERANGE]
+        The size argument is greater than 0, but is smaller than the length of
+        the pathname +1.
+
+    The getcwd() function may fail if:
+
+    [EACCES]
+        Read or search permission was denied for a component of the pathname.
+    [ENOMEM]
+        Insufficient storage space is available.
+*/
+specification
+StringTPtr getcwd_spec( CallContext context, StringTPtr buf, SizeT size, ErrorCode * errno )
+{
+    ProcessState * process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", process_state != NULL    );
+
+        /*
+         * The size argument is the size in bytes of the character array pointed to by
+         * the buf argument.
+         */
+        REQ( "app.getcwd.01", "The size argument is the size in bytes of the buf", true );
+
+        /*
+         * If buf is a null pointer, the behavior of getcwd() is unspecified.
+         */
+        REQ( "app.getcwd.02", "buf is not a null pointer", ! isNULL_VoidTPtr( buf ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        CString    * path;
+        FileSystem * fs  ;
+        File       * file;
+
+        /*
+         * [Upon successful completion, getcwd() shall return the buf argument.]
+         * Otherwise, getcwd() shall return a null pointer and set errno to indicate the
+         * error.
+         */
+        ERROR_BEGIN( POSIX_GETCWD, "getcwd.04.02", isNULL_VoidTPtr( getcwd_spec ), * errno )
+            /*
+             * The getcwd() function shall fail if:
+             *
+             * [EINVAL]
+             * The size argument is 0.
+             */
+            ERROR_SHALL( POSIX_GETCWD, EINVAL, "getcwd.05.01", size == 0 )
+
+            /*
+             * The getcwd() function shall fail if:
+             *
+             * [ERANGE]
+             * The size argument is greater than 0, but is smaller than the length of the
+             * pathname +1.
+             */
+            ERROR_SHALL(POSIX_GETCWD, ERANGE, "getcwd.05.02", TODO_ERR(ERANGE) )
+
+            /*
+             * The getcwd() function may fail if:
+             *
+             * [EACCES]
+             * Read or search permission was denied for a component of the pathname.
+             */
+            ERROR_SHALL(POSIX_GETCWD, EACCES, "getcwd.06.01", TODO_ERR(EACCES) )
+
+            /*
+             * The getcwd() function may fail if:
+             *
+             * [ENOMEM]
+             * Insufficient storage space is available.
+             */
+            ERROR_SHALL(POSIX_GETCWD, ENOMEM, "getcwd.06.02", TODO_ERR(ENOMEM) )
+        ERROR_END()
+
+        /*
+         * The getcwd() function shall place an absolute pathname of the current working
+         * directory in the array pointed to by buf
+         */
+        path = readCString_VoidTPtr( getcwd_spec );
+        fs = getFileSystem( context );
+        file = fileExist_FileSystem( fs, path, DirectoryFile );
+        REQ( "getcwd.01", "The getcwd() shall place an absolute pathname of the current working directory in the buf",
+                          equals_FileId( process_state->meta.workdir, file->fileid )
+           );
+
+        /*
+         * The pathname copied to the array shall contain no components that are symbolic
+         * links.
+         */
+        REQ("getcwd.03", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, getcwd() shall return the buf argument.
+         *
+         * return buf
+         */
+        REQ( "getcwd.04.01", "Upon successful completion, getcwd() shall return the buf argument",
+                             equals_VoidTPtr( getcwd_spec, buf )
+           );
+
+        return true;
+    }
+}
+
+void onGetcwd( CallContext context, StringTPtr result )
+{
+    if(!isNULL_VoidTPtr(result))
+    {
+        File *file;
+        CString *path;
+        FileSystem *fs = getFileSystem(context);
+        ProcessState *pstate = getProcessState_CallContext(context);
+
+        path = readCString_VoidTPtr(result);
+
+        file = fileExist_FileSystem(fs, path, DirectoryFile);
+
+        pstate->meta.workdir = file->fileid;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getwd - get the current working directory pathname (LEGACY)
+
+SYNOPSIS
+
+    #include <unistd.h>
+    char *getwd(char *path_name);
+
+DESCRIPTION
+
+    The getwd() function shall determine an absolute pathname of the current
+    working directory of the calling process, and copy a string containing that
+    pathname into the array pointed to by the path_name argument.
+
+    If the length of the pathname of the current working directory is greater
+    than ({PATH_MAX}+1) including the null byte, getwd() shall fail and return a
+    null pointer.
+
+RETURN VALUE
+
+    Upon successful completion, a pointer to the string containing the absolute
+    pathname of the current working directory shall be returned. Otherwise,
+    getwd() shall return a null pointer and the contents of the array pointed to
+    by path_name are undefined.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+StringTPtr getwd_spec( CallContext context, StringTPtr path_name, ErrorCode * errno )
+{
+    ProcessState * process_state;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists"  , process_state != NULL          );
+        REQ( "", "path_name is not empty", ! isNULL_VoidTPtr( path_name ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        if ( isNULL_VoidTPtr( getwd_spec ) )
+        {
+            /*
+             * [Upon successful completion, a pointer to the string containing the absolute
+             * pathname of the current working directory shall be returned.]
+             * Otherwise, getwd() shall return a null pointer
+             *
+             * If the length of the pathname of the current working directory is greater than
+             * ({PATH_MAX}+1) including the null byte, getwd() shall fail and return a null
+             * pointer.
+             */
+            REQ( "getwd.02.02", "Otherwise, getwd() shall return a null pointer", true );
+        }
+        else
+        {
+            CString * path = readCString_VoidTPtr( getwd_spec );
+            FileSystem * fs = getFileSystem( context );
+            File * file = fileExist_FileSystem( fs, path, DirectoryFile );
+
+            /*
+             * The getwd() function shall determine an absolute pathname of the current
+             * working directory of the calling process, and copy a string containing that
+             * pathname into the array pointed to by the path_name argument.
+             */
+            REQ( "getwd.01", "copy a string containing pathname into the array pointed to by the path_name",
+                             equals_FileId( process_state->meta.workdir, file->fileid )
+               );
+
+            /*
+             * Upon successful completion, a pointer to the string containing the absolute
+             * pathname of the current working directory shall be returned.
+             */
+            REQ("getwd.02.01",
+                "Upon successful, a pointer to the string containing absolute "
+                "pathname of current working directory shall be returned",
+                equals_VoidTPtr( getwd_spec, path_name ) );
+        }
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    umask - set and get the file mode creation mask
+
+SYNOPSIS
+
+    #include <sys/stat.h>
+    mode_t umask(mode_t cmask);
+
+DESCRIPTION
+
+    The umask() function shall set the process' file mode creation mask to cmask
+    and return the previous value of the mask. Only the file permission bits of
+    cmask (see <sys/stat.h>) are used; the meaning of the other bits is
+    implementation-defined.
+
+    The process' file mode creation mask is used to turn off permission bits in
+    the mode argument supplied during calls to the following functions:
+
+        open(), creat(), mkdir(), and mkfifo()
+
+        mknod()
+
+        mq_open()
+
+        sem_open()
+
+    Bit positions that are set in cmask are cleared in the mode of the created
+    file.
+
+RETURN VALUE
+
+    The file permission bits in the value returned by umask() shall be the
+    previous value of the file mode creation mask. The state of any other bits
+    in that value is unspecified, except that a subsequent call to umask() with
+    the returned value as cmask shall leave the state of the mask the same as
+    its state before the first call, including any unspecified use of those
+    bits.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+FilePermissions * umask_spec( CallContext context, FilePermissions * cmask )
+{
+    ProcessState    * process_state;
+    FilePermissions * old_umask    ;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", process_state != NULL );
+
+        old_umask = clone( process_state->meta.umask );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        FilePermission * empty_FilePermission = NULL;
+        FilePermissions * unknownUmask = create_FilePermissions(
+                                             empty_FilePermission, empty_FilePermission, empty_FilePermission,
+                                             Unknown_Bool3, Unknown_Bool3, Unknown_Bool3
+                                         );
+
+        /*
+         * The umask() function shall
+         *
+         * set the process' file mode creation mask to cmask
+         */
+        REQ( "umask.01.01", "set the process file creation mask to cmask", equals( process_state->meta.umask, cmask ) );
+
+        if ( ! equals( old_umask, unknownUmask ) )
+        {
+            /*
+             * The umask() function shall
+             *
+             * return the previous value of the mask
+             *
+             * The file permission bits in the value returned by umask() shall be the previous
+             * value of the file mode creation mask.
+             */
+            REQ( "umask.01.02", "return the previous value of the mask", equals( old_umask, umask_spec ) );
+        }
+
+        return true;
+    }
+}

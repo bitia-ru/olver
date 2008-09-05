@@ -1,0 +1,277 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/ncurses/ncurses_data.seh"
+#include "ncurses/char/add_model.seh"
+#include "data/ncurses_model.seh"
+
+
+#pragma SEC subsystem char "ncurses.char"
+
+
+
+/*
+   The group of functions 'ncurses.char.add' consists of:
+       addch [1]
+       echochar [1]
+       mvaddch [1]
+       mvwaddch [1]
+       waddch [1]
+       wechochar [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    addch, mvaddch, mvwaddch, waddch - add a single-byte character and
+    rendition to a window and advance the cursor
+
+SYNOPSIS
+
+
+    #include <curses.h>
+    int addch(const chtype ch);
+    int mvaddch(int y, int x, const chtype ch);
+    int mvwaddch(WINDOW *win, int y, int x, const chtype ch);
+    int waddch(WINDOW *win, const chtype ch);
+
+DESCRIPTION
+
+    The addch(), mvaddch(), mvwaddch() and waddch() functions place ch into the
+    current or specified window at the current or specified position, and then
+    advance the window's cursor position.These functions perform wrapping.
+    These functions perform special-character processing.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK.Otherwise they return
+    ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    echochar, wechochar - echo single-byte character and rendition to a window and refresh
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int echochar(const chtype ch);
+    int wechochar(WINDOW *win, const chtype ch);
+
+DESCRIPTION
+
+    The echochar() function is equivalent to a call to addch() followed by a
+    call to refresh().
+
+    The wechochar() function is equivalent to a call to waddch() followed by a
+    call to wrefresh().
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: wechochar, mvwaddch, waddch,
+//echochar, mvaddch, addch
+specification
+IntT addch_spec(CallContext context, ChTypeT ch, WindowTPtr* win, NCursesPosition* position, bool refresh)
+{
+    NCursesWindow*   modifiedWindow;
+
+    if (win!=NULL){
+        if (refresh){
+            FILTER("wechochar");
+        }
+        else{
+            if (position!=NULL){
+                FILTER("mvwaddch");
+            }
+            else{
+                FILTER("waddch");
+            }
+        }
+    }
+    else{
+        if (refresh){
+            FILTER("echochar");
+        }
+        else{
+            if (position!=NULL){
+                FILTER("mvaddch");
+            }
+            else{
+                FILTER("addch");
+            }
+        }
+    }
+
+    pre
+    {
+        modifiedWindow=addch_model(context, ch, win, position, refresh);
+
+        return true;
+    }
+    post
+    {
+         /*
+         * The echochar() function is equivalent to a call to addch() followed by a call
+         * to refresh().
+         */
+        REQ("echochar.01", "", TODO_REQ());
+
+        /*
+         * The wechochar() function is equivalent to a call to waddch() followed by a call
+         * to wrefresh().
+         */
+        REQ("wechochar.01", "", TODO_REQ());
+
+
+        if (addch_spec!=SUT_EOK)
+        {
+            /*
+             * Otherwise they return ERR.
+             */
+            REQ("addch.04.02;mvaddch.04.02;mvwaddch.04.02;waddch.04.02;echochar.02.02;wechochar.02.02",
+                "Function shall return ERR", addch_spec==SUT_ERR);
+        }
+        else
+        {
+            NCursesWindow* curWnd=getWindowMayNULL(context, win);
+
+            /*
+             * Upon successful completion, these functions return OK.
+             */
+            REQ("addch.04.01;mvaddch.04.01;mvwaddch.04.01;waddch.04.01;echochar.02.01;wechochar.02.01", "Function shall return OK", addch_spec==SUT_EOK);
+
+            /*
+            * [Compare model window with the real window]
+            */
+            REQ("", "Data in the window shall be valid", check_NCursesWindows(curWnd, modifiedWindow, CH_ALL, -1));
+        }
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+void addChTypeToWindow(NCursesWindow* win, IntT x, IntT y, ChTypeT ch)
+{
+    /*
+     * These functions perform special-character processing.
+     */
+    IMPLEMENT_REQ("addch.03;mvaddch.03;mvwaddch.03;waddch.03");
+
+    if (!addSpecChar(win, create_NCursesPosition(x, y), ch, true, false))
+    {
+        /*
+         * These functions perform wrapping.
+         */
+        IMPLEMENT_REQ("addch.02;mvaddch.02;mvwaddch.02;waddch.02");
+
+        setElement_NCursesWindow_YX(win, y, x, ch);
+        advanceCursorOnePos(win);
+    }
+}
+
+
+
+NCursesWindow* addch_model(CallContext context, ChTypeT ch, WindowTPtr* win,
+                           NCursesPosition* position, IntT refresh)
+{
+    NCursesWindow* curWnd=createNCursesWindow_Local(getWindowMayNULL(context, win));
+
+    /*
+     * The addch(), mvaddch(), mvwaddch() and waddch() functions place ch into the
+     * current or specified window at the current or specified position, and then
+     * advance the window's cursor position.
+     */
+    IMPLEMENT_REQ("addch.01;mvaddch.01;mvwaddch.01;waddch.01");
+
+    if (position!=NULL && !refresh)
+    {
+        curWnd->cursorPos->x=position->x;
+        curWnd->cursorPos->y=position->y;
+    }
+
+    addChTypeToWindow(curWnd, curWnd->cursorPos->x, curWnd->cursorPos->y, ch);
+
+    pushNCursesWindow(curWnd);
+
+    return curWnd;
+}
+
+
+void onAddch(CallContext context, ChTypeT ch, WindowTPtr* win, NCursesPosition* position, IntT addch_spec, bool refresh)
+{
+    if (addch_spec==SUT_EOK)
+    {
+        updateNCursesWindowMayNULL(context, win);
+        refresh_WindowTPtr(context, win, refresh);
+    }
+}
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/

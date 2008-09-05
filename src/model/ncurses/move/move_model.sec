@@ -1,0 +1,324 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/move/move_model.seh"
+
+
+#pragma SEC subsystem move "ncurses.move"
+
+
+
+/*
+   The group of functions 'ncurses.move' consists of:
+       move [1]
+       mvcur [1]
+       wmove [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    move, wmove - window cursor location functions
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int move(int y, int x);
+
+    int wmove(WINDOW *win, int y, int x);
+
+DESCRIPTION
+
+    The move() and wmove() functions move the cursor associated with the
+    current or specified window to (y, x) relative to the window's origin.
+    This function does not move the terminal's cursor until the next refresh
+    operation.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: move, wmove
+specification
+IntT move_spec( CallContext context, WindowTPtr* win,
+               NCursesPosition* cursorPos)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    move_model(local, cursorPos);
+
+    pre
+    {
+        return true;    }
+    post
+    {
+        if(move_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("move.03.02;wmove.03.02", "", TODO_REQ());
+
+            return true;
+        }
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("move.03.01;wmove.03.01",
+            "Upon successful completion return OK",
+            move_spec == SUT_OK);
+
+        /*
+         * The move() and wmove() functions move the cursor associated with
+         * the current or specified window to (y, x) relative to the
+         * window's origin.
+         */
+        REQ("move.01;wmove.01",
+            "Move the cursor to (y, x) relative to the window's origin",
+            equals(curWnd->cursorPos, cursorPos));
+
+        /*
+         * This function does not move the terminal's cursor until the next
+         * refresh operation.
+         */
+        REQ_UNCHECKABLE("move.02;wmove.02", "We work with inner model state");
+
+        REQ("", "Check all", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+}
+
+void move_model(NCursesWindow* local, NCursesPosition* pos)
+{
+    local->cursorPos = clone(pos);
+
+    pushNCursesWindow(local);
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    mvcur - output cursor movement commands to the terminal
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int mvcur(int oldrow, int oldcol, int newrow, int newcol);
+
+DESCRIPTION
+
+    The mvcur() function outputs one or more commands to the terminal that move
+    the terminal's cursor to (newrow, newcol), an absolute position on the
+    terminal screen. The (oldrow, oldcol) arguments specify the former cursor
+    position. Specifying the former position is necessary on terminals that do
+    not provide coordinate-based movement commands. On terminals that provide
+    these commands, Curses may select a more efficient way to move the cursor
+    based on the former position. If (newrow, newcol) is not a valid address
+    for the terminal in use, mvcur() fails. If (oldrow, oldcol) is the same as
+    (newrow, newcol), then mvcur() succeeds without taking any action. If
+    mvcur() outputs a cursor movement command, it updates its information
+    concerning the location of the cursor on the terminal.
+
+RETURN VALUE
+
+    Upon successful completion, mvcur() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT mvcur_spec( CallContext context, NCursesPosition* cursorPosOld,
+                NCursesPosition* cursorPosNew)
+{
+    NCursesWindow* curWnd = getNCursesStdWindow(context);
+    NCursesPosition* oldPos = clone(curWnd->cursorPos);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    move_model(local, cursorPosNew);
+
+    pre
+    {
+        /*
+         * The (oldrow, oldcol) arguments specify the former cursor position.
+         */
+        REQ("mvcur.02", "The (oldrow, oldcol) arguments specify the former"
+            " cursor position", equals(cursorPosOld, curWnd->cursorPos));
+
+        return true;
+    }
+    post
+    {
+        if(     cursorPosNew->x < 0 || cursorPosNew->x >= curWnd->ncols
+            ||  cursorPosNew->y < 0 || cursorPosNew->y >= curWnd->nlines)
+        {
+            /*
+             * If (newrow, newcol) is not a valid address for the terminal in
+             * use, mvcur() fails.
+             */
+            REQ("mvcur.04",
+                "If (newrow, newcol) is not a valid address for the terminal mvcur() should not change cursor position",
+                equals(oldPos, curWnd->cursorPos)
+                );
+
+            /*
+             * If (newrow, newcol) is not a valid address for the terminal in
+             * use, mvcur() fails.
+             */
+            REQ("mvcur.04",
+                "If (newrow, newcol) is not a valid address for the terminal in use, mvcur() fails",
+                mvcur_spec == SUT_ERR);
+        }
+
+        if(mvcur_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("mvcur.07.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, mvcur() returns OK.
+         */
+        REQ("mvcur.07.01",
+            "Upon successful completion returns OK",
+            mvcur_spec == SUT_OK);
+
+        if(equals(cursorPosOld, cursorPosNew))
+        {
+            /*
+             * If (oldrow, oldcol) is the same as (newrow, newcol),
+             * then mvcur() succeeds without taking any action.
+             */
+            REQ("mvcur.05",
+                "If (oldrow,oldcol) is the same as (newrow,newcol), succeeds",
+                mvcur_spec == SUT_EOK);
+        }
+
+        /*
+         * The mvcur() function outputs one or more commands to the terminal
+         * that move the terminal's cursor to (newrow, newcol), an absolute
+         * position on the terminal screen.
+         */
+        REQ("mvcur.01", "", TODO_REQ());
+
+        /*
+         * Specifying the former position is necessary on terminals that do
+         * not provide coordinate-based movement commands
+         */
+        REQ("mvcur.03.01", "", TODO_REQ());
+
+        /*
+         * On terminals that provide these commands, Curses may select a more
+         * efficient way to move the cursor based on the former position.
+         */
+        REQ("mvcur.03.02", "", TODO_REQ());
+
+        /*
+         * If mvcur() outputs a cursor movement command, it updates its
+         * information concerning the location of the cursor on the terminal.
+         */
+        REQ("mvcur.06", "", TODO_REQ());
+
+        REQ("", "Cursor position should be correct after mvcur", check_NCursesWindows(curWnd, local, CH_CURSOR, -1));
+
+        REQ("", "Check all", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+void onMove(CallContext context, WindowTPtr* win,
+                NCursesPosition* cursorPos, IntT move_spec)
+{
+    NCursesWindow* curWnd;
+
+    if (SUT_EOK == move_spec)
+    {
+        if(win != NULL)
+        {
+            curWnd = getWindow(win);
+        }
+        else
+        {
+            curWnd = getNCursesStdWindow(context);
+        }
+
+        curWnd->cursorPos = clone(cursorPos);
+    }
+}
+
+void onMvcur(CallContext context, NCursesPosition* cursorPosOld,
+                NCursesPosition* cursorPosNew, IntT mvcur_spec)
+{
+    NCursesWindow* curWnd;
+
+    if (mvcur_spec==SUT_EOK)
+    {
+        curWnd = getNCursesStdWindow(context);
+
+        curWnd->cursorPos = clone(cursorPosNew);
+    }
+}

@@ -1,0 +1,3329 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "socket/netdb/netdb_config.h"
+
+#include "socket/netdb/netdb_model.seh"
+#include "socket/netdb/netdb_media.seh"
+#include "config/type_config.seh"
+#include "util/inet/inet_model.seh"
+#include "socket/netdata/netdata_model.seh"
+#include "socket/socket/socket_model.seh"
+
+#pragma SEC subsystem netdb "socket.netdb"
+
+/*
+   The group of functions 'socket.netdb' consists of:
+       __h_errno_location [1]
+       endprotoent [1]
+       endservent [1]
+       freeaddrinfo [1]
+       gai_strerror [1]
+       getaddrinfo [1]
+       gethostbyaddr [1]
+       gethostbyname [1]
+       getnameinfo [1]
+       getprotobyname [1]
+       getprotobynumber [1]
+       getprotoent [1]
+       getservbyname [1]
+       getservbyport [1]
+       getservent [1]
+       setprotoent [1]
+       setservent [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+endservent, getservbyname, getservbyport, getservent, setservent - network
+services database functions
+
+SYNOPSIS
+
+#include <netdb.h>
+
+void endservent(void);
+struct servent *getservbyname(const char *name, const char *proto);
+struct servent *getservbyport(int port, const char *proto);
+struct servent *getservent(void);
+void setservent(int stayopen);
+
+DESCRIPTION
+
+These functions shall retrieve information about network services. This
+information is considered to be stored in a database that can be accessed
+sequentially or randomly. The implementation of this database is unspecified.
+
+The setservent() function shall open a connection to the database, and set
+the next entry to the first entry. If the stayopen argument is non-zero,
+the net database shall not be closed after each call to the getservent()
+function (either directly, or indirectly through one of the other getserv*()
+functions), and the implementation may maintain an open file descriptor for the
+database.
+
+The getservent() function shall read the next entry of the database, opening
+and closing a connection to the database as necessary.
+
+The getservbyname() function shall search the database from the beginning and
+find the first entry for which the service name specified by name matches the
+s_name member and the protocol name specified by proto matches the s_proto
+member, opening and closing a connection to the database as necessary. If
+proto is a null pointer, any value of the s_proto member shall be matched.
+
+The getservbyport() function shall search the database from the beginning and
+find the first entry for which the port specified by port matches the s_port
+member and the protocol name specified by proto matches the s_proto member,
+opening and closing a connection to the database as necessary. If proto is a
+null pointer, any value of the s_proto member shall be matched. The port
+argument shall be in network byte order.
+
+The getservbyname(), getservbyport(), and getservent() functions shall each
+return a pointer to a servent structure, the members of which shall contain
+the fields of an entry in the network services database.
+
+The endservent() function shall close the database, releasing any open file
+descriptor.
+
+These functions need not be reentrant. A function that is not required to be
+reentrant is not required to be thread-safe.
+
+RETURN VALUE
+
+Upon successful completion, getservbyname(), getservbyport(), and getservent()
+return a pointer to a servent structure if the requested entry was found,
+and a null pointer if the end of the database was reached or the requested
+entry was not found. Otherwise, a null pointer is returned.
+
+ERRORS
+
+No errors are defined.
+*/
+
+specification
+void endservent_spec( CallContext context)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { CloseDatabase, "Close the database" };
+    }
+    post
+    {
+
+        /*
+         * The endservent() function shall close the database, releasing any open file
+         * descriptor.
+         */
+        REQ("endservent.01", "shall close the database", TODO_REQ());
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("endservent.07", "need not be reentrant", true);
+
+        return true;
+    }
+}
+
+void onEndservent(CallContext context)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    data->serv_db_pos = -1;
+
+    traceFormattedUserInfo("$(obj)", data);
+}
+
+
+specification
+ServentT * getservbyname_spec( CallContext context, CString *name, CString *proto )
+{
+    pre
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        REQ("","serv_db shall be filled",data->serv_db_filling == NETDB_FILLED);
+
+        return true;
+    }
+    post
+    {
+
+        ServentT * tmp = findserv_model(context, name, -1, proto, NULL);
+
+        if(getservbyname_spec == NULL)
+        {
+            /*
+             * Upon successful completion, getservbyname(), getservbyport(), and getservent()
+             * return
+             *
+             * a null pointer if the end of the database was reached or the requested entry
+             * was not found
+             */
+            REQ("getservbyname.08.02", "return NULL if not found", tmp == NULL);
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, getservbyname(), getservbyport(), and getservent()
+         * return
+         *
+         * a pointer to a servent structure if the requested entry was found
+         */
+        REQ("getservbyname.08.01", "return a pointer to a servent structure",
+             getservbyname_spec != NULL
+            );
+
+        /*
+         * The getservbyname() function shall search the database from the beginning and
+         * find the first entry for which
+         *
+         * the service name specified by name matches the s_name member
+         */
+        REQ("getservbyname.01.01", "the service name matches the s_name",
+            equals(name, getservbyname_spec->s_name)
+            && (!tmp || equals(getservbyname_spec->s_name,tmp->s_name) )
+            );
+
+        /*
+         * The getservbyname() function shall search the database from the beginning and
+         * find the first entry for which
+         *
+         * the protocol name specified by proto matches the s_proto member
+         *
+         * If proto is a null pointer, any value of the s_proto member shall be matched.
+         */
+        if(proto != NULL)
+        {
+            REQ("getservbyname.01.02;getservbyname.04", "the protocol name matches the s_proto",
+                equals(proto, getservbyname_spec->s_proto)
+                );
+        }
+        REQ("getservbyname.01.02;getservbyname.04", "the s_proto shall match the protocol name",
+            !tmp || equals(getservbyname_spec->s_proto, tmp->s_proto)
+            );
+
+        REQ("getservbyname.06","result shall exist in database", tmp!=NULL);
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("getservbyname.07", "need not be reentrant", true);
+
+        /*
+         * opening and closing a connection to the database as necessary
+         */
+        REQ("getservbyname.03", "opening and closing a connection", TODO_REQ());
+
+        /*
+         * Otherwise, a null pointer is returned
+         */
+        REQ("getservbyname.09", "", TODO_REQ());
+
+  
+
+        return true;
+    }
+}
+
+void onGetservbyname( CallContext context, CString *name, CString *proto, ServentT * getservbyname_spec )
+{
+    NetdbProcessData * data = get_netdb_data(context);
+    traceFormattedUserInfo("getservbyname returned: $(obj)", data);
+}
+
+
+// port in network byte order
+specification
+ServentT * getservbyport_spec( CallContext context, IntT port, CString * proto )
+{
+    pre
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        REQ("","serv_db shall be filled",data->serv_db_filling == NETDB_FILLED);
+
+        return true;
+    }
+    post
+    {
+        ServentT * tmp = findserv_model(context, NULL, port, proto, NULL);
+
+        if(getservbyport_spec == NULL)
+        {
+            /*
+             * Upon successful completion, getservbyname(), getservbyport(), and getservent()
+             * return
+             *
+             * a null pointer if the end of the database was reached or the requested entry
+             * was not found
+             */
+            REQ("getservbyport.08.02", "the requested entry was not found",
+                tmp == NULL
+                );
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, getservbyname(), getservbyport(), and getservent()
+         * return
+         *
+         * a pointer to a servent structure if the requested entry was found
+         */
+        REQ("getservbyport.08.01", "return a pointer to a servent structure",
+            getservbyport_spec != NULL
+            );
+
+        /*
+         * The getservbyport() function shall search the database from the beginning and
+         * find the first entry for which
+         *
+         * the port specified by port matches the s_port member
+         */
+        REQ("getservbyport.01.01", "port matches the s_port",
+            (getservbyport_spec->s_port == port) // both in network byte order
+            && (!tmp || (tmp->s_port == getservbyport_spec->s_port) )
+            );
+
+        /*
+         * The getservbyport() function shall search the database from the beginning and
+         * find the first entry for which
+         *
+         * the protocol name specified by proto matches the s_proto member
+         *
+         * If proto is a null pointer, any value of the s_proto member shall be matched.
+         */
+        if(proto!=NULL)
+        {
+            REQ("getservbyport.01.02;getservbyport.04", "proto matches the s_proto",
+                equals(getservbyport_spec->s_proto, proto)
+                );
+        }
+        REQ("getservbyport.01.02;getservbyport.04", "proto matches the s_proto",
+            !tmp || equals(tmp->s_proto,getservbyport_spec->s_proto)
+            );
+
+        REQ("getservbyport.06", "result shall exist in database", tmp!=NULL);
+
+        /*
+         * The port argument shall be in network byte order
+         */
+        REQ("getservbyport.05", "", TODO_REQ());
+
+        /*
+         * opening and closing a connection to the database as necessary
+         */
+        REQ("getservbyport.03", "", TODO_REQ());
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("getservbyport.07", "need not be reentrant", true);
+
+
+        /*
+         * Otherwise, a null pointer is returned
+         */
+        REQ("getservbyport.09", "", TODO_REQ());
+
+
+
+        return true;
+    }
+}
+
+void onGetservbyport( CallContext context, IntT port, CString * proto, ServentT * getservbyport_spec )
+{
+    NetdbProcessData * data = get_netdb_data(context);
+    traceFormattedUserInfo("getservbyport returned: $(obj)", data);
+}
+
+
+specification
+ServentT * getservent_spec( CallContext context)
+{
+    int old_pos;
+    pre
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        /*  */
+        REQ("", "serv_db shall be initialized", serv_db!=NULL);
+
+        old_pos = data->serv_db_pos;
+        if(old_pos<0)
+            old_pos = 0;
+
+        return true;
+    }
+    coverage C
+    {
+        return { ReadNextEntryOfDatabase, "Read the next entry of the database" };
+    }
+    post
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        if(getservent_spec == NULL)
+        {
+            /*
+             * Upon successful completion, getservbyname(), getservbyport(), and getservent()
+             * return
+             *
+             * a null pointer if the end of the database was reached or the requested entry
+             * was not found
+             */
+            REQ("getservent.08.02", "the end of the database was reached",
+                data->serv_db_pos == size_List(serv_db)
+                );
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, getservbyname(), getservbyport(), and getservent()
+         * return
+         *
+         * a pointer to a servent structure if the requested entry was found
+         */
+        REQ("getservent.08.01", "shall return a pointer to a servent structure ",
+            getservent_spec != NULL
+            );
+
+        /*
+         * If the stayopen argument is non-zero, the net database shall not be closed
+         * after each call to the getservent() function (either directly, or indirectly
+         * through one of the other getserv*() functions), and the implementation may
+         * maintain an open file descriptor for the database.
+         */
+        REQ("getservent.02", "the net database shall not be closed", TODO_REQ());
+
+        /*
+         * The getservent() function shall read the next entry of the database
+         */
+        REQ("getservent.01", "shall read the next entry",
+            ( data->serv_db_pos == old_pos+1 )
+            && ( (data->serv_db_filling != NETDB_FILLED)
+                 || equals( getservent_spec, getservent_byPos(context, old_pos) )
+                )
+            );
+
+        /*
+         * opening and closing a connection to the database as necessary
+         */
+        REQ("getservent.03", "", TODO_REQ());
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("getservent.07", "need not be reentrant", true);
+
+        /*
+         * Otherwise, a null pointer is returned
+         */
+        REQ("getservent.09", "", TODO_REQ());
+
+
+
+        return true;
+    }
+}
+
+void onGetservent( CallContext context, ServentT * getservent_spec)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    if(serv_db==NULL)
+    {
+        setBadVerdict("onGetservent: serv_db is not initialized!");
+        return;
+    }
+    if(data->serv_db_pos == max_IntT)
+    {
+        setBadVerdict("onGetservent: so large database is not supported!");
+        return;
+    }
+
+    if(data->serv_db_pos<0)
+        data->serv_db_pos = 0;
+
+    if( getservent_spec != NULL)
+    {
+        data->serv_db_pos++;
+        if(data->serv_db_filling == NETDB_FILLING)
+        {
+            append_List(serv_db, getservent_spec);
+            traceFormattedUserInfo("Model DB, new entry: $(obj)", getservent_spec);
+        }
+    }
+}
+
+
+specification
+void setservent_spec( CallContext context, IntT stayopen)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        /*
+         * The setservent() function shall
+         *
+         * open a connection to the database
+         */
+        REQ("setservent.01.01", "shall open a connection", TODO_REQ());
+
+        /*
+         * The setservent() function shall
+         *
+         * set the next entry to the first entry
+         */
+        REQ("setservent.01.02", "shall set the next entry to the first entry",
+            data->serv_db_pos==0
+            );
+
+        /*
+         * If the stayopen argument is non-zero, the net database shall not be closed
+         * after each call to the getservent() function (either directly, or indirectly
+         * through one of the other getserv*() functions), and the implementation may
+         * maintain an open file descriptor for the database.
+         */
+        REQ("setservent.02", "", TODO_REQ());
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("setservent.07", "need not be reentrant", true);
+
+        return true;
+    }
+}
+
+void onSetservent( CallContext context, IntT stayopen)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    data->serv_db_pos = 0;
+
+    traceFormattedUserInfo("$(obj)", data);
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+endprotoent, getprotobyname, getprotobynumber, getprotoent, setprotoent -
+network protocol database functions
+
+SYNOPSIS
+
+#include <netdb.h>
+
+void endprotoent(void);
+struct protoent *getprotobyname(const char *name);
+struct protoent *getprotobynumber(int proto);
+struct protoent *getprotoent(void);
+void setprotoent(int stayopen);
+
+DESCRIPTION
+
+These functions shall retrieve information about protocols. This information
+is considered to be stored in a database that can be accessed sequentially or
+randomly. The implementation of this database is unspecified.
+
+The setprotoent() function shall open a connection to the database, and set
+the next entry to the first entry. If the stayopen argument is non-zero,
+the connection to the network protocol database shall not be closed after each
+call to getprotoent() (either directly, or indirectly through one of the
+other getproto*() functions), and the implementation may maintain an open file
+descriptor for the database.
+
+The getprotobyname() function shall search the database from the beginning and
+find the first entry for which the protocol name specified by name matches the
+p_name member, opening and closing a connection to the database as necessary.
+
+The getprotobynumber() function shall search the database from the beginning
+and find the first entry for which the protocol number specified by proto
+matches the p_proto member, opening and closing a connection to the database
+as necessary.
+
+The getprotoent() function shall read the next entry of the database, opening
+and closing a connection to the database as necessary.
+
+The getprotobyname(), getprotobynumber(), and getprotoent() functions shall
+each return a pointer to a protoent structure, the members of which shall
+contain the fields of an entry in the network protocol database.
+
+The endprotoent() function shall close the connection to the database,
+releasing any open file descriptor.
+
+These functions need not be reentrant. A function that is not required to be
+reentrant is not required to be thread-safe.
+
+RETURN VALUE
+
+Upon successful completion, getprotobyname(), getprotobynumber(), and
+getprotoent() return a pointer to a protoent structure if the requested
+entry was found, and a null pointer if the end of the database was reached or
+the requested entry was not found. Otherwise, a null pointer is returned.
+
+ERRORS
+
+No errors are defined.
+*/
+
+specification
+void endprotoent_spec( CallContext context)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { CloseConnectionToDatabase, "Close the connection to the database" };
+    }
+    post
+    {
+        /*
+         * The endprotoent() function shall close the connection to the database,
+         * releasing any open file descriptor.
+         */
+        REQ("endprotoent.01", "shall close the database", TODO_REQ());
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("endprotoent.07", "need not be reentrant", true);
+
+        return true;
+    }
+}
+
+void onEndprotoent( CallContext context)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    data->proto_db_pos = -1;
+
+    traceFormattedUserInfo("$(obj)", data);
+}
+
+
+specification
+ProtoentT * getprotobyname_spec( CallContext context, CString * name)
+{
+    pre
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        REQ("","proto_db shall be filled",data->proto_db_filling == NETDB_FILLED);
+
+        return true;
+    }
+    post
+    {
+        ProtoentT * tmp = findproto_model(context, name, -1);
+
+        if(getprotobyname_spec == NULL)
+        {
+            /*
+             * Upon successful completion, getprotobyname(), getprotobynumber(), and
+             * getprotoent() return
+             *
+             * a null pointer if the end of the database was reached or the requested entry
+             * was not found
+             */
+            REQ("getprotobyname.08.02", "return NULL if not found", tmp == NULL);
+
+            return true;
+        }
+        /*
+         * Upon successful completion, getprotobyname(), getprotobynumber(), and
+         * getprotoent() return
+         *
+         * a pointer to a protoent structure if the requested entry was found
+         */
+        REQ("getprotobyname.08.01", "return a pointer to a protoent structure",
+             getprotobyname_spec != NULL
+            );
+
+        /*
+         * The getprotobyname() function shall search the database from the beginning and
+         * find the first entry for which the protocol name specified by name matches the
+         * p_name member
+         */
+        REQ("getprotobyname.01", "the name matches the p_name",
+             equals(name, getprotobyname_spec->p_name)
+            );
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("getprotobyname.07", "need not be reentrant", true);
+
+        /*
+         * opening and closing a connection to the database as necessary
+         */
+        REQ("getprotobyname.03", "", TODO_REQ());
+
+        /*
+         * Otherwise, a null pointer is returned
+         */
+        REQ("getprotobyname.09", "", TODO_REQ());
+
+
+
+        return true;
+    }
+}
+
+void onGetprotobyname( CallContext context, CString * name, ProtoentT * getprotobyname_spec)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    if( !(data->proto_db_state) )
+        data->proto_db_pos = -1;
+
+    traceFormattedUserInfo("$(obj)", data);
+}
+
+
+specification
+ProtoentT * getprotobynumber_spec( CallContext context, IntT proto )
+{
+    pre
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        REQ("","proto_db shall be filled",data->proto_db_filling == NETDB_FILLED);
+
+        return true;
+    }
+    post
+    {
+        ProtoentT * tmp = findproto_model(context, NULL, proto);
+
+        if(getprotobynumber_spec == NULL)
+        {
+            /*
+             * Upon successful completion, getprotobyname(), getprotobynumber(), and
+             * getprotoent() return
+             *
+             * a null pointer if the end of the database was reached or the requested entry
+             * was not found
+             */
+            REQ("getprotobynumber.08.02", "the requested entry was not found", tmp == NULL);
+
+            REQ("", "13.4.24 LSB defined protocol numbers",
+                   (proto != SUT_IPPROTO_IP)
+                && (proto != SUT_IPPROTO_ICMP)
+                && (proto != SUT_IPPROTO_UDP)
+                && (proto != SUT_IPPROTO_IGMP)
+                && (proto != SUT_IPPROTO_RAW)
+                && (proto != SUT_IPPROTO_IPV6)
+                && (proto != SUT_IPPROTO_ICMPV6)
+                && (proto != SUT_IPPROTO_TCP)
+               );
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, getprotobyname(), getprotobynumber(), and
+         * getprotoent() return
+         *
+         * a pointer to a protoent structure if the requested entry was found
+         */
+        REQ("getprotobynumber.08.01", "return a pointer to a protoent structure",
+            getprotobynumber_spec != NULL
+            );
+
+        /*
+         * The getprotobynumber() function shall search the database from the beginning
+         * and find the first entry for which the protocol number specified by proto
+         * matches the p_proto member
+         */
+        REQ("getprotobynumber.01", "proto matches the p_proto member",
+            getprotobynumber_spec->p_proto == proto
+            );
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("getprotobynumber.07", "need not be reentrant", true);
+
+        /*
+         * opening and closing a connection to the database as necessary
+         */
+        REQ("getprotobynumber.03", "opening and closing a connection", TODO_REQ());
+
+        /*
+         * Otherwise, a null pointer is returned
+         */
+        REQ("getprotobynumber.09", "", TODO_REQ());
+
+
+        return true;
+    }
+}
+
+void onGetprotobynumber( CallContext context, IntT proto, ProtoentT * getprotobynumber_spec )
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    if( !(data->proto_db_state) )
+        data->proto_db_pos = -1;
+
+    traceFormattedUserInfo("$(obj)", data);
+}
+
+
+specification
+ProtoentT * getprotoent_spec( CallContext context )
+{
+    int old_pos;
+    pre
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        /*  */
+        REQ("", "proto_db shall be initialized", proto_db!=NULL);
+
+        old_pos = data->proto_db_pos;
+        if(old_pos<0)
+            old_pos = 0;
+
+        return true;
+    }
+    coverage C
+    {
+        return { ReadNextEntryOfDatabase, "Read the next entry of the database" };
+    }
+    post
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        if(getprotoent_spec == NULL)
+        {
+            /*
+             * Upon successful completion, getprotobyname(), getprotobynumber(), and
+             * getprotoent() return
+             *
+             * a null pointer if the end of the database was reached or the requested entry
+             * was not found
+             */
+            REQ("getprotoent.08.02", "the end of the database was reached",
+                data->proto_db_pos == size_List(proto_db)
+                );
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, getprotobyname(), getprotobynumber(), and
+         * getprotoent() return
+         *
+         * a pointer to a protoent structure if the requested entry was found
+         */
+        REQ("getprotoent.08.01", "shall return a pointer to a protoent structure",
+            getprotoent_spec != NULL
+           );
+
+        /*
+         * If the stayopen argument is non-zero, the connection to the network
+         * protocol database shall not be closed after each call to getprotoent()
+         * (either directly, or indirectly through one of the other getproto*()
+         * functions), and the implementation may maintain an open file descriptor for
+         * the database.
+         */
+        REQ("getprotoent.02", "the database shall not be closed", TODO_REQ());
+
+        /*
+         * The getprotoent() function shall read the next entry of the database
+         */
+        REQ("getprotoent.01", "shall read the next entry",
+            ( data->proto_db_pos == old_pos+1 )
+            && ( (data->proto_db_filling != NETDB_FILLED)
+                 || equals( getprotoent_spec, getprotoent_byPos(context, old_pos) )
+                )
+            );
+
+        /*
+         * opening and closing a connection to the database as necessary
+         */
+        REQ("getprotoent.03", "", TODO_REQ());
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("getprotoent.07", "need not be reentrant", true);
+
+        /*
+         * Otherwise, a null pointer is returned
+         */
+        REQ("getprotoent.09", "", TODO_REQ());
+
+
+
+        return true;
+    }
+}
+
+void onGetprotoent( CallContext context, ProtoentT * getprotoent_spec )
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    if(proto_db==NULL)
+    {
+        setBadVerdict("onGetprotoent: proto_db is not initialized!");
+        return;
+    }
+    if(data->proto_db_pos == max_IntT)
+    {
+        setBadVerdict("onGetprotoent: so large database is not supported!");
+        return;
+    }
+
+    if(data->proto_db_pos<0)
+        data->proto_db_pos = 0;
+
+    if( getprotoent_spec != NULL )
+    {
+        append_List(proto_db, getprotoent_spec);
+        data->proto_db_pos++;
+    }
+
+    traceFormattedUserInfo("$(obj)", data);
+}
+
+
+specification
+void setprotoent_spec( CallContext context, IntT stayopen)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        /*
+         * The setprotoent() function shall
+         *
+         * open a connection to the database
+         */
+        REQ("setprotoent.01.01", "shall open a connection", TODO_REQ());
+
+        /*
+         * The setprotoent() function shall
+         *
+         * set the next entry to the first entry
+         */
+        REQ("setprotoent.01.02", "shall set the next entry to the first entry",
+            data->proto_db_pos==0
+            );
+
+        /*
+         * If the stayopen argument is non-zero, the connection to the network
+         * protocol database shall not be closed after each call to getprotoent()
+         * (either directly, or indirectly through one of the other getproto*()
+         * functions), and the implementation may maintain an open file descriptor for
+         * the database.
+         */
+        REQ("setprotoent.02", "", TODO_REQ());
+
+        /*
+         * These functions need not be reentrant. A function that is not required to be
+         * reentrant is not required to be thread-safe.
+         */
+        REQ("setprotoent.07", "need not be reentrant", true);
+
+        return true;
+    }
+}
+
+void onSetprotoent( CallContext context, IntT stayopen)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    data->proto_db_state = stayopen;
+
+    data->proto_db_pos = 0;
+
+    traceFormattedUserInfo("$(obj)", data);
+}
+
+
+/****/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+freeaddrinfo, getaddrinfo - get address information
+
+SYNOPSIS
+
+#include <sys/socket.h> #include <netdb.h>
+
+void freeaddrinfo(struct addrinfo *ai);
+int getaddrinfo(const char *restrict nodename,
+                const char *restrict servname,
+                const struct addrinfo *restrict hints,
+                struct addrinfo **restrict res
+                );
+
+DESCRIPTION
+
+The freeaddrinfo() function shall free one or more addrinfo structures returned
+by getaddrinfo(), along with any additional storage associated with those
+structures. If the ai_next field of the structure is not null, the entire
+list of structures shall be freed. The freeaddrinfo() function shall support
+the freeing of arbitrary sublists of an addrinfo list originally returned by
+getaddrinfo().
+
+The getaddrinfo() function shall translate the name of a service location (for
+example, a host name) and/or a service name and shall return a set of socket
+addresses and associated information to be used in creating a socket with which
+to address the specified service.
+
+Note:
+
+In many cases it is implemented by the Domain Name System, as documented in RFC
+1034, RFC 1035, and RFC 1886.
+
+The freeaddrinfo() and getaddrinfo() functions shall be thread-safe.
+
+The nodename and servname arguments are either null pointers or pointers to
+null-terminated strings. One or both of these two arguments shall be supplied
+by the application as a non-null pointer.
+
+The format of a valid name depends on the address family or families. If a
+specific family is not given and the name could be interpreted as valid within
+multiple supported families, the implementation shall attempt to resolve the
+name in all supported families and, in absence of errors, one or more results
+shall be returned.
+
+If the nodename argument is not null, it can be a descriptive name or can be an
+address string. If the specified address family is AF_INET, [IP6]  AF_INET6,
+or AF_UNSPEC, valid descriptive names include host names. If the specified
+address family is AF_INET or AF_UNSPEC, address strings using Internet
+standard dot notation as specified in inet_addr() are valid.
+
+[IP6] If the specified address family is AF_INET6 or AF_UNSPEC, standard IPv6
+text forms described in inet_ntop() are valid.
+
+If nodename is not null, the requested service location is named by nodename;
+otherwise, the requested service location is local to the caller.
+
+If servname is null, the call shall return network-level addresses for the
+specified nodename. If servname is not null, it is a null-terminated character
+string identifying the requested service. This can be either a descriptive
+name or a numeric representation suitable for use with the address family or
+families. If the specified address family is AF_INET, [IP6]  AF_INET6, or
+AF_UNSPEC, the service can be specified as a string specifying a decimal port
+number.
+
+If the hints argument is not null, it refers to a structure containing input
+values that may direct the operation by providing options and by limiting the
+returned information to a specific socket type, address family, and/or protocol.
+In this hints structure every member other than ai_flags, ai_family,
+ai_socktype, and ai_protocol shall be set to zero or a null pointer. A value
+of AF_UNSPEC for ai_family means that the caller shall accept any address
+family. A value of zero for ai_socktype means that the caller shall accept any
+socket type. A value of zero for ai_protocol means that the caller shall
+accept any protocol. If hints is a null pointer, the behavior shall be as if
+it referred to a structure containing the value zero for the ai_flags,
+ai_socktype, and ai_protocol fields, and AF_UNSPEC for the ai_family field.
+
+The ai_flags field to which the hints parameter points shall be set to zero or
+be the bitwise-inclusive OR of one or more of the values AI_PASSIVE,
+AI_CANONNAME, AI_NUMERICHOST, AI_NUMERICSERV, AI_V4MAPPED, AI_ALL, and
+AI_ADDRCONFIG.
+
+If the AI_PASSIVE flag is specified, the returned address information shall be
+suitable for use in binding a socket for accepting incoming connections for
+the specified service. In this case, if the nodename argument is null, then
+the IP address portion of the socket address structure shall be set to
+INADDR_ANY for an IPv4 address or IN6ADDR_ANY_INIT for an IPv6 address. If
+the AI_PASSIVE flag is not specified, the returned address information shall be
+suitable for a call to connect() (for a connection-mode protocol) or for a call
+to connect(), sendto(), or sendmsg() (for a connectionless protocol). In this
+case, if the nodename argument is null, then the IP address portion of the
+socket address structure shall be set to the loopback address. The AI_PASSIVE
+flag shall be ignored if the nodename argument is not null.
+
+If the AI_CANONNAME flag is specified and the nodename argument is not null,
+the function shall attempt to determine the canonical name corresponding to
+nodename (for example, if nodename is an alias or shorthand notation for a
+complete name).
+
+Note:
+
+Since different implementations use different conceptual models, the terms ``
+canonical name'' and ``alias'' cannot be precisely defined for the general
+case. However, Domain Name System implementations are expected to interpret
+them as they are used in RFC 1034.
+
+A numeric host address string is not a ``name'', and thus does not have a ``
+canonical name'' form; no address to host name translation is performed. See
+below for handling of the case where a canonical name cannot be obtained.
+
+If the AI_NUMERICHOST flag is specified, then a non-null nodename string
+supplied shall be a numeric host address string. Otherwise, an [EAI_NONAME]
+error is returned. This flag shall prevent any type of name resolution service
+(for example, the DNS) from being invoked.
+
+If the AI_NUMERICSERV flag is specified, then a non-null servname string
+supplied shall be a numeric port string. Otherwise, an [EAI_NONAME] error
+shall be returned. This flag shall prevent any type of name resolution service
+(for example, NIS+) from being invoked.
+
+[IP6] If the AI_V4MAPPED flag is specified along with an ai_family of
+AF_INET6, then getaddrinfo() shall return IPv4-mapped IPv6 addresses on
+finding no matching IPv6 addresses ( ai_addrlen shall be 16). The AI_V4MAPPED
+flag shall be ignored unless ai_family equals AF_INET6. If the AI_ALL flag is
+used with the AI_V4MAPPED flag, then getaddrinfo() shall return all matching
+IPv6 and IPv4 addresses. The AI_ALL flag without the AI_V4MAPPED flag is
+ignored.
+
+If the AI_ADDRCONFIG flag is specified, IPv4 addresses shall be returned only
+if an IPv4 address is configured on the local system, [IP6]  and IPv6
+addresses shall be returned only if an IPv6 address is configured on the local
+system.
+
+The ai_socktype field to which argument hints points specifies the socket type
+for the service, as defined in socket(). If a specific socket type is not
+given (for example, a value of zero) and the service name could be interpreted
+as valid with multiple supported socket types, the implementation shall attempt
+to resolve the service name for all supported socket types and, in the absence
+of errors, all possible results shall be returned. A non-zero socket type
+value shall limit the returned information to values with the specified socket
+type.
+
+If the ai_family field to which hints points has the value AF_UNSPEC, addresses
+shall be returned for use with any address family that can be used with the
+specified nodename and/or servname. Otherwise, addresses shall be returned
+for use only with the specified address family. If ai_family is not AF_UNSPEC
+and ai_protocol is not zero, then addresses are returned for use only with the
+specified address family and protocol; the value of ai_protocol shall be
+interpreted as in a call to the socket() function with the corresponding values
+of ai_family and ai_protocol.
+
+RETURN VALUE
+
+A zero return value for getaddrinfo() indicates successful completion; a non-
+zero return value indicates failure. The possible values for the failures are
+listed in the ERRORS section.
+
+Upon successful return of getaddrinfo(), the location to which res points shall
+refer to a linked list of addrinfo structures, each of which shall specify
+a socket address and information for use in creating a socket with which to
+use that socket address. The list shall include at least one addrinfo
+structure. The ai_next field of each structure contains a pointer to the next
+structure on the list, or a null pointer if it is the last structure on the
+list. Each structure on the list shall include values for use with a call to
+the socket() function, and a socket address for use with the connect()
+function or, if the AI_PASSIVE flag was specified, for use with the bind()
+function. The fields ai_family, ai_socktype, and ai_protocol shall be usable
+as the arguments to the socket() function to create a socket suitable for use
+with the returned address. The fields ai_addr and ai_addrlen are usable as
+the arguments to the connect() or bind() functions with such a socket,
+according to the AI_PASSIVE flag.
+
+If nodename is not null, and if requested by the AI_CANONNAME flag, the
+ai_canonname field of the first returned addrinfo structure shall point to
+a null-terminated string containing the canonical name corresponding to the
+input nodename; if the canonical name is not available, then ai_canonname
+shall refer to the nodename argument or a string with the same contents. The
+contents of the ai_flags field of the returned structures are undefined.
+
+All fields in socket address structures returned by getaddrinfo() that are not
+filled in through an explicit argument (for example, sin6_flowinfo) shall be
+set to zero.
+
+Note:
+
+This makes it easier to compare socket address structures.
+
+ERRORS
+
+The getaddrinfo() function shall fail and return the corresponding error value
+if:
+
+[EAI_AGAIN]
+
+The name could not be resolved at this time. Future attempts may succeed.
+
+[EAI_BADFLAGS]
+
+The flags parameter had an invalid value.
+
+[EAI_FAIL]
+
+A non-recoverable error occurred when attempting to resolve the name.
+
+[EAI_FAMILY]
+
+The address family was not recognized.
+
+[EAI_MEMORY]
+
+There was a memory allocation failure when trying to allocate storage for the
+return value.
+
+[EAI_NONAME]
+
+The name does not resolve for the supplied parameters.
+
+[EAI_NONAME] Neither nodename nor servname were supplied. At least one of
+these shall be supplied.
+
+[EAI_SERVICE]
+
+The service passed was not recognized for the specified socket type.
+
+[EAI_SOCKTYPE]
+
+The intended socket type was not recognized.
+
+[EAI_SYSTEM]
+
+A system error occurred; the error code can be found in errno.
+
+[EAI_OVERFLOW]
+
+An argument buffer overflowed.
+*/
+
+specification
+void freeaddrinfo_spec( CallContext context, AddrInfoTPtr ai_ptr )
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * The freeaddrinfo() function shall free one or more addrinfo structures returned
+         * by getaddrinfo(), along with any additional storage associated with those
+         * structures.
+         */
+        REQ("freeaddrinfo.01", "", TODO_REQ());
+
+        /*
+         * If the ai_next field of the structure is not null, the entire list of
+         * structures shall be freed.
+         */
+        REQ("freeaddrinfo.02", "", TODO_REQ());
+
+        /*
+         * The freeaddrinfo() function shall support the freeing of arbitrary sublists of
+         * an addrinfo list originally returned by getaddrinfo().
+         */
+        REQ("freeaddrinfo.03", "", TODO_REQ());
+
+        /*
+         * The freeaddrinfo() and getaddrinfo() functions shall be thread-safe.
+         */
+        REQ("freeaddrinfo.04", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onFreeaddrinfo( CallContext context, AddrInfoTPtr ai_ptr )
+{
+
+}
+
+
+specification
+IntT getaddrinfo_spec( CallContext context, CString * nodename,
+                       CString * servname, AddrInfoT * hints, VoidTPtrObj * res )
+{
+    pre
+    {
+        if(hints != NULL)
+        {
+            /*
+             * In this hints structure every member other than ai_flags, ai_family,
+             * ai_socktype, and ai_protocol shall be set to zero or a null pointer.
+             */
+            REQ("app.getaddrinfo.17", "other hints fields shall be set to zero",
+                    (hints->ai_canonname == NULL)
+                 && isNULL_VoidTPtr(hints->ai_next)
+                );
+        }
+
+        return true;
+    }
+    post
+    {
+        AddrInfoT * res_ai;
+
+        if(hints == NULL)
+        {
+            /*
+             * If hints is a null pointer, the behavior shall be as if it referred to a
+             * structure containing the value zero for the ai_flags, ai_socktype, and
+             * ai_protocol fields, and AF_UNSPEC for the ai_family field.
+             */
+            hints = create_NullAddrInfoT(context);
+            IMPLEMENT_REQ("getaddrinfo.21");
+        }
+
+        /*
+         * The list shall include at least one addrinfo structure.
+         */
+        REQ("getaddrinfo.44",
+            "The list shall include at least one addrinfo structure",
+            !isNULL_VoidTPtr(*res) );
+
+        res_ai = create_AddrInfoT_VoidTPtr(context,*res);
+        traceAddrInfoT(context, res_ai);
+
+        /*
+         * a non-zero return value indicates failure. The possible values for
+         * the failures are listed in the ERRORS section.
+         */
+        ERROR_BEGIN(POSIX_GETADDRINFO, "getaddrinfo.42.02", getaddrinfo_spec!=0, getaddrinfo_spec)
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_AGAIN]
+             * The name could not be resolved at this time. Future attempts may succeed.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_AGAIN, "getaddrinfo.53.01", TODO_ERR(EAI_AGAIN) )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_BADFLAGS]
+             * The flags parameter had an invalid value.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_BADFLAGS, "getaddrinfo.53.02",
+                        (hints->ai_flags &
+                              ~(SUT_AI_PASSIVE | SUT_AI_CANONNAME | SUT_AI_NUMERICHOST
+                              /*| SUT_AI_NUMERICSERV */
+                                | SUT_AI_V4MAPPED | SUT_AI_ALL | SUT_AI_ADDRCONFIG
+                               )
+                        )
+                        || ( (hints->ai_flags & SUT_AI_CANONNAME) && (nodename==NULL) ) /* Fedora */
+            )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_FAIL]
+             * A non-recoverable error occurred when attempting to resolve the name.
+             */
+            /*
+             * This flag (AI_NUMERICHOST) shall prevent any type of name resolution service (for example,
+             * the DNS) from being invoked.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_FAIL, "getaddrinfo.53.03",
+                        !( hints->ai_flags & SUT_AI_NUMERICHOST )
+                        && TODO_ERR(EAI_FAIL)
+                       )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_FAMILY]
+             * The address family was not recognized.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_FAMILY, "getaddrinfo.53.04",
+                         (
+                              (hints->ai_family!=SUT_AF_UNSPEC)
+                           && (hints->ai_family!=SUT_AF_INET)
+                           && (hints->ai_family!=SUT_AF_INET6)
+                           && (hints->ai_family!=SUT_AF_UNIX)
+                         )
+                         // CONFIG? && TODO_ERR(EAI_FAMILY)
+                        )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_MEMORY]
+             * There was a memory allocation failure when trying to allocate storage for the
+             * return value.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_MEMORY, "getaddrinfo.53.05", TODO_ERR(EAI_MEMORY) )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_NONAME]
+             * The name does not resolve for the supplied parameters.
+             */
+            /*
+             * The format of a valid name depends on the address family or families.
+             */
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_NONAME] Neither nodename nor servname were supplied. At least one of
+             * these shall be supplied.
+             */
+            /*
+             * One or both of these two arguments shall be supplied by the application as a
+             * non-null pointer.
+             */
+            /*
+             * If the AI_NUMERICHOST flag is specified, then a non-null nodename string
+             * supplied shall be a numeric host address string.
+             *
+             * Otherwise, an [EAI_NONAME] error is returned.
+             */
+            /*
+             * If the AI_NUMERICSERV flag is specified, then a non-null servname string
+             * supplied shall be a numeric port string.
+             *
+             * Otherwise, an [EAI_NONAME] error shall be returned.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_NONAME,
+                        "getaddrinfo.53.06;getaddrinfo.05;getaddrinfo.53.07;getaddrinfo.03;getaddrinfo.31.02;getaddrinfo.32.02",
+                           TODO_ERR(EAI_NONAME) /*getaddrinfo.53.06;getaddrinfo.05*/
+                        || ( (servname == NULL) && (nodename == NULL) ) /*getaddrinfo.53.07;getaddrinfo.03*/
+                        || ( (hints->ai_flags & SUT_AI_NUMERICHOST) && (nodename!=NULL) && !is_addr_numeric(nodename) ) /*getaddrinfo.31.02*/
+                      //|| ( (hints->ai_flags & SUT_AI_NUMERICSERV) && (servname!=NULL) && !is_serv_numeric(servname) ) /*getaddrinfo.32.02*/
+                       )
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_SERVICE]
+             * The service passed was not recognized for the specified socket type.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_SERVICE, "getaddrinfo.53.08", TODO_ERR(EAI_SERVICE) )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_SOCKTYPE]
+             * The intended socket type was not recognized.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_SOCKTYPE, "getaddrinfo.53.09",
+                            (hints->ai_socktype != 0)
+                         && (hints->ai_socktype != SUT_SOCK_STREAM)
+                         && (hints->ai_socktype != SUT_SOCK_PACKET)
+                         && (hints->ai_socktype != SUT_SOCK_DGRAM)
+                         && (hints->ai_socktype != SUT_SOCK_RAW)
+                         && (hints->ai_socktype != SUT_SOCK_RDM)
+                         && (hints->ai_socktype != SUT_SOCK_SEQPACKET)
+                         // CONFIG? && TODO_ERR(EAI_SOCKTYPE)
+            )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_SYSTEM]
+             * A system error occurred; the error code can be found in errno.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_SYSTEM, "getaddrinfo.53.10",
+                        // TODO: check errno != SUT_EOK.
+                        TODO_ERR(EAI_SYSTEM)
+                        // All other is uncheckable since implemetation dependent
+                       )
+
+            /*
+             * The getaddrinfo() function shall fail and return the corresponding error value
+             * if:
+             *
+             * [EAI_OVERFLOW]
+             * An argument buffer overflowed.
+             */
+            ERROR_SHALL(POSIX_GETADDRINFO, EAI_OVERFLOW, "getaddrinfo.53.11", TODO_ERR(EAI_OVERFLOW) )
+
+        ERROR_END()
+
+        /*
+         * A zero return value for getaddrinfo() indicates successful completion
+         */
+        REQ("getaddrinfo.42.01", "getaddrinfo returns 0 on success", getaddrinfo_spec == 0);
+
+
+        /*
+         * If a specific family is not given and the name could be interpreted as valid
+         * within multiple supported families, the implementation shall attempt to resolve
+         * the name in all supported families and, in absence of errors, one or more
+         * results shall be returned.
+         */
+        REQ("getaddrinfo.06", "", TODO_REQ()); //
+
+
+        /*[Valid names]*/
+
+        /*
+         * If the nodename argument is not null, it can be a descriptive name or can be an
+         * address string.
+         */
+        REQ("getaddrinfo.07", "", TODO_REQ()); //
+
+        /*
+         * If the specified address family is AF_INET, [IP6]  AF_INET6, or AF_UNSPEC,
+         * valid descriptive names include host names.
+         */
+        REQ("getaddrinfo.08", "", TODO_REQ()); //
+
+        /*
+         * If the specified address family is AF_INET or AF_UNSPEC, address strings using
+         * Internet standard dot notation as specified in inet_addr() are valid.
+         */
+        REQ("getaddrinfo.09", "", TODO_REQ()); //
+
+        /*
+         * [IP6] If the specified address family is AF_INET6 or AF_UNSPEC, standard IPv6
+         * text forms described in inet_ntop() are valid.
+         */
+        REQ("getaddrinfo.10.ip6", "", TODO_REQ()); //
+
+
+        if(nodename == NULL)
+        {
+            /*
+             * If nodename is not null, the requested service location is named by nodename;
+             * otherwise, the requested service location is local to the caller.
+             */
+            // "local to the caller" means addresses '127.0.0.1'(ipv4) and '::1'(ipv6)
+
+            REQ("getaddrinfo.11", "", TODO_REQ());
+        }
+
+        /*
+         * If servname is null, the call shall return network-level addresses for the
+         * specified nodename.
+         */
+        REQ("getaddrinfo.12", "", TODO_REQ()); //
+
+        /*
+         * If servname is not null, it is a null-terminated character string identifying
+         * the requested service.
+         *
+         * This can be either a descriptive name or a numeric representation suitable for
+         * use with the address family or families.
+         */
+        // "numeric representation" means port number. see getaddrinfo.15
+        REQ("getaddrinfo.14", "", TODO_REQ()); //
+
+        /*
+         * If the specified address family is AF_INET, [IP6] AF_INET6, or AF_UNSPEC,
+         * the service can be specified as a string specifying a decimal port number.
+         */
+        REQ("getaddrinfo.15", "", TODO_REQ()); //
+
+        if(hints)
+        {
+            /*
+             * If the hints argument is not null, it refers to a structure containing input
+             * values that may direct the operation by providing options and by limiting the
+             * returned information to a specific socket type, address family, and/or protocol.
+             */
+
+            if(hints->ai_protocol != 0)
+            {
+                /* If ai_family is not AF_UNSPEC and ai_protocol is not zero,
+                 * then addresses are returned for use only with the specified
+                 * address family and protocol.
+                 */
+                REQ("getaddrinfo.16", "ai_protocol",
+                    AND_ai_check(context ,res_ai, check_ai_protocol, hints)
+                   );
+            }
+            else
+            {
+                /*
+                 * A value of zero for ai_protocol means that the caller shall accept any protocol.
+                 */
+                IMPLEMENT_REQ("getaddrinfo.20");
+            }
+
+            /*
+             * The ai_flags field to which the hints parameter points shall be set to zero or
+             * be the bitwise-inclusive OR of one or more of the values AI_PASSIVE,
+             * AI_CANONNAME, AI_NUMERICHOST, AI_NUMERICSERV, AI_V4MAPPED, AI_ALL, and
+             * AI_ADDRCONFIG.
+             */
+            REQ("getaddrinfo.22", "hints->ai_flags constrains",
+                 (hints->ai_flags &
+                  ~(SUT_AI_PASSIVE | SUT_AI_CANONNAME | SUT_AI_NUMERICHOST /*| SUT_AI_NUMERICSERV */
+                    | SUT_AI_V4MAPPED | SUT_AI_ALL | SUT_AI_ADDRCONFIG)
+                 )== 0
+                );
+
+            if(nodename!=NULL)
+            {
+                /*
+                 * The AI_PASSIVE flag shall be ignored if the nodename argument is not null.
+                 */
+                IMPLEMENT_REQ("getaddrinfo.27");
+            }
+            else
+            {
+                if(hints->ai_flags & SUT_AI_PASSIVE)
+                {
+                    /*
+                     * If the AI_PASSIVE flag is specified, the returned address information shall be
+                     * suitable for use in binding a socket for accepting incoming connections for
+                     * the specified service.
+                     */
+                    REQ("getaddrinfo.23", "", TODO_REQ()); //
+
+                    if(nodename == NULL)
+                    {
+                        /*
+                         * In this case, if the nodename argument is null, then the IP address portion of
+                         * the socket address structure shall be set to INADDR_ANY for an IPv4 address or
+                         * IN6ADDR_ANY_INIT for an IPv6 address.
+                         */
+                        REQ("getaddrinfo.24", "ip address in result shall be INADDR_ANY",
+                            AND_ai_check(context, res_ai, check_ai_ip, NULL)
+                           );
+                    }
+                }
+                else
+                {
+                    /*
+                     * If the AI_PASSIVE flag is not specified, the returned address information shall
+                     * be suitable for a call to connect() (for a connection-mode protocol) or for a
+                     * call to connect(), sendto(), or sendmsg() (for a connectionless protocol).
+                     */
+                    REQ("getaddrinfo.25", "", TODO_REQ()); //
+
+                    if(nodename == NULL)
+                    {
+                        /*
+                         * In this case, if the nodename argument is null, then the IP address portion of
+                         * the socket address structure shall be set to the loopback address.
+                         */
+                        REQ("getaddrinfo.26", "ip address in result shall be loopback address",
+                            AND_ai_check(context, res_ai, check_ai_ip, res_ai)
+                           );
+                    }
+                }
+            }
+
+            if(hints->ai_flags & SUT_AI_CANONNAME)
+            {
+                /*
+                 * the terms ``canonical name'' and ``alias'' cannot be precisely defined for the
+                 * general case.
+                 */
+                /*
+                 * A numeric host address string is not a ``name'', and thus does not have a ``
+                 * canonical name'' form; no address to host name translation is performed.
+                 */
+                REQ("getaddrinfo.30", "", TODO_REQ());
+
+                if(nodename != NULL)
+                {
+                    /*
+                     * If nodename is not null, and if requested by the AI_CANONNAME flag, the
+                     * ai_canonname field of the first returned addrinfo structure shall point to
+                     * a null-terminated string containing the canonical name corresponding to the
+                     * input nodename
+                     */
+                    REQ("getaddrinfo.49", "canonname is in the first returned addrinfo",
+                        (res_ai->ai_canonname != NULL)); //
+
+                    /*
+                     * if the canonical name is not available, then ai_canonname shall refer to the
+                     * nodename argument or a string with the same contents.
+                     */
+                    REQ("getaddrinfo.50", "", TODO_REQ()); //
+
+               
+                }
+            }
+
+            if(hints->ai_flags & SUT_AI_NUMERICHOST)
+            {
+                if(nodename!=NULL)
+                {
+                    /*
+                     * If the AI_NUMERICHOST flag is specified, then a non-null nodename string
+                     * supplied shall be a numeric host address string.
+                     */
+                    REQ("getaddrinfo.31.01", "nodename shall be a numeric address",
+                        is_addr_numeric(nodename)
+                       );
+                }
+
+                /*
+                 * This flag shall prevent any type of name resolution service (for example,
+                 * the DNS) from being invoked.
+                 */
+                /*[Also checked in errors section]*/
+                REQ("getaddrinfo.31.03", "", TODO_REQ());//
+            }
+
+
+
+            if( false /*hints->ai_flags & SUT_AI_NUMERICSERV*/)
+            {
+                if(servname!=NULL)
+                {
+                    /*
+                     * If the AI_NUMERICSERV flag is specified, then a non-null servname string
+                     * supplied shall be a numeric port string.
+                     */
+                    REQ("getaddrinfo.32.01", "servname shall be a numeric port", is_serv_numeric(servname) );
+                }
+
+                /*
+                 * This flag shall prevent any type of name resolution service (for example, NIS+)
+                 * from being invoked.
+                 */
+                /*[Also checked in errors section]*/
+                REQ("getaddrinfo.32.03", "", TODO_REQ()); //
+            }
+
+            if( hints->ai_flags & SUT_AI_V4MAPPED)
+            {
+                if(hints->ai_family!=SUT_AF_INET6 )
+                {
+                    /*
+                     * The AI_V4MAPPED flag shall be ignored unless ai_family equals AF_INET6.
+                     */
+                    IMPLEMENT_REQ("getaddrinfo.33.ip6.02");
+                }
+                else
+                {
+                    /*
+                     * If the AI_V4MAPPED flag is specified along with an ai_family of AF_INET6, then
+                     * getaddrinfo() shall return IPv4-mapped IPv6 addresses on finding no matching
+                     * IPv6 addresses ( ai_addrlen shall be 16).
+                     */
+                    REQ("getaddrinfo.33.ip6.01", "ai_addrlen shall be 16",
+                        // 28 on fedora //AND_ai_check(context, res_ai, check_ai_addrlen, create_IntTObj(16) )
+                         AND_ai_check(context, res_ai, check_ai_addrlen, create_IntTObj(28) )
+                       );
+                }
+            }
+
+            if( hints->ai_flags & SUT_AI_ALL )
+            {
+                if( hints->ai_flags & SUT_AI_V4MAPPED )
+                {
+                    /*
+                     * If the AI_ALL flag is used with the AI_V4MAPPED flag, then getaddrinfo() shall
+                     * return all matching IPv6 and IPv4 addresses.
+                     */
+                    REQ("getaddrinfo.33.ip6.03", "", TODO_REQ()); //
+                }
+                else
+                {
+                    /*
+                     * The AI_ALL flag without the AI_V4MAPPED flag is ignored.
+                     */
+                    IMPLEMENT_REQ("getaddrinfo.33.ip6.04");
+                }
+            }
+
+            if( hints->ai_flags & SUT_AI_ADDRCONFIG )
+            {
+                /*
+                 * If the AI_ADDRCONFIG flag is specified, IPv4 addresses shall be returned only
+                 * if an IPv4 address is configured on the local system
+                 */
+                REQ("getaddrinfo.34", "", TODO_REQ()); //
+
+                /*
+                 * and IPv6 addresses shall be returned only if an IPv6 address is configured on
+                 * the local system
+                 */
+                REQ("getaddrinfo.34.ip6.01", "", TODO_REQ()); //
+            }
+
+            if(hints->ai_socktype != 0)
+            {
+                /*
+                 * A non-zero socket type value shall limit the returned information to values
+                 * with the specified socket type.
+                 */
+                REQ("getaddrinfo.37", "ai_socktype",
+                    AND_ai_check(context, res_ai, check_ai_socktype, hints)
+                   );
+            }
+            else
+            {
+                /*
+                 * If a specific socket type is not given (for example, a value of zero) and the
+                 * service name could be interpreted as valid with multiple supported socket
+                 * types, the implementation shall attempt to resolve the service name for all
+                 * supported socket types and, in the absence of errors, all possible results
+                 * shall be returned.
+                 */
+                /*
+                 * A value of zero for ai_socktype means that the caller shall accept any socket
+                 * type.
+                 */
+                REQ("getaddrinfo.36;getaddrinfo.19", "", TODO_REQ()); //
+            }
+
+            if( hints->ai_family == SUT_AF_UNSPEC )
+            {
+                /*
+                 * If the ai_family field to which hints points has the value AF_UNSPEC, addresses
+                 * shall be returned for use with any address family that can be used with the
+                 * specified nodename and/or servname.
+                 */
+                /*
+                 * A value of AF_UNSPEC for ai_family means that the caller shall accept any
+                 * address family.
+                 */
+                REQ("getaddrinfo.38;getaddrinfo.18", "", TODO_REQ()); //
+            }
+            else
+            {
+                /*
+                 * Otherwise, addresses shall be returned for use only with the specified address
+                 * family.
+                 */
+                REQ("getaddrinfo.39", "ai_family",
+                    AND_ai_check(context, res_ai, check_ai_family, hints)
+                   );
+            }
+
+        } // end of if(hints)
+
+        /*
+         * All fields in socket address structures returned by getaddrinfo() that are not
+         * filled in through an explicit argument (for example, sin6_flowinfo) shall be
+         * set to zero.
+         */
+        REQ("getaddrinfo.52", "", TODO_REQ()); //
+
+
+        /*
+         * The freeaddrinfo() and getaddrinfo() functions shall be thread-safe.
+         */
+        REQ("getaddrinfo.04", "", TODO_REQ()); //
+
+        return true;
+    }
+}
+
+void onGetaddrinfo( CallContext context, CString * nodename,
+                   CString * servname, AddrInfoT * hints, VoidTPtrObj * res, IntT getaddrinfo_spec )
+{
+
+}
+
+
+/****/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+getnameinfo - get name information
+
+SYNOPSIS
+
+#include <sys/socket.h> #include <netdb.h>
+
+int getnameinfo(const struct sockaddr *restrict sa, socklen_t salen,
+char *restrict node, socklen_t nodelen, char *restrict service,
+socklen_t servicelen, int flags);
+
+DESCRIPTION
+
+The getnameinfo() function shall translate a socket address to a node name and
+service location, all of which are defined as in getaddrinfo().
+
+The sa argument points to a socket address structure to be translated.
+
+[IP6] If the socket address structure contains an IPv4-mapped IPv6 address or
+an IPv4-compatible IPv6 address, the implementation shall extract the embedded
+IPv4 address and lookup the node name for that IPv4 address.
+
+Note:
+
+The IPv6 unspecified address ( "::" ) and the IPv6 loopback address (
+"::1" ) are not IPv4-compatible addresses. If the address is the
+IPv6 unspecified address ( "::" ), a lookup is not performed, and the
+[EAI_NONAME] error is returned.
+
+If the node argument is non-NULL and the nodelen argument is non-zero, then the
+node argument points to a buffer able to contain up to nodelen characters that
+receives the node name as a null-terminated string. If the node argument is
+NULL or the nodelen argument is zero, the node name shall not be returned. If
+the node's name cannot be located, the numeric form of the address contained
+in the socket address structure pointed to by the sa argument is returned
+instead of its name.
+
+If the service argument is non-NULL and the servicelen argument is non-zero,
+then the service argument points to a buffer able to contain up to servicelen
+bytes that receives the service name as a null-terminated string. If the
+service argument is NULL or the servicelen argument is zero, the service name
+shall not be returned. If the service's name cannot be located, the numeric
+form of the service address (for example, its port number) shall be returned
+instead of its name.
+
+The flags argument is a flag that changes the default actions of the function.
+By default the fully-qualified domain name (FQDN) for the host shall be
+returned, but:
+
+If the flag bit NI_NOFQDN is set, only the node name portion of the FQDN shall
+be returned for local hosts.
+
+If the flag bit NI_NUMERICHOST is set, the numeric form of the address
+contained in the socket address structure pointed to by the sa argument shall
+be returned instead of its name, under all circumstances.
+
+If the flag bit NI_NAMEREQD is set, an error shall be returned if the host's
+name cannot be located.
+
+If the flag bit NI_NUMERICSERV is set, the numeric form of the service address
+shall be returned (for example, its port number) instead of its name, under
+all circumstances.
+
+If the flag bit NI_NUMERICSCOPE is set, the numeric form of the scope
+identifier shall be returned (for example, interface index) instead of its
+name. This flag shall be ignored if the sa argument is not an IPv6 address.
+
+If the flag bit NI_DGRAM is set, this indicates that the service is a datagram
+service (SOCK_DGRAM). The default behavior shall assume that the service is a
+stream service (SOCK_STREAM).
+
+Notes:
+
+The two NI_NUMERICxxx flags are required to support the -n flag that many
+commands provide.
+
+The NI_DGRAM flag is required for the few AF_INET and AF_INET6 port numbers
+(for example, [512,514]) that represent different services for UDP and TCP.
+
+The getnameinfo() function shall be thread-safe.
+
+RETURN VALUE
+
+A zero return value for getnameinfo() indicates successful completion; a non-
+zero return value indicates failure. The possible values for the failures are
+listed in the ERRORS section.
+
+Upon successful completion, getnameinfo() shall return the node and service
+names, if requested, in the buffers provided. The returned names are always
+null-terminated strings.
+
+ERRORS
+
+The getnameinfo() function shall fail and return the corresponding value if:
+
+[EAI_AGAIN]
+
+The name could not be resolved at this time. Future attempts may succeed.
+
+[EAI_BADFLAGS]
+
+The flags had an invalid value.
+
+[EAI_FAIL]
+
+A non-recoverable error occurred.
+
+[EAI_FAMILY]
+
+The address family was not recognized or the address length was invalid for the
+specified family.
+
+[EAI_MEMORY]
+
+There was a memory allocation failure.
+
+[EAI_NONAME]
+
+The name does not resolve for the supplied parameters.
+
+[EAI_NONAME]
+
+NI_NAMEREQD is set and the host's name cannot be located, or both nodename and
+servname were null.
+
+[EAI_OVERFLOW]
+
+An argument buffer overflowed. The buffer pointed to by the node argument or
+the service argument was too small.
+
+[EAI_SYSTEM]
+
+A system error occurred. The error code can be found in errno.
+*/
+
+specification
+IntT getnameinfo_spec( CallContext context, SockaddrT * sa,
+                       CString * node, sut_socklen_t nodelen,
+                       CString * service, sut_socklen_t servicelen,
+                       IntT flags )
+{
+    pre
+    {
+        /*
+         * If the node argument is non-NULL and the nodelen argument is non-zero, then the
+         * node argument points to a buffer able to contain up to nodelen characters that
+         * receives the node name as a null-terminated string.
+         */
+        REQ("app.getnameinfo.05.01", "", TODO_REQ());
+
+        /*
+         * If the service argument is non-NULL and the servicelen argument is non-zero,
+         * then the service argument points to a buffer able to contain up to servicelen
+         * bytes that receives the service name as a null-terminated string.
+         */
+        REQ("app.getnameinfo.07.01", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+
+        /*
+         * a non-zero return value indicates failure. The possible values for the
+         * failures are listed in the ERRORS section.
+         */
+        ERROR_BEGIN(POSIX_GETNAMEINFO, "getnameinfo.12.02", getnameinfo_spec!=0, getnameinfo_spec)
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_AGAIN]
+             * The name could not be resolved at this time. Future attempts may succeed.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_AGAIN, "getnameinfo.15.01", TODO_ERR(EAI_AGAIN) )
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_BADFLAGS]
+             * The flags had an invalid value.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_BADFLAGS, "getnameinfo.15.02",
+                         (flags &
+                           ~(SUT_NI_NOFQDN|SUT_NI_NUMERICHOST|SUT_NI_NAMEREQD|SUT_NI_NUMERICSERV|
+                             /*SUT_NI_NUMERICSCOPE|*/SUT_NI_DGRAM )
+                         )
+                       )
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_FAIL]
+             * A non-recoverable error occurred.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_FAIL, "getnameinfo.15.03", TODO_ERR(EAI_FAIL) )
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_FAMILY]
+             * The address family was not recognized or the address length was invalid for the
+             * specified family.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_FAMILY, "getnameinfo.15.04", TODO_ERR(EAI_FAMILY) )
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_MEMORY]
+             * There was a memory allocation failure.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_MEMORY, "getnameinfo.15.05", TODO_ERR(EAI_MEMORY) )
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_NONAME]
+             * The name does not resolve for the supplied parameters.
+             */
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_NONAME]
+             * NI_NAMEREQD is set and the host's name cannot be located, or both nodename and
+             * servname were null.
+             */
+            /*
+             * If the flag bit NI_NAMEREQD is set, an error shall be returned if the host's
+             * name cannot be located.
+             */
+            /*
+             * The IPv6 unspecified address ( "::" ) and the IPv6 loopback address (
+             * "::1" ) are not IPv4-compatible addresses. If the address is the
+             * IPv6 unspecified address ( "::" ), a lookup is not performed, and the
+             * [EAI_NONAME] error is returned.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_NONAME, "getnameinfo.15.06;getnameinfo.15.07;getnameinfo.09.03;getnameinfo.04.ip6",
+                           TODO_ERR(EAI_NONAME) /*getnameinfo.15.06*/
+                        || TODO_ERR(EAI_NONAME) /*getnameinfo.15.07;getnameinfo.09.03*/
+                    //fedora fails    || ( (node==NULL) && (service==NULL) ) /*getnameinfo.15.07*/
+                        || ( (sa->family == SUT_AF_INET6) && is_in6addr_loopback(sa) )
+                        )
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_OVERFLOW]
+             * An argument buffer overflowed. The buffer pointed to by the node argument or
+             * the service argument was too small.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_OVERFLOW, "getnameinfo.15.08", TODO_ERR(EAI_OVERFLOW) )
+
+            /*
+             * The getnameinfo() function shall fail and return the corresponding value if:
+             *
+             * [EAI_SYSTEM]
+             * A system error occurred. The error code can be found in errno.
+             */
+            ERROR_SHALL(POSIX_GETNAMEINFO, EAI_SYSTEM, "getnameinfo.15.09", TODO_ERR(EAI_SYSTEM) )
+
+        ERROR_END()
+
+        /*
+         * A zero return value for getnameinfo() indicates successful completion
+         */
+        REQ("getnameinfo.12.01", "zero on return", getnameinfo_spec == 0);
+
+        /*
+         * [IP6] If the socket address structure contains an IPv4-mapped IPv6 address or
+         * an IPv4-compatible IPv6 address, the implementation shall extract the embedded
+         * IPv4 address and lookup the node name for that IPv4 address.
+         */
+        REQ("getnameinfo.03.ip6", "", TODO_REQ()); //
+
+        /*
+         * If the node's name cannot be located, the numeric form of the address
+         * contained in the socket address structure pointed to by the sa argument is
+         * returned instead of its name.
+         */
+        REQ("getnameinfo.06", "", TODO_REQ()); //
+        // TODO: if `node` is numeric then it corresponds to `sa`
+
+
+        /*
+         * If the service's name cannot be located, the numeric form of the service
+         * address (for example, its port number) shall be returned instead of its name.
+         */
+        REQ("getnameinfo.08", "", TODO_REQ()); //
+        // TODO: check the service is numeric or exists in the serv_db
+
+
+        if(flags & SUT_NI_NOFQDN )
+        {
+            /*
+             * If the flag bit NI_NOFQDN is set, only the node name portion of the FQDN shall
+             * be returned for local hosts.
+             */
+            REQ("getnameinfo.09.01", "", TODO_REQ()); //
+        }
+
+        if(flags & SUT_NI_NUMERICHOST)
+        {
+            if(node)
+            {
+                /*
+                 * If the flag bit NI_NUMERICHOST is set, the numeric form of the address
+                 * contained in the socket address structure pointed to by the sa argument shall
+                 * be returned instead of its name, under all circumstances.
+                 */
+                CString * numhost = numerichost(sa);
+                traceFormattedUserInfo("`$(obj)` ?= `$(obj)`",numhost, node);
+                if(numhost)
+                    REQ("getnameinfo.09.02", "NI_NUMERICHOST", equals(node, numhost )  );
+            }
+        }
+
+        if(flags & SUT_NI_NUMERICSERV)
+        {
+            if(service)
+            {
+                /*
+                 * If the flag bit NI_NUMERICSERV is set, the numeric form of the service address
+                 * shall be returned (for example, its port number) instead of its name, under
+                 * all circumstances.
+                 */
+                CString * numserv = numericserv(sa, servicelen);
+                traceFormattedUserInfo("`$(obj)` ?= `$(obj)`",numserv, service);
+                if(numserv)
+                    REQ("getnameinfo.09.04", "NI_NUMERICSERV", equals(service, numserv )  );
+            }
+        }
+        else
+        {
+            if(service && serv_db)
+            {
+                IntT port;
+                ServentT * se;
+                CString * servname_cut;
+                if(sa->family == SUT_AF_INET)
+                    port = getInetSocket_sin_port(sa);
+                else
+                if(sa->family == SUT_AF_INET6)
+                    port = getInet6Socket_sin6_port(sa);
+                else
+                    port=-1;
+
+                se = findserv_model(context, NULL, port, NULL, NULL);
+                if(se)
+                {
+                    servname_cut = substring_CString(se->s_name, 0, min(length_CString(service), min(length_CString(se->s_name), servicelen)));
+
+                    if(POSIX_GETNAMEINFO_FULL_SERVICENAME_RESOLUTION)
+                    {
+                        traceFormattedUserInfo("`$(obj)` ?= `$(obj)`",servname_cut, service);
+                        REQ("getnameinfo.09.04","service name",equals(service, servname_cut) );
+                    }
+                    else
+                    {
+                        if (!equals(service, servname_cut) && !equals(service, numericserv(sa,servicelen)))
+                        {
+                            VERBOSE("-----------------------\n");
+                            DUMP("service = $(obj)\n", service);
+                            DUMP("servname_cut = $(obj)\n", servname_cut);
+                            DUMP("numericserv = $(obj)\n", numericserv(sa,servicelen));
+                            VERBOSE("servicelen = %d\n", servicelen);
+                            DUMP("se->s_name = $(obj)\n", se->s_name);
+
+                            traceFormattedUserInfo("expected: $(obj), returned: $(obj)",servname_cut, service);
+                        }
+
+                        REQ("getnameinfo.09.04","service name",
+                            equals(service, servname_cut) || equals(service, numericserv(sa,servicelen) )
+                           );
+                    }
+                }
+            }
+        }
+
+//        if(flags & SUT_NI_NUMERICSCOPE)
+        {
+            if(sa->family != SUT_AF_INET6)
+            {
+                /*
+                 * This flag shall be ignored if the sa argument is not an IPv6 address.
+                 */
+                IMPLEMENT_REQ("getnameinfo.09.05.00");
+            }
+            else
+            {
+                /*
+                 * If the flag bit NI_NUMERICSCOPE is set, the numeric form of the scope
+                 * identifier shall be returned (for example, interface index) instead of its
+                 * name.
+                 */
+                REQ("getnameinfo.09.05.ip6", "", TODO_REQ()); //
+            }
+        }
+
+        if(flags & SUT_NI_DGRAM)
+        {
+            /*
+             * If the flag bit NI_DGRAM is set, this indicates that the service is a datagram
+             * service (SOCK_DGRAM).
+             */
+            REQ("getnameinfo.09.06.01", "", TODO_REQ()); //
+        }
+        else
+        {
+            /*
+             * The default behavior shall assume that the service is a stream service
+             * (SOCK_STREAM).
+             */
+            REQ("getnameinfo.09.06.02", "", TODO_REQ()); //
+        }
+
+        if( !(flags & (SUT_NI_NUMERICHOST|SUT_NI_NUMERICSERV|SUT_NI_NOFQDN|SUT_NI_NAMEREQD|SUT_NI_DGRAM) ) )
+        {
+            /*
+             * The flags argument is a flag that changes the default actions of the function.
+             * By default the fully-qualified domain name (FQDN) for the host shall be
+             * returned
+             */
+            REQ("getnameinfo.09.00", "", TODO_REQ()); //
+        }
+
+        /*
+         * Upon successful completion, getnameinfo() shall return the node and service
+         * names, if requested, in the buffers provided.
+         * The returned names are always null-terminated strings.
+         */
+        REQ("getnameinfo.13", "", TODO_REQ()); //
+
+    
+
+        /*
+         * The getnameinfo() function shall be thread-safe.
+         */
+        REQ("getnameinfo.11", "", TODO_REQ()); //
+
+        return true;
+    }
+}
+
+void onGetnameinfo( CallContext context, SockaddrT * sa,
+                    CString * node, sut_socklen_t nodelen,
+                    CString * service, sut_socklen_t servicelen,
+                    IntT flags, IntT getnameinfo_spec )
+{
+
+}
+
+/****/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+gethostbyaddr, gethostbyname - network host database functions
+
+SYNOPSIS
+
+#include <netdb.h>
+
+[OB] struct hostent *gethostbyaddr(const void *addr, socklen_t len,
+int type); struct hostent *gethostbyname(const char *name);
+
+DESCRIPTION
+
+These functions shall retrieve information about hosts. This information is
+considered to be stored in a database that can be accessed sequentially or
+randomly. Implementation of this database is unspecified.
+
+Note:
+
+In many cases it is implemented by the Domain Name System, as documented in RFC
+1034, RFC 1035, and RFC 1886.
+
+Entries shall be returned in hostent structures.
+
+The gethostbyaddr() function shall return an entry containing addresses of
+address family type for the host with address addr. The len argument contains
+the length of the address pointed to by addr. The gethostbyaddr() function
+need not be reentrant. A function that is not required to be reentrant is not
+required to be thread-safe.
+
+The gethostbyname() function shall return an entry containing addresses of
+address family AF_INET for the host with name name. The gethostbyname()
+function need not be reentrant. A function that is not required to be reentrant
+is not required to be thread-safe.
+
+The addr argument of gethostbyaddr() shall be an in_addr structure when type is
+AF_INET. It contains a binary format (that is, not null-terminated) address
+in network byte order. The gethostbyaddr() function is not guaranteed to
+return addresses of address families other than AF_INET, even when such
+addresses exist in the database.
+
+If gethostbyaddr() returns successfully, then the h_addrtype field in the
+result shall be the same as the type argument that was passed to the
+function, and the h_addr_list field shall list a single address that is a copy
+of the addr argument that was passed to the function.
+
+The name argument of gethostbyname() shall be a node name; the behavior of
+gethostbyname() when passed a numeric address string is unspecified. For IPv4,
+a numeric address string shall be in the dotted-decimal notation described in
+inet_addr().
+
+If name is not a numeric address string and is an alias for a valid host name,
+then gethostbyname() shall return information about the host name to which
+the alias refers, and name shall be included in the list of aliases returned.
+
+RETURN VALUE
+
+Upon successful completion, these functions shall return a pointer to a hostent
+structure if the requested entry was found, and a null pointer if the end of
+the database was reached or the requested entry was not found.
+
+Upon unsuccessful completion, gethostbyaddr() and gethostbyname() shall set
+h_errno to indicate the error.
+
+ERRORS
+
+These functions shall fail in the following cases. The gethostbyaddr() and
+gethostbyname() functions shall set h_errno to the value shown in the list
+below. Any changes to errno are unspecified.
+
+[HOST_NOT_FOUND]
+
+No such host is known.
+
+[NO_DATA]
+
+The server recognized the request and the name, but no address is available.
+Another type of request to the name server for the domain might return an
+answer.
+
+[NO_RECOVERY]
+
+An unexpected server failure occurred which cannot be recovered.
+
+[TRY_AGAIN]
+
+A temporary and possibly transient error occurred, such as a failure of a
+server to respond.
+*/
+
+specification
+HostentT * gethostbyaddr_spec( CallContext context, VoidTPtr addr, sut_socklen_t len, IntT type )
+{
+    pre
+    {
+        /*
+         * The gethostbyaddr() function is not guaranteed to return addresses of address
+         * families other than AF_INET, even when such addresses exist in the database.
+         */
+        REQ("app.gethostbyaddr.07", "families other than AF_INET are not specified", type == SUT_AF_INET);
+
+        /*
+         * The len argument contains the length of the address pointed to by addr.
+         */
+        REQ("app.gethostbyaddr.03", "", TODO_REQ());
+
+        /*
+         * The addr argument of gethostbyaddr() shall be an in_addr structure when type is
+         * AF_INET.
+         */
+        REQ("app.gethostbyaddr.05", "", TODO_REQ());
+
+        /*
+         * It contains a binary format (that is, not null-terminated) address in network
+         * byte order.
+         */
+        REQ("app.gethostbyaddr.06", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        IntT h_errno;
+        VoidTPtr h_addr_list_at1;
+        CByteArray *ar, *ar1;
+
+        /*
+         * Upon unsuccessful completion, gethostbyaddr() and gethostbyname() shall set
+         * h_errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_GETHOSTBYADDR, "gethostbyaddr.10.02",
+                    (gethostbyaddr_spec == NULL) && ((h_errno = read_h_errno(context)) != 0),
+                    h_errno
+                   )
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [HOST_NOT_FOUND]
+             * No such host is known.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYADDR, HOST_NOT_FOUND, "gethostbyaddr.11.01", TODO_ERR(HOST_NOT_FOUND) )
+
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [NO_DATA]
+             * The server recognized the request and the name, but no address is available.
+             * Another type of request to the name server for the domain might return an
+             * answer.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYADDR, NO_DATA, "gethostbyaddr.11.02", TODO_ERR(NO_DATA) )
+
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [NO_RECOVERY]
+             * An unexpected server failure occurred which cannot be recovered.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYADDR, NO_RECOVERY, "gethostbyaddr.11.03", TODO_ERR(NO_RECOVERY) )
+
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [TRY_AGAIN]
+             * A temporary and possibly transient error occurred, such as a failure of a
+             * server to respond.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYADDR, TRY_AGAIN, "gethostbyaddr.11.04", TODO_ERR(TRY_AGAIN) )
+
+        ERROR_END()
+
+        /*
+         * The gethostbyaddr() function need not be reentrant. A function that is not
+         * required to be reentrant is not required to be thread-safe.
+         */
+        REQ("gethostbyaddr.04", "need not be reentrant", true);
+
+        if(gethostbyaddr_spec != NULL)
+        {
+            /*
+             * If gethostbyaddr() returns successfully, then the h_addrtype field in the
+             * result shall be the same as the type argument that was passed to the
+             * function
+             */
+            REQ("gethostbyaddr.08", "family type", gethostbyaddr_spec->h_addrtype == type);
+
+            /*
+             * the h_addr_list field shall list a single address that is a copy of the addr
+             * argument that was passed to the function
+             */
+            if(!isNULL_VoidTPtr(gethostbyaddr_spec->h_addr_list))
+            {
+                ar = readCByteArray_VoidTPtr(addr, len);
+                ar1 = readCByteArray_VoidTPtr(readPointer_VoidTPtr(context,gethostbyaddr_spec->h_addr_list),
+                                               gethostbyaddr_spec->h_length );
+
+                h_addr_list_at1 = gethostbyaddr_spec->h_addr_list;
+                h_addr_list_at1.address += sizeof_VoidTPtr;
+
+                traceFormattedUserInfo("addresses: $(obj), $(obj)", ar, ar1);
+            }
+            REQ("gethostbyaddr.09", "h_addr_list is not null", !isNULL_VoidTPtr(gethostbyaddr_spec->h_addr_list) );
+            REQ("gethostbyaddr.09", "h_addr_list[0] is a copy of the addr ", equals( ar, ar1 ) );
+            REQ("gethostbyaddr.09", "h_addr_list[1] is null",
+                isNULL_VoidTPtr( readPointer_VoidTPtr(context, h_addr_list_at1) ) );
+            REQ("gethostbyaddr.09", "length check", gethostbyaddr_spec->h_length == len );
+
+           
+        }
+
+        /*
+         * Upon successful completion, these functions shall return a pointer to a hostent
+         * structure if the requested entry was found, and a null pointer if the end of
+         * the database was reached or the requested entry was not found.
+         */
+        REQ("gethostbyaddr.10.01", "", TODO_REQ()); //
+
+        /*
+         * Any changes to errno are unspecified.
+         */
+        REQ("gethostbyaddr.12", "Any changes to errno are unspecified", true);
+
+        return true;
+    }
+}
+
+void onGethostbyaddr( CallContext context, VoidTPtr addr, sut_socklen_t len,
+                      IntT type, HostentT * gethostbyaddr_spec
+                     )
+{
+
+}
+
+
+specification
+HostentT * gethostbyname_spec( CallContext context, CString * name )
+{
+    pre
+    {
+        /*
+         * The name argument of gethostbyname() shall be a node name
+         */
+        REQ("app.gethostbyname.05", "", TODO_REQ());
+
+        /*
+         * the behavior of gethostbyname() when passed a numeric address string is
+         * unspecified
+         */
+        REQ("app.gethostbyname.06", "", TODO_REQ());
+
+        /*
+         * For IPv4, a numeric address string shall be in the dotted-decimal notation
+         * described in inet_addr().
+         */
+        REQ("app.gethostbyname.07", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        IntT h_errno;
+
+        /*
+         * Upon unsuccessful completion, gethostbyaddr() and gethostbyname() shall set
+         * h_errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_GETHOSTBYNAME, "gethostbyname.10.02",
+                    (gethostbyname_spec == NULL) && ((h_errno = read_h_errno(context)) != 0),
+                    h_errno
+                   )
+
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [HOST_NOT_FOUND]
+             * No such host is known.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYNAME, HOST_NOT_FOUND, "gethostbyname.11.01", TODO_ERR(HOST_NOT_FOUND) )
+
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [NO_DATA]
+             * The server recognized the request and the name, but no address is available.
+             * Another type of request to the name server for the domain might return an
+             * answer.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYNAME, NO_DATA, "gethostbyname.11.02", TODO_ERR(NO_DATA) )
+
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [NO_RECOVERY]
+             * An unexpected server failure occurred which cannot be recovered.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYNAME, NO_RECOVERY, "gethostbyname.11.03", TODO_ERR(NO_RECOVERY) )
+
+            /*
+             * These functions shall fail in the following cases. The gethostbyaddr() and
+             * gethostbyname() functions shall set h_errno to the value shown in the list
+             * below.
+             *
+             * [TRY_AGAIN]
+             * A temporary and possibly transient error occurred, such as a failure of a
+             * server to respond.
+             */
+            ERROR_SHALL(POSIX_GETHOSTBYNAME, TRY_AGAIN, "gethostbyname.11.04", TODO_ERR(TRY_AGAIN) )
+
+        ERROR_END()
+
+
+        /*
+         * If name is not a numeric address string and is an alias for a valid
+         * host name, then
+         * gethostbyname() shall return information about the host name to which the
+         * alias refers
+         */
+        REQ("gethostbyname.08.01", "", TODO_REQ()); //
+
+        /*
+         * If name is not a numeric address string and is an alias for a valid
+         * host name, then
+         * name shall be included in the list of aliases returned
+         */
+        REQ("gethostbyname.08.02", "", TODO_REQ()); //
+
+        /*
+         * Upon successful completion, these functions shall return a pointer to a hostent
+         * structure if the requested entry was found, and a null pointer if the end of
+         * the database was reached or the requested entry was not found.
+         */
+        REQ("gethostbyname.10.01", "", TODO_REQ()); //
+
+        /*
+         * The gethostbyname() function shall return an entry containing addresses of
+         * address family AF_INET for the host with name name.
+         */
+        REQ("gethostbyname.02", "address family AF_INET", gethostbyname_spec->h_addrtype == SUT_AF_INET);
+
+        /*
+         * The gethostbyname() function need not be reentrant. A function that is not
+         * required to be reentrant is not required to be thread-safe.
+         */
+        REQ("gethostbyname.04", "need not be reentrant", true);
+
+        /*
+         * Any changes to errno are unspecified.
+         */
+        REQ("gethostbyname.12", "Any changes to errno are unspecified", true);
+
+        return true;
+    }
+}
+
+void onGethostbyname( CallContext context, CString * name, HostentT * gethostbyname_spec )
+{
+
+}
+
+
+/****/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+gai_strerror - address and name information error description
+
+SYNOPSIS
+
+#include <netdb.h>
+
+const char *gai_strerror(int ecode);
+
+DESCRIPTION
+
+The gai_strerror() function shall return a text string describing an error
+value for the getaddrinfo() and getnameinfo() functions listed in the <
+netdb.h> header.
+
+When the ecode argument is one of the following values listed in the <netdb.
+h> header:
+
+[EAI_AGAIN] [EAI_BADFLAGS] [EAI_FAIL] [EAI_FAMILY] [EAI_MEMORY]
+[EAI_NONAME] [EAI_OVERFLOW] [EAI_SERVICE] [EAI_SOCKTYPE] [EAI_SYSTEM]
+
+the function return value shall point to a string describing the error.
+
+If the argument is not one of those values, the function shall return a
+pointer to a string whose contents indicate an unknown error.
+
+RETURN VALUE
+
+Upon successful completion, gai_strerror() shall return a pointer to an
+implementation-defined string.
+
+ERRORS
+
+No errors are defined.
+*/
+specification
+CString * gai_strerror_spec( CallContext context, IntT ecode )
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * The gai_strerror() function shall return a text string describing an error
+         * value for the getaddrinfo() and getnameinfo() functions listed in the <
+         * netdb.h> header.
+         *
+         * When the ecode argument is one of the following values listed in the <netdb.
+         * h> header:
+         * [EAI_AGAIN] [EAI_BADFLAGS] [EAI_FAIL] [EAI_FAMILY] [EAI_MEMORY]
+         * [EAI_NONAME] [EAI_OVERFLOW] [EAI_SERVICE] [EAI_SOCKTYPE] [EAI_SYSTEM]
+         * the function return value shall point to a string describing the error.
+         */
+        REQ("gai_strerror.01.01", "", TODO_REQ());
+
+        /*
+         * The gai_strerror() function shall return a text string describing an error
+         * value for the getaddrinfo() and getnameinfo() functions listed in the <
+         * netdb.h> header.
+         *
+         * If the argument is not one of those values, the function shall return a
+         * pointer to a string whose contents indicate an unknown error.
+         */
+        REQ("gai_strerror.01.02", "", TODO_REQ());
+
+        /* TODO: It is possible to check that the function returns different strings for ecodes
+           listed above, and the same string (`unknown error') for wrong ecodes.
+           Also one may pre-configure error messages.
+         */
+
+        REQ("gai_strerror.01", "shall return a text string", gai_strerror_spec != NULL);
+
+        /*
+         * Upon successful completion, gai_strerror() shall return a pointer to an
+         * implementation-defined string.
+         */
+        REQ("gai_strerror.02", "implementation-defined", true);
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+__h_errno_location -- address of h_errno variable
+
+SYNOPSIS
+
+int * __h_errno_location(void);
+
+DESCRIPTION
+
+__h_errno_location() returns the address of the h_errno variable, where
+h_errno is as specified in ISO POSIX (2003).
+
+__h_errno_location() is not in the source standard; it is only in the binary
+standard. Note that h_errno itself is only in the source standard; it is not
+in the binary standard.
+*/
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright © 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+h_errno - error return value for network database operations
+
+SYNOPSIS
+
+[OB] #include <netdb.h>
+
+DESCRIPTION
+This method of returning errors is used only in connection with obsolescent
+functions.
+
+The <netdb.h> header provides a declaration of h_errno as a modifiable
+lvalue of type int.
+
+It is unspecified whether h_errno is a macro or an identifier declared with
+external linkage. If a macro definition is suppressed in order to access an
+actual object, or a program defines an identifier with the name h_errno,
+the behavior is undefined.
+
+RETURN VALUE
+
+None.
+
+ERRORS
+
+No errors are defined.
+*/
+specification
+VoidTPtr __h_errno_location_spec( CallContext context)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { ReturnAddressOf_h_errno_Variable, "Return the address of the h_errno variable" };
+    }
+    post
+    {
+        /*
+         * __h_errno_location() returns the address of the h_errno variable, where
+         * h_errno is as specified in ISO POSIX (2003).
+         */
+        REQ("__h_errno_location.01", "returns the address",
+                !isNULL_VoidTPtr(__h_errno_location_spec)
+            );
+
+        return true;
+    }
+}
+
+void onHErrnoLocation(CallContext context, VoidTPtr res)
+{
+    if( !isNULL_VoidTPtr(res) )
+    {
+        NetdbProcessData * data = get_netdb_data(context);
+
+        data->h_errno_ptr = res;
+    }
+}
+
+/********************************************************************/
+/**                       Specification Types                      **/
+/********************************************************************/
+
+specification typedef struct ServentT ServentT = {};
+
+ServentT * create_emptyServentT(void)
+{
+    return create(&type_ServentT, NULL, NULL_VoidTPtr, 0, NULL );
+}
+
+
+specification typedef struct ProtoentT ProtoentT = {};
+
+ProtoentT * create_emptyProtoentT(void)
+{
+    return create(&type_ProtoentT, NULL, NULL_VoidTPtr, 0 );
+}
+
+
+specification typedef struct AddrInfoT AddrInfoT = {};
+
+AddrInfoT * create_NullAddrInfoT()
+{
+    return create(&type_AddrInfoT, NULL_VoidTPtr,
+                  0, SUT_AF_UNSPEC, 0, 0,
+                  0, NULL,
+                  NULL, NULL_VoidTPtr
+                 );
+}
+
+specification typedef struct HostentT HostentT = {};
+
+HostentT * create_emptyHostentT(void)
+{
+    return create(&type_HostentT, NULL, NULL_VoidTPtr, 0, 0, NULL_VoidTPtr );
+}
+
+specification typedef struct NetdbProcessData NetdbProcessData = {};
+
+Map * netdb_data; // ProcessIdObj -> NetdbProcessData;
+
+
+NetdbProcessData * create_emptyNetdbProcessData(void)
+{
+    return create(&type_NetdbProcessData, NULL_VoidTPtr, -1, 0, -1, 0, 0);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+NetdbProcessData * get_netdb_data(CallContext context)
+{
+    ProcessIdObj * pid_obj;
+    NetdbProcessData * res;
+
+    pid_obj = create_ProcessIdObj(getProcessId_CallContext(context));
+
+    res = get_Map(netdb_data, pid_obj);
+
+    if(!res)
+    {
+        res = create_emptyNetdbProcessData();
+        put_Map(netdb_data, pid_obj, res);
+    }
+
+    return res;
+}
+
+IntT read_h_errno(CallContext context)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+    IntT res;
+
+    if( !data || isNULL_VoidTPtr(data->h_errno_ptr) )
+    {
+        char errmsg[] = "h_errno location is unknown. Use __h_errno_location()!";
+        traceUserInfo(errmsg);
+        DUMP(errmsg);
+        setBadVerdict(errmsg);
+
+        return 0;
+    }
+
+    res = readInt_VoidTPtr(data->h_errno_ptr);
+
+    traceFormattedUserInfo("h_error: %d", res);
+
+    return res;
+}
+
+List * serv_db; // ServentT
+List * proto_db; // ServentT
+
+bool reset_serv_db(void)
+{
+    serv_db = create_List(&type_ServentT);
+    if(serv_db == NULL)
+        return false;
+
+    return true;
+}
+
+// port shall be in host byte order
+ServentT * findserv_model(CallContext context, CString *name, IntT port, CString *proto, int * pos)
+{
+    int size;
+    int i;
+
+    if(serv_db == NULL)
+    {
+        traceUserInfo("findserv_model: serv_db is not initialized!");
+        return NULL;
+    }
+
+    size = size_List(serv_db);
+    for(i=0;i<size;i++)
+    {
+        ServentT * tmp = get_List(serv_db, i);
+
+        /*
+         * The getservbyname() function shall search the database from the beginning and
+         * find the first entry for which
+         * the service name specified by name matches the s_name member
+         * and the protocol name specified by proto matches the s_proto member.
+         *
+         * If proto is a null pointer, any value of the s_proto member shall be matched.
+         */
+        if( (name!=NULL) && !equals(tmp->s_name, name) )
+            continue;
+
+        if( (port>=0) && (tmp->s_port!=port) )
+            continue;
+
+        if( (proto!=NULL) && !equals(tmp->s_proto, proto) )
+            continue;
+
+        if(pos)
+            *pos = i+1;
+
+        return tmp;
+    }
+
+    if(pos)
+        *pos = -1;
+
+
+    {
+        char buf_name[256] = "name_none";
+        char buf_prot[256] = "prot_none";
+
+        if (name != NULL)
+        {
+            strcpy(buf_name, toCharArray_CString(name));
+        }
+
+        if (proto != NULL)
+        {
+            strcpy(buf_prot, toCharArray_CString(proto));
+        }
+
+        traceFormattedUserInfo("Entry not found: name = %s, port = %d, proto = %s ", buf_name, port, buf_prot);
+    }
+
+    return NULL;
+}
+
+ProtoentT * findproto_model(CallContext context, CString *name, IntT proto)
+{
+    int size;
+    int i;
+
+    if(proto_db == NULL)
+    {
+        traceUserInfo("findproto_model: proto_db is not initialized!");
+        return NULL;
+    }
+
+    size = size_List(proto_db);
+    for(i=0;i<size;i++)
+    {
+        ProtoentT * tmp = get_List(proto_db, i);
+
+        if( (name!=NULL) && !equals(tmp->p_name, name) )
+            continue;
+
+        if( (proto>=0) && (tmp->p_proto != proto) )
+            continue;
+
+        return tmp;
+    }
+    return NULL;
+}
+
+ServentT * getservent_byPos(CallContext context, int pos)
+{
+    return get_List(serv_db, pos);
+}
+
+ProtoentT * getprotoent_byPos(CallContext context, int pos)
+{
+    return get_List(proto_db, pos);
+}
+
+
+bool is_addr_numeric(CString * addr)
+{
+    return (inet_addr_how_many_parts(addr) > 0 );
+}
+
+bool is_serv_numeric(CString * addr)
+{
+    int i;
+    int len = length_CString(addr);
+
+    for(i=0;i<len;i++)
+    {
+        if( (charAt_CString(addr, i) <'0') || (charAt_CString(addr, i) >'9') )
+            return false;
+    }
+
+    return true;
+}
+
+bool AND_ai_check(CallContext context, AddrInfoT * ai, bool(*check)(AddrInfoT * ai, Object * par1), Object * par1 )
+{
+    bool res = true;
+
+    while(ai!=NULL)
+    {
+        res &= check(ai, par1);
+
+        ai = create_AddrInfoT_VoidTPtr(context, ai->ai_next);
+    }
+    return res;
+}
+
+bool equals_in6addr(UInt8T * addr1, UInt8T * addr2)
+{
+    int i;
+    for(i=0;i<INET6_ADDRESSLEN;i++)
+        if( addr1[i] != addr2[i] )
+            return false;
+
+    return true;
+}
+
+bool is_in6addr_any(SockaddrT * addr)
+{
+    UInt8T addr6_any[INET6_ADDRESSLEN] = SUT_IN6ADDR_ANY_INIT;
+    UInt8T * addr6 = getInet6Socket_u6_addr8(addr);
+    return equals_in6addr(addr6, addr6_any);
+}
+
+bool is_in6addr_loopback(SockaddrT * addr)
+{
+    UInt8T addr6_loopack[INET6_ADDRESSLEN] = SUT_IN6ADDR_LOOPBACK_INIT;
+    UInt8T * addr6 = getInet6Socket_u6_addr8(addr);
+    return equals_in6addr(addr6, addr6_loopack);
+}
+
+bool check_ai_ip(AddrInfoT * ai, Object * par1)
+{
+    switch(ai->ai_family)
+    {
+    case SUT_AF_INET:
+        if(par1)
+            return ( getInetSocket_sin_addr(ai->ai_addr) == NETORDER_INADDR_LOOPBACK);
+        else
+            return ( getInetSocket_sin_addr(ai->ai_addr) == NETORDER_INADDR_ANY);
+    case SUT_AF_INET6:
+        if(par1)
+            return is_in6addr_loopback(ai->ai_addr);
+        else
+            return is_in6addr_any(ai->ai_addr);
+    }
+
+    return true;
+}
+
+bool check_ai_family(AddrInfoT * ai, Object * par1)
+{
+    return ( ai->ai_family == ((AddrInfoT *)par1)->ai_family );
+}
+
+bool check_ai_addrlen(AddrInfoT * ai, Object * par1)
+{
+    return ( ai->ai_addrlen == *((IntTObj *)par1) );
+}
+
+bool check_ai_socktype(AddrInfoT * ai, Object * par1)
+{
+    return ( ai->ai_socktype == ((AddrInfoT *)par1)->ai_socktype );
+}
+
+bool check_ai_protocol(AddrInfoT * ai, Object * par1)
+{
+    return ( ai->ai_protocol == ((AddrInfoT *)par1)->ai_protocol );
+}
+
+void traceAddrInfoT(CallContext context,AddrInfoT * res_ai)
+{
+    while(res_ai)
+    {
+        traceFormattedUserInfo("$(obj)", res_ai);
+
+        res_ai = create_AddrInfoT_VoidTPtr(context, res_ai->ai_next);
+    }
+}
+
+CString * numerichost(SockaddrT * sa)
+{
+    if(sa->family == SUT_AF_INET)
+    {
+        UInt8T * p;
+        UInt32T addr = getInetSocket_sin_addr(sa);
+        //addr = ntohl_model(addr);
+        p = (UInt8T *)&addr;
+        return format_CString("%d.%d.%d.%d", p[0], p[1], p[2], p[3]);
+    }
+    else
+    if(sa->family == SUT_AF_INET6)
+    {
+        UInt8T * p = getInet6Socket_u6_addr8(sa);
+        // TODO: return format_CString();
+    }
+
+    return NULL;
+}
+
+CString * numericserv(SockaddrT * sa, sut_socklen_t servicelen)
+{
+    CString * res = NULL;
+
+    if(servicelen<1)
+        return NULL;
+
+    if(sa->family == SUT_AF_INET)
+    {
+        UShortT port = getInetSocket_sin_port(sa);
+        port = ntohs_model(port);
+        res = format_CString("%d", port);
+        res = substring_CString(res, 0, min(length_CString(res), servicelen-1) );
+        return res;
+    }
+    else
+    if(sa->family == SUT_AF_INET6)
+    {
+        UInt16T port = getInet6Socket_sin6_port(sa);
+        port = ntohs_model(port);
+        res = format_CString("%d", port);
+        res = substring_CString(res, 0, min(length_CString(res), servicelen-1) );
+        return res;
+    }
+
+    return NULL;
+}
+
+/********************************************************************/
+/**                          Init Function                         **/
+/********************************************************************/
+
+bool init_netdb(void)
+{
+    netdb_data = create_Map(&type_ProcessIdObj, &type_NetdbProcessData);
+    if(netdb_data == NULL)
+        return false;
+
+    if( !reset_serv_db() )
+        return false;
+
+    proto_db = create_List(&type_ProtoentT);
+    if(proto_db == NULL)
+        return false;
+
+    return true;
+}

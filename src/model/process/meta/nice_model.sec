@@ -1,0 +1,1015 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "process/meta/nice_config.h"
+#include "process/meta/nice_model.seh"
+#include "data/sys/resource_model.seh"
+#include "process/process/process_model.seh"
+#include "process/meta/user_model.seh"
+#include "process/process/process_common.seh"
+#include "system/system/system_model.seh"
+
+#pragma SEC subsystem meta "process.meta"
+
+/*
+   The group of functions 'process.meta.nice' consists of:
+       getpriority [2]
+       nice [2]
+       setpriority [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getpriority, setpriority - get and set the nice value
+
+SYNOPSIS
+
+    #include <sys/resource.h>
+    int getpriority(int which, id_t who);
+    int setpriority(int which, id_t who, int value);
+
+DESCRIPTION
+
+    The getpriority() function shall obtain the nice value of a process, process
+    group, or user. The setpriority() function shall set the nice value of a
+    process, process group, or user to value+ {NZERO}.
+
+    Target processes are specified by the values of the which and who arguments.
+    The which argument may be one of the following values: PRIO_PROCESS,
+    PRIO_PGRP, or PRIO_USER, indicating that the who argument is to be
+    interpreted as a process ID, a process group ID, or an effective user ID,
+    respectively. A 0 value for the who argument specifies the current process,
+    process group, or user.
+
+    The nice value set with setpriority() shall be applied to the process. If
+    the process is multi-threaded, the nice value shall affect all system scope
+    threads in the process.
+
+    If more than one process is specified, getpriority() shall return value
+    {NZERO} less than the lowest nice value pertaining to any of the specified
+    processes, and setpriority() shall set the nice values of all of the
+    specified processes to value+ {NZERO}.
+
+    The default nice value is {NZERO}; lower nice values shall cause more
+    favorable scheduling. While the range of valid nice values is [0,{NZERO}*2-
+    1], implementations may enforce more restrictive limits. If value+ {NZERO}
+    is less than the system's lowest supported nice value, setpriority() shall
+    set the nice value to the lowest supported value; if value+ {NZERO} is
+    greater than the system's highest supported nice value, setpriority() shall
+    set the nice value to the highest supported value.
+
+    Only a process with appropriate privileges can lower its nice value.
+
+    Any processes or threads using SCHED_FIFO or SCHED_RR shall be unaffected by
+    a call to setpriority(). This is not considered an error. A process which
+    subsequently reverts to SCHED_OTHER need not have its priority affected by
+    such a setpriority() call.
+
+    The effect of changing the nice value may vary depending on the process-
+    scheduling algorithm in effect.
+
+    Since getpriority() can return the value -1 on successful completion, it is
+    necessary to set errno to 0 prior to a call to getpriority(). If
+    getpriority() returns the value -1, then errno can be checked to see if an
+    error occurred or if the value is a legitimate nice value.
+
+RETURN VALUE
+
+    Upon successful completion, getpriority() shall return an integer in the
+    range -{NZERO} to {NZERO}-1. Otherwise, -1 shall be returned and errno set
+    to indicate the error.
+
+    Upon successful completion, setpriority() shall return 0; otherwise, -1
+    shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    The getpriority() and setpriority() functions shall fail if:
+
+    [ESRCH]
+        No process could be located using the which and who argument values
+        specified.
+
+    [EINVAL]
+        The value of the which argument was not recognized, or the value of the
+        who argument is not a valid process ID, process group ID, or user ID.
+
+    In addition, setpriority() may fail if:
+
+    [EPERM]
+        A process was located, but neither the real nor effective user ID of the
+        executing process match the effective user ID of the process whose nice
+        value is being changed.
+
+    [EACCES]
+        A request was made to change the nice value to a lower numeric value and
+        the current process does not have appropriate privileges.
+*/
+specification
+IntT getpriority_spec( CallContext context, IntT which, ProcessId who, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [value of NZERO is known] */
+        REQ( "", "value of NZERO is known", setNZeroIfNeeded( context ) );
+
+        /*
+         * Since getpriority() can return the value -1 on successful completion, it is
+         * necessary to set errno to 0 prior to a call to getpriority().
+         */
+        REQ( "app.getpriority.01", "it is necessary to set errno to 0 prior to a call to getpriority()", true );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Which
+    {
+        if ( which == SUT_PRIO_PGRP )
+        {
+            return { WhichIsPrioPgrp, "which is PRIO_PGRP" };
+        }
+        else if ( which == SUT_PRIO_PROCESS )
+        {
+            return { WhichIsPrioProcess, "which is PRIO_PROCESS" };
+        }
+        else if ( which == SUT_PRIO_USER )
+        {
+            return { WhichIsPrioUser, "which is PRIO_USER" };
+        }
+        else
+        {
+            return { WhichIsUnknown, "which is unknown" };
+        }
+    }
+    coverage C_Who
+    {
+        if ( who.process == 0 )
+        {
+            return { WhoIsZero, "who is zero" };
+        }
+        else
+        {
+            return { WhoIsNotZero, "who is not zero" };
+        }
+    }
+    post
+    {
+        ProcessState * process_state = getProcessState_CallContext( context );
+
+        Set /* ProcessState */ * processes = create_Set( & type_ProcessState );
+
+        ProcessId pGroup   ;
+        ProcessId processId;
+        UidT      UserId   ;
+
+        bool checkResult;
+
+        if ( who.process == 0 )
+        {
+            pGroup    = process_state->meta.pgroup     ;
+            processId = process_state->processid       ;
+            UserId    = process_state->meta.real_userid;
+
+            /*
+             * Target processes are specified by the values of the which and who arguments.
+             *
+             * A 0 value for the who argument specifies the current process, process group,
+             * or user.
+             */
+            REQ( "getpriority.02.02", "0 value for the who argument", true );
+        }
+        else
+        {
+            pGroup    = who        ;
+            processId = who        ;
+            UserId    = who.process;
+        }
+
+        if ( which == SUT_PRIO_PGRP || which == SUT_PRIO_PROCESS || which == SUT_PRIO_USER )
+        {
+            SystemState * systemState = getSystemState( context.system );
+            int i;
+            for ( i = 0; i < size_Map( systemState->processes ); i++ ) {
+                ProcessIdObj * key = key_Map( systemState->processes, i );
+                ProcessState * processState = get_Map( systemState->processes, key );
+                if ( ( which == SUT_PRIO_PGRP    && equals_ProcessId( processState->meta.pgroup, pGroup    ) ) ||
+                     ( which == SUT_PRIO_PROCESS && equals_ProcessId( processState->processid  , processId ) ) ||
+                     ( which == SUT_PRIO_USER    && processState->meta.effective_userid == UserId            )
+                   ) {
+                    add_Set( processes, processState );
+                }
+            }
+
+            /*
+             * Target processes are specified by the values of the which and who arguments.
+             *
+             * The which argument may be one of the following values: PRIO_PROCESS,
+             * PRIO_PGRP, or PRIO_USER, indicating that the who argument is to be interpreted
+             * as a process ID, a process group ID, or an effective user ID, respectively.
+             */
+            REQ( "getpriority.02.01",
+                 "The which argument may be one of the following values: PRIO_PROCESS, PRIO_PGRP, or PRIO_USER", true
+               );
+        }
+
+        /*
+         * [Upon successful completion, getpriority() shall return an integer in the range -
+         * {NZERO} to {NZERO}-1.]
+         * Otherwise, -1 shall be returned and errno set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_GETPRIORITY, "getpriority.08.02", getpriority_spec == -1 && * errno != SUT_EOK, * errno )
+            /*
+             * The getpriority() and setpriority() functions shall fail if:
+             *
+             * [ESRCH]
+             * No process could be located using the which and who argument values specified.
+             */
+            ERROR_SHALL( POSIX_GETPRIORITY, ESRCH, "getpriority.09.01", isEmpty_Set( processes ) )
+
+            /*
+             * The getpriority() and setpriority() functions shall fail if:
+             *
+             * [EINVAL]
+             * The value of the which argument was not recognized, or the value of the who
+             * argument is not a valid process ID, process group ID, or user ID.
+             */
+            ERROR_SHALL( POSIX_GETPRIORITY, EINVAL, "getpriority.09.02", ( which != SUT_PRIO_PGRP    &&
+                                                                           which != SUT_PRIO_PROCESS &&
+                                                                           which != SUT_PRIO_USER
+                                                                         )                              ||
+                                                                         isEmpty_Set( processes )
+                       )
+        ERROR_END()
+
+        if ( size_Set( processes ) == 1 )
+        {
+            ProcessState * process = get_Set( processes, 0 );
+            checkResult = ( process->meta.nice == (UIntT)-1                                                ||
+                            (IntT)process->meta.nice - (IntT)process_state->meta.NZero == getpriority_spec
+                          );
+        }
+        else
+        {
+            int i;
+            checkResult = true;
+            for ( i = 0; i < size_Set( processes ); i++ ) {
+                ProcessState * process = get_Set( processes, i );
+                if ( process->meta.nice != (UIntT)-1                                               &&
+                     (IntT)process->meta.nice - (IntT)process_state->meta.NZero < getpriority_spec
+                   ) {
+                    checkResult = false;
+                    break;
+                }
+            }
+
+            /*
+             * If more than one process is specified,
+             *
+             * getpriority() shall return value {NZERO} less than the lowest nice value
+             * pertaining to any of the specified processes
+             */
+            REQ( "getpriority.05.01",
+                 "value {NZERO} less than the lowest nice value pertaining to any of the specified processes",
+                 checkResult
+               );
+        }
+
+        /*
+         * The getpriority() function shall obtain the nice value of a process, process
+         * group, or user.
+         */
+        REQ( "getpriority.01",
+             "The getpriority() function shall obtain the nice value of a process, process group, or user", checkResult
+           );
+
+        /*
+         * Upon successful completion, getpriority() shall return an integer in the range
+         * -{NZERO} to {NZERO}-1.
+         */
+        REQ( "getpriority.08.01", "getpriority() shall return an integer in the range -{NZERO} to {NZERO}-1",
+                                  - (IntT)process_state->meta.NZero <= getpriority_spec   &&
+                                  getpriority_spec <= (IntT)process_state->meta.NZero - 1
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    nice - change the nice value of a process
+
+SYNOPSIS
+
+    #include <unistd.h>
+    int nice(int incr);
+
+DESCRIPTION
+
+    The nice() function shall add the value of incr to the nice value of the
+    calling process. A process' nice value is a non-negative number for which a
+    more positive value shall result in less favorable scheduling.
+
+    A maximum nice value of 2*{NZERO}-1 and a minimum nice value of 0 shall be
+    imposed by the system. Requests for values above or below these limits shall
+    result in the nice value being set to the corresponding limit. Only a
+    process with appropriate privileges can lower the nice value.
+
+    Calling the nice() function has no effect on the priority of processes or
+    threads with policy SCHED_FIFO or SCHED_RR. The effect on processes or
+    threads with other scheduling policies is implementation-defined.
+
+    The nice value set with nice() shall be applied to the process. If the
+    process is multi-threaded, the nice value shall affect all system scope
+    threads in the process.
+
+    As -1 is a permissible return value in a successful situation, an
+    application wishing to check for error situations should set errno to 0,
+    then call nice(), and if it returns -1, check to see whether errno is
+    non-zero.
+
+RETURN VALUE
+
+    Upon successful completion, nice() shall return the new nice value -{NZERO}.
+    Otherwise, -1 shall be returned, the process' nice value shall not be
+    changed, and errno shall be set to indicate the error.
+
+ERRORS
+
+    The nice() function shall fail if:
+
+    [EPERM]
+        The incr argument is negative and the calling process does not have
+        appropriate privileges.
+*/
+specification
+IntT nice_spec( CallContext context, IntT incr, ErrorCode * errno )
+{
+    ProcessState * process_state;
+    UIntT oldNice;
+
+    pre
+    {
+        process_state = getProcessState_CallContext( context );
+
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [value of NZERO is known] */
+        REQ( "", "value of NZERO is known", setNZeroIfNeeded( context ) );
+
+        oldNice = process_state->meta.nice;
+
+        /*
+         * A maximum nice value of 2*{NZERO}-1 and a minimum nice value of 0 shall be
+         * imposed by the system.
+         */
+        REQ("app.nice.01", "", TODO_REQ());
+
+        /*
+         * As -1 is a permissible return value in a successful situation, an application
+         * wishing to check for error situations should set errno to 0, then call nice(),
+         * and if it returns -1, check to see whether errno is non-zero.
+         */
+        REQ( "app.nice.02", "an application wishing to check for error situations should set errno to 0", true );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        // verbose( "nice_spec : process_state->meta.effective_userid [%d]\n", process_state->meta.effective_userid );
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Incr
+    {
+        if ( incr < 0 )
+        {
+            return { IncrIsNegative, "incr is negative" };
+        }
+        if ( incr == 0 )
+        {
+            return { IncrIsZero, "incr is zero" };
+        }
+        else // incr > 0
+        {
+            return { IncrIsPositive, "incr is positive" };
+        }
+    }
+    post
+    {
+        bool checkResult;
+
+        IntT correctIncr;
+
+        if ( (IntT)oldNice != -1 && (IntT)oldNice + incr < 0 )
+        {
+            correctIncr = - (IntT)oldNice;
+
+            /*
+             * Requests for values above or below these limits shall result in the nice value
+             * being set to the corresponding limit.
+             */
+            REQ( "nice.02", "Requests for values below these limits", true );
+        }
+        else if ( (IntT)oldNice != -1 && (IntT)oldNice + incr > 2 * (IntT)process_state->meta.NZero - 1 )
+        {
+            correctIncr = 2 * (IntT)process_state->meta.NZero - 1 - (IntT)oldNice;
+
+            /*
+             * Requests for values above or below these limits shall result in the nice value
+             * being set to the corresponding limit.
+             */
+            REQ( "nice.02", "Requests for values above these limits", true );
+        }
+        else
+        {
+            correctIncr = incr;
+        }
+
+        /*
+         * [Upon successful completion, nice() shall return the new nice value -{NZERO}.]
+         * Otherwise, -1 shall be returned, the process' nice value shall not be changed,
+         * and errno shall be set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_NICE, "nice.06.02", nice_spec == -1 && * errno != SUT_EOK, * errno )
+#ifdef NewCTesK
+            checkResult = ( correctIncr < 0                                                             &&
+                            ( C_Priority == C_Priority.PriorityIsReallyLow                           ||
+                              ( C_Priority == C_Priority.PriorityIsUnknown && * errno == SUT_EPERM )
+                            )
+                          );
+#else
+            checkResult = ( correctIncr < 0                                                              &&
+                            ( coverage( C_Priority ) == PriorityIsReallyLow                           ||
+                              ( coverage( C_Priority ) == PriorityIsUnknown && * errno == SUT_EPERM )
+                            )
+                          );
+#endif
+            // if ( checkResult ) {
+            //     verbose( "<<<%3d|%3d|%3d|%3d|%3d|%3d|%3d>>>\n", correctIncr, incr, oldNice,
+            //             process_state->meta.real_userid , process_state->meta.effective_userid ,
+            //             process_state->meta.real_groupid, process_state->meta.effective_groupid
+            //           );
+            // } else {
+            //     verbose( "  [%3d|%3d|%3d|%3d|%3d|%3d|%3d]\n"  , correctIncr, incr, oldNice,
+            //             process_state->meta.real_userid , process_state->meta.effective_userid ,
+            //             process_state->meta.real_groupid, process_state->meta.effective_groupid
+            //           );
+            // }
+
+            /*
+             * The nice() function shall fail if:
+             *
+             * [EPERM]
+             * The incr argument is negative and the calling process does not have appropriate
+             * privileges.
+             */
+            ERROR_SHALL( POSIX_NICE, EPERM, "nice.07.01", checkResult )
+
+            if ( nice_spec == -1 && * errno == SUT_EPERM )
+            {
+                /*
+                 * Only a process with appropriate privileges can lower the nice value.
+                 */
+                REQ( "nice.07.01", "Only a process with appropriate privileges can lower the nice value", checkResult );
+            }
+        ERROR_END()
+
+        if ( (IntT)oldNice == -1 ) { return true; }
+
+        checkResult = ( (IntT)oldNice + correctIncr == (IntT)process_state->meta.nice );
+
+        /*
+         * The nice() function shall add the value of incr to the nice value of the
+         * calling process.
+         */
+        REQ( "nice.01", "The nice() shall add the value of incr to the nice of the calling process", checkResult );
+
+        /*
+         * The nice value set with nice() shall be applied to the process.
+         */
+        REQ( "nice.04", "The nice value set with nice() shall be applied to the process", checkResult );
+
+        /*
+         * [PS|TPS] Calling the nice() function has no effect on the priority of
+         * processes or threads with policy SCHED_FIFO or SCHED_RR. The effect on
+         * processes or threads with other scheduling policies is implementation-defined.
+         */
+        REQ("nice.03", "", TODO_REQ());
+
+        /*
+         * If the process is multi-threaded, the nice value shall affect all system scope
+         * threads in the process.
+         */
+        REQ("nice.05", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, nice() shall return the new nice value -{NZERO}.
+         */
+        //verbose( "nice_spec : oldNice                   is %d\n", (IntT)oldNice                   );
+        //verbose( "nice_spec : process_state->meta.nice  is %d\n", (IntT)process_state->meta.nice  );
+        //verbose( "nice_spec : process_state->meta.NZero is %d\n", (IntT)process_state->meta.NZero );
+        //if ( nice_spec != (IntT)process_state->meta.nice - (IntT)process_state->meta.NZero ) { verbose( "\n!!!\n\n" ); }
+        REQ( "nice.06.01", "Upon successful completion, nice() shall return the new nice value -{NZERO}",
+                           nice_spec == (IntT)process_state->meta.nice - (IntT)process_state->meta.NZero
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    getpriority, setpriority - get and set the nice value
+
+SYNOPSIS
+
+    #include <sys/resource.h>
+    int getpriority(int which, id_t who);
+    int setpriority(int which, id_t who, int value);
+
+DESCRIPTION
+
+    The getpriority() function shall obtain the nice value of a process, process
+    group, or user. The setpriority() function shall set the nice value of a
+    process, process group, or user to value+ {NZERO}.
+
+    Target processes are specified by the values of the which and who arguments.
+    The which argument may be one of the following values: PRIO_PROCESS,
+    PRIO_PGRP, or PRIO_USER, indicating that the who argument is to be
+    interpreted as a process ID, a process group ID, or an effective user ID,
+    respectively. A 0 value for the who argument specifies the current process,
+    process group, or user.
+
+    The nice value set with setpriority() shall be applied to the process. If
+    the process is multi-threaded, the nice value shall affect all system scope
+    threads in the process.
+
+    If more than one process is specified, getpriority() shall return value
+    {NZERO} less than the lowest nice value pertaining to any of the specified
+    processes, and setpriority() shall set the nice values of all of the
+    specified processes to value+ {NZERO}.
+
+    The default nice value is {NZERO}; lower nice values shall cause more
+    favorable scheduling. While the range of valid nice values is [0,{NZERO}*2-
+    1], implementations may enforce more restrictive limits. If value+ {NZERO}
+    is less than the system's lowest supported nice value, setpriority() shall
+    set the nice value to the lowest supported value; if value+ {NZERO} is
+    greater than the system's highest supported nice value, setpriority() shall
+    set the nice value to the highest supported value.
+
+    Only a process with appropriate privileges can lower its nice value.
+
+    Any processes or threads using SCHED_FIFO or SCHED_RR shall be unaffected by
+    a call to setpriority(). This is not considered an error. A process which
+    subsequently reverts to SCHED_OTHER need not have its priority affected by
+    such a setpriority() call.
+
+    The effect of changing the nice value may vary depending on the process-
+    scheduling algorithm in effect.
+
+    Since getpriority() can return the value -1 on successful completion, it is
+    necessary to set errno to 0 prior to a call to getpriority(). If
+    getpriority() returns the value -1, then errno can be checked to see if an
+    error occurred or if the value is a legitimate nice value.
+
+RETURN VALUE
+
+    Upon successful completion, getpriority() shall return an integer in the
+    range -{NZERO} to {NZERO}-1. Otherwise, -1 shall be returned and errno set
+    to indicate the error.
+
+    Upon successful completion, setpriority() shall return 0; otherwise, -1
+    shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    The getpriority() and setpriority() functions shall fail if:
+
+    [ESRCH]
+        No process could be located using the which and who argument values
+        specified.
+
+    [EINVAL]
+        The value of the which argument was not recognized, or the value of the
+        who argument is not a valid process ID, process group ID, or user ID.
+
+    In addition, setpriority() may fail if:
+
+    [EPERM]
+        A process was located, but neither the real nor effective user ID of the
+        executing process match the effective user ID of the process whose nice
+        value is being changed.
+
+    [EACCES]
+        A request was made to change the nice value to a lower numeric value and
+        the current process does not have appropriate privileges.
+*/
+specification
+IntT setpriority_spec( CallContext context, IntT which, ProcessId who, IntT value, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /* [value of NZERO is known] */
+        REQ( "", "value of NZERO is known", setNZeroIfNeeded( context ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Which
+    {
+        if ( which == SUT_PRIO_PGRP )
+        {
+            return { WhichIsPrioPgrp, "which is PRIO_PGRP" };
+        }
+        else if ( which == SUT_PRIO_PROCESS )
+        {
+            return { WhichIsPrioProcess, "which is PRIO_PROCESS" };
+        }
+        else if ( which == SUT_PRIO_USER )
+        {
+            return { WhichIsPrioUser, "which is PRIO_USER" };
+        }
+        else
+        {
+            return { WhichIsUnknown, "which is unknown" };
+        }
+    }
+    coverage C_Who
+    {
+        if ( who.process == 0 )
+        {
+            return { WhoIsZero, "who is zero" };
+        }
+        else
+        {
+            return { WhoIsNotZero, "who is not zero" };
+        }
+    }
+    post
+    {
+        ProcessState * process_state = getProcessState_CallContext( context );
+
+        Set /* ProcessState */ * processes = create_Set( & type_ProcessState );
+
+        ProcessId pGroup   ;
+        ProcessId processId;
+        UidT      UserId   ;
+
+        IntT correctValue;
+
+        int i;
+        bool checkResult;
+
+        if ( who.process == 0 )
+        {
+            pGroup    = process_state->meta.pgroup     ;
+            processId = process_state->processid       ;
+            UserId    = process_state->meta.real_userid;
+
+            /*
+             * Target processes are specified by the values of the which and who arguments.
+             *
+             * A 0 value for the who argument specifies the current process, process group,
+             * or user.
+             */
+            REQ( "setpriority.02.02", "0 value for the who argument", true );
+        }
+        else
+        {
+            pGroup    = who        ;
+            processId = who        ;
+            UserId    = who.process;
+        }
+
+        if ( which == SUT_PRIO_PGRP || which == SUT_PRIO_PROCESS || which == SUT_PRIO_USER )
+        {
+            SystemState * systemState = getSystemState( context.system );
+            for ( i = 0; i < size_Map( systemState->processes ); i++ ) {
+                ProcessIdObj * key = key_Map( systemState->processes, i );
+                ProcessState * processState = get_Map( systemState->processes, key );
+                if ( ( which == SUT_PRIO_PGRP    && equals_ProcessId( processState->meta.pgroup, pGroup    ) ) ||
+                     ( which == SUT_PRIO_PROCESS && equals_ProcessId( processState->processid  , processId ) ) ||
+                     ( which == SUT_PRIO_USER    && processState->meta.effective_userid == UserId            )
+                   ) {
+                    add_Set( processes, processState );
+                }
+            }
+
+            /*
+             * Target processes are specified by the values of the which and who arguments.
+             *
+             * The which argument may be one of the following values: PRIO_PROCESS,
+             * PRIO_PGRP, or PRIO_USER, indicating that the who argument is to be interpreted
+             * as a process ID, a process group ID, or an effective user ID, respectively.
+             */
+            REQ( "setpriority.02.01",
+                 "The which argument may be one of the following values: PRIO_PROCESS, PRIO_PGRP, or PRIO_USER", true
+               );
+        }
+
+        /*
+         * [Upon successful completion, setpriority() shall return 0]
+         * otherwise, -1 shall be returned and errno set to indicate the error
+         */
+        ERROR_BEGIN( POSIX_SETPRIORITY, "setpriority.08.02", setpriority_spec == -1, * errno )
+
+            /*
+             * The getpriority() and setpriority() functions shall fail if:
+             *
+             * [ESRCH]
+             * No process could be located using the which and who argument values specified.
+             */
+            ERROR_SHALL( POSIX_SETPRIORITY, ESRCH, "setpriority.09.01", isEmpty_Set( processes ) )
+
+            /*
+             * The getpriority() and setpriority() functions shall fail if:
+             *
+             * [EINVAL]
+             * The value of the which argument was not recognized, or the value of the who
+             * argument is not a valid process ID, process group ID, or user ID.
+             */
+            ERROR_SHALL( POSIX_SETPRIORITY, EINVAL, "setpriority.09.02", ( which != SUT_PRIO_PGRP    &&
+                                                                           which != SUT_PRIO_PROCESS &&
+                                                                           which != SUT_PRIO_USER
+                                                                         )                              ||
+                                                                         isEmpty_Set( processes )
+                       )
+
+            /*
+             * In addition, setpriority() may fail if:
+             *
+             * [EPERM]
+             * A process was located, but neither the real nor effective user ID of the
+             * executing process match the effective user ID of the process whose nice value
+             * is being changed.
+             */
+            checkResult = ( which == SUT_PRIO_USER && * errno == SUT_EPERM );
+            if ( ! checkResult ) {
+                for ( i = 0; i < size_Set( processes ); i++ ) {
+                    ProcessState * process = get_Set( processes, i );
+                    if ( process_state->meta.real_userid      != process->meta.effective_userid &&
+                         process_state->meta.effective_userid != process->meta.effective_userid
+                       ) {
+                        checkResult = true;
+                        break;
+                    }
+                }
+            }
+            ERROR_MAY( POSIX_SETPRIORITY, EPERM, "setpriority.10.01", checkResult )
+
+            /*
+             * In addition, setpriority() may fail if:
+             *
+             * [EACCES]
+             * A request was made to change the nice value to a lower numeric value and the
+             * current process does not have appropriate privileges.
+             */
+            checkResult = false;
+            for ( i = 0; i < size_Set( processes ); i++ ) {
+                ProcessState * process = get_Set( processes, i );
+                if ( ( process->meta.nice == (UIntT)-1                                    ||
+                       value + (IntT)process_state->meta.NZero < (IntT)process->meta.nice
+#ifdef NewCTesK
+                     )                                                                            &&
+                     ( C_Priority == C_Priority.PriorityIsReallyLow                            ||
+                       ( C_Priority == C_Priority.PriorityIsUnknown && * errno == SUT_EACCES )
+                     )
+#else
+                     )                                                                             &&
+                     ( coverage( C_Priority ) == PriorityIsReallyLow                            ||
+                       ( coverage( C_Priority ) == PriorityIsUnknown && * errno == SUT_EACCES )
+                     )
+#endif
+                   ) {
+                    checkResult = true;
+                    break;
+                }
+            }
+            ERROR_MAY( POSIX_SETPRIORITY, EACCES, "setpriority.10.02", checkResult )
+
+            if ( setpriority_spec == -1 )
+            {
+                /*
+                 * Only a process with appropriate privileges can lower its nice value.
+                 */
+                REQ( "setpriority.10.02", "Only a process with appropriate privileges can lower its nice value",
+                                           * errno == SUT_EACCES => checkResult
+                   );
+            }
+        ERROR_END()
+
+        if ( value + (IntT)process_state->meta.NZero < 0 )
+        {
+            correctValue = - (IntT)process_state->meta.NZero;
+
+            /*
+             * If value+ {NZERO} is less than the system's lowest supported nice value,
+             * setpriority() shall set the nice value to the lowest supported value
+             */
+            REQ( "setpriority.06.01", "value+ {NZERO} is less than the system's lowest supported nice value", true );
+        }
+        else if ( value + (IntT)process_state->meta.NZero > 2 * (IntT)process_state->meta.NZero - 1 )
+        {
+            correctValue = (IntT)process_state->meta.NZero - 1;
+
+            /*
+             * if value+ {NZERO} is greater than the system's highest supported nice value,
+             * setpriority() shall set the nice value to the highest supported value
+             */
+            REQ( "setpriority.06.02", "value+ {NZERO} is greater than the system's highest supported nice value", true );
+        }
+        else
+        {
+            correctValue = value;
+        }
+
+        if ( size_Set( processes ) == 1 )
+        {
+            ProcessState * process = get_Set( processes, 0 );
+            checkResult = ( (IntT)process->meta.nice == correctValue + (IntT)process_state->meta.NZero );
+        }
+        else
+        {
+            int i;
+            checkResult = true;
+            for ( i = 0; i < size_Set( processes ); i++ ) {
+                ProcessState * process = get_Set( processes, i );
+                // verbose( "[%d|%d|%d]\n", process->meta.nice, correctValue, process_state->meta.NZero );
+                if ( (IntT)process->meta.nice != correctValue + (IntT)process_state->meta.NZero ) {
+                    checkResult = false;
+                    break;
+                }
+            }
+
+            /*
+             * If more than one process is specified,
+             *
+             * setpriority() shall set the nice values of all of the specified processes to
+             * value+ {NZERO}
+             */
+            REQ( "setpriority.05.01",
+                 "setpriority() shall set the nice values of all of the specified processes to value+ {NZERO}", checkResult
+               );
+        }
+
+        /*
+         * The setpriority() function shall set the nice value of a process, process
+         * group, or user to value+ {NZERO}.
+         */
+        REQ( "setpriority.01",
+             "The setpriority() function shall set the nice value of a process, process group, or user to value+ {NZERO}",
+             checkResult
+           );
+
+        /*
+         * The nice value set with setpriority() shall be applied to the process.
+         */
+        REQ( "setpriority.03", "The nice value set with setpriority() shall be applied to the process", checkResult );
+
+        /*
+         * If the process is multi-threaded, the nice value shall affect all system scope
+         * threads in the process.
+         */
+        REQ("setpriority.04", "", TODO_REQ());
+
+        /*
+         * While the range of valid nice values is [0,{NZERO}*2-1], implementations may
+         * enforce more restrictive limits.
+         */
+        REQ("setpriority.11", "", TODO_REQ());
+
+        /*
+         * [PS|TPS] Any processes or threads using SCHED_FIFO or SCHED_RR shall be
+         * unaffected by a call to setpriority(). This is not considered an error. A
+         * process which subsequently reverts to SCHED_OTHER need not have its priority
+         * affected by such a setpriority() call.
+         */
+        REQ("setpriority.07", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, setpriority() shall return 0
+         */
+        REQ( "setpriority.08.01", "Upon successful completion, setpriority() shall return 0", setpriority_spec == 0 );
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool setNZeroIfNeeded( CallContext context ) {
+    ProcessState * processState = getProcessState_CallContext( context );
+    if ( processState->meta.NZero == (UIntT)-1 ) {
+        processState->meta.NZero = 20;
+    }
+    return true;
+}

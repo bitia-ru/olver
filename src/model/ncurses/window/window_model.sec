@@ -1,0 +1,2143 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/window/window_model.seh"
+#include "ncurses/ncurses/ncurses_data.seh"
+#include "ncurses/char/add_model.seh"
+#include "data/ncurses_model.seh"
+
+
+#pragma SEC subsystem window "ncurses.window"
+
+
+
+/*
+   The group of functions 'ncurses.window.window' consists of:
+       copywin [1]
+       curs_set [1]
+       delwin [1]
+       derwin [1]
+       dupwin [1]
+       getwin [1]
+       intrflush [1]
+       keypad [1]
+       meta [1]
+       mvderwin [1]
+       mvwin [1]
+       newwin [1]
+       nodelay [1]
+       overlay [1]
+       overwrite [1]
+       putwin [1]
+       subwin [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    copywin - copy a region of a window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int copywin(const WINDOW *srcwin, WINDOW *dstwin, int sminrow, int
+        smincol, int dminrow, int dmincol, int dmaxrow, int dmaxcol, int
+        overlay);
+
+DESCRIPTION
+
+    The copywin() function provides a finer granularity of control over the
+    overlay() and overwrite() functions. As in the prefresh() function, a
+    rectangle is specified in the destination window, (dminrow, dmincol) and
+    (dmaxrow, dmaxcol), and the upper-left-corner coordinates of the source
+    window, (sminrow, smincol). If overlay is TRUE, then copying is
+    non-destructive, as in overlay(). If overlay is FALSE, then copying is
+    destructive, as in overwrite().
+
+RETURN VALUE
+
+    Upon successful completion, copywin() returns OK. Otherwise, it returns
+    ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT copywin_spec( CallContext context, WindowTPtr* srcwin, WindowTPtr* dstwin,
+                  IntT sminrow, IntT smincol, IntT dminrow, IntT dmincol,
+                  IntT dmaxrow, IntT dmaxcol, IntT overlay)
+{
+    NCursesWindow* src = getWindowMayNULL(context, srcwin);
+    NCursesWindow* dst = getWindowMayNULL(context, dstwin);
+    NCursesWindow* src_local = createNCursesWindow_Local(src);
+    NCursesWindow* dst_local = createNCursesWindow_Local(dst);
+
+    copywin_model(  src_local, dst_local, sminrow, smincol, dminrow, dmincol,
+                    dmaxrow, dmaxcol, overlay);
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(copywin_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("copywin.04.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, copywin() returns OK.
+         */
+        REQ("copywin.04.01",
+            "Upon successful completion, returns OK",
+            copywin_spec == SUT_OK);
+
+        /*
+         * The copywin() function provides a finer granularity of control
+         * over the overlay() and overwrite() functions.
+         */
+        REQ("copywin.01", "", TODO_REQ());
+
+        REQ("", "Check all src", check_NCursesWindows(src, src_local, CH_ALL, -1));
+        REQ("", "Check all dst", check_NCursesWindows(dst, dst_local, CH_ALL, -1));
+
+        /*
+         * As in the prefresh() function, a rectangle is specified in the
+         * destination window, (dminrow, dmincol) and (dmaxrow, dmaxcol),
+         * and the upper-left-corner coordinates of the source window,
+         * (sminrow, smincol).
+         */
+        IMPLEMENT_REQ("copywin.02");
+
+        return true;
+    }
+}
+
+void copywin_model(NCursesWindow* src, NCursesWindow* dst,
+                  IntT sminrow, IntT smincol, IntT dminrow, IntT dmincol,
+                  IntT dmaxrow, IntT dmaxcol, IntT overlay)
+{
+    IntT i, j;
+    ChTypeT ch;
+    NCursesPosition* pos_src = create_NCursesPosition(smincol, sminrow);
+    NCursesPosition* pos_dst = create_NCursesPosition(dmincol, dminrow);
+
+    for( i = 0; i < dmaxcol - dmincol + 1 ; i++)
+    {
+        for( j = 0; j < dmaxrow - dminrow + 1; j++)
+        {
+            ch = getElement_NCursesWindow(src, pos_src);
+
+            if(equals_ChTypeT(ch, src->bkgd) && overlay)
+            {
+                /*
+                 * If overlay is TRUE, then copying is non-destructive,
+                 * as in overlay().
+                 */
+                IMPLEMENT_REQ("copywin.03.01");
+                ch = dst->bkgd;
+            }
+            else
+            {
+                /*
+                 * If overlay is FALSE, then copying is destructive, as in
+                 * overwrite().
+                 */
+                IMPLEMENT_REQ("copywin.03.02");
+            }
+
+            setElement_NCursesWindow(dst, pos_dst, ch);
+
+            pos_src->y++;
+            pos_dst->y++;
+        }
+        pos_src->y = sminrow;
+        pos_dst->y = dminrow;
+        pos_src->x++;
+        pos_dst->x++;
+    }
+
+    pushNCursesWindow(dst);
+}
+
+void onCopywin( CallContext context, WindowTPtr* srcwin, WindowTPtr* dstwin,
+                  IntT sminrow, IntT smincol, IntT dminrow, IntT dmincol,
+                  IntT dmaxrow, IntT dmaxcol, IntT overlay,
+                  IntT copywin_spec)
+{
+    /*if(copywin_spec == SUT_EOK)
+    {
+        NCursesWindow* src = getWindow(srcwin), *dst=getWindow(dstwin);
+        IntT i, j;
+        ChTypeT ch;
+
+        for( i = 0; i < dmaxcol - dmincol; i++)
+            for( j = 0; j < dmaxrow - dminrow; j++)
+            {
+                ch = getElement_NCursesWindow(src,
+                        create_NCursesPosition(i + smincol, j + sminrow));
+
+                if(equals_ChTypeT(ch, src->bkgd) && overlay)
+                    ch = dst->bkgd;
+
+                setElement_NCursesWindow(dst,
+                    create_NCursesPosition(i + dmincol, j + dminrow),
+                    ch);
+            }
+    }*/
+    if(copywin_spec == SUT_OK)
+    {
+        onNCursesUniversal(context, dstwin, copywin_spec);
+        onNCursesUniversal(context, srcwin, copywin_spec);
+        refresh_WindowTPtr(context, dstwin, 0);
+        refresh_WindowTPtr(context, srcwin, 0);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    curs_set - set the cursor mode
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int curs_set(int visibility);
+
+DESCRIPTION
+
+    The curs_set() function sets the appearance of the cursor based on the
+    value of visibility:
+
+        Value of visibility     Appearance of Cursor
+
+        0                       Invisible
+        1                       Terminal-specific normal mode
+        2                       Terminal-specific high visibility mode
+
+    The terminal does not necessarily support all the above values.
+
+RETURN VALUE
+
+    If the terminal supports the cursor mode specified by visibility, then
+    curs_set() returns the previous cursor state. Otherwise, the function
+    returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT curs_set_spec( CallContext context, IntT visibility)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    IntT curs = term->cursor_visibility;
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(curs_set_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, the function returns ERR.
+             */
+            REQ("curs_set.03.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        if(curs != -1)//-1 means undefined initial value
+        {
+            /*
+             * If the terminal supports the cursor mode specified by visibility,
+             * then curs_set() returns the previous cursor state.
+             */
+            REQ("curs_set.03.01",
+                "Returns the previous cursor state",
+                curs_set_spec == curs);
+        }
+
+        /*
+         * The curs_set() function sets the appearance of the cursor based on
+         * the value of visibility:
+         *
+         *  Value of visibility     Appearance of Cursor
+         *
+         *  0                       Invisible
+         *  1                       Terminal-specific normal mode
+         *  2                       Terminal-specific high visibility mode
+         */
+        REQ("curs_set.01",
+            "Sets the appearance of the cursor based on the visibility",
+            term->cursor_visibility == visibility);
+
+        /*
+         * The terminal does not necessarily support all the above values.
+         */
+        REQ("curs_set.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+void onCurs_set( CallContext context, IntT visibility, IntT curs_set_spec)
+{
+    if(curs_set_spec != SUT_ERR)
+    {
+        NCursesTerminal* term = getNCursesStdTerminal(context);
+        term->cursor_visibility = visibility;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    delwin - delete a window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int delwin(WINDOW *win);
+
+DESCRIPTION
+
+    The delwin() function deletes win, freeing all memory associated with it.
+    The application must delete subwindows before deleting the main window.
+
+RETURN VALUE
+
+    Upon successful completion, delwin() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT delwin_spec( CallContext context, WindowTPtr* win)
+{
+    pre
+    {
+
+        if(win!=NULL)
+        {
+            /*
+             * The application must delete subwindows before deleting the main
+             * window.
+             */
+            REQ("delwin.02",
+                "The application must delete subwindows before deleting the main window",
+                !windowHasChildren(*win));
+        }
+
+        return true;
+    }
+    coverage C
+    {
+        return { DeleteWindow, "Delete a window" };
+    }
+    post
+    {
+        if(delwin_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("delwin.03.02", "Otherwise, it returns ERR.", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, delwin() returns OK.
+         */
+        REQ("delwin.03.01", "Upon successful completion, delwin() returns OK.", delwin_spec == SUT_OK);
+
+        /*
+         * The delwin() function deletes win, freeing all memory associated
+         * with it.
+         */
+        REQ("delwin.01",
+            "The delwin() function deletes win, freeing all memory associated with it",
+            getWindowMayNULL(context, win) == NULL);
+
+        return true;
+    }
+}
+
+void onDelwin( CallContext context, WindowTPtr* win, IntT delwin_spec)
+{
+    if(delwin_spec == SUT_EOK)
+        unregisterNCursesWindow(*win);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    derwin, newwin, subwin - window creation functions
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    WINDOW *derwin(WINDOW *orig, int nlines, int ncols, int begin_y,
+        int begin_x);
+
+    WINDOW *newwin(int nlines, int ncols, int begin_y, int begin_x);
+
+    WINDOW *subwin(WINDOW *orig, int nlines, int ncols, int begin_y,
+        int begin_x);
+
+DESCRIPTION
+
+    The derwin() function is the same as subwin(), except that begin_y and
+    begin_x are relative to the origin of the window orig rather than absolute
+    screen positions.
+
+    The newwin() function creates a new window with nlines lines and ncols
+    columns,positioned so that the origin is (begin_y, begin_x). If nlines is
+    zero, it defaults to LINES - begin_y; if ncols is zero, it defaults to COLS
+    - begin_x.
+
+    The size of a window cannot be greater than the physical size of the
+    screen, or that defined using the environment variables LINES and COLUMNS.
+    The behaviour of a window which extends outside the terminal screen is
+    undefined.
+
+    The subwin() function creates a new window with nlines lines and ncols
+    columns,positioned so that the origin is at (begin_y, begin_x). (This
+    position is an absolute screen position, not a position relative to the
+    window orig.) If any part of the new window is outside orig, the function
+    fails and the window is not created.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return a pointer to the new
+    window. Otherwise, they return a null pointer.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+WindowTPtr derwin_spec( CallContext context, WindowTPtr* orig, IntT nlines,
+                       IntT ncols, IntT begin_y, IntT begin_x)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        NCursesWindow* wnd = getWindow(&derwin_spec);
+        NCursesWindow* par = getWindow(&wnd->parent);
+
+        if(isNULL_VoidTPtr(derwin_spec))
+        {
+            /*
+             * Otherwise, they return a null pointer.
+             */
+            REQ("derwin.04.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * The derwin() function is the same as subwin(), except that
+         * begin_y and begin_x are relative to the origin of the window
+         * orig rather than absolute screen positions.
+         */
+        REQ("derwin.01",
+            "Is the same as subwin()",
+                                wnd->begx == par->begx + begin_x
+                            &&  wnd->begy == par->begy + begin_y);
+
+        return true;
+    }
+}
+
+
+void onDerwin(  CallContext context, WindowTPtr* orig, IntT nlines,
+                IntT ncols, IntT begin_y, IntT begin_x,
+                WindowTPtr derwin_spec)
+{
+    if(!isNULL_VoidTPtr(derwin_spec))
+    {
+        NCursesWindow* wnd;
+        NCursesPosition* pos = getAbsoluteScreenPosition(getWindow(orig),
+                                    create_NCursesPosition(begin_x, begin_y));
+
+        registerNCursesWindow( derwin_spec,
+            create_NCursesWindow(derwin_spec,  nlines, ncols, pos->y, pos->x, *orig));
+
+        wnd = getWindow(&derwin_spec);
+        wnd->wnd_image = NULL;
+
+        updateNCursesWindow(context, derwin_spec);
+
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    dupwin - duplicate a window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    WINDOW *dupwin(WINDOW *win);
+
+DESCRIPTION
+
+    The dupwin() function creates a duplicate of the window win.
+
+RETURN VALUE
+
+    Upon successful completion, dupwin() returns a pointer to the new window.
+    Otherwise, it returns a null pointer.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+WindowTPtr dupwin_spec( CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curWnd = getWindow(win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { DuplicateWindow, "Duplicate a window" };
+    }
+    post
+    {
+        if(isNULL_VoidTPtr(dupwin_spec))
+        {
+            /*
+             * Otherwise, it returns a null pointer.
+             */
+            REQ("dupwin.02.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * The dupwin() function creates a duplicate of the window win.
+         */
+        REQ("dupwin.01",
+            "Creates a duplicate of the window win",
+                    check_NCursesWindows(
+                    getWindow(&dupwin_spec), local,
+                    CH_ALL ^ CH_ADDR ^ CH_PARX ^ CH_PARY, -1));
+
+        return true;
+    }
+}
+
+void onDupwin( CallContext context, WindowTPtr* win, WindowTPtr dupwin_spec)
+{
+    if(!isNULL_VoidTPtr(dupwin_spec))
+    {
+        NCursesWindow* wnd = clone(getWindow(win));
+
+        wnd->address = dupwin_spec;
+
+        //Q: Implementation specific behavior??
+        wnd->parx = 0;
+        wnd->pary = 0;
+
+        wnd->parent = NULL_VoidTPtr;
+
+        registerNCursesWindow( dupwin_spec, wnd);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    getwin, putwin - dump window to, and reload window from, a file
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    WINDOW *getwin(FILE *filep);
+
+    int putwin(WINDOW *win, FILE *filep);
+
+DESCRIPTION
+
+    The getwin() function reads window-related data stored in the file by
+    putwin(). The function then creates and initialises a new window using
+    that data.
+
+    The putwin() function writes all data associated with win into the stdio
+    stream to which filep points, using an unspecified format. This
+    information can be retrieved later using getwin().
+
+RETURN VALUE
+
+    Upon successful completion, getwin() returns a pointer to the window it
+    created. Otherwise, it returns a null pointer.
+
+    Upon successful completion, putwin() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+WindowTPtr getwin_spec( CallContext context, CString* filep)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(isNULL_VoidTPtr(getwin_spec))
+        {
+            /*
+             * Otherwise, it returns a null pointer.
+             */
+            REQ("getwin.03.02",
+                "Otherwise, returns a null pointer",
+                TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * The getwin() function reads window-related data stored in the file
+         * by putwin().
+         */
+        REQ("getwin.01", "", TODO_REQ());
+
+        /*
+         * The function then creates and initialises a new window using that
+         * data.
+         */
+        REQ("getwin.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+void onGetwin( CallContext context, CString* filep, WindowTPtr getwin_spec)
+{
+
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    intrflush - enable or disable flush on interrupt
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int intrflush(WINDOW *win, bool bf);
+
+DESCRIPTION
+
+    The intrflush() function specifies whether pressing an interrupt key (
+    interrupt, suspend or quit) will flush the input buffer associated with the
+    current screen.If the value of bf is TRUE, then flushing of the output
+    buffer associated with the current screen will occur when an interrupt key
+    (interrupt, suspend, or quit) is pressed. If the value of bf is FALSE then
+    no flushing of the buffer will occur when an interrupt key is pressed The
+    default for the option is inherited from the display driver settings. The
+    win argument is ignored.
+
+RETURN VALUE
+
+    Upon successful completion, intrflush() returns OK. Otherwise, it
+    returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT intrflush_spec( CallContext context, WindowTPtr* win, IntT bf)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(intrflush_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("intrflush.05.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, intrflush() returns OK
+         */
+        REQ("intrflush.05.01",
+            "Upon successful completion, returns OK",
+            intrflush_spec == SUT_OK);
+
+        /*
+         * The intrflush() function specifies whether pressing an interrupt
+         * key (interrupt, suspend or quit) will flush the input buffer
+         * associated with the current screen.
+         */
+        REQ("intrflush.01", "", TODO_REQ());
+
+        if(bf)
+        {
+            /*
+             * If the value of bf is TRUE, then flushing of the output buffer
+             * associated with the current screen will occur when an interrupt
+             * key (interrupt, suspend, or quit) is pressed.
+             */
+            REQ("intrflush.02.01", "", TODO_REQ());
+        }
+        else
+        {
+            /*
+             * If the value of bf is FALSE then no flushing of the buffer will
+             * occur when an interrupt key is pressed
+             */
+            REQ("intrflush.02.02", "", TODO_REQ());
+        }
+
+        /*
+         * The default for the option is inherited from the display driver
+         * settings.
+         */
+        REQ("intrflush.03", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onIntrflush( CallContext context, WindowTPtr* win, IntT bf,
+                 IntT intrflush_spec)
+{
+    if(intrflush_spec == SUT_EOK)
+    {
+        NCursesTerminal* term = getNCursesStdTerminal(context);
+
+        if(term != NULL)
+            term->intrflush = bf;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    keypad - enable/disable abbreviation of function keys
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int keypad(WINDOW *win, bool bf);
+
+DESCRIPTION
+
+    The keypad() function controls keypad translation.If bf is TRUE, keypad
+    translation is turned on.If bf is FALSE, keypad translation is turned off.
+    The initial state is FALSE.
+
+    This function affects the behaviour of any function that provides keyboard
+    input.
+
+    If the terminal in use requires a command to enable it to transmit
+    distinctive codes when a function key is pressed, then after keypad
+    translation is first enabled, the implementation transmits this command to
+    the terminal before an affected input function tries to read any characters
+    from that terminal.
+
+RETURN VALUE
+
+    Upon successful completion, keypad() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT keypad_spec( CallContext context, WindowTPtr* win, IntT bf)
+{
+    NCursesWindow* wnd = getWindow(win);
+
+    pre
+    {
+        REQ("", "wnd != NULL", wnd);
+
+        return true;
+    }
+    post
+    {
+        if(keypad_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("keypad.06.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, keypad() returns OK.
+         */
+        REQ("keypad.06.01",
+            "Upon successful completion, returns OK",
+            keypad_spec == SUT_OK);
+
+        /*
+         * The keypad() function controls keypad translation.
+         */
+        REQ("keypad.01", "", TODO_REQ());
+
+        if(bf)
+        {
+            /*
+             * If bf is TRUE, keypad translation is turned on.
+             */
+            REQ("keypad.02.01",
+                "If bf is TRUE, keypad translation is turned on",
+                wnd->keypad);
+        }
+        else
+        {
+            /*
+             * If bf is FALSE, keypad translation is turned off.
+             */
+            REQ("keypad.02.02",
+                "If bf is FALSE, keypad translation is turned off",
+                !wnd->keypad);
+        }
+
+        /*
+         * The initial state is FALSE.
+         */
+        REQ("keypad.03", "", TODO_REQ());
+
+        /*
+         * This function affects the behaviour of any function that
+         * provides keyboard input.
+         */
+        REQ("keypad.04", "", TODO_REQ());
+
+        /*
+         * If the terminal in use requires a command to enable it to transmit
+         * distinctive codes when a function key is pressed, then after keypad
+         * translation is first enabled, the implementation transmits this
+         * command to the terminal before an affected input function tries
+         * to read any characters from that terminal.
+         */
+        REQ("keypad.05", "", TODO_REQ());
+
+        return true;
+    }
+}
+void onKeypad( CallContext context, WindowTPtr* win, IntT bf,
+                 IntT keypad_spec)
+{
+    if(keypad_spec == SUT_EOK)
+    {
+        NCursesWindow* wnd = getWindow(win);
+
+        if(wnd != NULL)
+            wnd->keypad = bf;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    meta - enable/disable meta-keys
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int meta(WINDOW *win, bool bf);
+
+DESCRIPTION
+
+    Initially, whether the terminal returns 7 or 8 significant bits on input
+    depends on the control mode of the display driver (see the XBD
+    specification, General Terminal Interface). To force 8 bits to be
+    returned, invoke meta(win, TRUE). To force 7 bits to be returned, invoke
+    meta(win, FALSE). The win argument is always ignored. If the terminfo
+    capabilities smm (meta_on) and rmm (meta_off) are defined for the
+    terminal, smm is sent to the terminal when meta(win, TRUE) is called and
+    rmm is sent when meta(win, FALSE) is called.
+
+RETURN VALUE
+
+    Upon successful completion, meta() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT meta_spec( CallContext context, WindowTPtr* win, IntT bf)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(meta_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("meta.05.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, meta() returns OK.
+         */
+        REQ("meta.05.01",
+            "Upon successful completion, returns OK",
+            meta_spec == SUT_OK);
+
+        /*
+         * Initially, whether the terminal returns 7 or 8 significant bits on
+         * input depends on the control mode of the display driver
+         */
+        REQ("meta.01", "", TODO_REQ());
+
+        /*
+         * To force 8 bits to be returned, invoke meta(win, TRUE).
+         */
+        REQ("meta.02.01", "", TODO_REQ());
+
+        /*
+         * To force 7 bits to be returned, invoke meta(win, FALSE).
+         */
+        REQ("meta.02.02", "", TODO_REQ());
+
+        /*
+         * If the terminfo capabilities smm (meta_on) and rmm (meta_off) are
+         * defined for the terminal, smm is sent to the terminal when
+         * meta(win, TRUE) is called and rmm is sent when meta(win, FALSE)
+         * is called.
+         */
+        REQ("meta.04", "", TODO_REQ());//Look in the map...
+
+        return true;
+    }
+}
+
+
+void onMeta( CallContext context, WindowTPtr* win, IntT bf,
+                 IntT meta_spec)
+{
+    if(meta_spec == SUT_EOK)
+    {
+        NCursesTerminal* term = getNCursesStdTerminal(context);
+
+        if(term != NULL)
+            term->meta = bf;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    mvderwin - define window coordinate transformation
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int mvderwin(WINDOW *win, int par_y, int par_x);
+
+DESCRIPTION
+
+    The mvderwin() function specifies a mapping of characters. The function
+    identifies a mapped area of the parent of the specified window, whose size
+    is the same as the size of the specified window and whose origin is at
+    (par_y, par_x) of the parent window.
+
+    During any refresh of the specified window, the characters displayed in
+    that window's display area of the terminal are taken from the mapped area.
+
+    Any references to characters in the specified window obtain or modify
+    characters in the mapped area.
+
+    That is, mvderwin() defines a coordinate transformation from each position
+    in the mapped area to a corresponding position (same y, x offset from the
+    origin) in the specified window.
+
+RETURN VALUE
+
+    Upon successful completion, mvderwin() returns OK. Otherwise, it returns
+    ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT mvderwin_spec( CallContext context, WindowTPtr* win, NCursesPosition* pos)
+{
+    NCursesWindow* curWnd = getWindow(win);
+    NCursesWindow* tmp = clone(curWnd);
+    NCursesWindow* local;
+
+    tmp->parx = pos->x;
+    tmp->pary = pos->y;
+
+    local = createNCursesWindow_Local(tmp);
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(mvderwin_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("mvderwin.06.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, mvderwin() returns OK.
+         */
+        REQ("mvderwin.06.01",
+            "Upon successful completion, returns OK",
+            mvderwin_spec == SUT_OK);
+
+        /*
+         * The mvderwin() function specifies a mapping of characters.
+         */
+        REQ("mvderwin.01", "", TODO_REQ());
+
+        /*
+         * The function identifies a mapped area of the parent of the
+         * specified window, whose size is the same as the size of the
+         * specified window
+         */
+        REQ("mvderwin.02.01", "", TODO_REQ());
+
+        /*
+         * and whose origin is at (par_y, par_x) of the parent window.
+         */
+        REQ("mvderwin.02.02",
+            "origin is at (par_y, par_x) of the parent window",
+                                       curWnd->parx == pos->x
+                                    && curWnd->pary == pos->y);
+
+        /*
+         * During any refresh of the specified window, the characters displayed
+         * in that window's display area of the terminal are taken from the
+         * mapped area.
+         */
+        REQ("mvderwin.03", "", TODO_REQ());
+
+        /*
+         * Any references to characters in the specified window obtain or
+         * modify characters in the mapped area.
+         */
+        REQ("mvderwin.04", "", TODO_REQ());
+
+        /*
+         * That is, mvderwin() defines a coordinate transformation from each
+         * position in the mapped area to a corresponding position (same y, x
+         * offset from the origin) in the specified window.
+         */
+        REQ("mvderwin.05", "", TODO_REQ());
+
+        REQ("", "Check All", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+}
+
+
+void onMvderwin(   CallContext context, WindowTPtr* win, NCursesPosition* pos,
+                IntT mvderwin_spec)
+{
+    if(mvderwin_spec == SUT_EOK)
+    {
+        updateNCursesWindow(context, *win);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    mvwin - move window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int mvwin(WINDOW *win, int y, int x);
+
+DESCRIPTION
+
+    The mvwin() function moves the specified window so that its origin is at
+    position (y, x). If the move would cause any portion of the window to
+    extend past any edge of the screen, the function fails and the window is
+    not moved.
+
+RETURN VALUE
+
+    Upon successful completion, mvwin() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+No errors are defined.
+*/
+
+specification
+IntT mvwin_spec( CallContext context, WindowTPtr* win, IntT y, IntT x)
+{
+    NCursesWindow* curWnd = getWindow(win);
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+
+    pre
+    {
+        REQ("", "The application should not move subwindows",
+                curWnd->wnd_image != NULL);
+
+        return true;
+    }
+    post
+    {
+        if(     y + curWnd->nlines > stdWnd->nlines || y + curWnd->nlines < 0
+            &&  x + curWnd->ncols > stdWnd->ncols || x + curWnd->ncols < 0)
+        {
+            /*
+             * If the move would cause any portion of the window to extend past
+             * any edge of the screen, the function fails and the window is not
+             * moved.
+             */
+            REQ("mvwin.02",
+                "If the move would cause any portion of the window to extend "
+                "past any edge of the screen, the function fails",
+                mvwin_spec == SUT_ERR);
+        }
+
+        if(mvwin_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("mvwin.03.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, mvwin() returns OK.
+         */
+        REQ("mvwin.03.01",
+            "Upon successful completion, returns OK",
+            mvwin_spec == SUT_OK);
+
+        /*
+         * The mvwin() function moves the specified window so that its origin
+         * is at position (y, x).
+         */
+        REQ("mvwin.01",
+            "Moves specified window so that its origin is at position (y,x)",
+            curWnd->begx == x && curWnd->begy == y);
+
+        REQ("", "Check all", check_NCursesWindow(context, win, CH_ALL, -1));
+
+        return true;
+    }
+}
+
+
+void onMvwin(   CallContext context, WindowTPtr* win, IntT y, IntT x,
+                IntT mvwin_spec)
+{
+    if(mvwin_spec == SUT_EOK)
+    {
+        NCursesWindow* wnd = getWindow(win);
+        IntT i, j;
+
+        wnd->begx = x;
+        wnd->begy = y;
+
+        //Q: Moved window's elements become not refreshed: may need change
+        for(i=0;i<wnd->nlines;i++)
+            for(j=0;j<wnd->ncols;j++)
+                setRefresh_NCursesWindow(wnd, create_NCursesPosition(j, i), 3);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    derwin, newwin, subwin - window creation functions
+
+SYNOPSIS
+
+    #include <curses.h>
+    WINDOW *derwin(WINDOW *orig, int nlines, int ncols, int begin_y,
+        int begin_x);
+    WINDOW *newwin(int nlines, int ncols, int begin_y, int begin_x);
+    WINDOW *subwin(WINDOW *orig, int nlines, int ncols, int begin_y,
+        int begin_x);
+
+DESCRIPTION
+
+    The derwin() function is the same as subwin(), except that begin_y and
+    begin_x are relative to the origin of the window orig rather than absolute
+    screen positions.
+
+    The newwin() function creates a new window with nlines lines and ncols
+    columns,positioned so that the origin is (begin_y, begin_x). If nlines is
+    zero, it defaults to LINES - begin_y; if ncols is zero, it defaults to
+    COLS - begin_x.
+
+    The size of a window cannot be greater than the physical size of the
+    screen, or that defined using the environment variables LINES and COLUMNS.
+    The behaviour of a window which extends outside the terminal screen is
+    undefined.
+
+    The subwin() function creates a new window with nlines lines and ncols
+    columns,positioned so that the origin is at (begin_y, begin_x). (This
+    position is an absolute screen position, not a position relative to the
+    window orig.) If any part of the new window is outside orig, the function
+    fails and the window is not created.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return a pointer to the new
+    window. Otherwise, they return a null pointer.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification typedef struct NewWinReturnType NewWinReturnType = {};
+
+NewWinReturnType *create_NewWinReturnType(
+    WindowTPtr win,
+    IntT nCOLS,
+    IntT nLINES )
+{
+    return create(&type_NewWinReturnType, win, nCOLS, nLINES);
+}
+
+specification
+NewWinReturnType* newwin_spec(  CallContext context, IntT nlines, IntT ncols,
+                                IntT begin_y, IntT begin_x)
+{
+    pre
+    {
+
+        return true;
+    }
+    post
+    {
+        if (nlines > newwin_spec->nLINES || ncols > newwin_spec->nCOLS)
+        {
+            /*
+            * The size of a window cannot be greater than the physical size
+            * of the screen, or that defined using the environment variables
+            * LINES and COLUMNS. The behaviour of a window which extends
+            * outside the terminal screen is undefined.
+            */
+            REQ("newwin.02.03", "Window can not be greater than screen",
+                    isNULL_VoidTPtr(newwin_spec->win));
+        }
+
+        return true;
+    }
+}
+
+void onNewwin(  CallContext context, IntT nlines, IntT ncols, IntT begin_y,
+                IntT begin_x, NewWinReturnType* newwin_spec)
+{
+    IntT lines=nlines;
+    IntT cols=ncols;
+
+   /*
+    * Upon successful completion, these functions return a pointer to the
+    * new window.
+    */
+    IMPLEMENT_REQ("newwin.04.01");
+
+   /*
+    * Otherwise, they return a null pointer.
+    */
+    IMPLEMENT_REQ("newwin.04.02");
+
+    if (!isNULL_VoidTPtr(newwin_spec->win))
+    {
+
+       /*
+        * The newwin() function creates a new window with nlines lines and
+        * ncols columns,
+        */
+        IMPLEMENT_REQ("newwin.01.01");
+
+        /*
+        * positioned so that the origin is (begin_y, begin_x).
+        */
+        IMPLEMENT_REQ("newwin.01.02");
+
+        if (nlines==0)
+        {
+            /*
+            * If nlines is zero, it defaults to LINES - begin_y;
+            */
+            IMPLEMENT_REQ("newwin.02.01");
+
+            lines=newwin_spec->nLINES-begin_y;
+        }
+
+        if (ncols==0)
+        {
+            /*
+            * if ncols is zero, it defaults to COLS - begin_x.
+            */
+            IMPLEMENT_REQ("newwin.02.02");
+
+            cols= newwin_spec->nCOLS-begin_x;
+        }
+
+        registerNCursesWindow( newwin_spec->win,
+            create_NCursesWindow(   newwin_spec->win,  lines, cols,
+                                    begin_y, begin_x, NULL_VoidTPtr));
+
+        updateNCursesWindow_WindowState( getWindow(&newwin_spec->win),
+                                    window_state(context, newwin_spec->win));
+    }
+
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    nodelay - enable or disable block during read
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int nodelay(WINDOW *win, bool bf);
+
+DESCRIPTION
+
+    The nodelay() function specifies whether Delay Mode or No Delay Mode is in
+    effect for the screen associated with the specified window.If bf is TRUE,
+    this screen is set to No Delay Mode.If bf is FALSE, this screen is set to
+    Delay Mode. The initial state is FALSE.
+
+RETURN VALUE
+
+    Upon successful completion, nodelay() returns OK. Otherwise, it returns
+    ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT nodelay_spec( CallContext context, WindowTPtr* win, IntT bf)
+{
+    NCursesWindow*  wnd = getWindow(win);
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(nodelay_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("nodelay.04.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, nodelay() returns OK.
+         */
+        REQ("nodelay.04.01",
+            "Upon successful completion, returns OK",
+            nodelay_spec == SUT_OK);
+
+        /*
+         * The nodelay() function specifies whether Delay Mode or
+         * No Delay Mode is in effect for the screen associated
+         * with the specified window.
+         */
+        REQ("nodelay.01", "", TODO_REQ());
+
+        if(bf)
+        {
+            /*
+             * If bf is TRUE, this screen is set to No Delay Mode.
+             */
+            REQ("nodelay.02.01",
+                "If bf is TRUE, this screen is set to No Delay Mode",
+                !wnd->delay);
+        }
+        else
+        {
+            /*
+             * If bf is FALSE, this screen is set to Delay Mode.
+             */
+            REQ("nodelay.02.02",
+                "If bf is FALSE, this screen is set to Delay Mode",
+                wnd->delay);
+        }
+
+        /*
+         * The initial state is FALSE.
+         */
+        REQ("nodelay.03", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onNodelay( CallContext context, WindowTPtr* win, IntT bf,
+                 IntT nodelay_spec)
+{
+    if(nodelay_spec == SUT_EOK)
+    {
+        NCursesWindow* wnd = getWindow(win);
+
+        wnd->delay = bf ? 0 : 1;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    overlay, overwrite - copy overlapped windows
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int overlay(const WINDOW *srcwin, WINDOW *dstwin);
+
+    int overwrite(const WINDOW *srcwin, WINDOW *dstwin);
+
+DESCRIPTION
+
+    The overlay() and overwrite() functions overlay srcwin on top of dstwin.
+    The srcwin and dstwin arguments need not be the same size; only text where
+    the two windows overlap is copied.
+
+    The overwrite() function copies characters as though a sequence of
+    win_wch() and wadd_wch() were performed with the destination window's
+    attributes and background attributes cleared.
+
+    The overlay() function does the same thing, except that, whenever a
+    character to be copied is the background character of the source window,
+    overlay() does not copy the character but merely moves the destination
+    cursor the width of the source background character.
+
+    If any portion of the overlaying window border is not the first column of a
+    multi-column character then all the column positions will be replaced with
+    the background character and rendition before the overlay is done. If the
+    default background character is a multi-column character when this occurs,
+    then these functions fail.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT overlay_spec( CallContext context, WindowTPtr* srcwin,
+                            WindowTPtr* dstwin)
+{
+    NCursesWindow* src = getWindow(srcwin);
+    NCursesWindow* dst = getWindow(dstwin);
+    NCursesWindow* src_local = createNCursesWindow_Local(src);
+    NCursesWindow* dst_local = createNCursesWindow_Local(dst);
+
+    FILTER("overlay");
+
+    overlay_model(src_local, dst_local, 1);
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(overlay_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("overlay.07.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("overlay.07.01",
+            "Upon successful completion, return OK",
+            overlay_spec == SUT_OK);
+
+        /*
+         * If any portion of the overlaying window border is not the first
+         * column of a multi-column character then all the column positions
+         * will be replaced with the background character and rendition before
+         * the overlay is done.
+         */
+        REQ("overlay.05", "", TODO_REQ());
+
+        /*
+         * If the default background character is a multi-column character
+         * when this occurs, then these functions fail.
+         */
+        REQ("overlay.06", "", TODO_REQ());
+
+        REQ("", "Check all", check_NCursesWindows(src, src_local, CH_ALL, -1));
+        REQ("", "Check all", check_NCursesWindows(dst, dst_local, CH_ALL, -1));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+void overlay_model(NCursesWindow* src, NCursesWindow* dst, IntT overlay)
+{
+    Rect* rct = getIntersectingRect(src, dst);
+    NCursesPosition* src_lu, *dst_lu, *src_rl, *dst_rl;
+    IntT i, j;
+    ChTypeT ch;
+
+
+    if(rct == NULL)
+        return;
+
+    src_lu = getRelativeScreenPosition(src,
+        create_NCursesPosition(rct->left, rct->upper));
+    src_rl = getRelativeScreenPosition(src,
+        create_NCursesPosition(rct->right, rct->lower));
+    dst_lu = getRelativeScreenPosition(dst,
+        create_NCursesPosition(rct->left, rct->upper));
+    dst_rl = getRelativeScreenPosition(dst,
+        create_NCursesPosition(rct->right, rct->lower));
+
+    if(     src_lu == NULL || src_rl == NULL
+        ||  dst_lu == NULL || dst_rl == NULL)
+        return;
+
+    for( i = 0; i < src_rl->x - src_lu->x; i++)
+        for( j = 0; j < src_rl->y - src_lu->y; j++)
+        {
+            /*
+             * only text where the two windows overlap is copied.
+             */
+            IMPLEMENT_REQ("overlay.03;overwrite.03");
+
+            ch = getElement_NCursesWindow(src,
+                    create_NCursesPosition(i + src_lu->x, j + src_lu->y));
+
+            if(equals_ChTypeT(ch, src->bkgd) && overlay)
+            {
+                /*
+                 * The overlay() function does the same thing, except that,
+                 * whenever a character to be copied is the background
+                 * character of the source window, overlay() does not copy the
+                 * character but merely moves the destination cursor the width
+                 * of the source background character.
+                 */
+                IMPLEMENT_REQ("overlay.04;overwrite.04");
+                ch = dst->bkgd;
+            }
+
+            setElement_NCursesWindow(dst,
+                create_NCursesPosition(i + dst_lu->x, j + dst_lu->y),
+                ch);
+        }
+    /*
+     * The overlay() and overwrite() functions overlay srcwin on top of
+     * dstwin.
+     */
+    IMPLEMENT_REQ("overlay.01;overwrite.01");
+
+    pushNCursesWindow(dst);
+}
+
+
+void onOverlay( CallContext context, WindowTPtr* src,
+                            WindowTPtr* dst, IntT overlay_spec)
+{
+    if(overlay_spec == SUT_EOK)
+    {
+        updateNCursesWindow(context, *dst);
+        updateNCursesWindow(context, *src);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    overlay, overwrite - copy overlapped windows
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int overlay(const WINDOW *srcwin, WINDOW *dstwin);
+
+    int overwrite(const WINDOW *srcwin, WINDOW *dstwin);
+
+DESCRIPTION
+
+    The overlay() and overwrite() functions overlay srcwin on top of dstwin.
+    The scrwin and dstwin arguments need not be the same size; only text where
+    the two windows overlap is copied.
+
+    The overwrite() function copies characters as though a sequence of
+    win_wch() and wadd_wch() were performed with the destination window's
+    attributes and background attributes cleared.
+
+    The overlay() function does the same thing, except that, whenever a
+    character to be copied is the background character of the source window,
+    overlay() does not copy the character but merely moves the destination
+    cursor the width of the source background character.
+
+    If any portion of the overlaying window border is not the first column of a
+    multi-column character then all the column positions will be replaced with
+    the background character and rendition before the overlay is done. If the
+    default background character is a multi-column character when this occurs,
+    then these functions fail.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT overwrite_spec( CallContext context, WindowTPtr* srcwin,
+                            WindowTPtr* dstwin)
+{
+    NCursesWindow* src = getWindow(srcwin);
+    NCursesWindow* dst = getWindow(dstwin);
+    NCursesWindow* src_local = createNCursesWindow_Local(src);
+    NCursesWindow* dst_local = createNCursesWindow_Local(dst);
+
+    FILTER("overwrite");
+
+    overlay_model(src_local, dst_local, 0);
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+
+        if(overwrite_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("overwrite.07.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("overwrite.07.01",
+            "Upon successful completion, return OK",
+            overwrite_spec == SUT_OK);
+
+        /*
+         * If any portion of the overlaying window border is not the first
+         * column of a multi-column character then all the column positions
+         * will be replaced with the background character and rendition before
+         * the overlay is done.
+         */
+        REQ("overwrite.05", "", TODO_REQ());
+
+        /*
+         * If the default background character is a multi-column character
+         * when this occurs, then these functions fail.
+         */
+        REQ("overwrite.06", "", TODO_REQ());
+
+
+        REQ("", "Check all", check_NCursesWindows(src, src_local, CH_ALL, -1));
+        REQ("", "Check all", check_NCursesWindows(dst, dst_local, CH_ALL, -1));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+void onOverwrite( CallContext context, WindowTPtr* src,
+                           WindowTPtr* dst, IntT overwrite_spec)
+{
+    if(overwrite_spec == SUT_EOK)
+    {
+        updateNCursesWindow(context, *dst);
+        updateNCursesWindow(context, *src);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    getwin, putwin - dump window to, and reload window from, a file
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    WINDOW *getwin(FILE *filep);
+
+    int putwin(WINDOW *win, FILE *filep);
+
+DESCRIPTION
+
+    The getwin() function reads window-related data stored in the file by
+    putwin(). The function then creates and initialises a new window using
+    that data.
+
+    The putwin() function writes all data associated with win into the stdio
+    stream to which filep points, using an unspecified format. This
+    information can be retrieved later using getwin().
+
+RETURN VALUE
+
+    Upon successful completion, getwin() returns a pointer to the window it
+    created. Otherwise, it returns a null pointer.
+
+    Upon successful completion, putwin() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT putwin_spec( CallContext context, WindowTPtr* win, CString* filep)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if(putwin_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, it returns ERR.
+             */
+            REQ("putwin.03.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, putwin() returns OK.
+         */
+        REQ("putwin.03.01",
+            "Upon successful completion, returns OK",
+            putwin_spec == SUT_OK);
+
+        /*
+         * The putwin() function writes all data associated with win into
+         * the stdio stream to which filep points, using an unspecified
+         * format.
+         */
+        REQ("putwin.01", "", TODO_REQ());
+
+        /*
+         * This information can be retrieved later using getwin().
+         */
+        REQ("putwin.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+void onPutwin( CallContext context, WindowTPtr* win, CString* filep,
+                IntT putwin_spec)
+{
+
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    derwin, newwin, subwin - window creation functions
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    WINDOW *derwin(WINDOW *orig, int nlines, int ncols, int begin_y,
+        int begin_x);
+
+    WINDOW *newwin(int nlines, int ncols, int begin_y, int begin_x);
+
+    WINDOW *subwin(WINDOW *orig, int nlines, int ncols, int begin_y,
+        int begin_x);
+
+DESCRIPTION
+
+    The derwin() function is the same as subwin(), except that begin_y and
+    begin_x are relative to the origin of the window orig rather than absolute
+    screen positions.
+
+    The newwin() function creates a new window with nlines lines and ncols
+    columns,positioned so that the origin is (begin_y, begin_x). If nlines is
+    zero, it defaults to LINES - begin_y; if ncols is zero, it defaults to COLS
+    - begin_x.
+
+    The size of a window cannot be greater than the physical size of the
+    screen, or that defined using the environment variables LINES and COLUMNS.
+    The behaviour of a window which extends outside the terminal screen is
+    undefined.
+
+    The subwin() function creates a new window with nlines lines and ncols
+    columns,positioned so that the origin is at (begin_y, begin_x). (This
+    position is an absolute screen position, not a position relative to the
+    window orig.) If any part of the new window is outside orig, the function
+    fails and the window is not created.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return a pointer to the new
+    window. Otherwise, they return a null pointer.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+WindowTPtr subwin_spec( CallContext context, WindowTPtr* orig, IntT nlines,
+                       IntT ncols, IntT begin_y, IntT begin_x)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        NCursesWindow* wnd;
+
+        if(!check_outside(context, orig, nlines, ncols, begin_y, begin_x))
+        {
+            /*
+             * If any part of the new window is outside orig, the function
+             * fails and the window is not created.
+             */
+            REQ("subwin.03",
+                "If any part of new window is outside orig, function fails",
+                isNULL_VoidTPtr(subwin_spec));
+        }
+
+        if(isNULL_VoidTPtr(subwin_spec))
+        {
+            /*
+             * Otherwise, they return a null pointer.
+             */
+            REQ("subwin.04.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        wnd = getWindow(&subwin_spec);
+
+        /*
+         * The subwin() function creates a new window with nlines lines
+         * and ncols columns,
+         */
+        REQ("subwin.01.01",
+            "Creates a new window with nlines lines and ncols columns",
+            wnd->ncols == ncols && wnd->nlines == nlines);
+
+        /*
+         * positioned so that the origin is at (begin_y, begin_x).
+         */
+        REQ("subwin.01.02",
+            "Positioned so that the origin is at (begin_y, begin_x)",
+            wnd->begy == begin_y && wnd->begx == begin_x);
+
+        /*
+         * This position is an absolute screen position, not a position
+         * relative to the window orig.
+         */
+        REQ("subwin.02",
+            "This position is an absolute screen position",
+            wnd->begx == begin_x && wnd->begy == begin_y);
+
+        return true;
+    }
+}
+void onSubwin(  CallContext context, WindowTPtr* orig, IntT nlines,
+                IntT ncols, IntT begin_y, IntT begin_x,
+                WindowTPtr subwin_spec)
+{
+    if(!isNULL_VoidTPtr(subwin_spec))
+    {
+        NCursesWindow* wnd;
+        IntT y = begin_y, x = begin_x;
+
+        registerNCursesWindow( subwin_spec,
+                create_NCursesWindow( subwin_spec,  nlines, ncols,
+                                      begin_y, begin_x, *orig));
+
+        wnd = getWindow(&subwin_spec);
+        wnd->wnd_image = NULL;
+
+        updateNCursesWindow(context, subwin_spec);
+    }
+}
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+bool check_outside( CallContext context, WindowTPtr* orig, IntT nlines,
+                       IntT ncols, IntT begin_y, IntT begin_x)
+{
+    NCursesWindow* wnd = getWindow(orig);
+
+    return  nlines + begin_y >= wnd->begy && nlines + begin_y <= wnd->nlines + wnd->begy
+        &&  ncols + begin_x >= wnd->begx && ncols + begin_x <= wnd->ncols + wnd->begx;
+}

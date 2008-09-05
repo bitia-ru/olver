@@ -1,0 +1,255 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/mutex/mutex_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+static void pthread_mutex_lock_return_processor(ThreadId threadId,TSStream* stream,TSMetaData* meta)
+{
+    ErrorCode* code = create_ErrorCode(0);
+
+    *code = readInt_TSStream(stream);
+    registerReactionWithTimeInterval
+        ( 
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_mutex_lock_return,
+        create_MutexLockReturnType(threadId, code ),
+        meta->timestamp
+        );
+}
+
+static void pthread_mutex_unlock_return_processor(ThreadId threadId,TSStream* stream,TSMetaData* meta)
+{
+    ErrorCode* code = create_ErrorCode(0);
+
+    *code = readInt_TSStream(stream);
+    registerReactionWithTimeInterval
+        ( 
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_mutex_unlock_return,
+        create_MutexUnlockReturnType(threadId, code ),
+        meta->timestamp
+        );
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initPThreadMutexSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_pthread_mutex_static_init_spec(pthread_mutex_static_init_media);
+    set_mediator_pthread_mutex_init_spec(pthread_mutex_init_media);
+    set_mediator_pthread_mutex_destroy_spec(pthread_mutex_destroy_media);
+    set_mediator_pthread_mutex_lock_spec(pthread_mutex_lock_media);
+    set_mediator_pthread_mutex_lock_return(pthread_mutex_lock_return_media);
+    set_mediator_pthread_mutex_trylock_spec(pthread_mutex_trylock_media);
+    set_mediator_pthread_mutex_unlock_spec(pthread_mutex_unlock_media);
+    set_mediator_pthread_mutex_unlock_return(pthread_mutex_unlock_return_media);
+    // Set up dr processors
+    registerDRProcessor("pthread_mutex_lock_return",pthread_mutex_lock_return_processor);
+    registerDRProcessor("pthread_mutex_unlock_return",pthread_mutex_unlock_return_processor);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** pthread_mutex_static_init_spec **/
+mediator pthread_mutex_static_init_media for specification
+void pthread_mutex_static_init_spec( CallContext context, VoidTPtr ptr )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "pthread_mutex_static_init:$(ptr)", create_VoidTPtrObj(ptr) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onPThreadMutexStaticInit( ptr );
+    }
+}
+
+
+/** pthread_mutex_init_spec **/
+mediator pthread_mutex_init_media for specification
+ErrorCode* pthread_mutex_init_spec( CallContext context, VoidTPtr mutex, PThreadMutexAttrTPtr attr )
+{
+    call
+    {
+        ErrorCode* res = create_ErrorCode(0);
+        TSCommand command = create_TSCommand();
+            
+        format_TSCommand( &command, "pthread_mutex_init:$(ptr)$(ptr)", 
+                                        create_VoidTPtrObj(mutex), 
+                                        create_VoidTPtrObj(attr)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *res = readInt_TSStream( &command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onPThreadMutexInit( mutex, attr, pthread_mutex_init_spec );
+    }
+}
+
+
+/** pthread_mutex_destroy_spec **/
+mediator pthread_mutex_destroy_media for specification
+ErrorCode* pthread_mutex_destroy_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    call
+    {
+        ErrorCode* res = create_ErrorCode(0);
+        TSCommand command = create_TSCommand();
+            
+        format_TSCommand( &command, "pthread_mutex_destroy:$(ptr)", 
+                                        create_VoidTPtrObj(mutex)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *res = readInt_TSStream( &command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onPThreadMutexDestroy( mutex, pthread_mutex_destroy_spec );
+    }
+}
+
+
+/** pthread_mutex_lock_spec **/
+mediator pthread_mutex_lock_media for specification
+void pthread_mutex_lock_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+            
+        format_TSCommand( &command, "pthread_mutex_lock:$(ptr)", create_VoidTPtrObj(mutex) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onPThreadMutexLock( context, mutex );
+    }
+}
+
+mediator pthread_mutex_lock_return_media for reaction 
+MutexLockReturnType* pthread_mutex_lock_return(void)
+{
+    state
+    {
+        onPThreadMutexLockReturn( pthread_mutex_lock_return->context, pthread_mutex_lock_return->returned_value );
+    }
+}
+
+/** pthread_mutex_trylock_spec **/
+mediator pthread_mutex_trylock_media for specification
+ErrorCode* pthread_mutex_trylock_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    call
+    {
+        ErrorCode* res = create_ErrorCode(0);
+        TSCommand command = create_TSCommand();
+            
+        format_TSCommand( &command, "pthread_mutex_trylock:$(ptr)", create_VoidTPtrObj(mutex) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *res = readInt_TSStream( &command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onPThreadMutexTrylock( context, mutex, pthread_mutex_trylock_spec );
+    }
+}
+
+/** pthread_mutex_unlock_spec **/
+mediator pthread_mutex_unlock_media for specification
+void pthread_mutex_unlock_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+            
+        format_TSCommand( &command, "pthread_mutex_unlock:$(ptr)", create_VoidTPtrObj(mutex) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onPThreadMutexUnlock( context, mutex );
+    }
+}
+
+mediator pthread_mutex_unlock_return_media for reaction
+MutexUnlockReturnType* pthread_mutex_unlock_return(void)
+{
+    state
+    {
+        onPThreadMutexUnlockReturn( pthread_mutex_unlock_return->context, pthread_mutex_unlock_return->returned_value );
+    }
+}

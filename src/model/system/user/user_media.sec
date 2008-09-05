@@ -1,0 +1,363 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "system/user/user_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSystemUserSubsystem(void)
+{
+      // Set up mediators
+      set_mediator_endpwent_spec(endpwent_media);
+      set_mediator_getpwent_spec(getpwent_media);
+      set_mediator_getpwnam_spec(getpwnam_media);
+      set_mediator_getpwnam_r_spec(getpwnam_r_media);
+      set_mediator_getpwuid_spec(getpwuid_media);
+      set_mediator_getpwuid_r_spec(getpwuid_r_media);
+      set_mediator_setpwent_spec(setpwent_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** endpwent_spec **/
+mediator endpwent_media for specification
+void endpwent_spec( CallContext context, ErrorCode* errno, CancelStatus status )
+{
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "endpwent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+             {
+                *errno = readInt_TSStream(&command.response);
+             }
+        }
+        
+        destroy_TSCommand(&command);
+
+        return; 
+    }
+    state
+    {
+        onUserEndpwent(context, errno, status);
+    }
+}
+
+
+/** getpwent_spec **/
+mediator getpwent_media for specification
+Passwd* getpwent_spec(CallContext context, ErrorCode* errno, CancelStatus status )
+{
+    Passwd* res=NULL;
+    VoidTPtr   resEntry=NULL_VoidTPtr;
+    CString*  pw_name;
+    UidT        pw_uid;
+    GidT        pw_gid;
+    CString*  pw_dir;
+    CString*  pw_shell;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "getpwent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                resEntry = readPointer_TSStream(context, &command.response );
+                pw_name = readCString_TSStream(&command.response);
+                pw_uid = readInt_TSStream(&command.response);
+                pw_gid = readInt_TSStream(&command.response);
+                pw_dir = readCString_TSStream(&command.response);
+                pw_shell = readCString_TSStream(&command.response);
+
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        if(!CANCELLED(status) && !isNULL_VoidTPtr(resEntry))
+        { 
+           res = create_Passwd( pw_name, pw_uid, pw_gid, pw_dir, 
+               pw_shell);
+        }
+
+        return res; 
+    }
+    state
+    {
+      onUserGetpwent(context, getpwent_spec, errno, status);
+    }
+}
+
+
+/** getpwnam_spec **/
+mediator getpwnam_media for specification
+Passwd* getpwnam_spec( CallContext context, CString* dest, ErrorCode* errno, CancelStatus status )
+{
+    Passwd*     res=NULL;
+    VoidTPtr    resEntry=NULL_VoidTPtr;
+    CString*    pw_name;
+    UidT        pw_uid;
+    GidT        pw_gid;
+    CString*    pw_dir;
+    CString*    pw_shell;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getpwnam:$(str)",  dest);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                resEntry = readPointer_TSStream(context, &command.response );
+                pw_name = readCString_TSStream(&command.response);
+                pw_uid = readInt_TSStream(&command.response);
+                pw_gid = readInt_TSStream(&command.response);
+                pw_dir = readCString_TSStream(&command.response);
+                pw_shell = readCString_TSStream(&command.response);
+
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        if(!CANCELLED(status) && !isNULL_VoidTPtr(resEntry))
+        { 
+           res = create_Passwd(pw_name, pw_uid, pw_gid, pw_dir, pw_shell);
+        }
+
+        return res; 
+    }
+}
+
+
+/** getpwnam_r_spec **/
+mediator getpwnam_r_media for specification
+GetPwxxxFunctionResult* getpwnam_r_spec(CallContext context, 
+                                               CString* name,  PasswdTPtr pwd, 
+                                               SizeT bufsize,  
+                                               PasswdTPtr* result, 
+                                               ErrorCode* errno, CancelStatus status )
+{
+    IntT res=0;
+    CString*  pw_name;
+    UidT        pw_uid;
+    GidT        pw_gid;
+    CString*  pw_dir;
+    CString*  pw_shell;
+    Passwd* passResult=NULL;
+    GetPwxxxFunctionResult* funcResult=NULL;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getpwnam_r:$(str)$(ptr)$(size)",  
+            name,
+            create_VoidTPtrObj(pwd),
+            create_SizeTObj(bufsize)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                res=readInt_TSStream(&command.response);
+                *errno = readInt_TSStream(&command.response);
+                *result=readPointer_TSStream(context, &command.response );
+
+                pw_name = readCString_TSStream(&command.response);
+                pw_uid = readInt_TSStream(&command.response);
+                pw_gid = readInt_TSStream(&command.response);
+                pw_dir = readCString_TSStream(&command.response);
+                pw_shell = readCString_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        if(!CANCELLED(status) && !isNULL_VoidTPtr(*result))
+        { 
+           passResult=create_Passwd(pw_name, pw_uid, pw_gid, pw_dir, pw_shell);
+        }
+        if(!CANCELLED(status))
+        {
+            funcResult=create_GetPwxxxFunctionResult(res, passResult);
+        }
+        return funcResult; 
+    }
+}
+
+
+/** getpwuid_spec **/
+mediator getpwuid_media for specification
+Passwd* getpwuid_spec( CallContext context, UidT uid, ErrorCode* errno, CancelStatus status )
+{
+    Passwd* res=NULL;
+    VoidTPtr   resEntry=NULL_VoidTPtr;
+    CString*  pw_name;
+    UidT        pw_uid;
+    GidT        pw_gid;
+    CString*  pw_dir;
+    CString*  pw_shell;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getpwuid:$(int)",  create_IntTObj(uid));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                resEntry = readPointer_TSStream(context, &command.response );
+                pw_name = readCString_TSStream(&command.response);
+                pw_uid = readInt_TSStream(&command.response);
+                pw_gid = readInt_TSStream(&command.response);
+                pw_dir = readCString_TSStream(&command.response);
+                pw_shell = readCString_TSStream(&command.response);
+
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        if(!CANCELLED(status) && !isNULL_VoidTPtr(resEntry))
+        { 
+           res = create_Passwd(pw_name, pw_uid, pw_gid, pw_dir, pw_shell);
+        }
+
+        return res; 
+    }
+}
+
+
+/** getpwuid_r_spec **/
+mediator getpwuid_r_media for specification
+GetPwxxxFunctionResult*  getpwuid_r_spec(CallContext context, UidT uid,  
+                                                PasswdTPtr pwd, SizeT bufsize, 
+                                                PasswdTPtr* result, 
+                                                ErrorCode* errno, CancelStatus status )
+{
+    IntT       res=0;
+    VoidTPtr   resEntry=NULL_VoidTPtr;
+    CString*   pw_name;
+    UidT        pw_uid;
+    GidT        pw_gid;
+    CString*  pw_dir;
+    CString*  pw_shell;
+
+    Passwd* passResult=NULL;
+    GetPwxxxFunctionResult* funcResult=NULL;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getpwuid_r:$(int)$(ptr)$(size)",  
+            create_IntTObj(uid),
+            create_VoidTPtrObj(pwd),
+            create_SizeTObj(bufsize)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                res=readInt_TSStream(&command.response);
+                *errno = readInt_TSStream(&command.response);
+                *result=readPointer_TSStream(context, &command.response );
+
+                pw_name = readCString_TSStream(&command.response);
+                pw_uid = readInt_TSStream(&command.response);
+                pw_gid = readInt_TSStream(&command.response);
+                pw_dir = readCString_TSStream(&command.response);
+                pw_shell = readCString_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        if(!CANCELLED(status) && !isNULL_VoidTPtr(*result))
+        { 
+           passResult=create_Passwd( pw_name, pw_uid, pw_gid, pw_dir, pw_shell);
+        }
+
+        funcResult=create_GetPwxxxFunctionResult(res, passResult);
+        return funcResult; 
+    }
+}
+
+
+/** setpwent_spec **/
+mediator setpwent_media for specification
+void setpwent_spec( CallContext context, ErrorCode* errno)
+{
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+         format_TSCommand( &command, "setpwent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+
+        return; 
+    }
+    state
+    {
+      onUserSetpwent(context, errno);
+    }
+}
+
+
+
+

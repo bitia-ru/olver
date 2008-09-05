@@ -1,0 +1,805 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "process/resources/resources_config.h"
+#include "process/resources/tests/resources_scenario.seh"
+#include "process/resources/resources_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+
+#include "atl/integer.h"
+
+#include "system/sysconf/sysconf_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "process/meta/user_media.seh"
+#include "system/user/user_media.seh"
+
+#include "config/test_system_config.h"
+
+
+bool pre_setrlimit_spec( CallContext context, IntT resource, RLimitT * rlp, ErrorCode * errno );
+bool pre_setrlimit64_spec( CallContext context, IntT resource, RLimit64T * rlp, ErrorCode * errno );
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/ 
+
+
+static bool init_resources_scenario(int argc, char** argv)
+{
+    ThreadId t_id;
+    Passwd * passwd;
+
+    /* Init test scenario data */
+
+    // initializing the model
+    if(!init_resources_model())
+        return false;
+    
+    /* [params: creating thread] */
+    if(argc!=1)
+    {
+        traceUserInfo("init_resources_scenario:Wrong arguments!");
+        return false;
+    }
+
+    if(strcmp(argv[0],USER_NAME_TESTER)==0)
+    {
+        t_id = createProcess();    
+        context = getSystemContext( t_id.system, t_id.process );
+
+        // for initialization
+        sysconf_spec(context, SUT_SC_OPEN_MAX, requestErrorCode()); 
+
+        passwd = getpwnam_spec(context,create_CString((char*)USER_NAME_TESTER),requestErrorCode(), cancel_status);
+        if(passwd==NULL)
+        {
+            traceFormattedUserInfo("init_resources_scenario: getpwnam for user '%s' failed",USER_NAME_TESTER);
+            return false;
+        }
+
+        if( setgid_spec(context,passwd->pw_gid,requestErrorCode()) != 0 
+        || setuid_spec(context,passwd->pw_uid,requestErrorCode()) != 0 )
+        {
+            traceFormattedUserInfo("init_resources_scenario:setgid or setuid(%s) failed", USER_NAME_TESTER);
+            return false;
+        }
+    
+        if(isEnoughPrivilegesHardIncrease(context,0))
+        {
+            traceUserInfo("init_resources_scenario: It is required NOT to be enough privileges!");
+            return false;
+        }
+    }
+    else if(strcmp(argv[0],"root")==0)
+    {
+        t_id = createProcess(); 
+        context = getSystemContext( t_id.system, t_id.process );
+
+        // for initialization
+        sysconf_spec(context, SUT_SC_OPEN_MAX, requestErrorCode()); 
+
+        if( setgid_spec(context,0,requestErrorCode()) != 0 
+        || setuid_spec(context,0,requestErrorCode()) != 0 )
+        {
+            traceUserInfo("init_resources_scenario: setgid or setuid(0) failed."
+                          "Probably, you shall set agent > chown root, chown :root, chmod +s.");
+            return false;
+        }
+        
+        if(!isEnoughPrivilegesHardIncrease(context,0))
+        {
+            traceUserInfo("init_resources_scenario: Privileges are required!");
+            return false;
+        }              
+    }
+    else 
+    {
+        traceUserInfo("init_resources_scenario:Wrong argument format!");
+        return false;
+    }
+
+    return true;
+}
+
+
+static bool init_process_resources_unpriviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1]; 
+    myargv[0] = (char*)USER_NAME_TESTER;
+    return  init_resources_scenario(1, myargv);
+}
+
+static bool init_process_resources_priviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1]; 
+    myargv[0] = "root";
+    return init_resources_scenario(1, myargv);
+}
+
+
+static bool init_process_resources64_unpriviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1]; 
+    myargv[0] = (char*)USER_NAME_TESTER;
+    return init_resources_scenario(1, myargv);
+}
+
+
+static bool init_process_resources64_priviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1]; 
+    myargv[0] = "root";
+    return init_resources_scenario(1, myargv);
+}
+
+static bool init_process_resources_ulimit_unpriviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1]; 
+    myargv[0] = (char*)USER_NAME_TESTER;
+    return init_resources_scenario(1, myargv);
+}
+
+
+static bool init_process_resources_ulimit_priviledged_scenario(int argc, char** argv)
+{
+    char * myargv[1]; 
+    myargv[0] = "root";
+    return init_resources_scenario(1, myargv);
+}
+
+
+
+static void finish_resources_scenario(void)
+{
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool getrlimit_scen()
+{
+    RLimitT * rlp = create_RLimitT(0,0);
+
+    iterate(int i = 0; i<10||(containsKey_Map(RSavedLimits,create_IntTObj(i-1)) && i<30);i++;)
+    {
+        getrlimit_spec(context,i,rlp,requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool getrlimit_scen2() 
+{
+    RLimitT * rlp = create_RLimitT(0,0);
+
+    iterate(int i = 0; i<=4;i++;)
+    {
+        switch(i)
+        {
+        case 0: 
+            getrlimit_spec(context,min_IntT,rlp,requestErrorCode());
+            break;
+        case 1: 
+            getrlimit_spec(context,max_IntT,rlp,requestErrorCode());
+            break;
+        case 2:
+            getrlimit_spec(context,0,NULL,requestErrorCode());
+            break;
+        case 3:
+            getrlimit_spec(context,1000,NULL,requestErrorCode());
+            break;
+        case 4:
+            getrlimit_spec(context,-1,NULL,requestErrorCode());
+            break;
+        default:
+            traceUserInfo("getrlimit_scen2: wrong iteration");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool setrlimit_scen()
+{
+    RSavedLimitT * saved_lim;
+    RLimitT * rlp;
+
+    if(!PROCESS_RESOURCES_SCENARIO_LONG)
+        return true;
+    
+    rlp = create_RLimitT(0,0);
+
+    iterate(int i = -1; i<10;i++;)
+    iterate(int k = 0; k<=6;k++;)
+    iterate(int j = 0; j<=6;j++;)
+    {
+        saved_lim = get_Map(RSavedLimits,create_IntTObj(i));
+        if( saved_lim != NULL )
+        {            
+            switch(j)
+            {
+            case 0:
+                rlp->rlim_cur = toRLimT_RSavedLimitT(saved_lim,1); // max
+                break;
+            case 1:
+                rlp->rlim_cur = SUT_RLIM_SAVED_MAX;
+                break;
+            case 2:
+                rlp->rlim_cur = 4000;
+                break;
+            case 3:
+                rlp->rlim_cur = SUT_RLIM_SAVED_CUR;             
+                break;
+            case 4:
+                rlp->rlim_cur = 0;
+                break;
+            case 5: 
+                rlp->rlim_cur = 3000; 
+                break;
+            case 6: 
+                rlp->rlim_cur = SUT_RLIM_INFINITY; 
+                break;
+            default:
+                traceUserInfo("setrlimit_scen: wrong iteration j");
+                return false;
+            }
+            switch(k)
+            {
+            case 0: 
+                rlp->rlim_max = toRLimT_RSavedLimitT(saved_lim,1);
+                break;
+            case 1: 
+                rlp->rlim_max = SUT_RLIM_SAVED_MAX;
+                break;
+            case 2: 
+                rlp->rlim_max = SUT_RLIM_SAVED_CUR;
+                break;
+            case 3:
+                rlp->rlim_max = 2000;
+                break;
+            case 4: 
+                rlp->rlim_max = 1000;
+                break;
+            case 5:
+                rlp->rlim_max = 5000;
+                break;
+            case 6:
+                rlp->rlim_max = SUT_RLIM_INFINITY;
+                break;
+            default:
+                traceUserInfo("setrlimit_scen: wrong iteration k");
+                return false;
+            }
+            
+            if(pre_setrlimit_spec(context,i,rlp,requestErrorCode()))
+            {
+                setrlimit_spec(context,i,rlp,requestErrorCode());
+                getrlimit_spec(context,i,rlp,requestErrorCode()); // for check
+            }
+        }
+    }
+}
+
+scenario
+bool setrlimit_scen2() // wrong values
+{
+    int i;
+    RLimitT * rlp = create_RLimitT(0,0);
+    
+    
+    // NULL rlp
+    setrlimit_spec(context,0,NULL,requestErrorCode());
+    getrlimit_spec(context,0,rlp,requestErrorCode()); // for check
+
+    // extremal resource value
+    rlp->rlim_cur = 0;
+    rlp->rlim_max = 0;
+    setrlimit_spec(context,-100,rlp,requestErrorCode());
+    getrlimit_spec(context,-100,rlp,requestErrorCode()); // for check
+
+    // wrong resource value
+    for(i=0;i<1000;i++)
+    {        
+        if(!containsKey_Map(RSavedLimits,create_IntTObj(i)))
+        {
+            rlp->rlim_cur = 0;
+            rlp->rlim_max = 0;
+            setrlimit_spec(context,i,rlp,requestErrorCode());
+            getrlimit_spec(context,i,rlp,requestErrorCode()); // for check
+            break;
+        }
+    }
+    if(i==1000)
+    {
+        traceUserInfo("No wrong resource? o_O");
+        return false;
+    }
+}
+
+scenario
+bool setrlimit_scen_short()
+{
+    RLimitT * rlp;
+    IntT res;
+    RSavedLimitT * saved_lim;
+
+    if(PROCESS_RESOURCES_SCENARIO_LONG)
+        return true;
+
+    rlp = create_RLimitT(0,0);
+
+    // searching good resource value
+    for(res=0;res<1000;res++)
+    {        
+        saved_lim = get_Map(RSavedLimits,create_IntTObj(res));
+        if( saved_lim!=NULL && toRLimT_RSavedLimitT(saved_lim,1)>0 )
+            break;
+    }
+    if(saved_lim==NULL)
+    {
+        traceUserInfo("No good resource? o_O");
+        return false;
+    }      
+
+    iterate(int i=0;i<=6;i++;)
+    {
+        switch(i)
+        {
+        case 0: rlp->rlim_cur = 10000;
+                rlp->rlim_max = 10000;
+            break;
+        case 1: rlp->rlim_cur = 20000;
+                rlp->rlim_max = 30000;
+            break;
+        case 2: rlp->rlim_cur = 10000;
+                rlp->rlim_max = 30000;
+            break;
+        case 3: rlp->rlim_cur = 10000;
+                rlp->rlim_max = 20000;
+            break;
+        case 4: rlp->rlim_cur = 30000;
+                rlp->rlim_max = 20000;
+            break;
+        case 5: rlp->rlim_cur = SUT_RLIM_INFINITY;
+                rlp->rlim_max = SUT_RLIM_INFINITY;
+            break;
+        case 6: rlp->rlim_cur = SUT_RLIM_INFINITY;
+                rlp->rlim_max = SUT_RLIM_INFINITY;
+            break;
+        default:
+            traceUserInfo("setrlimit_scen_short: wrong iteration");
+            return false;
+        }
+        
+        if(pre_setrlimit_spec(context,res,rlp,requestErrorCode()))
+        {
+            setrlimit_spec(context,res,rlp,requestErrorCode());
+            getrlimit_spec(context,res,rlp,requestErrorCode()); // for check
+        }
+
+    }
+
+    return true;
+}
+
+
+scenario
+bool getrusage_scen()
+{
+    TimeSpecT nullTime = {0,0};
+    RusageT * r_usage = create_RusageT( nullTime, nullTime, 0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+    IntT who;
+    
+    iterate(int i=0;i<=3;i++;)
+    {
+        switch(i)
+        {
+        case 0: 
+            who = SUT_RUSAGE_SELF;
+            break;
+        case 1: 
+            who = SUT_RUSAGE_CHILDREN;
+            break;
+        case 2:
+            who = SUT_RUSAGE_BOTH;
+            break;
+        case 3:
+            who = 1000;
+            break;
+        }
+        getrusage_spec(context,who, r_usage, requestErrorCode());
+    }
+}
+
+scenario
+bool getrlimit64_scen()
+{
+    RLimit64T * rlp = create_RLimit64T(0,0);
+
+    iterate(int i = 0; i<10||(containsKey_Map(RSavedLimits,create_IntTObj(i-1)) && i<30);i++;)
+    {
+        getrlimit64_spec(context,i,rlp,requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool getrlimit64_scen2() 
+{
+    RLimit64T * rlp = create_RLimit64T(0,0);
+
+    iterate(int i = 0; i<=1;i++;)
+    {
+        switch(i)
+        {
+        case 0: 
+            getrlimit64_spec(context,min_IntT,rlp,requestErrorCode());
+            break;
+        case 1: 
+            getrlimit64_spec(context,max_IntT,rlp,requestErrorCode());
+            break;
+        default:
+            traceUserInfo("getrlimit_scen2: wrong iteration");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool setrlimit64_scen2() // wrong values
+{
+    int i;
+    RLimit64T * rlp = create_RLimit64T(0,0);
+    
+    
+    // extremal resource value
+    rlp->rlim_cur = 0;
+    rlp->rlim_max = 0;
+    setrlimit64_spec(context,-100,rlp,requestErrorCode());
+    getrlimit64_spec(context,-100,rlp,requestErrorCode()); // for check
+
+    // wrong resource value
+    for(i=0;i<1000;i++)
+    {        
+        if(!containsKey_Map(RSavedLimits,create_IntTObj(i)))
+        {
+            rlp->rlim_cur = 0;
+            rlp->rlim_max = 0;
+            setrlimit64_spec(context,i,rlp,requestErrorCode());
+            getrlimit64_spec(context,i,rlp,requestErrorCode()); // for check
+            break;
+        }
+    }
+    if(i==1000)
+    {
+        traceUserInfo("No wrong resource? o_O");
+        return false;
+    }
+}
+
+
+scenario
+bool ulimit_scen1()
+{
+    int cmd;
+    List * params = create_List(&type_LongTObj);
+    
+    iterate(int i=0;i<=1;i++;)
+    {
+        switch(i)
+        {
+        case 0: cmd = SUT_UL_GETFSIZE;
+            break;
+        case 1: cmd = -2;
+            break;
+        };
+        
+        ulimit_spec(context,cmd,params,requestErrorCode());
+    }
+  
+    return true;
+}
+
+scenario
+bool ulimit_scen2()
+{
+    int cmd = SUT_UL_SETFSIZE;
+    List * params = create_List(&type_LongTObj);
+    RSavedLimitT * saved_lim = get_Map(RSavedLimits,create_IntTObj(SUT_RLIMIT_FSIZE));
+    RLimitT * rlp = create_RLimitT(0,0);
+
+    if(saved_lim == NULL)
+    {
+        traceUserInfo("ulimit_scen2: saved_lim == NULL");
+        return false;
+    }
+
+    iterate(int i=0;i<=2;i++;)
+    {
+        switch(i)
+        {
+        case 0: clear_List(params);
+                append_List(params,create_LongTObj(SUT_RLIM_INFINITY/1024));
+            break;
+        case 1: clear_List(params);
+                append_List(params,create_LongTObj(0));
+            break;
+        case 2: clear_List(params);
+                append_List(params,create_LongTObj(1));
+            break;
+        };
+
+        ulimit_spec(context,cmd,params,requestErrorCode());
+    }
+    
+    return true;
+}
+
+scenario
+bool ulimit_scen_init()
+{
+    RLimitT * rlp = create_RLimitT(0,0);
+
+    getrlimit_spec(context,SUT_RLIMIT_FSIZE,rlp,requestErrorCode());
+    
+    return true;
+}
+/************************************************************************/
+
+Object * getState(void)
+{
+    Integer * i = create_Integer(isEnoughPrivilegesHardIncrease(context,0)?1:0);
+    return clone(i);
+}
+
+Object * getStateUlimit(void)
+{
+    Integer * i = create_Integer((isEnoughPrivilegesHardIncrease(context,0)?1:0)
+                                 +((getUlimitBehaviorKind() == UlimitBehaviorLSB)?10:0)
+                                );
+    return clone(i);
+}
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm resources_scenario =
+{
+    .init = init_resources_scenario,
+    .finish = finish_resources_scenario,
+    .getState = getState,
+    .actions = {
+
+        getrlimit_scen,
+        getrlimit_scen2,
+        setrlimit_scen,       /* IF PROCESS_RESOURCES_SCENARIO_LONG  */
+        setrlimit_scen_short, /* IF !PROCESS_RESOURCES_SCENARIO_LONG */
+        setrlimit_scen2,
+        getrusage_scen,
+      
+        NULL
+    }
+};
+
+scenario dfsm resources_scenario64 =
+{
+    .init = init_resources_scenario,
+    .finish = finish_resources_scenario,
+    .getState = getState,
+    .actions = {
+        getrlimit64_scen,
+        getrlimit64_scen2,
+        setrlimit64_scen2,
+       
+        NULL
+    }
+};
+
+scenario dfsm resources_scenario_ulimit =
+{
+    .init = init_resources_scenario,
+    .finish = finish_resources_scenario,
+    .getState = getStateUlimit,
+    .actions = {
+        ulimit_scen_init, // for model initialization
+        ulimit_scen1,
+        ulimit_scen2, 
+        NULL
+    }
+};
+
+
+scenario dfsm process_resources_unpriviledged =
+{
+    .init = init_process_resources_unpriviledged_scenario,
+        .finish = finish_resources_scenario,
+        .getState = getState,
+        .actions = {
+        
+        getrlimit_scen,
+            getrlimit_scen2,
+            setrlimit_scen,       /* IF PROCESS_RESOURCES_SCENARIO_LONG  */
+            setrlimit_scen_short, /* IF !PROCESS_RESOURCES_SCENARIO_LONG */
+            setrlimit_scen2,
+            getrusage_scen,
+            
+            NULL
+    }
+};
+
+
+scenario dfsm process_resources_priviledged =
+{
+    .init = init_process_resources_priviledged_scenario,
+        .finish = finish_resources_scenario,
+        .getState = getState,
+        .actions = {
+        
+        getrlimit_scen,
+            getrlimit_scen2,
+            setrlimit_scen,       /* IF PROCESS_RESOURCES_SCENARIO_LONG  */
+            setrlimit_scen_short, /* IF !PROCESS_RESOURCES_SCENARIO_LONG */
+            setrlimit_scen2,
+            getrusage_scen,
+            
+            NULL
+    }};
+
+scenario dfsm process_resources64_unpriviledged =
+{
+    .init = init_process_resources64_unpriviledged_scenario,
+        .finish = finish_resources_scenario,
+        .getState = getState,
+        .actions = {
+        getrlimit64_scen,
+            getrlimit64_scen2,
+            setrlimit64_scen2,
+            
+            NULL
+    }
+};
+
+
+scenario dfsm process_resources64_priviledged =
+{
+    .init = init_process_resources64_priviledged_scenario,
+        .finish = finish_resources_scenario,
+        .getState = getState,
+        .actions = {
+        getrlimit64_scen,
+            getrlimit64_scen2,
+            setrlimit64_scen2,
+            
+            NULL
+    }
+};
+
+scenario dfsm process_resources_ulimit_unpriviledged =
+{
+    .init = init_process_resources_ulimit_unpriviledged_scenario,
+        .finish = finish_resources_scenario,
+        .getState = getStateUlimit,
+        .actions = {
+        ulimit_scen_init, // for model initialization
+            ulimit_scen1,
+            ulimit_scen2, 
+            NULL
+    }
+};
+
+scenario dfsm process_resources_ulimit_priviledged =
+{
+    .init = init_process_resources_ulimit_priviledged_scenario,
+        .finish = finish_resources_scenario,
+        .getState = getStateUlimit,
+        .actions = {
+        ulimit_scen_init, // for model initialization
+            ulimit_scen1,
+            ulimit_scen2, 
+            NULL
+    }
+};
+
+
+bool main_process_resources(int argc, char** argv)
+{
+    process_resources_unpriviledged(argc, argv);
+    process_resources_priviledged(argc, argv);
+    process_resources64_unpriviledged(argc, argv);
+    process_resources64_priviledged(argc, argv);
+    process_resources_ulimit_unpriviledged(argc, argv);
+    process_resources_ulimit_priviledged(argc, argv);
+
+    setUlimitBehaviorKind(UlimitBehaviorGlibc);
+    {    
+        process_resources_ulimit_unpriviledged(argc, argv);
+        process_resources_ulimit_priviledged(argc, argv);
+    }
+
+    return true;
+}
+
+#ifdef PROCESS_RESOURCES_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/control_center.seh"
+#include "process/resources/resources_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initProcessMetaUserSubsystem();
+    initSystemUserSubsystem();
+
+    initProcessResourcesSubsystem();
+}
+
+
+
+
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    addTraceToFile("trace.xml"); 
+    
+    /* Set up tracer */
+    /* setTraceEncoding("windows-1251");
+     */
+
+    /* Run test scenario */
+    main_process_resources(argc,argv);
+
+    /*  unloadSUT(); */
+    return 0;
+}
+#endif

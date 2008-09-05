@@ -1,0 +1,323 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "signal/sigwait/sigwait_media.seh"
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void sigtimedwait_react_processor(ThreadId threadId, TSStream* stream,
+                                         TSMetaData* meta)
+{
+    SigSetTPtr sset;
+    IntT signo;
+    IntT res;
+    ErrorCode* err;
+
+    SigtimedwaitReactionType* react;
+
+    res = readInt_TSStream(stream);
+    err = create_ErrorCode(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        sigtimedwait_react,
+        create_SigtimedwaitReactionType(threadId, res, err),
+        meta->timestamp);
+    VERBOSE("sigtimedwait_react reaction registered...\n");
+}
+
+static void sigwait_react_processor(ThreadId threadId, TSStream* stream,
+                                    TSMetaData* meta)
+{
+    SigSetTPtr sset;
+    IntT signo;
+    IntT res;
+    ErrorCode* err;
+
+    sset = readPointer_TSStream(threadId, stream);
+    signo = readInt_TSStream(stream);
+    res = readInt_TSStream(stream);
+    err = create_ErrorCode(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        sigwait_react,
+        create_SigwaitReactionType(threadId, sset, signo, res, err, 0),
+        meta->timestamp);
+    VERBOSE("sigwait_react reaction registered...\n");
+}
+
+static void sigwaitinfo_react_processor(ThreadId threadId, TSStream* stream,
+                                        TSMetaData* meta)
+{
+    SigSetTPtr sset;
+    SigInfoTPtr info;
+    SigInfo* info_model;
+    IntT res;
+    ErrorCode* err;
+
+    //get reaction values
+    sset = readPointer_TSStream(threadId, stream);
+    info = readPointer_TSStream(threadId, stream);
+
+    res = readInt_TSStream(stream);
+    err = create_ErrorCode(readInt_TSStream(stream));
+
+    verbose("aaaa\n");
+    //update model for siginfo structure
+    info_model = getObjectInMemory(info);
+    read_StructSiginfo(info_model, stream, threadId);
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        sigwaitinfo_react,
+        create_SigwaitinfoReactionType(threadId, sset, info, res, err),
+        meta->timestamp);
+    VERBOSE("sigwaitinfo_react reaction registered...\n");
+}
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSignalSigwaitSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_sigtimedwait_spec(sigtimedwait_media);
+    set_mediator_sigtimedwait_react(sigtimedwait_react_media);
+    set_mediator_sigwait_spec(sigwait_media);
+    set_mediator_sigwait_react(sigwait_react_media);
+    set_mediator_sigwaitinfo_spec(sigwaitinfo_media);
+    set_mediator_sigwaitinfo_react(sigwaitinfo_react_media);
+
+    registerDRProcessor("sigtimedwait_react",
+                         sigtimedwait_react_processor);
+    registerDRProcessor("sigwait_react",
+                         sigwait_react_processor);
+    registerDRProcessor("sigwaitinfo_react",
+                         sigwaitinfo_react_processor);
+
+    // Set up formatters
+    registerTSFormatter("siginfo_t_data",(TSFormatterFuncType)siginfo_t_formatter);
+    registerTSFormatter("sigval_data",(TSFormatterFuncType)sigval_formatter);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** sigtimedwait_spec **/
+mediator sigtimedwait_media for specification
+void sigtimedwait_spec( CallContext context, SigSetTPtr set, SigInfoTPtr info, TimeUnit delta)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        String* str;
+
+        format_TSCommand( &command, "sigtimedwait:$(ptr)$(ptr)$(timeunit)",
+                          create_VoidTPtrObj(set),
+                          create_VoidTPtrObj(info),
+                          create_TimeUnitObj(delta));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            str = readString_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return;
+    }
+    state
+    {
+        onSigtimedwait(context, set, info, timestamp, delta);
+    }
+}
+
+mediator sigtimedwait_react_media for
+reaction SigtimedwaitReactionType* sigtimedwait_react(void)
+{
+    state
+    {
+        onSigtimedwaitReact(sigtimedwait_react);
+    }
+}
+/** sigwait_spec **/
+mediator sigwait_media for specification
+void sigwait_spec( CallContext context, SigSetTPtr set, VoidTPtr signo)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        String* str;
+
+        verbose( "sigwait_media : call\n" );
+        format_TSCommand( &command, "sigwait:$(ptr)$(ptr)",
+                          create_VoidTPtrObj(set),
+                          create_VoidTPtrObj(signo));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            str = readString_TSStream(&command.response);
+
+        }
+
+        destroy_TSCommand(&command);
+
+        return; // res;
+    }
+    state
+    {
+        verbose( "sigwait_media : state\n" );
+        //verbose("sigwait mediator state\n");
+        showSignalsInfoInProcessState( context );
+        onSigwait(context, set, signo);
+        showSignalsInfoInProcessState( context );
+    }
+}
+
+mediator sigwait_react_media for
+reaction SigwaitReactionType* sigwait_react(void)
+{
+    state
+    {
+        verbose( "sigwait_react_media : state\n" );
+        //verbose("sigwait reaction mediator state\n");
+        showSignalsInfoInProcessState( sigwait_react->context );
+        onSigwaitReact(sigwait_react);
+        showSignalsInfoInProcessState( sigwait_react->context );
+    }
+}
+/** sigwaitinfo_spec **/
+mediator sigwaitinfo_media for specification
+void sigwaitinfo_spec( CallContext context, SigSetTPtr set, SigInfoTPtr info)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        String* str;
+
+
+        format_TSCommand( &command, "sigwaitinfo:$(ptr)$(ptr)",
+                        create_VoidTPtrObj(set), create_VoidTPtrObj(info));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            str = readString_TSStream(&command.response);
+
+        }
+
+        destroy_TSCommand(&command);
+
+        return;
+    }
+    state
+    {
+        verbose("sigwaitinfo mediator state\n");
+        onSigwaitinfo(context, set, info);
+    }
+}
+
+mediator sigwaitinfo_react_media for
+reaction SigwaitinfoReactionType* sigwaitinfo_react(void)
+{
+    state
+    {
+        verbose("sigwaitinfo react mediator state\n");
+        verbose("asdffde\n");
+        onSigwaitinfoReact(sigwaitinfo_react);
+    }
+}
+
+/************************************************************************/
+/*                     siginfo_t formatter                              */
+/************************************************************************/
+
+static void siginfo_t_formatter(TSStream* stream,SigInfo* data)
+{
+  VERIFY_TYPE(siginfo_t_formatter, &type_SigInfo, data);
+
+  writeSigInfoData_TSStream(stream, data);
+}
+
+void writeSigInfoData_TSStream( TSStream* stream, SigInfo* data)
+{
+    writeTypeHeaderTSStream(stream,"siginfo_t_data");
+
+    writeInt_TSStream(stream, (IntT)data->m_si_signo);
+    writeInt_TSStream(stream, (IntT)data->m_si_code);
+    writeInt_TSStream(stream, (IntT)data->m_si_errno);
+    writeInt_TSStream(stream, (IntT)data->m_si_pid.process);
+    writeUInt_TSStream(stream, (UIntT)data->m_si_uid);
+    writePointer_TSStream(stream, data->m_si_addr);
+    writeInt_TSStream(stream, (IntT)data->m_si_status);
+    writeLong_TSStream(stream, data->m_si_band);
+    writeSignalValueData_TSStream(stream, data->m_si_value);
+}
+
+static void sigval_formatter(TSStream* stream,SignalValue* data)
+{
+  VERIFY_TYPE(siginfo_t_formatter, &type_SignalValue, data);
+
+  writeSignalValueData_TSStream(stream, data);
+}
+
+void writeSignalValueData_TSStream( TSStream* stream, SignalValue* data)
+{
+    writeTypeHeaderTSStream(stream,"sigval_data");
+
+    if (data->is_int)
+    {
+        writeInt_TSStream(stream, 1);
+    }
+    else
+    {
+        writeInt_TSStream(stream, 0);
+    }
+    writeInt_TSStream(stream, data->int_value);
+    writePointer_TSStream(stream, data->ptr_value);
+}
+
+void read_StructSiginfo(SigInfo* info, TSStream* stream, CallContext context)
+{
+    info->m_si_signo = readInt_TSStream(stream);
+    info->m_si_code = readInt_TSStream(stream);
+    info->m_si_errno = readInt_TSStream(stream);
+    info->m_si_pid.process = readInt_TSStream(stream);
+    info->m_si_pid.system = context.system;
+    info->m_si_uid = readUInt_TSStream(stream);
+    info->m_si_addr = readPointer_TSStream(context, stream);
+    info->m_si_status = readInt_TSStream(stream);
+    info->m_si_band = readLong_TSStream(stream);
+    read_SignalValue(info->m_si_value, stream, context);
+}
+
+void read_SignalValue(SignalValue* val, TSStream* stream, CallContext context)
+{
+    val->int_value = readInt_TSStream(stream);
+    val->ptr_value = readPointer_TSStream(context, stream);
+}

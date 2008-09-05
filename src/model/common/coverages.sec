@@ -1,0 +1,297 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <stdarg.h>
+#include "common/coverages.seh"
+
+/********************************************************************/
+/**                       pointer coverages                        **/
+/********************************************************************/
+
+coverage CoverageForPointer( VoidTPtr p ) {
+    if ( isNULL_VoidTPtr( p ) ) { return { NullPointer    }; }
+                           else { return { NotNullPointer }; }
+}
+
+/********************************************************************/
+/**                         file coverages                         **/
+/********************************************************************/
+
+coverage CoverageForFILETPtr( FILETPtr f ) {
+    return { NotNullFilePtr };
+}
+
+/********************************************************************/
+/**                       integer coverages                        **/
+/********************************************************************/
+
+#ifdef CTesKError
+coverage CoverageForInteger_MinMiddleMax( LongLong i, LongLong minI, LongLong middleI, LongLong maxI ) {
+    return { Anythere };
+}
+
+coverage CoverageForInteger_Min( LongLong i, LongLong minI, LongLong maxI ) {
+    return { Anythere };
+}
+
+coverage CoverageForInteger_Middle( LongLong i, LongLong minI, LongLong middleI, LongLong maxI ) {
+    return { Anythere };
+}
+#else
+
+static void CoverageForInteger_GeneralMinMaxMiddleRad_CheckInputData(
+                const char * funcName, LongLong i, LongLong minI, LongLong radMinI, LongLong maxI, LongLong radMaxI,
+                int lastMiddle, LongLong * middle, LongLong * radMiddle
+            ) {
+    int n;
+    assertion( radMinI >= 0, "%s : radMinI is %lli\n", funcName, radMinI );
+    for ( n = 1; n <= lastMiddle; n++ ) {
+        assertion( radMiddle[ n - 1 ] >= 0, "%s : radMiddle%i is %lli\n", funcName, n, radMiddle[ n - 1 ] );
+    }
+    assertion( radMaxI >= 0, "%s : radMaxI is %lli\n", funcName, radMaxI );
+    if ( lastMiddle == 0 ) {
+        assertion( minI + radMinI < maxI - radMaxI, "%s : minI is %lli, radMinI is %lli, maxI is %lli, radMaxI is %lli\n",
+                                                    funcName, minI, radMinI, maxI, radMaxI
+                 );
+    } else {
+        assertion( minI + radMinI < middle[ 0 ] - radMiddle[ 0 ],
+                   "%s : minI is %lli, radMinI is %lli, middle1 is %lli, radMiddle1 is %lli\n",
+                   funcName, minI, radMinI, middle[ 0 ], radMiddle[ 0 ]
+                 );
+        for ( n = 1; n <= lastMiddle - 1; n++ ) {
+            assertion( middle[ n - 1 ] + radMiddle[ n - 1 ] < middle[ n ] - radMiddle[ n ],
+                       "%s : middle%i is %lli, radMiddle%i is %lli, middle%i is %lli, radMiddle%i is %lli\n",
+                       funcName, n, middle[ n - 1 ], n, radMiddle[ n - 1 ], n + 1, middle[ n ], n + 1, radMiddle[ n ]
+                     );
+        }
+        assertion( middle[ lastMiddle - 1 ] + radMiddle[ lastMiddle - 1 ] < maxI - radMaxI,
+                   "%s : middle%i is %lli, radMiddle%i is %lli, maxI is %lli, radMaxI is %lli\n",
+                   funcName, lastMiddle, middle[ lastMiddle - 1 ], lastMiddle, radMiddle[ lastMiddle - 1 ], maxI, radMaxI
+                 );
+    } // if lastMiddle == 0
+    assertion( minI <= i && i <= maxI, "%s : minI is %lli, i is %lli, maxI is %lli\n", funcName, minI, i, maxI );
+} // CoverageForInteger_GeneralMinMaxMiddleRad_CheckInputData
+
+static coverage CoverageForInteger_GeneralMinMaxMiddleRad CoverageForInteger_GeneralMinMaxMiddleRad_Calculation(
+                    LongLong i, LongLong minI, bool tryToReachMinI, LongLong radMinI,
+                                LongLong maxI, bool tryToReachMaxI, LongLong radMaxI,
+                                int lastMiddle, LongLong * middle, LongLong * radMiddle
+                ) {
+    int n;
+    if ( tryToReachMinI ) {
+        if      ( i == minI           ) { return CoverageForInteger_GeneralMinMaxMiddleRad.Min         ; }
+        else if ( i <= minI + radMinI ) { return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMin; }
+    } else {
+        if ( i <= minI + radMinI ) { return CoverageForInteger_GeneralMinMaxMiddleRad.NearOrMin; }
+    }
+    if ( tryToReachMaxI ) {
+        if      ( i == maxI           ) { return CoverageForInteger_GeneralMinMaxMiddleRad.Max          ; }
+        else if ( i >= maxI - radMaxI ) { return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMax; }
+    } else {
+        if ( i >= maxI - radMaxI ) { return CoverageForInteger_GeneralMinMaxMiddleRad.NearOrMax; }
+    }
+    for ( n = 1; n <= lastMiddle; n++ ) {
+        if ( i == middle[ n - 1 ] ) {
+            switch ( n ) {
+                case 1: return CoverageForInteger_GeneralMinMaxMiddleRad.Middle1;
+                case 2: return CoverageForInteger_GeneralMinMaxMiddleRad.Middle2;
+                case 3: return CoverageForInteger_GeneralMinMaxMiddleRad.Middle3;
+                case 4: return CoverageForInteger_GeneralMinMaxMiddleRad.Middle4;
+                case 5: return CoverageForInteger_GeneralMinMaxMiddleRad.Middle5;
+                case 6: return CoverageForInteger_GeneralMinMaxMiddleRad.Middle6;
+                case 7: return CoverageForInteger_GeneralMinMaxMiddleRad.Middle7;
+            }
+        } else if ( i >= middle[ n - 1 ] - radMiddle[ n - 1 ] ) {
+            switch ( n ) {
+                case 1: return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle1;
+                case 2: return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle2;
+                case 3: return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle3;
+                case 4: return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle4;
+                case 5: return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle5;
+                case 6: return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle6;
+                case 7: return CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle7;
+            }
+        } else if ( i <= middle[ n - 1 ] + radMiddle[ n - 1 ] ) {
+            switch ( n ) {
+                case 1: return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle1;
+                case 2: return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle2;
+                case 3: return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle3;
+                case 4: return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle4;
+                case 5: return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle5;
+                case 6: return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle6;
+                case 7: return CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle7;
+            }
+        }
+    } // for n
+    if ( i < middle[ 0 ] - radMiddle[ 0 ] ) { return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMinMiddle1; }
+    for ( n = 2; n <= lastMiddle; n++ ) {
+        if ( i < middle[ n - 1 ] - radMiddle[ n - 1 ] ) {
+            switch ( n ) {
+                case 2: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle1Middle2;
+                case 3: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle2Middle3;
+                case 4: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle3Middle4;
+                case 5: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle4Middle5;
+                case 6: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle5Middle6;
+                case 7: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle6Middle7;
+            }
+        }
+    } // for n
+    if ( lastMiddle == 0 ) {
+        return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMinMax;
+    } else {
+        switch ( lastMiddle ) {
+            case 1: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle1Max;
+            case 2: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle2Max;
+            case 3: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle3Max;
+            case 4: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle4Max;
+            case 5: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle5Max;
+            case 6: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle6Max;
+            case 7: return CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle7Max;
+        }
+    } // if lastMiddle == 0
+} // CoverageForInteger_GeneralMinMaxMiddleRad_Calculation
+
+#define N 7
+
+coverage CoverageForInteger_GeneralMinMaxMiddleRad( LongLong i, LongLong minI, bool tryToReachMinI, LongLong radMinI,
+                                                                LongLong maxI, bool tryToReachMaxI, LongLong radMaxI,
+                                                                ...
+                                                  ) {
+    const char * funcName = "CoverageForInteger_GeneralMinMaxMiddleRad";
+    // middleN == middle[ N - 1 ], radMiddleN == radMiddle[ N - 1 ]
+    LongLong middle[ N ], radMiddle[ N ];
+    bool useMiddle;
+    int n, lastMiddle;
+    coverage CoverageForInteger_GeneralMinMaxMiddleRad calculatedCoverage;
+    // receiving middle, radMiddle, setting lastMiddle
+    va_list list;
+    va_start( list, radMaxI );
+    lastMiddle = 0;
+    while ( va_arg( list, bool ) ) {
+        assertion( lastMiddle < N, "%s : lastMiddle is %i, N is %i\n", funcName, lastMiddle, N );
+        middle[ lastMiddle ]    = va_arg( list, LongLong );
+        radMiddle[ lastMiddle ] = va_arg( list, LongLong );
+        lastMiddle++;
+    }
+    // parameters checks
+    CoverageForInteger_GeneralMinMaxMiddleRad_CheckInputData
+        ( funcName, i, minI, radMinI, maxI, radMaxI, lastMiddle, middle, radMiddle );
+    // coverage calcucation
+    calculatedCoverage = CoverageForInteger_GeneralMinMaxMiddleRad_Calculation( i, minI, tryToReachMinI, radMinI,
+                                                                                   maxI, tryToReachMaxI, radMaxI,
+                                                                                   lastMiddle, middle, radMiddle
+                                                                               );
+    switch ( calculatedCoverage ) {
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Min                  : return { Min                   };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMin         : return { NearAfterMin          };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearOrMin            : return { NearOrMin             };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Max                  : return { Max                   };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMax        : return { NearBeforeMax         };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearOrMax            : return { NearOrMax             };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Middle1              : return { Middle1               };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Middle2              : return { Middle2               };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Middle3              : return { Middle3               };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Middle4              : return { Middle4               };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Middle5              : return { Middle5               };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Middle6              : return { Middle6               };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.Middle7              : return { Middle7               };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle1    : return { NearBeforeMiddle1     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle2    : return { NearBeforeMiddle2     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle3    : return { NearBeforeMiddle3     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle4    : return { NearBeforeMiddle4     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle5    : return { NearBeforeMiddle5     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle6    : return { NearBeforeMiddle6     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearBeforeMiddle7    : return { NearBeforeMiddle7     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle1     : return { NearAfterMiddle1      };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle2     : return { NearAfterMiddle2      };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle3     : return { NearAfterMiddle3      };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle4     : return { NearAfterMiddle4      };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle5     : return { NearAfterMiddle5      };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle6     : return { NearAfterMiddle6      };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.NearAfterMiddle7     : return { NearAfterMiddle7      };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMinMiddle1    : return { BetweenMinMiddle1     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle1Middle2: return { BetweenMiddle1Middle2 };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle2Middle3: return { BetweenMiddle2Middle3 };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle3Middle4: return { BetweenMiddle3Middle4 };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle4Middle5: return { BetweenMiddle4Middle5 };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle5Middle6: return { BetweenMiddle5Middle6 };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle6Middle7: return { BetweenMiddle6Middle7 };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMinMax        : return { BetweenMinMax         };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle1Max    : return { BetweenMiddle1Max     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle2Max    : return { BetweenMiddle2Max     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle3Max    : return { BetweenMiddle3Max     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle4Max    : return { BetweenMiddle4Max     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle5Max    : return { BetweenMiddle5Max     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle6Max    : return { BetweenMiddle6Max     };
+        case CoverageForInteger_GeneralMinMaxMiddleRad.BetweenMiddle7Max    : return { BetweenMiddle7Max     };
+    } // switch calculatedCoverage
+} // CoverageForInteger_GeneralMinMaxMiddleRad
+
+#undef N
+
+coverage CoverageForInteger_MinMiddleMaxRad;
+coverage CoverageForInteger_MiddleMaxRad   ;
+coverage CoverageForInteger_MinMiddleRad   ;
+coverage CoverageForInteger_MiddleRad      ;
+
+coverage CoverageForInteger_MinMiddleMax;
+coverage CoverageForInteger_MiddleMax   ;
+coverage CoverageForInteger_MinMiddle   ;
+coverage CoverageForInteger_Middle      ;
+
+coverage CoverageForInteger_MinMaxRad;
+coverage CoverageForInteger_MaxRad   ;
+coverage CoverageForInteger_MinRad   ;
+
+coverage CoverageForInteger_MinMax;
+coverage CoverageForInteger_Max   ;
+coverage CoverageForInteger_Min   ;
+#endif // CTesKError
+
+/********************************************************************/
+/**                        string coverages                        **/
+/********************************************************************/
+
+coverage CoverageForCString_GeneralLen( CString * cs, bool allowNull, bool allowEmpty, int smallStringLen ) {
+    assertion( smallStringLen >= 0, "CoverageForCString_GeneralLen : smallStringLen is %i\n", smallStringLen );
+    if ( allowNull && cs == NULL ) { return { NullString }; }
+    assertion( cs != NULL, "CoverageForCString_GeneralLen : cs is NULL\n" );
+    if ( allowEmpty && length_CString( cs ) == 0 ) { return { EmptyString }; }
+    assertion( length_CString( cs ) != 0, "CoverageForCString_GeneralLen : length_CString( cs ) is 0\n" );
+    if ( length_CString( cs ) <= smallStringLen ) { return { SmallString }; }
+                                             else { return { LargeString }; }
+}
+
+coverage CoverageForWString_GeneralLen( WString * ws, bool allowNull, bool allowEmpty, int smallStringLen ) {
+    assertion( smallStringLen >= 0, "CoverageForWString_GeneralLen : smallStringLen is %i\n", smallStringLen );
+    if ( allowNull && ws == NULL ) { return { NullString }; }
+    assertion( ws != NULL, "CoverageForWString_GeneralLen : ws is NULL\n" );
+    if ( allowEmpty && length_WString( ws ) == 0 ) { return { EmptyString }; }
+    assertion( length_WString( ws ) != 0, "CoverageForWString_GeneralLen : length_WString( ws ) is 0\n" );
+    if ( length_WString( ws ) <= smallStringLen ) { return { SmallString }; }
+                                             else { return { LargeString }; }
+}
+
+coverage CoverageForCString;
+coverage CoverageForWString;
+
+coverage CoverageForNotNullCString;
+coverage CoverageForNotNullWString;
+
+coverage CoverageForNotEmptyCString;
+coverage CoverageForNotEmptyWString;

@@ -1,0 +1,883 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_model.seh"
+#include "system/user/user_media.seh"
+#include "process/process/tests/process_scenario.seh"
+#include "process/process/process_model.seh"
+#include "process/process/process_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/control_center.seh"
+#include "process/meta/user_model.seh"
+#include "process/meta/user_media.seh"
+#include "process/environ/environ_media.seh"
+#include "fs/meta/access_media.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "config/test_system_config.h"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static bool needOnlyFirstPriority;
+static bool needConformanceTestQuality;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static List * functionData; // NULL
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+static List * createFunctionDataForInt( const char * funcName ) {
+   List * result = create_List( & type_Map );
+   List * contexts;
+   int i, j;
+   for ( i = 1; i <= 4; i++ ) {
+      if ( ( contexts = createProcesses( i == 1 ) ) == NULL ) { return NULL; }
+      for ( j = 0; j < size_List( contexts ); j++ ) {
+         Map * pars = create_Map( & type_String, NULL );
+         ThreadIdObj * contextObj = get_List( contexts, j );
+         IntTObj * exitFailure = readIntValueByName( * contextObj, "EXIT_FAILURE" );
+         put_Map( pars, create_String( "context" ), contextObj );
+         switch ( i ) {
+            case 1: put_Map( pars, create_String( "int" ), create_IntTObj( SUT_EXIT_SUCCESS ) ); break;
+            case 2: put_Map( pars, create_String( "int" ),                 exitFailure        ); break;
+            case 3: put_Map( pars, create_String( "int" ), create_IntTObj( 0xFF             ) ); break;
+            case 4: put_Map( pars, create_String( "int" ), create_IntTObj( 0xFF + 1         ) ); break;
+         }
+         append_List( result, pars );
+      }
+   }
+   return result;
+}
+
+static List * createFunctionDataForIntInt( const char * funcName ) {
+    List * result = create_List( & type_Map );
+    List * contexts;
+    int i, j, k;
+    for ( i = 1; i <= 2; i++ ) {
+        for ( j = 1; j <= 2; j++ ) {
+            if ( ( contexts = createProcesses( i == 1 ) ) == NULL ) { return NULL; }
+            for ( k = 0; k < size_List( contexts ); k++ ) {
+                Map * pars = create_Map( & type_String, NULL );
+                ThreadIdObj * contextObj = get_List( contexts, k );
+                put_Map( pars, create_String( "context" ), contextObj );
+                switch ( i ) {
+                    case 1: put_Map( pars, create_String( "int1" ), create_IntTObj( 0 ) ); break;
+                    case 2: put_Map( pars, create_String( "int1" ), create_IntTObj( 1 ) ); break;
+                }
+                switch ( j ) {
+                    case 1: put_Map( pars, create_String( "int2" ), create_IntTObj( 0 ) ); break;
+                    case 2: put_Map( pars, create_String( "int2" ), create_IntTObj( 1 ) ); break;
+                }
+                append_List( result, pars );
+            }
+        }
+    }
+    return result;
+}
+
+static List * createFunctionDataForCString( const char * funcName ) {
+   List * result = create_List( & type_Map );
+   List * contexts;
+   int i, j;
+   // for ( i = 1; i <= 2; i++ ) { - error in test system with pair vfork+execl
+   for ( i = 1; i <= 1; i++ ) {
+      if ( ( contexts = createProcesses( i == 1 ) ) == NULL ) { return NULL; }
+      for ( j = 0; j < size_List( contexts ); j++ ) {
+         Map * pars = create_Map( & type_String, NULL );
+         ThreadIdObj * contextObj = get_List( contexts, j );
+         ProcessState * processState = getProcessState_CallContext( * contextObj );
+         put_Map( pars, create_String( "context" ), contextObj );
+         switch ( i ) {
+            case 1: put_Map( pars, create_String( "cstring" ), create_CString( "_exit" ) ); break;
+            case 2: put_Map( pars, create_String( "cstring" ), create_CString( "execl" ) ); break;
+         }
+         append_List( result, pars );
+      }
+   }
+   return result;
+}
+
+static List * createContexts( const char * funcName ) {
+   return createProcesses( true );
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    int i;
+    needOnlyFirstPriority = false;
+    //needOnlyFirstPriority = true;
+    needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    DISABLE_DEFERRED_REACTIONS
+        if ( equals( create_String( "_Exit"             ), testingFuncName ) ||
+             equals( create_String( "_exit"             ), testingFuncName ) ||
+             equals( create_String( "exit"              ), testingFuncName ) ||
+             equals( create_String( "return_from_main"  ), testingFuncName )
+           ) {
+            if ( ( functionData = createFunctionDataForInt( name ) ) == NULL ) { return false; }
+        } else if ( equals( create_String( "daemon" ), testingFuncName ) ) {
+            if ( ( functionData = createFunctionDataForIntInt( name ) ) == NULL ) { return false; }
+        } else if ( equals( create_String( "vfork" ), testingFuncName ) ) {
+            if ( ( functionData = createFunctionDataForCString( name ) ) == NULL ) { return false; }
+        } else {
+            if ( ( functionData = createContexts( name ) ) == NULL ) { return false; }
+        }
+        for ( i = 0; i < size_List( functionData ); i++ ) {
+            if ( elemType_List( functionData ) == & type_Map ) {
+                Map * par = get_List( functionData, i );
+                ThreadIdObj * contextObj = get_Map( par, create_String( "context" ) );
+                initProcessEnvironment( * contextObj );
+            } else {
+                ThreadIdObj * contextObj = get_List( functionData, i );
+                initProcessEnvironment( * contextObj );
+            }
+        }
+
+        setFindFirstSeriesOnly(true);
+        setFinishMode( UNTIL_END );
+        setWTimeMSec( SERIALIZATION_TIME_BRAKING > SERIALIZATION_TIME ? SERIALIZATION_TIME_BRAKING : SERIALIZATION_TIME );
+    ENABLE_DEFERRED_REACTIONS
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init__Exit_scenario            ( int argc, char ** argv ) { return init_scenario( "_Exit"             ); }
+static bool init___cxa_atexit_scenario     ( int argc, char ** argv ) { return init_scenario( "__cxa_atexit"      ); }
+static bool init___libc_start_main_scenario( int argc, char ** argv ) { return init_scenario( "__libc_start_main" ); }
+static bool init___register_atfork_scenario( int argc, char ** argv ) { return init_scenario( "__register_atfork" ); }
+static bool init__exit_scenario            ( int argc, char ** argv ) { return init_scenario( "_exit"             ); }
+static bool init_abort_scenario            ( int argc, char ** argv ) { return init_scenario( "abort"             ); }
+static bool init_daemon_scenario           ( int argc, char ** argv ) { return init_scenario( "daemon"            ); }
+static bool init_execl_scenario            ( int argc, char ** argv ) { return init_scenario( "execl"             ); }
+static bool init_execle_scenario           ( int argc, char ** argv ) { return init_scenario( "execle"            ); }
+static bool init_execlp_scenario           ( int argc, char ** argv ) { return init_scenario( "execlp"            ); }
+static bool init_execv_scenario            ( int argc, char ** argv ) { return init_scenario( "execv"             ); }
+static bool init_execve_scenario           ( int argc, char ** argv ) { return init_scenario( "execve"            ); }
+static bool init_execvp_scenario           ( int argc, char ** argv ) { return init_scenario( "execvp"            ); }
+static bool init_exit_scenario             ( int argc, char ** argv ) { return init_scenario( "exit"              ); }
+static bool init_fork_scenario             ( int argc, char ** argv ) { return init_scenario( "fork"              ); }
+static bool init_forkpty_scenario          ( int argc, char ** argv ) { return init_scenario( "forkpty"           ); }
+static bool init_popen_pclose_scenario     ( int argc, char ** argv ) { return init_scenario( "popen pclose"      ); }
+static bool init_return_from_main_scenario ( int argc, char ** argv ) { return init_scenario( "return_from_main"  ); }
+static bool init_vfork_scenario            ( int argc, char ** argv ) { return init_scenario( "vfork"             ); }
+static bool init_wait_scenario             ( int argc, char ** argv ) { return init_scenario( "wait"              ); }
+static bool init_wait4_scenario            ( int argc, char ** argv ) { return init_scenario( "wait4"             ); }
+static bool init_waitpid_scenario          ( int argc, char ** argv ) { return init_scenario( "waitpid"           ); }
+
+static void finish__Exit_scenario            ( void ) finish_scenario( _Exit             )
+static void finish___cxa_atexit_scenario     ( void ) finish_scenario( __cxa_atexit      )
+static void finish___libc_start_main_scenario( void ) finish_scenario( __libc_start_main )
+static void finish___register_atfork_scenario( void ) finish_scenario( __register_atfork )
+static void finish__exit_scenario            ( void ) finish_scenario( _exit             )
+static void finish_abort_scenario            ( void ) finish_scenario( abort             )
+static void finish_daemon_scenario           ( void ) finish_scenario( daemon            )
+static void finish_execl_scenario            ( void ) finish_scenario( execl             )
+static void finish_execle_scenario           ( void ) finish_scenario( execle            )
+static void finish_execlp_scenario           ( void ) finish_scenario( execlp            )
+static void finish_execv_scenario            ( void ) finish_scenario( execv             )
+static void finish_execve_scenario           ( void ) finish_scenario( execve            )
+static void finish_execvp_scenario           ( void ) finish_scenario( execvp            )
+static void finish_exit_scenario             ( void ) finish_scenario( exit              )
+static void finish_fork_scenario             ( void ) finish_scenario( fork              )
+static void finish_forkpty_scenario          ( void ) finish_scenario( forkpty           )
+static void finish_popen_pclose_scenario     ( void ) finish_scenario( popen_pclose      )
+static void finish_return_from_main_scenario ( void ) finish_scenario( return_from_main  )
+static void finish_vfork_scenario            ( void ) finish_scenario( vfork             )
+static void finish_wait_scenario             ( void ) finish_scenario( wait              )
+static void finish_wait4_scenario            ( void ) finish_scenario( wait4             )
+static void finish_waitpid_scenario          ( void ) finish_scenario( waitpid           )
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool __cxa_atexit_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        dotPrint( 10, 100 );
+        __cxa_atexit_spec( * contextObj, create_CString( "funcAtExit1" ), NULL_VoidTPtr, NULL_VoidTPtr );
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool __libc_start_main_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        dotPrint( 10, 100 );
+        __libc_start_main_spec( * contextObj, create_CString( "mainStartMain     1" ),
+                                              0                                      ,
+                                              create_List   ( & type_CString        ),
+                                              create_CString( "initStartMain1"      ),
+                                              create_CString( "finiStartMain1"      ),
+                                              create_CString( "rtld_finiStartMain1" ),
+                                              NULL_VoidTPtr
+                              );
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool __register_atfork_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        dotPrint( 10, 100 );
+        __register_atfork_spec( * contextObj, create_CString( "prepareAtFork1" ),
+                                              create_CString( "parentAtFork1"  ),
+                                              create_CString( "childAtFork1"   ),
+                                              NULL_VoidTPtr
+                              );
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool abort_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        dotPrint( 10, 100 );
+        abort_spec( * contextObj );
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool exec_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int j = 1; j <= 2; j++; )
+        {
+            CString * path;
+            switch ( j ) {
+                case 1: path = create_CString( ""        );   break;
+                case 2: path = create_CString( "./agent" );   break;
+            }
+            iterate ( int k = 1; k <= ( j != 2 ? 2 : 1 ); k++; )
+            {
+                List * argv = create_List( & type_CString );
+                append_List( argv, create_CString( "agent" ) );
+                switch ( k ) {
+                    case 1:                                                   ;   break;
+                    case 2: append_List( argv, create_CString( "something" ) );   break;
+                }
+                iterate ( int l = ( j != 2 ? 1 : 2 ); l <= 2; l++; )
+                {
+                    bool callExecl, callExecle, callExeclp, callExecv, callExecve, callExecvp;
+                    List * envp;
+                    ProcessState * processState;
+                    switch ( l ) {
+                        case 1: envp = create_List( & type_CString ); // j != 2
+                                break;
+                        case 2: processState = getProcessState_CallContext( * contextObj );
+                                envp = environMapAsList( processState->environ );
+                                break;
+                    }
+                    dotPrint( 10, 100 );
+                    callExecl  = equals( create_String( "execl"  ), testingFuncName );
+                    callExecle = equals( create_String( "execle" ), testingFuncName );
+                    callExeclp = equals( create_String( "execlp" ), testingFuncName );
+                    callExecv  = equals( create_String( "execv"  ), testingFuncName );
+                    callExecve = equals( create_String( "execve" ), testingFuncName );
+                    callExecvp = equals( create_String( "execvp" ), testingFuncName );
+                    if      ( callExecl  ) { execl_spec ( * contextObj, path, argv       ); }
+                    else if ( callExecle ) { execle_spec( * contextObj, path, argv, envp ); }
+                    else if ( callExeclp ) { execlp_spec( * contextObj, path, argv       ); }
+                    else if ( callExecv  ) { execv_spec ( * contextObj, path, argv       ); }
+                    else if ( callExecve ) { execve_spec( * contextObj, path, argv, envp ); }
+                    else if ( callExecvp ) { execvp_spec( * contextObj, path, argv       ); }
+                    else
+                    {
+                        REQTRACE( "exec_scen : unknown testingFuncName" );
+                        return false;
+                    }
+
+		    ts_sleep_msec(300);
+                } // iterate l
+            } // iterate k
+        } // iterate j
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool exit_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        Map * pars = get_List( functionData, contextI );
+        ThreadIdObj * contextObj = get_Map( pars, create_String( "context" ) );
+        IntTObj     * intObj     = get_Map( pars, create_String( "int"     ) );
+        bool call__Exit, call__exit, call_exit, call_return_from_main;
+        dotPrint( 10, 100 );
+        call__Exit            = equals( create_String( "_Exit"            ), testingFuncName );
+        call__exit            = equals( create_String( "_exit"            ), testingFuncName );
+        call_exit             = equals( create_String( "exit"             ), testingFuncName );
+        call_return_from_main = equals( create_String( "return_from_main" ), testingFuncName );
+        if      ( call__Exit            ) { _Exit_spec           ( * contextObj, * intObj ); }
+        else if ( call__exit            ) { _exit_spec           ( * contextObj, * intObj ); }
+        else if ( call_exit             ) { exit_spec            ( * contextObj, * intObj ); }
+        else if ( call_return_from_main ) { return_from_main_spec( * contextObj, * intObj ); }
+        else
+        {
+            REQTRACE( "exit_scen : unknown testingFuncName" );
+            return false;
+        }
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool fork_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        dotPrint( 10, 100 );
+        if ( equals( create_String( "daemon" ), testingFuncName ) )
+        {
+            Map * pars = get_List( functionData, contextI );
+            ThreadIdObj * contextObj = get_Map( pars, create_String( "context" ) );
+            IntTObj     * int1Obj    = get_Map( pars, create_String( "int1"    ) );
+            IntTObj     * int2Obj    = get_Map( pars, create_String( "int2"    ) );
+            daemon_spec( * contextObj, * int1Obj, * int2Obj );
+        }
+        else if ( equals( create_String( "fork" ), testingFuncName ) )
+        {
+            ThreadIdObj * contextObj = get_List( functionData, contextI );
+            fork_spec( * contextObj );
+        }
+        else if ( equals( create_String( "forkpty" ), testingFuncName ) )
+        {
+            ThreadIdObj * contextObj = get_List( functionData, contextI );
+            forkpty_spec( * contextObj );
+        }
+        else if ( equals( create_String( "vfork" ), testingFuncName ) )
+        {
+            Map * pars = get_List( functionData, contextI );
+            ThreadIdObj * contextObj = get_Map( pars, create_String( "context" ) );
+            CString     * strObj     = get_Map( pars, create_String( "cstring" ) );
+            vfork_spec( * contextObj, strObj );
+        }
+        else
+        {
+            REQTRACE( "fork_scen : unknown testingFuncName" );
+            return false;
+        }
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool popen_pclose_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        iterate ( int j = 1; j <= 2; j++; )
+        {
+            ProcessState * processState;
+            VoidTPtrObj * pipeFromPopen;
+            FILETPtr stream;
+            switch ( j ) {
+                case 1: dotPrint( 10, 100 );
+                        popen_spec( * contextObj, create_CString( "ls" ), create_CString( "r" ) );
+                        break;
+                case 2: processState = getProcessState_CallContext( * contextObj );
+                        if ( size_Set( processState->pipesFromPopen ) != 0 ) {
+                            pipeFromPopen = get_Set( processState->pipesFromPopen, 0 );
+                            stream = * pipeFromPopen;
+                            dotPrint( 10, 100 );
+                            pclose_spec( * contextObj, stream );
+                        } else {
+                            verbose( "0" );
+                        }
+                        break;
+            }
+        }
+    } // iterate contextI
+    return true;
+}
+
+scenario
+bool wait_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        //iterate ( int j = 1; j <= 3; j++; )
+        iterate ( int j = 1; j <= 3; j += 2; ) // error in pair fork_spec + exit_spec( * childThreadIdObj, 0 )
+        {
+            ProcessState * childState;
+            ThreadIdObj * childThreadIdObj;
+            dotPrint( 10, 100 );
+            // verbose( "wait_scen : contextI %d, j %d\n", contextI, j );
+            switch ( j ) {
+                case 1: fork_spec( * contextObj );
+                        break;
+                case 2: childState = get_Set( getChildren_CallContext( * contextObj ), 0 );
+                        childThreadIdObj = key_Map( childState->threads, 0 );
+                        verbose( "wait_scen : getProcessState_CallContext( * childThreadIdObj ) is %sNULL\n",
+                                 getProcessState_CallContext( * childThreadIdObj ) == NULL ? "" : "not "
+                               );
+                        exit_spec( * childThreadIdObj, 0 );
+                        //exit_spec( * contextObj, 0 );
+                        break;
+                case 3: if ( equals( create_String( "wait" ), testingFuncName ) ) {
+                            wait_spec( * contextObj, false );
+                        } else if ( equals( create_String( "wait4" ), testingFuncName ) ) {
+                            wait4_spec( * contextObj, create_ProcessId( (long)contextObj->thread, -1 ), false, 0, false );
+                        } else if ( equals( create_String( "waitpid" ), testingFuncName ) ) {
+                            waitpid_spec( * contextObj, create_ProcessId( (long)contextObj->thread, -1 ), false, 0 );
+                        } else {
+                            REQTRACE( "wait_scen : unknown testingFuncName" );
+                            return false;
+                        }
+                        break;
+            }
+        } // iterate j
+    } // iterate contextI
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+static Map * saveSingleModelState( void ) { return clone( systems ); }
+
+static void restoreSingleModelState( Map * saved_state ) { systems = saved_state; }
+
+static bool isSingleModelStateStationary( void ) {
+    int i, j;
+    for ( i = 0; i < size_Map( systems ); i++ ) {
+        Long * key = key_Map( systems, i );
+        SystemState * systemState = get_Map( systems, key );
+        for ( j = 0; j < size_Map( systemState->processes ); j++ ) {
+            ProcessIdObj * key = key_Map( systemState->processes, j );
+            ProcessState * processState = get_Map( systemState->processes, key );
+            if ( processState->childInCreation != NULL || processState->inExecCall ) { return false; }
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm _Exit_scenario =
+{
+    .init              = init__Exit_scenario                               ,
+    .finish            = finish__Exit_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exit_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm __cxa_atexit_scenario =
+{
+    .init              = init___cxa_atexit_scenario                        ,
+    .finish            = finish___cxa_atexit_scenario                      ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { __cxa_atexit_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm __libc_start_main_scenario =
+{
+    .init              = init___libc_start_main_scenario                   ,
+    .finish            = finish___libc_start_main_scenario                 ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { __libc_start_main_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm __register_atfork_scenario =
+{
+    .init              = init___register_atfork_scenario                   ,
+    .finish            = finish___register_atfork_scenario                 ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { __register_atfork_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm _exit_scenario =
+{
+    .init              = init__exit_scenario                               ,
+    .finish            = finish__exit_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exit_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm abort_scenario =
+{
+    .init              = init_abort_scenario                               ,
+    .finish            = finish_abort_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { abort_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm daemon_scenario =
+{
+    .init              = init_daemon_scenario                              ,
+    .finish            = finish_daemon_scenario                            ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { fork_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm execl_scenario =
+{
+    .init              = init_execl_scenario                               ,
+    .finish            = finish_execl_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exec_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm execle_scenario =
+{
+    .init              = init_execle_scenario                              ,
+    .finish            = finish_execle_scenario                            ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exec_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm execlp_scenario =
+{
+    .init              = init_execlp_scenario                              ,
+    .finish            = finish_execlp_scenario                            ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exec_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm execv_scenario =
+{
+    .init              = init_execv_scenario                               ,
+    .finish            = finish_execv_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exec_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm execve_scenario =
+{
+    .init              = init_execve_scenario                              ,
+    .finish            = finish_execve_scenario                            ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exec_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm execvp_scenario =
+{
+    .init              = init_execvp_scenario                              ,
+    .finish            = finish_execvp_scenario                            ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exec_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm exit_scenario =
+{
+    .init              = init_exit_scenario                                ,
+    .finish            = finish_exit_scenario                              ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exit_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm fork_scenario =
+{
+    .init              = init_fork_scenario                                ,
+    .finish            = finish_fork_scenario                              ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { fork_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm forkpty_scenario =
+{
+    .init              = init_forkpty_scenario                             ,
+    .finish            = finish_forkpty_scenario                           ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { fork_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm popen_pclose_scenario =
+{
+    .init              = init_popen_pclose_scenario                        ,
+    .finish            = finish_popen_pclose_scenario                      ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { popen_pclose_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm return_from_main_scenario =
+{
+    .init              = init_return_from_main_scenario                    ,
+    .finish            = finish_return_from_main_scenario                  ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { exit_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vfork_scenario =
+{
+    .init              = init_vfork_scenario                               ,
+    .finish            = finish_vfork_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { fork_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm wait_scenario =
+{
+    .init              = init_wait_scenario                                ,
+    .finish            = finish_wait_scenario                              ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { wait_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm wait4_scenario =
+{
+    .init              = init_wait4_scenario                               ,
+    .finish            = finish_wait4_scenario                             ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { wait_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm waitpid_scenario =
+{
+    .init              = init_waitpid_scenario                             ,
+    .finish            = finish_waitpid_scenario                           ,
+    .saveModelState    = (PtrSaveModelState)saveSingleModelState           ,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleModelState     ,
+    .isStationaryState = (PtrIsStationaryState)isSingleModelStateStationary,
+    .actions           = { wait_scen,
+                           NULL
+                         }
+};
+
+#ifdef PROCESS_PROCESS_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+    initProcessEnvironSubsystem();
+    initFsMetaAccessSubsystem();
+
+    initProcessProcessSubsystem();
+}
+
+bool main_process_process_local( int argc, char** argv )
+{
+/*
+    __cxa_atexit_scenario     ( argc, argv );
+    __libc_start_main_scenario( argc, argv );
+    __register_atfork_scenario( argc, argv );
+    _Exit_scenario            ( argc, argv );
+    _exit_scenario            ( argc, argv );
+    abort_scenario            ( argc, argv );
+    daemon_scenario           ( argc, argv );
+    execl_scenario            ( argc, argv );
+    execlp_scenario           ( argc, argv );
+    execle_scenario           ( argc, argv );
+    execv_scenario            ( argc, argv );
+    execve_scenario           ( argc, argv );
+    execvp_scenario           ( argc, argv );
+    exit_scenario             ( argc, argv );
+    fork_scenario             ( argc, argv );
+    forkpty_scenario          ( argc, argv );
+    popen_pclose_scenario     ( argc, argv );
+    return_from_main_scenario ( argc, argv );
+    vfork_scenario            ( argc, argv );*/
+    wait_scenario             ( argc, argv );
+    wait4_scenario            ( argc, argv );
+    waitpid_scenario          ( argc, argv );/**/
+    return true;
+}
+
+int main( int argc, char** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    main_process_process_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

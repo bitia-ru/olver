@@ -1,0 +1,410 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "ncurses/terminal/terminal_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initNcursesTerminalSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_delay_output_spec(delay_output_media);
+    set_mediator_delscreen_spec(delscreen_media);
+    set_mediator_endwin_spec(endwin_media);
+    set_mediator_filter_spec(filter_media);
+    set_mediator_initscr_spec(initscr_media);
+    set_mediator_longname_spec(longname_media);
+    set_mediator_newterm_spec(newterm_media);
+    set_mediator_set_term_spec(set_term_media);
+    set_mediator_termattrs_spec(termattrs_media);
+    set_mediator_vidattr_spec(vidattr_media);
+//    set_mediator_vidputs_spec(vidputs_media);
+
+    // Set up formatters
+    registerTSFormatter("chtype",(TSFormatterFuncType)chtype_formatter);
+
+    set_mediator_ripoffline_initfunc_call(ripoffline_initfunc_call_media);
+    registerDRProcessor("ripoffline_initfunc_call", ripoffline_initfunc_call_processor);
+}
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+static void ripoffline_initfunc_call_processor(ThreadId threadId, TSStream* stream, TSMetaData* meta)
+{
+    CallContext context = threadId;
+
+    VoidTPtr win = readPointer_TSStream(context, stream);
+    IntT columns = readInt_TSStream(stream);
+
+    ProcessId proc_id = getProcessId_CallContext(threadId);
+ 
+    // List * old_riplines = clone(getRipLines(proc_id));
+
+    registerReactionWithTimeInterval
+        (
+         getThreadChannelID(threadId),
+         NULL,
+         ripoffline_initfunc_call,
+         create_RipofflineInitfuncCallT(context, 
+                win, columns
+               ),
+         meta->timestamp
+        );
+}
+
+/** ripoffline_initfunc_call **/
+mediator ripoffline_initfunc_call_media for reaction 
+RipofflineInitfuncCallT* ripoffline_initfunc_call(void)
+{
+    state
+    {
+        onRipofflineInitfuncCall(ripoffline_initfunc_call);
+    }
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** delay_output_spec **/
+mediator delay_output_media for specification
+IntT delay_output_spec( CallContext context, IntT ms)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "delay_output:$(int)", create_IntTObj(ms));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** delscreen_spec **/
+mediator delscreen_media for specification
+void delscreen_spec( CallContext context, ScreenTPtr scr)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "delscreen:$(ptr)", create_VoidTPtrObj(scr));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onDelScreen(context, scr);
+    }
+}
+
+
+/** endwin_spec **/
+mediator endwin_media for specification
+IntT endwin_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        
+        format_TSCommand( &command, "endwin");
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onEndWin(context, endwin_spec);
+    }
+}
+
+
+/** filter_spec **/
+mediator filter_media for specification
+void filter_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        
+        format_TSCommand( &command, "filter");
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onFilter(context);
+    }
+}
+
+
+/** initscr_spec **/
+mediator initscr_media for specification
+InitScrReturnType* initscr_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        InitScrReturnType* res=NULL;
+        WindowTPtr ptr;
+        IntT cols;
+        IntT lines;
+
+
+        format_TSCommand( &command, "initscr");
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            ptr=readPointer_TSStream(context, &command.response);
+            cols=readInt_TSStream(&command.response);
+            lines=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_InitScrReturnType(ptr, cols, lines);
+    }
+    state
+    {
+        onInit_scr(context, initscr_spec);
+    }
+}
+
+
+/** longname_spec **/
+mediator longname_media for specification
+CString* longname_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        CString* res=NULL;
+        bool notNULL;
+    
+        format_TSCommand( &command, "longname");
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+
+            notNULL=readInt_TSStream(&command.response);
+
+            if (notNULL)
+            {
+                res=readCString_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** newterm_spec **/
+mediator newterm_media for specification
+NewTermReturnType* newterm_spec( CallContext context, CString* type, CString* outfile, CString* infile)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        NewTermReturnType* res=NULL;
+        WindowTPtr ptr;
+        IntT cols;
+        IntT lines;
+        VoidTPtr   SCREEN_ptr; 
+        CString* term_type;
+
+        if (type!=NULL)
+        {
+            format_TSCommand( &command, "newterm:$(int)$(str)$(str)$(str)", create_IntTObj(0), type, outfile, infile);
+        }
+        else
+        {
+            format_TSCommand( &command, "newterm:$(int)$(str)$(str)", create_IntTObj(1), outfile, infile);
+        }
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            ptr=readPointer_TSStream(context, &command.response);
+            cols=readInt_TSStream(&command.response);
+            lines=readInt_TSStream(&command.response);
+            SCREEN_ptr=readPointer_TSStream(context, &command.response);
+            term_type=readCString_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_NewTermReturnType(ptr, cols, lines, SCREEN_ptr, term_type);
+    }
+    state
+    {
+        onNewTerm(context, type, outfile, infile, newterm_spec);
+    }
+}
+
+
+/** set_term_spec **/
+mediator set_term_media for specification
+SetTermReturnType* set_term_spec( CallContext context, ScreenTPtr new_term)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        SetTermReturnType* res=NULL;
+        ScreenTPtr scr;
+        WindowTPtr stdscr;
+
+        format_TSCommand( &command, "set_term:$(ptr)", create_VoidTPtrObj(new_term));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            scr=readPointer_TSStream(context, &command.response);
+            stdscr=readPointer_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_SetTermReturnType(scr, stdscr);
+    }
+    state
+    {
+        onSetTerm(context, new_term, set_term_spec);
+    }
+}
+
+
+/** termattrs_spec **/
+mediator termattrs_media for specification
+ChTypeT termattrs_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        ChTypeT res;
+        
+        format_TSCommand( &command, "termattrs");
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res = readChTypeT_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** vidattr_spec **/
+//This mediator refers to: vidattr, vidputs
+mediator vidattr_media for specification
+VidAttrReturnType* vidattr_spec( CallContext context, ChTypeT ch, bool usePutfunc)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        VidAttrReturnType* res=NULL;
+        IntT    retVal;
+        ChTypeT returnedCh;
+        
+        if (!usePutfunc)
+        {
+            format_TSCommand( &command, "vidattr:$(chtype)", create_ChTypeTObj(ch));
+        }
+        else
+        {
+            format_TSCommand( &command, "vidputs:$(chtype)", create_ChTypeTObj(ch));
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            retVal = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_VidAttrReturnType(retVal); 
+    }
+    state
+    {
+       onVidattr(context, ch, vidattr_spec);
+    }
+}
+
+

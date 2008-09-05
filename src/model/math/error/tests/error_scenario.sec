@@ -1,0 +1,251 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "math/error/tests/error_scenario.seh"
+#include "math/error/error_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "math/math/math_data.seh"
+#include <stdio.h>
+
+static CallContext context;
+static VoidTPtr ptr;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_math_error_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    context = getContext();  
+
+    initReqFilters();
+
+    ptr = allocateMemoryBlock(context, 1024);
+
+    setFinishMode(UNTIL_END); 
+    
+    return true;
+}
+static void finish_math_error_scenario(void)
+{
+    deallocateMemoryBlock(context, ptr);
+    TEST_SCENARIO_VERDICT_VERBOSE(error_scenario);
+}
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool erf_erfc_scen()
+{
+    int leng_num[3] = {digMant_FloatT, digMant_DoubleT, digMant_LongDoubleT};
+    Unifloat* Almost_Inf[3] = { clone(max_FloatT), clone(max_DoubleT), clone(max_LongDoubleT)};
+    Unifloat* Nan[3] = {clone(nan_FloatT), clone(nan_DoubleT), clone(nan_LongDoubleT)};
+    Unifloat* Inf[3] = {clone(infinity_FloatT), clone(infinity_DoubleT), clone(infinity_LongDoubleT)};
+    Unifloat* Almost_Zero[3] = {createOne_Unifloat(UniFloatT),
+                        createOne_Unifloat(UniDoubleT),
+                        createOne_Unifloat(UniLongDoubleT)};
+    int i, sign;
+    UnifloatType type;
+    Almost_Zero[0]->exp = 1 - digMant_FloatT + minExp_FloatT;
+    Almost_Zero[1]->exp = 1 - digMant_DoubleT + minExp_DoubleT;
+    Almost_Zero[2]->exp = 1 - digMant_LongDoubleT + minExp_LongDoubleT;
+    for(type = 0; type < 3; type++)
+    {
+        Unifloat* x[15] = {
+        	clone(Nan[type]),
+        	clone(Nan[type]),
+            createZero_Unifloat(type),
+            createZero_Unifloat(type),
+            clone(Inf[type]),
+            clone(Inf[type]),
+            clone(Almost_Zero[type]),
+            convertString_Unifloat(create_CString("-2"), type),
+            convertString_Unifloat(create_CString("5"), type),
+            convertString_Unifloat(create_CString("9"), type),
+            convertString_Unifloat(create_CString("9,5"), type),
+            convertString_Unifloat(create_CString("11"), type),
+            convertString_Unifloat(create_CString("26"), type),
+            convertString_Unifloat(create_CString("27"), type),
+            convertString_Unifloat(create_CString("106"), type)
+            };
+        x[1]->sign = -1;
+        x[3]->sign = -1;
+        x[5]->sign = -1;
+        for(i = 0; i < 15; i++)
+        {
+            erf_spec(context, x[i], requestErrorCode());
+
+            if((i <= 9) || (i > 9 && i <= 12 && type > 0)
+                || (digExp_LongDoubleT == 15 && (i == 13 || i == 14) && type == 2))
+            	erfc_spec(context, x[i], requestErrorCode());
+        }
+    }
+    return true;
+}
+
+scenario
+bool erfc_underflow_scen()
+{
+	UnifloatType type;
+	
+    Unifloat* x[4] = {
+        convertString_Unifloat(create_CString("9,5"), 0),
+        convertString_Unifloat(create_CString("27"), 1),
+        convertString_Unifloat(create_CString("107"), 2),
+        convertString_Unifloat(create_CString("27"), 2),
+        };
+
+    erfc_spec(context, x[0], requestErrorCode());
+    erfc_spec(context, x[1], requestErrorCode());
+
+	if(type == 2 && digExp_LongDoubleT == 15)
+    	erfc_spec(context, x[2], requestErrorCode());
+    else
+    	erfc_spec(context, x[3], requestErrorCode());
+    	
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm math_error_scenario =
+{
+    .init = init_math_error_scenario,
+    .finish = finish_math_error_scenario,
+    .actions = {      
+                    erf_erfc_scen,
+                    NULL 
+               }
+};
+
+scenario dfsm math_error_erfc_underflow_scenario =
+{
+    .init = init_math_error_scenario,
+    .finish = finish_math_error_scenario,
+    .actions = {      
+                    erfc_underflow_scen,
+                    NULL 
+               }
+};
+
+bool main_math_error(int argc, char** argv)
+{
+    math_error_scenario(argc,argv);
+    return true;
+}
+
+#include "math/error/tests/error_scenario.seh"
+#include "math/math/math_data.seh"
+
+#ifdef MATH_ERROR_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "math/error/error_media.seh"
+#include "math/math/math_data.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initMath();
+
+    initMathErrorSubsystem();
+}
+
+#ifdef WIN32
+
+int main(int argc, char** argv)
+{
+    clock_t start, finish;
+    double duration;
+    
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    addTraceToFile("trace.xml");
+
+    
+    start = clock();
+    
+    main_math_error(argc,argv);
+
+    finish = clock();
+    duration = (double) (finish - start) / CLOCKS_PER_SEC;
+
+    verbose( "%2.3f seconds\n", duration );        
+    
+    
+    
+    //  unloadSUT();
+    return 0;
+}
+
+#else
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    addTraceToFile("trace.xml");
+    main_math_error(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif
+
+#endif
+
+

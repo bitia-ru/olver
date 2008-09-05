@@ -1,0 +1,246 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/meta/tests/nice_scenario.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_model.seh"
+#include "system/user/user_media.seh"
+#include "process/process/tests/process_scenario.seh"
+#include "process/process/process_model.seh"
+#include "process/process/process_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/control_center.seh"
+#include "process/meta/user_model.seh"
+#include "process/meta/user_media.seh"
+#include "process/environ/environ_media.seh"
+#include "fs/meta/access_media.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "data/sys/resource_model.seh"
+#include "process/meta/nice_model.seh"
+#include "process/meta/nice_media.seh"
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+List /* NULL */ * functionData;
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    int i;
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    if ( ( functionData = createContexts() ) == NULL ) { return false; }
+    setFinishMode( UNTIL_END );
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init_set_get_priority_scenario( int argc, char ** argv ) { return init_scenario( "set_get_priority" ); }
+static bool init_nice_scenario            ( int argc, char ** argv ) { return init_scenario( "nice"             ); }
+
+static void finish_set_get_priority_scenario( void ) finish_scenario( set_get_priority )
+static void finish_nice_scenario            ( void ) finish_scenario( nice             )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool set_get_priority_scen()
+{
+//    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    iterate ( int i = 0; i < 3; i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        if ( setNZeroIfNeeded( * contextObj ) ) {
+            ProcessState * process_state = getProcessState_CallContext( * contextObj );
+            int low  = - 3 * (IntT)process_state->meta.NZero;
+            int high =   3 *       process_state->meta.NZero;
+            int step = ( process_state->meta.NZero / 2 < 1 ? 1 : process_state->meta.NZero / 2 );
+            iterate ( IntT value = low; value <= high; value += step; )
+            //iterate ( IntT value = low; value <= low; value += step; )
+            {
+                iterate ( int j = 1; j <= 4; j++; )
+                //iterate ( int j = 1; j <= 1; j++; )
+                {
+                    IntT which;
+                    switch ( j ) {
+                        case 1: which = SUT_PRIO_PGRP   ; break;
+                        case 2: which = SUT_PRIO_PROCESS; break;
+                        case 3: which = SUT_PRIO_USER   ; break;
+                        case 4: which = -1              ; break;
+                    }
+                    //iterate ( int k = 1; k <= 3; k++; )
+                    iterate ( int k = 1; k <= 2; k++; )
+                    {
+                        ProcessId who;
+                        who.system = contextObj->system;
+                        switch ( k ) {
+                            case 1: who.process = 0  ; break;
+                            case 2: who.process = 600; break;
+                        }
+                        iterate ( int l = 1; l <= 2; l++; )
+                        {
+                            dotPrint( 10, 100 );
+                            switch ( l ) {
+                                case 1: setpriority_spec( * contextObj, which, who, value, requestErrorCode() );
+                                        break;
+                                case 2: getpriority_spec( * contextObj, which, who, requestErrorCode() );
+                                        break;
+                            }
+                        } // iterate l
+                    } // iterate k
+                } // iterate j
+            } // iterate value
+        }
+    } // iterate i
+    return true;
+}
+
+scenario
+bool nice_scen()
+{
+    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        if ( setNZeroIfNeeded( * contextObj ) ) {
+            ProcessState * process_state = getProcessState_CallContext( * contextObj );
+            int low  = - 3 * (IntT)process_state->meta.NZero;
+            int high =   3 *       process_state->meta.NZero;
+            int step = ( process_state->meta.NZero / 2 < 1 ? 1 : process_state->meta.NZero / 2 );
+            iterate ( int incr = low; incr <= high; incr += step; )
+            {
+                dotPrint( 10, 100 );
+                nice_spec( * contextObj, incr, requestErrorCode() );
+            } // iterate incr
+        }
+    } // iterate i
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm set_get_priority_scenario =
+{
+    .init              = init_set_get_priority_scenario  ,
+    .finish            = finish_set_get_priority_scenario,
+    .actions           = { set_get_priority_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm nice_scenario =
+{
+    .init              = init_nice_scenario  ,
+    .finish            = finish_nice_scenario,
+    .actions           = { nice_scen,
+                           NULL
+                         }
+};
+
+#ifdef PROCESS_META_NICE_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initProcessMetaNiceSubsystem();
+}
+
+bool main_process_meta_nice( int argc, char** argv )
+{
+    set_get_priority_scenario( argc, argv );
+    nice_scenario            ( argc, argv );
+    return true;
+}
+
+int main( int argc, char** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    main_process_meta_nice( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

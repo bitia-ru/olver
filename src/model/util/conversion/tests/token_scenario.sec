@@ -1,0 +1,404 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/conversion/tests/token_scenario.seh"
+
+
+#include "util/conversion/token_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+
+#define NUM_THREADS 5
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static char* strsep_stringp[]=
+{
+    "",
+    "a1s2d3f4",
+    "qwertyuiop",
+    "zaqwsxcderfvbgtyhnmjuiklop",
+    "newline\n;tab\t;slash\\;space other:~!@#$%^&*()_+\"|}?><:{",
+    NULL
+};
+
+static char* strsep_delim[]=
+{
+    "1",
+    "4321",
+    "a",
+    "asdf",
+    "mnbvc",
+    "",
+    " ",
+    "\n",
+    "\t",
+    "\\",
+    "\"",
+    "%"
+};
+
+static char* strtok_stringp[]=
+{
+    "a1s2d3f4",
+    "",
+    "qwertyuiop",
+    "zaqwsxcderfvbgtyhnmjuiklop",
+    "newline\n;tab\t;slash\\;space other:~!@#$%^&*()_+\"|}?><:{"
+};
+
+static char* strtok_delim[]=
+{
+    "asdf",
+    "4321",
+    "1",
+    "mnbvc",
+    "",
+    " ",
+    "\n",
+    "\t",
+    "\\",
+    "\"",
+    "%",
+    "a1s2d3f4",
+    "",
+    "qwertyuiop",
+    "zaqwsxcderfvbgtyhnmjuiklop",
+    "newline\n;tab\t;slash\\;space other:~!@#$%^&*()_+\"|}?><:{"
+};
+
+static const int maxSize=1000; 
+
+static int strsep_stringp_size=sizeof(strsep_stringp)/sizeof(char*);
+static int strsep_delim_size=sizeof(strsep_delim)/sizeof(char*);
+static int strtok_stringp_size=sizeof(strtok_stringp)/sizeof(char*);
+static int strtok_delim_size=sizeof(strtok_delim)/sizeof(char*);
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static VoidTPtr stringp;
+static VoidTPtr delim;
+
+static CallContext context_r[NUM_THREADS];
+static VoidTPtr stringp_r[NUM_THREADS];
+static VoidTPtr delim_r[NUM_THREADS];
+static VoidTPtr buffer_r[NUM_THREADS];
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_token_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    int i=0;
+    CString* tmp=create_CString("");
+
+    context = getContext();   
+    stringp = allocateMemoryBlock(context, maxSize);
+    delim = allocateMemoryBlock(context, maxSize);
+
+    for(i=0;i<NUM_THREADS;i++)
+        createThread();
+
+    if(!getContexts(NUM_THREADS, context_r))
+        return false;
+
+    for(i=0;i<NUM_THREADS;i++)
+    {
+        stringp_r[i] = allocateMemoryBlock(context_r[i], maxSize);
+        buffer_r[i]=NULL_VoidTPtr;
+
+        if (isNULL_VoidTPtr(stringp_r[i]))
+           return false;
+    }
+    initReqFilters();
+
+    return true;
+}
+static void finish_token_scenario(void)
+{
+    int i;
+
+    for(i=0;i<NUM_THREADS;i++)
+        deallocateMemoryBlock(context_r[i], stringp_r[i]);
+
+    deallocateMemoryBlock(context, stringp);
+    deallocateMemoryBlock(context, delim);
+    
+    TEST_SCENARIO_VERDICT_VERBOSE(token_scenario);  
+}
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool strsep_scen()
+{   
+    CString* stringp_str, *delim_str;    
+
+    iterate(int i=0;i<strsep_stringp_size;i++;)
+        iterate(int j=0;j<strsep_delim_size;j++;)
+        {
+            VERBOSE("scen\n");
+            if(strsep_stringp[i]!=NULL)
+            {                   
+                VERBOSE("In do...\n");
+                stringp_str=create_CString(strsep_stringp[i]);
+                VERBOSE("stringp==%s\n", *stringp_str);
+                writeCString_VoidTPtr(stringp, stringp_str);
+                        
+                delim_str=create_CString(strsep_delim[j]);
+                VERBOSE("delim==%s\n", *delim_str);
+                writeCString_VoidTPtr(delim, delim_str);               
+                
+                VERBOSE("bef_spec...\n");
+
+                strsep_spec(context, stringp, delim);                 
+            }
+            else
+            {
+                VERBOSE("In else...\n");
+                delim_str=create_CString(strsep_delim[j]);
+                VERBOSE("delim==%s\n", *delim_str);
+                writeCString_VoidTPtr(delim, delim_str);
+
+                VERBOSE("bef_spec...\n");                                
+                strsep_spec(context, NULL_VoidTPtr, delim);                
+            }
+        }
+
+
+    return true;
+}
+scenario
+bool strtok_scen()
+{   
+    StringTPtr ret;
+    CString* stringp_str, *delim_str;    
+    IntT it;
+
+    iterate(int i=0;i<strtok_stringp_size;i++;)
+        iterate(int j=0;j<strtok_delim_size;j++;)
+        {                    
+            it=j;
+
+            VERBOSE("In do...\n");
+            stringp_str=create_CString(strtok_stringp[i]);
+            VERBOSE("stringp==%s\n", *stringp_str);
+            writeCString_VoidTPtr(stringp, stringp_str);
+
+            delim_str=create_CString(strtok_delim[(++it)%strtok_delim_size]);
+            VERBOSE("delim==%s\n", *delim_str);
+            writeCString_VoidTPtr(delim, delim_str);               
+            
+            VERBOSE("bef_spec...\n");
+
+            ret=strtok_spec(context, stringp, delim);
+
+            while(!isNULL_VoidTPtr(ret))
+            {
+                delim_str = create_CString(
+                                    strtok_delim[(++it)%strtok_delim_size]);
+                VERBOSE("delim==%s\n", *delim_str);
+                writeCString_VoidTPtr(delim, delim_str);
+                ret=strtok_spec(context, NULL_VoidTPtr, delim);
+            }
+
+        }
+
+    return true;
+}
+
+scenario
+bool strtok_r_scen()
+{   
+    StringTPtr ret;
+    CString* stringp_str, *delim_str;    
+    IntT it;    
+
+    iterate(int k=0;k<NUM_THREADS;k++;)
+    {
+        iterate(int i=0;i<strtok_stringp_size;i++;)
+        {
+            iterate( int j=0;j<strtok_delim_size;j++;)
+            {
+                it=j;
+                VERBOSE("In _r do...\n");
+                stringp_str=create_CString(strtok_stringp[i]);
+                VERBOSE("stringp==%s\n", *stringp_str);
+                writeCString_VoidTPtr(stringp_r[k], stringp_str);
+                    
+                delim_str = create_CString(
+                                    strtok_delim[(++it)%strtok_delim_size]);
+                VERBOSE("delim==%s\n", *delim_str);
+                writeCString_VoidTPtr(delim, delim_str);
+            
+                VERBOSE("bef_spec...\n");
+
+                ret=strtok_r_spec(context_r[k], stringp_r[k], delim,
+                                                            &buffer_r[k]);
+                DUMP("\n");
+                while(!isNULL_VoidTPtr(ret) && !isNULL_VoidTPtr(buffer_r[k]))
+                {
+                    delim_str = create_CString(
+                                    strtok_delim[(++it)%strtok_delim_size]);
+                    VERBOSE("delim==%s\n", *delim_str);
+                    writeCString_VoidTPtr(delim, delim_str);
+                    ret=strtok_r_spec(context_r[k], NULL_VoidTPtr, delim,
+                                                            &buffer_r[k]);
+                    DUMP("\n");
+                }
+
+                delim_str=create_CString(
+                           strtok_delim[(++it)%strtok_delim_size]);
+                VERBOSE("delim==%s\n", *delim_str);
+                writeCString_VoidTPtr(delim, delim_str);
+                DUMP("\n");
+            }
+        }
+    }
+
+
+    return true;
+}
+
+scenario
+bool __strtok_r_scen()
+{   
+    StringTPtr ret;
+    CString* stringp_str, *delim_str;    
+    IntT i, j, it;    
+
+    iterate(int k=0;k<NUM_THREADS;k++;)
+        for(i=0;i<strtok_stringp_size;i++)
+            for(j=0;j<strtok_delim_size;j++)
+            {
+                it=j;
+                VERBOSE("In _r do...\n");
+                stringp_str=create_CString(strtok_stringp[i]);
+                VERBOSE("stringp==%s\n", *stringp_str);
+                writeCString_VoidTPtr(stringp_r[k], stringp_str);
+                    
+                delim_str=create_CString(
+                            strtok_delim[(++it)%strtok_delim_size]);
+                VERBOSE("delim==%s\n", *delim_str);
+                writeCString_VoidTPtr(delim, delim_str);
+            
+                VERBOSE("bef_spec...\n");
+
+                ret=__strtok_r_spec(context_r[k], stringp_r[k], delim,
+                                                            &buffer_r[k]);
+                DUMP("\n");
+                while(!isNULL_VoidTPtr(ret)&& !isNULL_VoidTPtr(buffer_r[k]))
+                {
+                    delim_str=create_CString(
+                            strtok_delim[(++it)%strtok_delim_size]);
+                    VERBOSE("delim==%s\n", *delim_str);
+                    writeCString_VoidTPtr(delim, delim_str);
+                    ret=__strtok_r_spec(context_r[k], NULL_VoidTPtr, delim,
+                                                            &buffer_r[k]);
+                    DUMP("\n");
+                }
+
+                delim_str=create_CString(
+                        strtok_delim[(++it)%strtok_delim_size]);
+                VERBOSE("delim==%s\n", *delim_str);
+                writeCString_VoidTPtr(delim, delim_str);
+                DUMP("\n");
+            }
+
+
+    return true;
+}
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm token_scenario =
+{
+    .init = init_token_scenario,
+    .finish = finish_token_scenario,
+    .actions = { 
+                    strsep_scen,
+                    strtok_scen,
+                    strtok_r_scen,
+                    __strtok_r_scen,
+                    NULL 
+                }
+};
+
+
+#ifdef UTIL_CONVERSION_TOKEN_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/conversion/token_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initUtilConversionTokenSubsystem();
+}
+
+
+bool main_util_conversion_token(int argc, char** argv)
+{
+    addTraceToFile("trace.xml");
+    token_scenario(argc,argv);
+    return true;
+}
+
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    main_util_conversion_token(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+#endif

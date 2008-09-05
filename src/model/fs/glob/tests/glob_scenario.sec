@@ -1,0 +1,389 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/glob/tests/glob_scenario.seh"
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "fs/dir/dir_media.seh"
+#include "fs/fs/tests/fs_scenario.seh"
+#include "fs/glob/glob_media.seh"
+#include "fs/glob/tests/glob_scenario.seh"
+#include "process/meta/fs_media.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static char *path[] =
+{
+    /* 0 */ "/",
+    /* 1 */ "/usr",
+    /* 2 */ "/usr/local",
+    /* 3 */ "/var",
+    /* 4 */ /*"/var/local" */
+};
+
+static int PATH_NUMBER = sizeof(path)/sizeof(char*);
+
+static char *pattern[] =
+{
+    /*  0 */ "/usr/local",
+    /*  1 */ "/usr/lo?al",
+    /*  2 */ "/?sr/local",
+    /*  3 */ "/usr/loca?",
+    /*  4 */ "/usr*/local",
+    /*  5 */ "/usr/loca*",
+    /*  6 */ "/usr/*oca*",
+    /*  7 */ "/u*/local",
+    /*  8 */ "/usr**/local",
+    /*  9 */ "/usr/local**",
+    /* 10 */ "/u**/local",
+    /* 11 */ "//usr/local",
+    /* 12 */ "/usr/local/",
+    /* 13 */ //"/usr/local//",
+    /* 14 */ "/usr/lo\\cal",
+    /* 15 */ //"/\\usr/local",
+    /* 16 */ //"/usr/local\\",
+    /* 17 */ "/abbra/cadabra",
+    /* 18 */ "/abbra/ca?abra",
+    /* 19 */ "/?bbra/cadabra",
+    /* 20 */ "/abbra/cadabr?",
+    /* 21 */ "/abbra*/cadabra",
+    /* 22 */ "/abbra/c*",
+    /* 23 */ "/abbra/*cadabra*",
+    /* 24 */ "/*/cadabra",
+    /* 25 */ "/abbra**/cadabra",
+    /* 26 */ "/abbra/cadabra**",
+    /* 27 */ "/**/cadabra",
+    /* 28 */ "//abbra/cadabra",
+    /* 29 */ "/abbra/cadabra/",
+    /* 30 */ //"/abbra/cadabra//",
+    /* 31 */ "/abbra/ca\\dabra",
+    /* 32 */ //"/\\abbra/cadabra",
+    /* 33 */ //"/abbra/cadabra\\",
+};
+
+static int PATTERN_NUMBER=sizeof(pattern)/sizeof(char*);
+
+static GlobTPtr pglob;
+static Glob64TPtr pglob64;
+
+/********************************************************************/
+/**                      Test Scenario Debug                       **/
+/********************************************************************/
+#ifdef FS_GLOB_LOCAL_MAIN
+
+static AssertionExit system_assertion_handler;
+
+void fs_glob_assertion_exit(const char *format, va_list arg_list)
+{
+    system_assertion_handler(format, arg_list);
+}
+
+#endif /* #ifdef FS_GLOB_LOCAL_MAIN */
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool update_dirs(CallContext context)
+{
+    int i;
+
+    FileSystem *file_system = getFileSystem(context);
+    ErrorCode *error = create_ErrorCode(SUT_EOK);
+
+    for(i = 0; i < PATH_NUMBER; i++)
+    {
+        File *file;
+        DirEntT *dirEnt;
+        DIRTPtr dirp = opendir_spec(context, create_CString(path[i]), error, cancel_status);
+
+        if(isNULL_VoidTPtr(dirp))
+        {
+            return false;
+        }
+
+        while( (dirEnt = readdir_spec(context, dirp, error, cancel_status) )&&
+            !isNULL_VoidTPtr(dirEnt->pdirent));
+
+        file = getFile_FileSystem(file_system, create_CString(path[i]));
+        ((DirectoryDescriptor *)file->descriptor)->uptodate = true;
+
+        closedir_spec(context, dirp, error, cancel_status);
+    }
+
+    return true;
+}
+
+static bool init_glob_scenario(int argc, char **argv)
+{
+#ifdef FS_GLOB_LOCAL_MAIN
+
+    system_assertion_handler = atAssertion(fs_glob_assertion_exit);
+
+#endif /* #ifdef FS_GLOB_LOCAL_MAIN */
+
+    context = getContext();
+    initPathSystemConfiguration();
+    pglob = allocateMemoryBlock(context, sizeof_Type(context, "glob_t"));
+    pglob64 = allocateMemoryBlock(context, sizeof_Type(context, "glob64_t"));
+
+    if(isNULL_VoidTPtr(pglob) || isNULL_VoidTPtr(pglob64))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+static void finish_glob_scenario(void)
+{
+    deallocateMemoryBlock(context, pglob);
+    deallocateMemoryBlock(context, pglob64);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(glob_scenario);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool glob_scen()
+{
+    GlobFlags flags = default_GlobFlags();
+    GlobT *glob = default_GlobT();
+    Glob64T *glob64 = default_Glob64T();
+    int i=0, j=0;
+
+	update_dirs(context);
+		
+    for(i = 0; i < PATTERN_NUMBER; i++)
+    for(j = 0; j < 3; j++)
+    {
+        GlobErrorFunction *errfunc;
+
+        switch(j)
+        {
+        case 0:
+            errfunc = NULL;
+            break;
+        case 1:
+            errfunc = create_GlobErrorFunction(ZeroGlobErrorFunction, 0);
+            break;
+        case 2:
+            errfunc = create_GlobErrorFunction(OneGlobErrorFunction, 0);
+            break;
+        }
+
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+        globfree_spec(context, pglob);
+
+        /* GLOB_ERR */
+        flags.err = true;
+
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+        globfree_spec(context, pglob);
+
+        /* GLOB_MARK */
+        flags.mark = true;
+
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+        globfree_spec(context, pglob);
+
+        /* GLOB_NOSORT */
+        flags.nosort = true;
+
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+        globfree_spec(context, pglob);
+
+        /* GLOB_DOOFFS */
+        flags.dooffs = true;
+        glob->offs = 13;
+
+        setglob_spec(context, pglob, glob);
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+        globfree_spec(context, pglob);
+
+        /* GLOB_NOCHECK */
+        flags.dooffs = true;
+
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+        globfree_spec(context, pglob);
+
+        /* GLOB_APPEND */
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+
+        flags.append = true;
+
+        glob_spec(context, create_CString(pattern[(i + 13) % PATTERN_NUMBER]), flags, errfunc, pglob);
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+
+        globfree_spec(context, pglob);
+
+        flags.append = false;
+
+        /* GLOB_NOESCAPE */
+        flags.noescape = true;
+
+        glob_spec(context, create_CString(pattern[i]), flags, errfunc, pglob);
+        globfree_spec(context, pglob);
+    }
+
+    for(i = 0; i < PATTERN_NUMBER; i++)
+    for(j = 0; j < 3; j++)
+    {
+        GlobErrorFunction *errfunc;
+
+        switch(j)
+        {
+        case 0:
+            errfunc = NULL;
+            break;
+        case 1:
+            errfunc = create_GlobErrorFunction(ZeroGlobErrorFunction, 0);
+            break;
+        case 2:
+            errfunc = create_GlobErrorFunction(OneGlobErrorFunction, 0);
+            break;
+        }
+
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+        globfree64_spec(context, pglob64);
+
+        /* GLOB_ERR */
+        flags.err = true;
+
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+        globfree64_spec(context, pglob64);
+
+        /* GLOB_MARK */
+        flags.mark = true;
+
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+        globfree64_spec(context, pglob64);
+
+        /* GLOB_NOSORT */
+        flags.nosort = true;
+
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+        globfree64_spec(context, pglob64);
+
+        /* GLOB_DOOFFS */
+        flags.dooffs = true;
+        glob64->offs = 13;
+
+        setglob64_spec(context, pglob64, glob64);
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+        globfree64_spec(context, pglob64);
+
+        /* GLOB_NOCHECK */
+        flags.dooffs = true;
+
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+        globfree64_spec(context, pglob64);
+
+        /* GLOB_APPEND */
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+
+        flags.append = true;
+
+        glob64_spec(context, create_CString(pattern[(i + 13) % PATTERN_NUMBER]), flags, errfunc, pglob64);
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+
+        globfree64_spec(context, pglob64);
+
+        flags.append = false;
+
+        /* GLOB_NOESCAPE */
+        flags.noescape = true;
+
+        glob64_spec(context, create_CString(pattern[i]), flags, errfunc, pglob64);
+        globfree64_spec(context, pglob64);
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm glob_scenario =
+{
+    .init = init_glob_scenario,
+    .finish = finish_glob_scenario,
+    .actions =
+    {
+        glob_scen,
+        NULL
+    }
+};
+
+bool main_fs_glob(int argc, char **argv)
+{
+    glob_scenario(argc, argv);
+    return true;
+}
+
+#ifdef FS_GLOB_LOCAL_MAIN
+
+#include "common/init.seh"
+#include "common/control_center.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initFsDirSubsystem();
+    initProcessMetaFsSubsystem();
+    initFsGlobSubsystem();
+}
+
+int main(int argc, char **argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    addTraceToFile("trace.xml");
+    main_fs_glob(argc, argv);
+
+    return 0;
+}
+
+#endif /* #ifdef FS_GLOB_LOCAL_MAIN */

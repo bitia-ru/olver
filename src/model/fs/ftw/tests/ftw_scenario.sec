@@ -1,0 +1,468 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "fs/ftw/tests/ftw_scenario.seh"
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "fs/dir/dir_media.seh"
+#include "fs/dir/tests/fs_dump.seh"
+#include "fs/dir/tests/dir_scenario.seh"
+#include "fs/fs/tests/fs_scenario.seh"
+#include "fs/fs/fs_media.seh"
+#include "fs/ftw/ftw_media.seh"
+#include "fs/ftw/tests/ftw_scenario.seh"
+#include "fs/symlink/symlink_media.seh"
+#include "io/file/file_media.seh"
+#include "process/meta/fs_media.seh"
+#include "process/process/process_media.seh"
+#include "system/system/system_model.seh"
+
+bool pre_ftw_spec(CallContext context, CString *path, FTWFunction *fn,
+                  IntT ndirs, ErrorCode *errno);
+
+bool pre_ftw64_spec(CallContext context, CString *path, FTWFunction *fn,
+                    IntT ndirs, ErrorCode *errno);
+
+bool pre_nftw_spec(CallContext context, CString *path, FTWFunction *fn,
+                   IntT fd_limit, NFTWFlags flags, ErrorCode *errno);
+
+bool pre_nftw64_spec(CallContext context, CString *path, FTWFunction *fn,
+                     IntT fd_limit, NFTWFlags flags, ErrorCode *errno);
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+#define FILE_NUMBER 2
+
+char* file[FILE_NUMBER] = 
+{
+    /* 0 */ "file0",
+    /* 1 */ "file1"
+};
+
+#define DIR_NUMBER 2
+
+char* dir[DIR_NUMBER] = 
+{
+    /* 0 */ "dir0",
+    /* 1 */ "dir1"
+};
+
+#define SYMLINK_NUMBER 2
+
+char* symlink_array[SYMLINK_NUMBER] = 
+{
+    /* 0 */ "symlink0",
+    /* 1 */ "symlink1"
+};
+
+#define LEVEL_NUMBER 3
+
+#define MKDIR(path, perms)\
+    mkdir_spec(context, path, create_FilePermissions_String(perms), requestErrorCode())
+
+#define RMDIR(path)\
+    rmdir_spec(context, path, requestErrorCode())
+
+#define CREAT(path, perms)\
+    close_spec(context, creat_spec(context, path, create_FilePermissions_String(perms), requestErrorCode(), false), requestErrorCode())
+
+#define SYMLINK(symlink, path)\
+    symlink_spec(context, path, symlink, requestErrorCode(), cancel_status);
+
+#define UNLINK(path)\
+    unlink_spec(context, path, requestErrorCode(), cancel_status)
+
+/********************************************************************/
+/**                      Test Scenario Debug                       **/
+/********************************************************************/
+#ifdef FS_FTW_LOCAL_MAIN
+
+static AssertionExit system_assertion_handler;
+
+void fs_ftw_assertion_exit(const char *format, va_list arg_list)
+{
+    system_assertion_handler(format, arg_list);
+}
+
+#endif /* #ifdef FS_FTW_LOCAL_MAIN */
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static void create_environment(CString *root, int levels, const char *file_perms,
+                               const char *dir_perms)
+{
+    if(levels >= 0)
+    {
+        int i;
+        File *obj;
+
+        for(i = 0; i < FILE_NUMBER; i++)
+        {
+            CString *path = concat_Path(root, create_CString(file[i]));
+
+            CREAT(path, file_perms);
+
+            if((obj = getFile_FileSystem(getFileSystem(context), path)) != NULL)
+            {
+                obj->kind = RegularFile;
+            }
+        }
+
+        if(levels != 0)
+        {
+            for(i = 0; i < DIR_NUMBER; i++)
+            {
+                CString *path = concat_Path(root, create_CString(dir[i]));
+
+                MKDIR(path, dir_perms);
+
+                create_environment(path, levels - 1, file_perms, dir_perms);
+
+                if((obj = getFile_FileSystem(getFileSystem(context), path)) != NULL)
+                {
+                    setUptodate_Directory(obj, true);
+                }
+            }
+        }
+    }
+}
+
+static void create_symlinks(CString *root, int levels)
+{
+    if(levels >= 0)
+    {
+        int i, j, size;
+
+        if(levels != LEVEL_NUMBER)
+        {
+            List* list = split_Path(root);
+
+            size = size_List(list);
+
+            for(i = 0; i < SYMLINK_NUMBER; i++)
+            {
+                CString *path = create_CString("");
+                CString *link = concat_Path(root, create_CString(symlink_array[i]));
+
+                for(j = 0; j < size - (i % (LEVEL_NUMBER - levels) + 1); j++)
+                {
+                    path = concat_CString(path, create_CString("/"));
+                    path = concat_CString(path, get_List(list, j));
+                }
+
+                traceFormattedUserInfo("create_symlinks: LINK=$(obj)", link);
+                traceFormattedUserInfo("create_symlinks: PATH=$(obj)", path);
+
+                SYMLINK(link, path);
+            }
+        }
+
+        if(levels != 0)
+        {
+            for(i = 0; i < DIR_NUMBER; i++)
+            {
+                CString *path = concat_Path(root, create_CString(dir[i]));
+
+                create_symlinks(path, levels - 1);
+            }
+        }
+    }
+}
+
+static bool init_ftw_scenario(int argc, char **argv)
+{
+File* dir;
+
+#ifdef FS_FTW_LOCAL_MAIN
+
+    system_assertion_handler = atAssertion(fs_ftw_assertion_exit);
+
+#endif /* #ifdef FS_FTW_LOCAL_MAIN */
+
+    set_assertion_exit_callback();
+
+    //VERBOSE_ON();
+    context = getContext();
+    initReqFilters();
+    initPathSystemConfiguration();
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    return true;
+}
+
+static void finish_ftw_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(ftw_scenario);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+void ftw_call(CallContext context, CString *path, FTWFunction *fn, IntT ndirs )
+{
+    fn->nftw = false;
+
+    reset_FTWFunction(fn);
+
+    if(pre_ftw_spec(context, path, fn, ndirs, requestErrorCode()))
+    {
+        ftw_spec(context, path, fn, ndirs, requestErrorCode());
+    }
+
+    reset_FTWFunction(fn);
+
+    if(pre_ftw64_spec(context, path, fn, ndirs, requestErrorCode()))
+    {
+        ftw64_spec(context, path, fn, ndirs, requestErrorCode());
+    }
+
+    reset_FTWFunction(fn);
+}
+
+void nftw_call(CallContext context, CString *path, FTWFunction *fn, IntT ndirs,
+               NFTWFlags flags )
+{
+    fn->nftw = true;
+
+    reset_FTWFunction(fn);
+
+    if(pre_nftw_spec(context, path, fn, ndirs, flags, requestErrorCode()))
+    {
+        nftw_spec(context, path, fn, ndirs, flags, requestErrorCode());
+    }
+
+    reset_FTWFunction(fn);
+
+    if(pre_nftw64_spec(context, path, fn, ndirs, flags, requestErrorCode()))
+    {
+        nftw64_spec(context, path, fn, ndirs, flags, requestErrorCode());
+    }
+
+    reset_FTWFunction(fn);
+}
+
+void ftw_nftw_call(CallContext context, CString *path, FTWFunction *fn,
+                   IntT ndirs)
+{
+    NFTWFlags flags = default_NFTWFlags();
+
+    ftw_call(context, path, fn, ndirs );
+
+    nftw_call(context, path, fn, ndirs, flags );
+
+    flags.depth = true;
+    nftw_call(context, path, fn, ndirs, flags );
+
+    flags.phys = true;
+    nftw_call(context, path, fn, ndirs, flags );
+
+    flags.chdir = true;
+    nftw_call(context, path, fn, ndirs, flags );
+
+    flags.mount = true;
+    nftw_call(context, path, fn, ndirs, flags );
+}
+
+scenario
+bool ftw_f_scen()
+{
+    CString *path = getTestScenarioSandboxPathCh("");
+    FTWFunction *fn = default_FTWFunction();
+
+    // prepare test data dir
+    createTestScenarioSandboxDir(context);
+    create_environment(path, 0, "rwxrwxrwx", "rwxrwxrwx");
+
+    ftw_nftw_call(context, path, fn, 1 );
+
+    removeTestScenarioSandboxDir(context);
+    
+    return true;
+}
+
+scenario
+bool ftw_fd_scen()
+{
+    CString *path = getTestScenarioSandboxPathCh("");
+    FTWFunction *fn = default_FTWFunction();
+
+    // prepare test data dir
+    createTestScenarioSandboxDir(context);
+    create_environment(path, LEVEL_NUMBER, "rwxrwxrwx", "rwxrwxrwx");
+
+    ftw_nftw_call(context, path, fn, 1 );
+
+    removeTestScenarioSandboxDir(context);
+
+    return true;
+}
+
+scenario
+bool ftw_dnr_scen()
+{
+    CString *path = getTestScenarioSandboxPathCh("");
+    FTWFunction *fn = default_FTWFunction();
+
+    // prepare test data dir
+    createTestScenarioSandboxDir(context);
+    create_environment(path, LEVEL_NUMBER, "rwxrwxrwx", "-wx-wx-wx");
+
+    ftw_nftw_call(context, path, fn, 1 );
+
+    removeTestScenarioSandboxDir(context);
+
+    return true;
+}
+
+scenario
+bool ftw_non_zero_scen()
+{
+    CString *path = getTestScenarioSandboxPathCh("");
+
+    FTWFunction *fn0 = create_FTWFunction(false, ConstFTWFunction, 0, +1);
+    FTWFunction *fn1 = create_FTWFunction(false, ConstFTWFunction, 0, -1);
+
+    // prepare test data dir
+    createTestScenarioSandboxDir(context);
+    create_environment(path, LEVEL_NUMBER, "rwxrwxrwx", "rwxrwxrwx");
+
+    ftw_nftw_call(context, path, fn0, 1 );
+    ftw_nftw_call(context, path, fn1, 1 );
+
+    removeTestScenarioSandboxDir(context);
+
+    return true;
+}
+
+scenario
+bool ftw_ndirs_scen()
+{
+    CString *path = getTestScenarioSandboxPathCh("");
+    FTWFunction *fn = default_FTWFunction();
+
+    // prepare test data dir
+    createTestScenarioSandboxDir(context);
+    create_environment(path, LEVEL_NUMBER, "rwxrwxrwx", "-wx-wx-wx");
+
+    ftw_nftw_call(context, path, fn, -1 );
+    ftw_nftw_call(context, path, fn,  0 );
+
+    removeTestScenarioSandboxDir(context);
+
+    return true;
+}
+
+scenario
+bool ftw_eacces_scen()
+{
+    CString *path = getTestScenarioSandboxPathCh("");
+    CString *test_path = concat_Path(concat_Path(path, create_CString(dir[0])), create_CString(dir[0]));
+    FTWFunction *fn = default_FTWFunction();
+
+    // prepare test data dir
+    createTestScenarioSandboxDir(context);
+    create_environment(path, LEVEL_NUMBER, "rwxrwxrwx", "rw-rw-rw-");
+
+    ftw_nftw_call(context, test_path, fn, 1 );
+
+    removeTestScenarioSandboxDir(context);
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm ftw_scenario =
+{
+    .init = init_ftw_scenario,
+    .finish = finish_ftw_scenario,
+    .actions = 
+    {
+        ftw_f_scen,
+        ftw_fd_scen,
+        ftw_dnr_scen,
+        ftw_non_zero_scen,
+        ftw_ndirs_scen,
+        ftw_eacces_scen,
+        NULL
+    }
+};
+
+bool main_fs_ftw(int argc, char **argv)
+{
+
+    addTraceToFile("trace.xml");
+    ftw_scenario(argc, argv);
+    return true;
+}
+ 
+#ifdef FS_FTW_LOCAL_MAIN
+
+#include "common/init.seh"
+#include "common/control_center.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessMetaFsSubsystem();
+    initProcessProcessSubsystem();
+    initIoFileSubsystem();
+    initFsFsSubsystem();
+    initFsDirSubsystem();
+    initFsSymlinkSubsystem();
+    initFsFtwSubsystem();
+}
+
+int main(int argc, char **argv)
+{
+    initTestSystem();
+    loadSUT();
+  
+    main_fs_ftw(argc, argv);
+
+    return 0;
+}
+
+#endif /* #ifdef FS_FTW_LOCAL_MAIN */

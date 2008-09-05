@@ -1,0 +1,128 @@
+#!/bin/bash
+#
+# This script creates a report for the test run in the /results directory
+#
+
+#
+# Adjust Directory
+#
+pushd ${0%/*} > /dev/null 2>&1
+
+#
+# Timer sub
+#
+timer(){
+START=`date '+%s'`
+while [ ! -z `ps -eo pid | grep $1` ]
+do
+    NOW=`date '+%s'`
+    DIFF=$(( $NOW - $START ))
+    H=$(( $DIFF / 3600 ))
+    if [ $H -lt 10 ]; then H="0$H"; fi
+    M=$(( ($DIFF / 60) % 60 ))
+    if [ $M -lt 10 ]; then M="0$M"; fi
+    S=$(( $DIFF % 60 ))
+    if [ $S -lt 10 ]; then S="0$S"; fi
+    echo -e "\rElapsed time:   $H:$M:$S\c"
+    sleep 1
+done
+}
+
+GENERATE="../tools/TraceTools/bin/stargen -J-Xmx1048m"
+
+#
+# Parameters
+#
+export TTIMEMARK=${TTIMEMARK:-`date +%Y-%m-%d_%H-%M-%S`}
+export AGENT_LOG=${AGENT_LOG:-/tmp/olver-log/agent.log}
+export RUN_LOG=${RUN_LOG:-run.log}
+
+#
+# Prepare dir for reports and logs
+#
+REPORT_DIR=${OLVER_REPORT_DIR:-$(cd ".." && pwd)/results}/$TTIMEMARK
+if [ ! -d $REPORT_DIR ];then
+    mkdir -p $REPORT_DIR
+    chmod 755 $REPORT_DIR
+fi
+
+#
+# Move traces and logs
+#
+for F in *.utz
+do
+    mv -f $F $REPORT_DIR/$1
+done
+
+cp -f $AGENT_LOG $REPORT_DIR
+cp -f $RUN_LOG $REPORT_DIR
+cp -f *.log $REPORT_DIR
+
+#
+# Generate UniTesK report
+#
+echo ""
+echo "Generate UniTesK report"
+echo "----------------------------"
+$GENERATE -d $REPORT_DIR/report -x $REPORT_DIR/res.xml -mfpsc 40 -bdbs xml:../tools/BugDB/BugDB.xml $REPORT_DIR/*.utz
+
+
+#
+# Adjust Directory
+#
+cd ../tools/reportgen
+
+#
+# Generate REQ coverage report
+#
+echo ""
+echo "Generate REQ coverage report"
+echo "----------------------------"
+{ timer $$ & timerid=$! ;}
+if test -x /usr/bin/xsltproc; then
+    echo "xsltproc..."
+    xsltproc -o $REPORT_DIR/result.htm reqcoverage.xsl $REPORT_DIR/res.xml
+else
+    echo "xalan..."
+    java -classpath ../tools/share/java/xalan/xalan.jar org.apache.xalan.xslt.Process -IN $REPORT_DIR/res.xml -XSL reqcoverage.xsl -OUT $REPORT_DIR/result.htm
+fi
+echo
+{ kill -s 9 $timerid & sleep 1 ;} >/dev/null 2>&1
+
+#
+# Generate TET report
+#
+if test -x /usr/bin/perl; then
+    echo ""
+    echo "Generate TET-like report"
+    echo "----------------------------"
+    { timer $$ & timerid=$! ;}
+    mkdir -p $REPORT_DIR/tet
+    ./tetreport.pl $REPORT_DIR/res.xml > $REPORT_DIR/tet/tetreport.log
+#    ./tjreport -d $REPORT_DIR/tet/tetreport.log > $REPORT_DIR/tet/nice_tet.log
+    echo
+    { kill -s 9 $timerid & sleep 1 ;} >/dev/null 2>&1
+else
+    echo "TET-like report skipped because '/usr/bin/perl' is absent"
+fi
+
+#
+# Generate Summary Report
+#
+if test -x /usr/bin/perl; then
+    echo ""
+    echo "Generate OLVER summary report"
+    echo "----------------------------"
+    ./sumreport.pl $REPORT_DIR/res.xml $REPORT_DIR/result.htm $REPORT_DIR/run.log $REPORT_DIR/agent.log ./LSBCoreFunctions $TTIMEMARK $REPORT_DIR/unknown_failures.txt > $REPORT_DIR/summary.htm
+else
+    echo "OLVER summary report skipped because '/usr/bin/perl' is absent"
+fi
+
+echo ""
+echo "Open $REPORT_DIR/summary.htm to see reports"
+echo ""
+
+#
+# Restore Directory
+#
+popd > /dev/null 2>&1

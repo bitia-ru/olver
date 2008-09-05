@@ -1,0 +1,1499 @@
+ /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "math/chyper/chyper_model.seh"
+#include "math/math/math_config.h"
+
+#pragma SEC subsystem chyper "math.chyper"
+
+
+
+/* 
+   The group of functions 'math.chyper' consists of: 
+       cacosh [2]
+       cacoshf [2]
+       cacoshl [2]
+       casinh [2]
+       casinhf [2]
+       casinhl [2]
+       catanh [2]
+       catanhf [2]
+       catanhl [2]
+       ccosh [2]
+       ccoshf [2]
+       ccoshl [2]
+       csinh [2]
+       csinhf [2]
+       csinhl [2]
+       ctanh [2]
+       ctanhf [2]
+       ctanhl [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+cacosh, cacoshf, cacoshl - complex arc hyperbolic cosine functions 
+
+SYNOPSIS
+
+#include <complex.h>
+
+double complex cacosh(double complex z);
+
+float complex cacoshf(float complex z);
+
+long double complex cacoshl(long double complex z);
+
+DESCRIPTION
+
+[CX] The functionality described on this reference page is aligned with the ISO 
+C standard. Any conflict between the requirements described here and the ISO C 
+standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the 
+ISO C standard. These functions shall compute the complex arc hyperbolic cosine 
+of z, with a branch cut at values less than 1 along the real axis.
+
+RETURN VALUE
+
+These functions shall return the complex arc hyperbolic cosine value, in the 
+range of a half-strip of non-negative values along the real axis and in the 
+interval [-i, +i] along the imaginary axis.
+
+ERRORS
+
+No errors are defined.
+*/
+
+//This specification refers to: cacoshf, cacosh, cacoshl
+specification
+UnifloatComplex* cacosh_spec( CallContext context, UnifloatComplex* x )
+{
+    char type[3][10] = {"cacoshf", "cacosh", "cacoshl"};
+
+    FILTER(type[(x->Re)->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "RE and IM part of x shall not be NULL", 
+            (x->Re != NULL) && (x->Im != NULL));
+        /*[Type coincidence]*/
+        REQ("", "RE and IM part of x has equal type", 
+            (x->Re)->type == (x->Im)->type);
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        UnifloatType type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+        Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+        Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+        Unifloat* One = createOne_Unifloat(type);
+
+        /*[Calculate model function]*/
+        UnifloatComplex* model_res = cacosh_model(x);
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        round_Unifloat(cacosh_spec->Re, mant);
+        round_Unifloat(cacosh_spec->Im, mant);
+
+        if (CHECK_EXTENDED_REQ)
+        if (x->Im->sign == 1)
+        {
+            if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(±0 + i * 0) returns +0 + i * Pi/2.
+                 */
+                REQ("cacosh.ext.04;cacoshf.ext.04;cacoshl.ext.04",
+                    "cacosh(±0 + i * 0) returns +0 + i * Pi/2", 
+                    isZero_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(cacosh_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(x + i * Inf) returns +Inf + i * Pi/2, for finite x.
+                 */
+                REQ("cacosh.ext.05;cacoshf.ext.05;cacoshl.ext.05", 
+                    "cacosh(x + i * Inf) returns +Inf + i * Pi/2, for finite x",
+                    isInfinity_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(cacosh_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite x.
+                 */
+                REQ("cacosh.ext.06;cacoshf.ext.06;cacoshl.ext.06", 
+                    "cacosh(x + i * NaN) returns NaN + i * NaN", 
+                    isNan_Unifloat(cacosh_spec->Re) && isNan_Unifloat(cacosh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(-Inf + i * y) returns +Inf + i * Pi, for positive-signed finite y.
+                 */
+                REQ("cacosh.ext.07;cacoshf.ext.07;cacoshl.ext.07", 
+                    "cacosh(-Inf + i * y) returns +Inf + i * Pi, for positive-signed finite y",
+                    isInfinity_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) && 
+                    (compareWithPrecision_Unifloat(cacosh_spec->Im, Pi[type], mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+            {
+                /* 
+                 * cacosh(+Inf + i * y) returns +Inf + i * 0, for positive - singed finite y.
+                 */
+                REQ("cacosh.ext.08;cacoshf.ext.08;cacoshl.ext.08", 
+                    "cacosh(+Inf + i * y) returns +Inf + i * 0, for positive - singed finite y",
+                    isInfinity_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) &&
+                    isZero_Unifloat(cacosh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(-Inf + i * Inf) returns +Inf + i * 3*Pi/4.
+                 */
+                REQ("cacosh.ext.09;cacoshf.ext.09;cacoshl.ext.09", 
+                    "cacosh(-Inf + i * Inf) returns +Inf + i * 3*Pi/4",
+                    isInfinity_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(cacosh_spec->Im, ThreePiFour, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(+Inf + i * Inf) returns +Inf + i * Pi/4.
+                 */
+                REQ("cacosh.ext.10;cacoshf.ext.10;cacoshl.ext.10", 
+                    "cacosh(+Inf + i * Inf) returns +Inf + i * Pi/4",
+                    isInfinity_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(cacosh_spec->Im, PiFour, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(±Inf + i * NaN) returns +Inf + i * NaN.
+                 */
+                REQ("cacosh.ext.11;cacoshf.ext.11;cacoshl.ext.11",
+                    "cacosh(±Inf + i * NaN) returns +Inf + i * NaN",
+                    isInfinity_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) &&
+                    isNan_Unifloat(cacosh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite y.
+                 */
+                REQ("cacosh.ext.12;cacoshf.ext.12;cacoshl.ext.12",
+                    "cacosh(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(cacosh_spec->Re) && isNan_Unifloat(cacosh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(NaN + i * Inf) return +Inf + i * NaN.
+                 */
+                REQ("cacosh.ext.13;cacoshf.ext.13;cacoshl.ext.13",
+                    "cacosh(NaN + i * Inf) return +Inf + i * NaN",
+                    isInfinity_Unifloat(cacosh_spec->Re) && (cacosh_spec->Re->sign == 1) &&
+                    isNan_Unifloat(cacosh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("cacosh.ext.14;cacoshf.ext.14;cacoshl.ext.14",
+                    "cacosh(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(cacosh_spec->Re) && isNan_Unifloat(cacosh_spec->Im));
+            }
+            if ((compare_Unifloat(x->Re, One) == 0) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(1 + i * 0) returns 0 + i * 0.
+                 */
+                REQ("cacosh.ext.15;cacoshf.ext.15;cacoshl.ext.15", 
+                    "cacosh(1 + i * 0) returns 0 + i * 0",
+                    isZero_Unifloat(cacosh_spec->Re) && isZero_Unifloat(cacosh_spec->Im));
+            }
+
+            if ((compare_Unifloat(abs_Unifloat(x->Re), One) == 0) && (x->Re->sign == -1) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cacosh(-1 + i * 0) returns 0 + i * Pi.
+                 */
+                REQ("cacosh.ext.16;cacoshf.ext.16;cacoshl.ext.16", 
+                    "cacosh(-1 + i * 0) returns 0 + i * Pi",
+                    isZero_Unifloat(cacosh_spec->Re) && 
+                    (compareWithPrecision_Unifloat(cacosh_spec->Im, Pi[type], mant) == 0));
+            }
+        }
+        /*
+         * These functions shall return the complex arc hyperbolic cosine 
+         * value, in the range of a half-strip of non-negative values along 
+         * the real axis and in the interval [-i, +i] along the imaginary axis.
+         */
+        REQ("cacosh.02;cacoshf.02;cacoshl.02", 
+            "Result should be in the range of a half-strip of non-negative values along "
+            " the real axis and in the interval [-iPi, +iPi] along the imaginary axis", 
+            (cacosh_spec->Re->sign == 1) && 
+            (compareWithPrecision_Unifloat(abs_Unifloat(cacosh_spec->Im), clone(Pi[type]), mant) != 1));
+        
+        /*  
+         * These functions shall compute the complex arc hyperbolic cosine of 
+         * z, with a branch cut at values less than 1 along the real axis.
+         */
+        REQ("cacosh.01;cacoshf.01;cacoshl.01", 
+            "Functions shall return the complex arc hyperbolic cosine value", 
+            compareWithPrecision_UnifloatComplex(cacosh_spec, model_res, mant) == 0);
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+casinh, casinhf, casinhl - complex arc hyperbolic sine functions 
+
+SYNOPSIS
+
+#include <complex.h>
+
+double complex casinh(double complex z);
+
+float complex casinhf(float complex z);
+
+long double complex casinhl(long double complex z);
+
+DESCRIPTION
+
+[CX] The functionality described on this reference page is aligned with the ISO 
+C standard. Any conflict between the requirements described here and the ISO C 
+standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the 
+ISO C standard. These functions shall compute the complex arc hyperbolic sine 
+of z, with branch cuts outside the interval [-i, +i] along the imaginary axis.
+
+RETURN VALUE
+
+These functions shall return the complex arc hyperbolic sine value, in the 
+range of a strip mathematically unbounded along the real axis and in the 
+interval [-i/2, +i/2] along the imaginary axis.
+
+ERRORS
+
+No errors are defined.
+*/
+
+//This specification refers to: casinhf, casinh, casinhl
+specification
+UnifloatComplex* casinh_spec( CallContext context, UnifloatComplex* x )
+{
+    char type[3][10] = {"casinhf", "casinh", "casinhl"};
+
+    FILTER(type[(x->Re)->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "RE and IM part of x shall not be NULL", 
+            (x->Re != NULL) && (x->Im != NULL));
+        /*[Type coincidence]*/
+        REQ("", "RE and IM part of x has equal type", 
+            (x->Re)->type == (x->Im)->type);
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        UnifloatType type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+        Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+        Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+        Unifloat* One = createOne_Unifloat(type);
+
+        /*[Calculate model function]*/
+        UnifloatComplex* model_res = casinh_model(x);
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        round_Unifloat(casinh_spec->Re, mant);
+        round_Unifloat(casinh_spec->Im, mant);
+
+        if (CHECK_EXTENDED_REQ)
+        if ((x->Im->sign == 1) && (x->Re->sign == 1))
+        {
+            if (isZero_Unifloat(x->Re) && (x->Re->sign == 1) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(+0 + i * 0) returns 0 + i * 0.
+                 */
+                REQ("casinh.ext.05;casinhf.ext.05;casinhl.ext.05",
+                    "casinh(+0 + i * 0) returns 0 + i * 0", 
+                    isZero_Unifloat(casinh_spec->Re) && isZero_Unifloat(casinh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(x + i * Inf) returns +Inf + i * Pi/2 for positive-signed finite x.
+                 */
+                REQ("casinh.ext.06;casinhf.ext.06;casinhl.ext.06", 
+                    "casinh(x + i * Inf) returns +Inf + i * Pi/2 for positive-signed finite x",
+                    isInfinity_Unifloat(casinh_spec->Re) && (casinh_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(casinh_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite x.
+                 */
+                REQ("casinh.ext.07;casinhf.ext.07;casinhl.ext.07", 
+                    "casinh(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(casinh_spec->Re) && isNan_Unifloat(casinh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(+Inf + i * y) returns +Inf + i * 0 for positive-signed finite y.
+                 */
+                REQ("casinh.ext.08;casinhf.ext.08;casinhl.ext.08", 
+                    "casinh(+Inf + i * y) returns +Inf + i * 0 for positive-signed finite y",
+                    isInfinity_Unifloat(casinh_spec->Re) && (casinh_spec->Re->sign == 1) &&
+                    isZero_Unifloat(casinh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(+Inf + i * Inf) returns +Inf + i * Pi/4.
+                 */
+                REQ("casinh.ext.09;casinhf.ext.09;casinhl.ext.09", 
+                    "casinh(+Inf + i * Inf) returns +Inf + i * Pi/4",
+                    isInfinity_Unifloat(casinh_spec->Re) && (casinh_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(casinh_spec->Im, PiFour, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(+Inf + i * NaN) returns +Inf + i * NaN.
+                 */
+                REQ("casinh.ext.10;casinhf.ext.10;casinhl.ext.10", 
+                    "casinh(+Inf + i * NaN) returns +Inf + i * NaN", 
+                    isInfinity_Unifloat(casinh_spec->Re) && (casinh_spec->Re->sign == 1) &&
+                    isNan_Unifloat(casinh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(NaN + i * 0) returns NaN + i * 0.
+                 */
+                REQ("casinh.ext.11;casinhf.ext.11;casinhl.ext.11",
+                    "casinh(NaN + i * 0) returns NaN + i * 0",
+                    isNan_Unifloat(casinh_spec->Re) && isZero_Unifloat(casinh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+            {
+                /* 
+                 * casinh(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite nonzero y.
+                 */
+                REQ("casinh.ext.12;casinhf.ext.12;casinhl.ext.12", 
+                    "casinh(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(casinh_spec->Re) && isNan_Unifloat(casinh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(NaN + i * Inf) returns ±Inf + i * NaN (where the sign of the real part
+                 * of the result is unspecified).
+                 */
+                REQ("casinh.ext.13;casinhf.ext.13;casinhl.ext.13", 
+                    "casinh(NaN + i * Inf) returns ±Inf + i * NaN",
+                    isInfinity_Unifloat(casinh_spec->Re) && isNan_Unifloat(casinh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * casinh(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("casinh.ext.14;casinhf.ext.14;casinhl.ext.14",
+                    "casinh(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(casinh_spec->Re) && isNan_Unifloat(casinh_spec->Im));
+            }
+            if (isZero_Unifloat(x->Re) && (compare_Unifloat(x->Im, One) == 0))
+            {
+                /*
+                 * casinh(0 + i) returns 0 + i * Pi/2.
+                 */
+                REQ("casinh.ext.15;casinhf.ext.15;casinhl.ext.15", 
+                    "casinh(0 + i) returns 0 + i * Pi/2",
+                    isZero_Unifloat(casinh_spec->Re) && 
+                    (compareWithPrecision_Unifloat(casinh_spec->Im, PiTwo, mant) == 0));
+            }
+        }
+
+        /*
+         * These functions shall return the complex arc hyperbolic sine value, 
+         * in the range of a strip mathematically unbounded along the real axis 
+         * and in the interval [-iPi/2, +iPi/2] along the imaginary axis.
+         */
+        REQ("casinh.02;casinhf.02;casinhl.02", 
+            "Imaginary part of result should be in the range [-iPi/2, +iPi/2]", 
+            compareWithPrecision_Unifloat(abs_Unifloat(casinh_spec->Im), PiTwo, mant) != 1);
+
+        /*
+         * These functions shall compute the complex arc hyperbolic sine of z, 
+         * with branch cuts outside the interval [-i, +i] along the imaginary 
+         * axis.
+         */
+        REQ("casinh.01;casinhf.01;casinhl.01", 
+            "Functions shall return the complex arc hyperbolic sine value", 
+            compareWithPrecision_UnifloatComplex(casinh_spec, model_res, mant) == 0);
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+catanh, catanhf, catanhl - complex arc hyperbolic tangent functions 
+
+SYNOPSIS
+
+#include <complex.h>
+
+double complex catanh(double complex z);
+
+float complex catanhf(float complex z);
+
+long double complex catanhl(long double complex z);
+
+DESCRIPTION
+
+[CX] The functionality described on this reference page is aligned with the ISO 
+C standard. Any conflict between the requirements described here and the ISO C 
+standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the 
+ISO C standard. These functions shall compute the complex arc hyperbolic 
+tangent of z, with branch cuts outside the interval [-1, +1] along the real 
+axis.
+
+RETURN VALUE
+
+These functions shall return the complex arc hyperbolic tangent value, in the 
+range of a strip mathematically unbounded along the real axis and in the 
+interval [-i/2, +i/2] along the imaginary axis.
+
+ERRORS
+
+No errors are defined.
+*/
+
+//This specification refers to: catanhf, catanh, catanhl
+specification
+UnifloatComplex* catanh_spec( CallContext context, UnifloatComplex* x )
+{
+    char type[3][10] = {"catanhf", "catanh", "catanhl"};
+    Unifloat* One;
+    One = createOne_Unifloat((x->Re)->type);
+
+    FILTER(type[(x->Re)->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "RE and IM part of x shall not be NULL", 
+            (x->Re != NULL) && (x->Im != NULL));
+        /*[Type coincidence]*/
+        REQ("", "RE and IM part of x has equal type", 
+            (x->Re)->type == (x->Im)->type);
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        UnifloatType type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+        Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+        Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+
+        /*[Calculate model function]*/
+        UnifloatComplex* model_res = catanh_model(x);
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        round_Unifloat(catanh_spec->Re, mant);
+        round_Unifloat(catanh_spec->Im, mant);
+
+        if (CHECK_EXTENDED_REQ)
+        if ((x->Re->sign == 1) && (x->Im->sign == 1))
+        {
+            if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(+0 + i * 0) returns +0 + i * 0.
+                 */
+                REQ("catanh.ext.05;catanhf.ext.05;catanhl.ext.05",
+                    "catanh(+0 + i * 0) returns +0 + i * 0",
+                    isZero_Unifloat(catanh_spec->Re) && isZero_Unifloat(catanh_spec->Im));
+            }
+
+            if (isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(+0 + i * NaN) returns +0 + i * NaN.
+                 */
+                REQ("catanh.ext.06;catanhf.ext.06;catanhl.ext.06",
+                    "catanh(+0 + i * NaN) returns +0 + i * NaN",
+                    isZero_Unifloat(catanh_spec->Re) && isNan_Unifloat(catanh_spec->Im));
+            }
+
+            if ((compare_Unifloat(x->Re, One) == 0) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(+1 + i * 0) returns +Inf + i * 0 and raises the "divide-by-zero"
+                 * floating-point exception.
+                 */
+                REQ("catanh.ext.07;catanhf.ext.07;catanhl.ext.07", 
+                    "catanh(+1 + i * 0) returns +Inf + i * 0", 
+                    isInfinity_Unifloat(catanh_spec->Re) && isZero_Unifloat(catanh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(x + i * Inf) returns +0 + i * Pi/2, for finite positive-signed x.
+                 */
+                REQ("catanh.ext.08;catanhf.ext.08;catanhl.ext.08", 
+                    "catanh(x + i * Inf) returns +0 + i * Pi/2",
+                    isZero_Unifloat(catanh_spec->Re) && 
+                    (compareWithPrecision_Unifloat(catanh_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for nonzero finite x.
+                 */
+                REQ("catanh.ext.09;catanhf.ext.09;catanhl.ext.09", 
+                    "catanh(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(catanh_spec->Re) && isNan_Unifloat(catanh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(+Inf + i * y) returns +0 + i * Pi/2, for finite positive-signed y.
+                 */
+                REQ("catanh.ext.10;catanhf.ext.10;catanhl.ext.10",
+                    "catanh(+Inf + i * y) returns +0 + i * Pi/2",
+                    isZero_Unifloat(catanh_spec->Re) && 
+                    (compareWithPrecision_Unifloat(catanh_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(+Inf + i * Inf) returns +0 + i * Pi/2.
+                 */
+                REQ("catanh.ext.11;catanhf.ext.11;catanhl.ext.11", 
+                    "catanh(+Inf + i * Inf) returns +0 + i * Pi/2",
+                    isZero_Unifloat(catanh_spec->Re) &&
+                    (compareWithPrecision_Unifloat(catanh_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(+Inf + i * NaN) returns +0 + i * NaN.
+                 */
+                REQ("catanh.ext.12;catanhf.ext.12;catanhl.ext.12",
+                    "catanh(+Inf + i * NaN) returns +0 + i * NaN",
+                    isZero_Unifloat(catanh_spec->Re) && isNan_Unifloat(catanh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite y.
+                 */
+                REQ("catanh.ext.13;catanhf.ext.13;catanhl.ext.13", 
+                    "catanh(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(catanh_spec->Re) && isNan_Unifloat(catanh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(NaN + i * Inf) returns ±0 + i * Pi/2 (where the sign of the real part of
+                 * the result is unspecified).
+                 */
+                REQ("catanh.ext.14;catanhf.ext.14;catanhl.ext.14", 
+                    "catanh(NaN + i * Inf) returns ±0 + i * Pi/2",
+                    isZero_Unifloat(catanh_spec->Re) && 
+                    (compareWithPrecision_Unifloat(catanh_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * catanh(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("catanh.ext.15;catanhf.ext.15;catanhl.ext.15",
+                    "catanh(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(catanh_spec->Re) && isNan_Unifloat(catanh_spec->Im));
+            }
+        }
+
+        /*
+         * These functions shall return the complex arc hyperbolic tangent 
+         * value, in the range of a strip mathematically unbounded along the 
+         * real axis and in the interval [-i*Pi/2, +i*Pi/2] along the imaginary axis.
+         */
+        REQ("catanh.02;catanhf.02;catanhl.02", 
+            "Functions shall return the complex arc hyperbolic tangent value", 
+            compareWithPrecision_Unifloat(abs_Unifloat(catanh_spec->Im), PiTwo, mant) != 1);
+
+        /*
+         * These functions shall compute the complex arc hyperbolic tangent of 
+         * z, with branch cuts outside the interval [-1, +1] along the real 
+         * axis.
+         */
+        REQ("catanh.01;catanhf.01;catanhl.01", 
+            "Functions shall return the complex arc hyperbolic tangent value", 
+            compareWithPrecision_UnifloatComplex(catanh_spec, model_res, mant) == 0);
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+ccosh, ccoshf, ccoshl - complex hyperbolic cosine functions 
+
+SYNOPSIS
+
+#include <complex.h>
+
+double complex ccosh(double complex z);
+
+float complex ccoshf(float complex z);
+
+long double complex ccoshl(long double complex z);
+
+DESCRIPTION
+
+[CX] The functionality described on this reference page is aligned with the ISO 
+C standard. Any conflict between the requirements described here and the ISO C 
+standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the 
+ISO C standard. These functions shall compute the complex hyperbolic cosine of 
+z.
+
+RETURN VALUE
+
+These functions shall return the complex hyperbolic cosine value.
+
+ERRORS
+
+No errors are defined.
+*/
+
+//This specification refers to: ccoshf, ccosh, ccoshl
+specification
+UnifloatComplex* ccosh_spec( CallContext context, UnifloatComplex* x )
+{
+    char type[3][10] = {"ccoshf", "ccosh", "ccoshl"};
+
+    FILTER(type[(x->Re)->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "RE and IM part of x shall not be NULL", 
+            (x->Re != NULL) && (x->Im != NULL));
+        /*[Type coincidence]*/
+        REQ("", "RE and IM part of x has equal type", 
+            (x->Re)->type == (x->Im)->type);
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        UnifloatComplex* cis;
+        UnifloatType type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        Unifloat* One = createOne_Unifloat(type);
+        Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+        Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+        Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+
+        /*[Calculate model function]*/
+        UnifloatComplex* model_res = ccosh_model(x);
+
+        if (isOverflow_Unifloat(model_res->Re))
+        {
+            int sign = model_res->Re->sign;
+            model_res->Re = clone(infinity_Unifloat(type));
+            model_res->Re->sign = sign;
+        }
+
+        if (isOverflow_Unifloat(model_res->Im))
+        {
+            int sign = model_res->Im->sign;
+            model_res->Im = clone(infinity_Unifloat(type));
+            model_res->Im->sign = sign;
+        }
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        round_Unifloat(ccosh_spec->Re, mant);
+        round_Unifloat(ccosh_spec->Im, mant);
+
+        if (CHECK_EXTENDED_REQ)
+        if ((x->Im->sign == 1) && (x->Re->sign == 1))
+        {
+            if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(+0 + i * 0) returns 1 + i * 0.
+                 */
+                REQ("ccosh.ext.05;ccoshf.ext.05;ccoshl.ext.05",
+                    "ccosh(+0 + i * 0) returns 1 + i * 0", 
+                    (compare_Unifloat(ccosh_spec->Re, One) == 0) &&
+                    isZero_Unifloat(ccosh_spec->Im));
+            }
+            
+            if (isZero_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(+0 + i * Inf) returns NaN ± i * 0 (where the sign of the imaginary part
+                 * of the result is unspecified) and raises the "invalid" floating-point exception.
+                 */
+                REQ("ccosh.ext.06;ccoshf.ext.06;ccoshl.ext.06",
+                    "ccosh(+0 + i * Inf) returns NaN ± i * 0",
+                    isNan_Unifloat(ccosh_spec->Re) && isZero_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(+0 + i * NaN) returns NaN ± i * 0 (where the sign of the imaginary part
+                 * of the result is unspecified).
+                 */
+                REQ("ccosh.ext.07;ccoshf.ext.07;ccoshl.ext.07",
+                    "ccosh(+0 + i * NaN) returns NaN ± i * 0",
+                    isNan_Unifloat(ccosh_spec->Re) && isZero_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(x + i * Inf) returns NaN + i * NaN and raises the "invalid" floating-
+                 * point exception, for finite nonzero x.
+                 */
+                REQ("ccosh.ext.08;ccoshf.ext.08;ccoshl.ext.08", 
+                    "ccosh(x + i * Inf) returns NaN + i * NaN", 
+                    isNan_Unifloat(ccosh_spec->Re) && isNan_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite nonzero x.
+                 */
+                REQ("ccosh.ext.09;ccoshf.ext.09;ccoshl.ext.09", 
+                    "ccosh(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(ccosh_spec->Re) && isNan_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(+Inf + i * 0) returns +Inf + i * 0.
+                 */
+                REQ("ccosh.ext.10;ccoshf.ext.10;ccoshl.ext.10", 
+                    "ccosh(+Inf + i * 0) returns +Inf + i * 0",
+                    isInfinity_Unifloat(ccosh_spec->Re) && (ccosh_spec->Re->sign == 1) &&
+                    isZero_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+            {
+                cis = create_UnifloatComplex(cos_Unifloat(x->Im), sin_Unifloat(x->Im));
+                /*
+                 * ccosh(+Inf + i * y) returns +Inf * cis(y), for finite y (where cis(y) = cos(y) +
+                 * i * sin(y)).
+                 */
+                REQ("ccosh.ext.11;ccoshf.ext.11;ccoshl.ext.11", 
+                    "ccosh(+Inf + i * y) returns +Inf * cis(y)",
+                    (compare_Unifloat(ccosh_spec->Re, mul_Unifloat(infinity_Unifloat(type), cis->Re)) == 0) &&
+                    (compare_Unifloat(ccosh_spec->Im, mul_Unifloat(infinity_Unifloat(type), cis->Im)) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(+Inf + i * Inf) returns ±Inf + i * NaN (where the sign of real part of
+                 * the result is unspecified) and raises the "invalid" floating-point exception.
+                 */
+                REQ("ccosh.ext.12;ccoshf.ext.12;ccoshl.ext.12", 
+                    "ccosh(+Inf + i * Inf) returns ±Inf + i * NaN",
+                    isInfinity_Unifloat(ccosh_spec->Re) && isNan_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(+Inf + i * NaN) returns +Inf + i * NaN.
+                 */
+                REQ("ccosh.ext.13;ccoshf.ext.13;ccoshl.ext.13", 
+                    "ccosh(+Inf + i * NaN) returns +Inf + i * NaN",
+                    isInfinity_Unifloat(ccosh_spec->Re) && isNan_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(NaN + i * 0) returns NaN ± i * 0 (where the sign of the imaginary part of
+                 * the resul is unspecified).
+                 */
+                REQ("ccosh.ext.14;ccoshf.ext.14;ccoshl.ext.14", 
+                    "ccosh(NaN + i * 0) returns NaN ± i * 0",
+                    isNan_Unifloat(ccosh_spec->Re) && isZero_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && !isZero_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for all nonzero numbers y.
+                 */
+                REQ("ccosh.ext.15;ccoshf.ext.15;ccoshl.ext.15",
+                    "ccosh(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(ccosh_spec->Re) && isNan_Unifloat(ccosh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * ccosh(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("ccosh.ext.16;ccoshf.ext.16;ccoshl.ext.16",
+                    "ccosh(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(ccosh_spec->Re) && isNan_Unifloat(ccosh_spec->Im));
+            }
+        }
+
+        /*
+         * These functions shall compute the complex hyperbolic cosine of z.
+         */
+        /*
+         * These functions shall return the complex hyperbolic cosine value.
+         */
+         REQ("ccosh.02;ccoshf.02;ccoshl.02;ccosh.01;ccoshf.01;ccoshl.01", 
+            "Functions shall return the complex hyperbolic cosine value", 
+            compareWithPrecision_UnifloatComplex(ccosh_spec, model_res, mant) == 0);
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+csinh, csinhf, csinhl - complex hyperbolic sine functions 
+
+SYNOPSIS
+
+#include <complex.h>
+
+double complex csinh(double complex z);
+
+float complex csinhf(float complex z);
+
+long double complex csinhl(long double complex z);
+
+DESCRIPTION
+
+[CX] The functionality described on this reference page is aligned with the ISO 
+C standard. Any conflict between the requirements described here and the ISO C 
+standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the 
+ISO C standard. These functions shall compute the complex hyperbolic sine of z.
+
+RETURN VALUE
+
+These functions shall return the complex hyperbolic sine value.
+
+ERRORS
+
+No errors are defined.
+*/
+
+//This specification refers to: csinhf, csinh, csinhl
+specification
+UnifloatComplex* csinh_spec( CallContext context, UnifloatComplex* x )
+{
+    char type[3][10] = {"csinhf", "csinh", "csinhl"};
+
+    FILTER(type[(x->Re)->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "RE and IM part of x shall not be NULL", 
+            (x->Re != NULL) && (x->Im != NULL));
+        /*[Type coincidence]*/
+        REQ("", "RE and IM part of x has equal type", 
+            (x->Re)->type == (x->Im)->type);
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        UnifloatType type = x->Re->type;
+        int mant = digMant_Unifloat(type);
+
+        /*[Calculate model function]*/
+        UnifloatComplex* model_res = csinh_model(x);
+        UnifloatComplex* cis;
+
+        if (isOverflow_Unifloat(model_res->Re))
+        {
+            int sign = model_res->Re->sign;
+            model_res->Re = clone(infinity_Unifloat(type));
+            model_res->Re->sign = sign;
+        }
+
+        if (isOverflow_Unifloat(model_res->Im))
+        {
+            int sign = model_res->Im->sign;
+            model_res->Im = clone(infinity_Unifloat(type));
+            model_res->Im->sign = sign;
+        }
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        round_Unifloat(csinh_spec->Re, mant);
+        round_Unifloat(csinh_spec->Im, mant);
+
+        if (CHECK_EXTENDED_REQ)
+        if ((x->Re->sign == 1) && (x->Im->sign == 1))
+        {
+            if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(+0 + i * 0) returns +0 + i * 0.
+                 */
+                REQ("csinh.ext.05;csinhf.ext.05;csinhl.ext.05",
+                    "csinh(+0 + i * 0) returns +0 + i * 0",
+                    isZero_Unifloat(csinh_spec->Re) && isZero_Unifloat(csinh_spec->Im));
+            }
+
+            if (isZero_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(+0 + i * Inf) returns ±0 + i * NaN (where the sign of the real part of
+                 * the result is unspecified) and raises the "invalid" floating-point exception.
+                 */
+                REQ("csinh.ext.06;csinhf.ext.06;csinhl.ext.06", 
+                    "csinh(+0 + i * Inf) returns ±0 + i * NaN",
+                    isZero_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+
+            if (isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(+0 + i * NaN) returns ±0 + i * NaN (where the sign of the real part of
+                 * the result is unspecified).
+                 */
+                REQ("csinh.ext.07;csinhf.ext.07;csinhl.ext.07",
+                    "csinh(+0 + i * NaN) returns ±0 + i * NaN",
+                    isZero_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im) && !isZero_Unifloat(x->Re))
+            {
+                /*
+                 * csinh(x + i * Inf) returns NaN + i * NaN and raises the "invalid" floating-
+                 * point exception, for positive finite x.
+                 */
+                REQ("csinh.ext.08;csinhf.ext.08;csinhl.ext.08",
+                    "csinh(x + i * Inf) returns NaN + i * NaN", 
+                    isNan_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite nonzero x.
+                 */
+                REQ("csinh.ext.09;csinhf.ext.09;csinhl.ext.09", 
+                    "csinh(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(+Inf + i * 0) returns +Inf + i * 0.
+                 */
+                REQ("csinh.ext.10;csinhf.ext.10;csinhl.ext.10", 
+                    "csinh(+Inf + i * 0) returns +Inf + i * 0",
+                    isInfinity_Unifloat(csinh_spec->Re) && isZero_Unifloat(csinh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+            {
+                cis = create_UnifloatComplex(cos_Unifloat(x->Im), sin_Unifloat(x->Im));
+                /*
+                 * csinh(+Inf + i * y) returns +Inf * cis(y), for positive finite y (where cis(y) =
+                 * cos(y) + i * sin(y)).
+                 */
+                REQ("csinh.ext.11;csinhf.ext.11;csinhl.ext.11", 
+                    "csinh(+Inf + i * y) returns +Inf * cis(y)",
+                    (compare_Unifloat(csinh_spec->Re, mul_Unifloat(infinity_Unifloat(type), cis->Re)) == 0) &&
+                    (compare_Unifloat(csinh_spec->Im, mul_Unifloat(infinity_Unifloat(type), cis->Im)) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(+Inf + i * Inf) returns ±Inf + i * NaN (where the sign of the real part
+                 * of the result is unspecified) and raises the "invalid" floating-point exception.
+                 */
+                REQ("csinh.ext.12;csinhf.ext.12;csinhl.ext.12", 
+                    "csinh(+Inf + i * Inf) returns ±Inf + i * NaN",
+                    isInfinity_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(+Inf + i * NaN) returns ±Inf + i * NaN (where the sign of the real part
+                 * of the result is unspecified).
+                 */
+                REQ("csinh.ext.13;csinhf.ext.13;csinhl.ext.13", 
+                    "csinh(+Inf + i * NaN) returns ±Inf + i * NaN",
+                    isInfinity_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(NaN + i * 0) returns NaN + i * 0.
+                 */
+                REQ("csinh.ext.14;csinhf.ext.14;csinhl.ext.14",
+                    "csinh(NaN + i * 0) returns NaN + i * 0", 
+                    isNan_Unifloat(csinh_spec->Re) && isZero_Unifloat(csinh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && !isNan_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for all nonzero numbers y.
+                 */
+                REQ("csinh.ext.15;csinhf.ext.15;csinhl.ext.15", 
+                    "csinh(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csinh(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("csinh.ext.16;csinhf.ext.16;csinhl.ext.16", 
+                    "csinh(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(csinh_spec->Re) && isNan_Unifloat(csinh_spec->Im));
+            }
+        }
+
+        /*
+         * These functions shall compute the complex hyperbolic sine of z.
+         */
+        /*
+         * These functions shall return the complex hyperbolic sine value.
+         */
+        REQ("csinh.02;csinhf.02;csinhl.02;csinh.01;csinhf.01;csinhl.01", 
+            "Function shall return the complex hyperbolic sine value", 
+            compareWithPrecision_UnifloatComplex(csinh_spec, model_res, mant) == 0);
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    ctanh, ctanhf, ctanhl - complex hyperbolic tangent functions 
+
+SYNOPSIS
+
+    #include <complex.h>
+
+    double complex ctanh(double complex z);
+
+    float complex ctanhf(float complex z);
+
+    long double complex ctanhl(long double complex z);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and 
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 
+    defers to the ISO C standard. These functions shall compute the complex 
+    hyperbolic tangent of z.
+
+RETURN VALUE
+
+    These functions shall return the complex hyperbolic tangent value.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: ctanhf, ctanh, ctanhl
+specification
+UnifloatComplex* ctanh_spec( CallContext context, UnifloatComplex* x )
+{
+    char type[3][10] = {"ctanhf", "ctanh", "ctanhl"};
+
+    FILTER(type[(x->Re)->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+        /*[Implicit precondition]*/
+        REQ("", "RE and IM part of x shall not be NULL", 
+            (x->Re != NULL) && (x->Im != NULL));
+        /*[Type coincidence]*/
+        REQ("", "RE and IM part of x has equal type", 
+            (x->Re)->type == (x->Im)->type);
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        UnifloatType type = x->Re->type;
+        int mant = digMant_Unifloat(type);
+        Unifloat* One = createOne_Unifloat(type);
+        Unifloat* Zero = createZero_Unifloat(type);
+        Unifloat* Two = convertInteger_Unifloat(2, type);
+
+        /*[Calculate model function]*/
+        UnifloatComplex* model_res = ctanh_model(x);
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        round_Unifloat(ctanh_spec->Re, mant);
+        round_Unifloat(ctanh_spec->Im, mant);
+
+        if (CHECK_EXTENDED_REQ)
+        if ((x->Re->sign == 1) && (x->Im->sign == 1))
+        {
+            if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(+0 + i * 0) returns +0 + i * 0.
+                 */
+                REQ("ctanh.ext.05;ctanhf.ext.05;ctanhl.ext.05", 
+                    "ctanh(+0 + i * 0) returns +0 + i * 0",
+                    isZero_Unifloat(ctanh_spec->Re) && isZero_Unifloat(ctanh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(x + i * Inf) returns NaN + i * NaN and raises the "invalid" floating-
+                 * point exception, for finite x.
+                 */
+                REQ("ctanh.ext.06;ctanhf.ext.06;ctanhl.ext.06",
+                    "ctanh(x + i * Inf) returns NaN + i * NaN",
+                    isNan_Unifloat(ctanh_spec->Re) && isNan_Unifloat(ctanh_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite x.
+                 */
+                REQ("ctanh.ext.07;ctanhf.ext.07;ctanhl.ext.07", 
+                    "ctanh(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(ctanh_spec->Re) && isNan_Unifloat(ctanh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(+Inf + i * y) returns 1 + i * 0 * sin(2y), for positive-signed finite y.
+                 */
+                REQ("ctanh.ext.08;ctanhf.ext.08;ctanhl.ext.08", 
+                    "ctanh(+Inf + i * y) returns 1 + i * 0 * sin(2y)",
+                    (compare_Unifloat(ctanh_spec->Re, One) == 0) &&
+                    (compare_Unifloat(ctanh_spec->Im, mul_Unifloat(Zero, 
+                                      sin_Unifloat(mul_Unifloat(x->Im, Two)))) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(+Inf + i * Inf) returns 1 ± i * 0 (where the sign of the imaginary part
+                 * of the result is unspecified).
+                 */
+                REQ("ctanh.ext.09;ctanhf.ext.09;ctanhl.ext.09", 
+                    "ctanh(+Inf + i * Inf) returns 1 ± i * 0",
+                    (compare_Unifloat(ctanh_spec->Re, One) == 0) &&
+                    isZero_Unifloat(ctanh_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(+Inf + i * NaN) returns 1 ± i * 0 (where the sign of the imaginary part
+                 * of the result is unspecified).
+                 */
+                REQ("ctanh.ext.10;ctanhf.ext.10;ctanhl.ext.10", 
+                    "ctanh(+Inf + i * NaN) returns 1 ± i * 0",
+                    (compare_Unifloat(ctanh_spec->Re, One) == 0) &&
+                    isZero_Unifloat(ctanh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(NaN + i * 0) returns NaN + i * 0.
+                 */
+                REQ("ctanh.ext.11;ctanhf.ext.11;ctanhl.ext.11",
+                    "ctanh(NaN + i * 0) returns NaN + i * 0",
+                    isNan_Unifloat(ctanh_spec->Re) && isZero_Unifloat(ctanh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && !isNan_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for all nonzero numbers y.
+                 */
+                REQ("ctanh.ext.12;ctanhf.ext.12;ctanhl.ext.12",
+                    "ctanh(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(ctanh_spec->Re) && isNan_Unifloat(ctanh_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * ctanh(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("ctanh.ext.13;ctanhf.ext.13;ctanhl.ext.13", 
+                    "ctanh(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(ctanh_spec->Re) && isNan_Unifloat(ctanh_spec->Im));
+            }
+        }
+
+        /*
+         * These functions shall compute the complex hyperbolic tangent of z.
+         */
+        /*
+         * These functions shall return the complex hyperbolic tangent value.
+         */
+        REQ("ctanh.02;ctanhf.02;ctanhl.02;ctanh.01;ctanhf.01;ctanhl.01", 
+            "Functions shall return the complex hyperbolic tangent value", 
+            compareWithPrecision_UnifloatComplex(ctanh_spec, model_res, mant) == 0);
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+

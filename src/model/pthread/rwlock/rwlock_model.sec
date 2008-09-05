@@ -1,0 +1,3336 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "pthread/rwlock/rwlock_config.h"
+#include "pthread/rwlock/rwlock_model.seh"
+#include "config/system_config.seh"
+#include "data/errno_model.seh"
+#include "common/common_scenario.seh"
+
+
+#pragma SEC subsystem rwlock "pthread.rwlock"
+
+
+
+/* 
+   The group of functions 'pthread.rwlock.rwlock' consists of: 
+       pthread_rwlock_destroy [2]
+       pthread_rwlock_init [2]
+       pthread_rwlock_rdlock [2]
+       pthread_rwlock_timedrdlock [2]
+       pthread_rwlock_timedwrlock [2]
+       pthread_rwlock_tryrdlock [2]
+       pthread_rwlock_trywrlock [2]
+       pthread_rwlock_unlock [2]
+       pthread_rwlock_wrlock [2]
+ */
+ 
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_rwlock_destroy, pthread_rwlock_init - destroy and initialize a
+    read-write lock object
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    int pthread_rwlock_destroy(pthread_rwlock_t *rwlock);
+    int pthread_rwlock_init(pthread_rwlock_t *restrict rwlock,
+           const pthread_rwlockattr_t *restrict attr);
+
+DESCRIPTION
+
+    The pthread_rwlock_destroy() function shall destroy the read-write lock
+    object referenced by rwlock and release any resources used by the lock. The
+    effect of subsequent use of the lock is undefined until the lock is
+    reinitialized by another call to pthread_rwlock_init(). An implementation
+    may cause pthread_rwlock_destroy() to set the object referenced by rwlock
+    to an invalid value. Results are undefined if pthread_rwlock_destroy() is
+    called when any thread holds rwlock. Attempting to destroy an uninitialized
+    read-write lock results in undefined behavior.
+
+    The pthread_rwlock_init() function shall allocate any resources required to
+    use the read-write lock referenced by rwlock and initializes the lock to an
+    unlocked state with attributes referenced by attr. If attr is NULL, the
+    default read-write lock attributes shall be used; the effect is the same as
+    passing the address of a default read-write lock attributes object. Once
+    initialized, the lock can be used any number of times without being
+    reinitialized. Results are undefined if pthread_rwlock_init() is called
+    specifying an already initialized read-write lock. Results are undefined if
+    a read-write lock is used without first being initialized.
+
+    If the pthread_rwlock_init() function fails, rwlock shall not be
+    initialized and the contents of rwlock are undefined.
+
+    Only the object referenced by rwlock may be used for performing
+    synchronization. The result of referring to copies of that object in calls
+    to pthread_rwlock_destroy(), pthread_rwlock_rdlock(),
+    pthread_rwlock_timedrdlock(), pthread_rwlock_timedwrlock(),
+    pthread_rwlock_tryrdlock(), pthread_rwlock_trywrlock(),
+    pthread_rwlock_unlock(), or pthread_rwlock_wrlock() is undefined.
+
+RETURN VALUE
+
+    If successful, the pthread_rwlock_destroy() and pthread_rwlock_init()
+    functions shall return zero; otherwise, an error number shall be returned
+    to indicate the error.
+
+    The [EBUSY] and [EINVAL] error checks, if implemented, act as if they were
+    performed immediately at the beginning of processing for the function and
+    caused an error return prior to modifying the state of the read-write lock
+    specified by rwlock.
+
+ERRORS
+
+    The pthread_rwlock_destroy() function may fail if:
+
+    [EBUSY]
+        The implementation has detected an attempt to destroy the object
+        referenced by rwlock while it is locked.
+
+    [EINVAL]
+        The value specified by rwlock is invalid.
+
+    The pthread_rwlock_init() function shall fail if:
+
+    [EAGAIN]
+        The system lacked the necessary resources (other than memory) to
+        initialize another read-write lock.
+
+    [ENOMEM]
+        Insufficient memory exists to initialize the read-write lock.
+
+    [EPERM]
+        The caller does not have the privilege to perform the operation.
+
+    The pthread_rwlock_init() function may fail if:
+
+    [EBUSY]
+        The implementation has detected an attempt to reinitialize the object
+        referenced by rwlock, a previously initialized but not yet destroyed
+        read-write lock.
+
+    [EINVAL]
+        The value specified by attr is invalid.
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+
+specification
+ErrorCode* pthread_rwlock_destroy_spec(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = NULL;
+    Rwlock* post_rwlock = NULL;
+
+    pre
+    {
+        VERBOSE("pthread_rwlock_destroy_spec: pre\n");
+
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by rwlock is available in the context", isValidPointer(context, rwlock));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by rwlock is enough",
+            sizeWMemoryAvailable(rwlock) >= sizeof_Type(context, "pthread_rwlock_t"));
+
+        pre_rwlock = clone(getRwlock(rwlock));
+
+        if(!POSIX_PTHREAD_RWLOCK_DESTROY_FAILS_WITH_EBUSY)
+        {
+            /*
+             * Results are undefined if pthread_rwlock_destroy() is called when any thread 
+             * holds rwlock.
+             */
+            REQ("app.pthread_rwlock_destroy.02", "rwlock should not be locked", !isLocked_Rwlock(pre_rwlock));
+        }
+
+        if(!POSIX_PTHREAD_RWLOCK_DESTROY_FAILS_WITH_EINVAL)
+        {
+            /*
+             * Attempting to destroy an uninitialized read-write lock results in undefined 
+             * behavior.
+             */
+            REQ("app.pthread_rwlock_destroy.03", "rwlock should be initialized", pre_rwlock != NULL);
+        }
+
+        return true;
+    }
+
+    coverage AttrC
+    {
+       if (pre_rwlock->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_DESTROY_FAILS_WITH_EINVAL
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_DESTROY_FAILS_WITH_EBUSY
+    coverage BusyC
+    {
+       if (isLocked_Rwlock(pre_rwlock))
+            return {Busy, "Rwlock is locked"};
+        else
+            return {NotBusy, "Rwlock is not locked"};
+    }
+#endif
+
+    post
+    {
+        VERBOSE("pthread_rwlock_destroy_spec: post\n");
+
+        if ((*pthread_rwlock_destroy_spec == SUT_EINVAL) || (*pthread_rwlock_destroy_spec == SUT_EBUSY))
+        {
+            /*
+             * The [EBUSY] and [EINVAL] error checks, if implemented, act as if they were 
+             * performed immediately at the beginning of processing for the function and 
+             * caused an error return prior to modifying the state of the read-write lock 
+             * specified by rwlock.
+             */
+            REQ("pthread_rwlock_destroy.06", "", TODO_REQ());
+        }
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_DESTROY, "pthread_rwlock_destroy.05",
+                    *pthread_rwlock_destroy_spec != 0, *pthread_rwlock_destroy_spec)
+            /*
+             * The pthread_rwlock_destroy() function may fail if:
+             * 
+             * [EBUSY] 
+             * 
+             * The implementation has detected an attempt to destroy the object referenced by 
+             * rwlock while it is locked. 
+             */
+             /* [If the pthread_rwlock_destroy() function fails, rwlock shall not be unregistered.] */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_DESTROY, EBUSY, "pthread_rwlock_destroy.07.01",
+                      T(isLocked_Rwlock(pre_rwlock)) && T(getObjectInMemory(rwlock) != NULL))
+
+            /*
+             * The pthread_rwlock_destroy() function may fail if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock is invalid. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_DESTROY, EINVAL, "pthread_rwlock_destroy.07.02", (pre_rwlock == NULL))
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_DESTROY, EINTR, "pthread_rwlock_destroy.08")
+
+        ERROR_END()
+
+        post_rwlock = getRwlock(rwlock);
+
+        /*
+         * The pthread_rwlock_destroy() function shall destroy the read-write lock object 
+         * referenced by rwlock and release any resources used by the lock.
+         */
+        REQ("pthread_rwlock_destroy.01", "pthread_rwlock_destroy() shall destroy the rwlock", post_rwlock == NULL);
+
+        /*
+         * If successful, the pthread_rwlock_destroy() and pthread_rwlock_init() functions 
+         * shall return zero;
+         */
+        REQ("pthread_rwlock_destroy.04", "return value should be zero", *pthread_rwlock_destroy_spec == 0);
+
+        VERBOSE("pthread_rwlock_destroy_spec: post finish\n");
+        
+        return true;
+    }
+}
+
+void onPThreadRwlockDestroy(PThreadRwlockTPtr rwlock, ErrorCode* pthread_rwlock_destroy_spec)
+{
+    if (*pthread_rwlock_destroy_spec == 0)
+    {
+        unregisterRwlock(rwlock); 
+    }
+}
+
+specification
+ErrorCode* pthread_rwlock_init_spec(CallContext context, VoidTPtr rwlock, PThreadRwlockAttrTPtr attr)
+{
+    PThreadRwlockAttrT* attributes = !isNULL_VoidTPtr(attr) ? getRwlockAttributes(attr) : NULL;
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+    Rwlock* post_rwlock = NULL;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by rwlock is available in the context", isValidPointer(context, rwlock));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by rwlock is enough",
+            sizeWMemoryAvailable(rwlock) >= sizeof_Type(context, "pthread_rwlock_t"));
+
+        if(!POSIX_PTHREAD_RWLOCK_INIT_FAILS_WITH_EBUSY)
+        {
+            /*
+             * Results are undefined if pthread_rwlock_init() is called specifying an already 
+             * initialized read-write lock.
+             */
+            REQ("app.pthread_rwlock_init.05", "rwlock is not initialized", pre_rwlock == NULL);
+        }
+
+        if(!POSIX_PTHREAD_RWLOCK_INIT_FAILS_WITH_EINVAL)
+        {
+            /* [Behaviour is undefined if the value specified by attr is invalid] */
+            REQ("","The value specified by attr is valid", isNULL_VoidTPtr(attr) || T(attributes != NULL));
+        }
+
+        return true;
+    }
+
+    coverage AttrC
+    {
+        if (isNULL_VoidTPtr(attr))
+            return {DefaultAttributes, "Default initialization"};
+        else if (attributes->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+    
+#if POSIX_PTHREAD_RWLOCK_INIT_FAILS_WITH_EBUSY
+    coverage BusyC
+    {
+        if (getObjectInMemory(rwlock) == NULL)
+            return {GoodRwlock, "Rwlock is not initialized"};
+        else
+            return {InvalidRwlock, "Rwlock is already initialized"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_INIT_FAILS_WITH_EINVAL
+    coverage C
+    {
+        if (isNULL_VoidTPtr(attr) || (attributes != NULL))
+            return {NormalRwlockAttr, "RwlockAttr is initialized or NULL"};
+        else
+            return {NotInitialized, "RwlockAttr is not initialized"};
+    }
+#endif
+
+    post
+    {
+        post_rwlock = getRwlock(rwlock);
+
+        if ((*pthread_rwlock_init_spec == SUT_EINVAL) || (*pthread_rwlock_init_spec == SUT_EBUSY))
+        {
+            /*
+             * The [EBUSY] and [EINVAL] error checks, if implemented, act as if they were 
+             * performed immediately at the beginning of processing for the function and 
+             * caused an error return prior to modifying the state of the read-write lock 
+             * specified by rwlock.
+             */
+            REQ("pthread_rwlock_init.10", "", TODO_REQ());
+        }
+
+        if (*pthread_rwlock_init_spec != 0)
+        {
+            /*
+             * If the pthread_rwlock_init() function fails, rwlock shall not be initialized 
+             * and the contents of rwlock are undefined.
+             */
+            REQ("pthread_rwlock_init.07", "rwlock shall not be initialized", post_rwlock == NULL);
+        }
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_INIT, "pthread_rwlock_init.09",
+                    *pthread_rwlock_init_spec != 0, *pthread_rwlock_init_spec)
+            /*
+             * The pthread_rwlock_init() function shall fail if:
+             * 
+             * [EAGAIN] 
+             * 
+             * The system lacked the necessary resources (other than memory) to initialize 
+             * another read-write lock. 
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_RWLOCK_INIT, EAGAIN, "pthread_rwlock_init.11.01", "Hard to check system resources")
+
+            /*
+             * The pthread_rwlock_init() function shall fail if:
+             * 
+             * [ENOMEM] 
+             * 
+             * Insufficient memory exists to initialize the read-write lock. 
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_RWLOCK_INIT, ENOMEM, "pthread_rwlock_init.11.02", "Hard to check system resources")
+
+            /*
+             * The pthread_rwlock_init() function shall fail if:
+             * 
+             * [EPERM] 
+             * 
+             * The caller does not have the privilege to perform the operation. 
+             */
+            ERROR_SHALL(POSIX_PTHREAD_RWLOCK_INIT, EPERM, "pthread_rwlock_init.11.03", TODO_ERR(EPERM))
+
+            /*
+             * The pthread_rwlock_init() function may fail if:
+             * 
+             * [EBUSY] 
+             * 
+             * The implementation has detected an attempt to reinitialize the object 
+             * referenced by rwlock, a previously initialized but not yet destroyed read- 
+             * write lock. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_INIT, EBUSY, "pthread_rwlock_init.12.01", pre_rwlock != NULL)
+
+            /*
+             * The pthread_rwlock_init() function may fail if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by attr is invalid. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_INIT, EINVAL, "pthread_rwlock_init.12.02", !isNULL_VoidTPtr(attr) && (attributes == NULL))
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_INIT, EINTR, "pthread_rwlock_init.13")
+
+        ERROR_END()
+
+        /*
+         * The pthread_rwlock_init() function shall allocate any resources required to use 
+         * the read-write lock referenced by rwlock
+         */
+        REQ("pthread_rwlock_init.01", "rwlock should be created", post_rwlock != NULL);
+
+        /*
+         * and initializes the lock to an unlocked state
+         */
+        REQ("pthread_rwlock_init.02", "rwlock should be unlocked", !isLocked_Rwlock(post_rwlock));
+
+        if (!isNULL_VoidTPtr(attr))
+        {
+            /*
+             * with attributes referenced by attr.
+             */
+            REQ("pthread_rwlock_init.03", "'pshared' shall be initialized with the specified value",
+                post_rwlock->pshared == attributes->pshared);
+        }
+        else
+        {
+            /*
+             * If attr is NULL, the default read-write lock attributes shall be used; the 
+             * effect is the same as passing the address of a default read-write lock 
+             * attributes object.
+             */
+            REQ("pthread_rwlock_init.04", "'pshared' shall be initialized with the default value",
+                post_rwlock->pshared == getDefaultRwlockPShared());
+        }
+
+        /*
+         * If successful, the pthread_rwlock_destroy() and pthread_rwlock_init() functions 
+         * shall return zero;
+         */
+        REQ("pthread_rwlock_init.08", "return value should be zero", *pthread_rwlock_init_spec == 0);
+
+        /* [Wait lists should be empty.] */
+        REQ("", "readers wait list shall be empty", isEmpty_Set(post_rwlock->reader_wait_list));
+        REQ("", "writers wait list shall be empty", isEmpty_List(post_rwlock->writer_wait_list));
+
+        return true;
+    }
+}
+
+void onPThreadRwlockInit(VoidTPtr rwlock, PThreadRwlockAttrTPtr attr, ErrorCode* pthread_rwlock_init_spec)
+{
+    if (*pthread_rwlock_init_spec == 0)
+    {
+        if (!isNULL_VoidTPtr(attr))
+        {
+            PThreadRwlockAttrT* attributes = getRwlockAttributes(attr);
+            registerRwlock(rwlock, attributes->pshared);
+        }
+        else
+        {
+            registerRwlock(rwlock, getDefaultRwlockPShared());
+        }
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+  
+    pthread_rwlock_rdlock, pthread_rwlock_tryrdlock - lock a read-write lock object for reading
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock);
+    int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock); 
+
+DESCRIPTION
+
+    The pthread_rwlock_rdlock() function shall apply a read lock to the 
+    read-write lock referenced by rwlock. The calling thread acquires the read 
+    lock if a writer does not hold the lock and there are no writers blocked on
+    the lock.
+
+    If the Thread Execution Scheduling option is supported, and the 
+    threads involved in the lock are executing with the scheduling policies 
+    SCHED_FIFO or SCHED_RR, the calling thread shall not acquire the lock if a 
+    writer holds the lock or if writers of higher or equal priority are blocked
+    on the lock; otherwise, the calling thread shall acquire the lock. 
+
+    If the Threads Execution Scheduling option is supported, and the threads 
+    involved in the lock are executing with the SCHED_SPORADIC scheduling 
+    policy, the calling thread shall not acquire the lock if a writer holds the
+    lock or if writers of higher or equal priority are blocked on the lock; 
+    otherwise, the calling thread shall acquire the lock. 
+
+    If the Thread Execution Scheduling option is not supported, it is 
+    implementation-defined whether the calling thread acquires the lock when a 
+    writer does not hold the lock and there are writers blocked on the lock. 
+    If a writer holds the lock, the calling thread shall not acquire the read 
+    lock. If the read lock is not acquired, the calling thread shall block 
+    until it can acquire the lock. The calling thread may deadlock if at the 
+    time the call is made it holds a write lock.
+
+    A thread may hold multiple concurrent read locks on rwlock (that is, 
+    successfully call the pthread_rwlock_rdlock() function n times). If so, the
+    application shall ensure that the thread performs matching unlocks (that 
+    is, it calls the pthread_rwlock_unlock() function n times).
+
+    The maximum number of simultaneous read locks that an implementation 
+    guarantees can be applied to a read-write lock shall be 
+    implementation-defined. The pthread_rwlock_rdlock() function may fail if 
+    this maximum would be exceeded.
+
+    The pthread_rwlock_tryrdlock() function shall apply a read lock as in the 
+    pthread_rwlock_rdlock() function, with the exception that the function 
+    shall fail if the equivalent pthread_rwlock_rdlock() call would have 
+    blocked the calling thread. In no case shall the pthread_rwlock_tryrdlock()
+    function ever block; it always either acquires the lock or fails and 
+    returns immediately.
+
+    Results are undefined if any of these functions are called with an 
+    uninitialized read-write lock.
+
+    If a signal is delivered to a thread waiting for a read-write lock for 
+    reading, upon return from the signal handler the thread resumes waiting for
+    the read-write lock for reading as if it was not interrupted.
+
+RETURN VALUE
+
+    If successful, the pthread_rwlock_rdlock() function shall return zero; 
+    otherwise, an error number shall be returned to indicate the error.
+
+    The pthread_rwlock_tryrdlock() function shall return zero if the lock for 
+    reading on the read-write lock object referenced by rwlock is acquired. 
+    Otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_rwlock_tryrdlock() function shall fail if:
+
+    [EBUSY]
+        The read-write lock could not be acquired for reading because a writer 
+        holds the lock or a writer with the appropriate priority was blocked on
+        it.
+
+        The pthread_rwlock_rdlock() and pthread_rwlock_tryrdlock() functions 
+        may fail if:
+    
+    [EINVAL]
+        The value specified by rwlock does not refer to an initialized 
+        read-write lock object.
+    
+    [EAGAIN]
+        The read lock could not be acquired because the maximum number of read 
+        locks for rwlock has been exceeded.
+
+        The pthread_rwlock_rdlock() function may fail if:
+
+    [EDEADLK]
+        A deadlock condition was detected or the current thread already owns 
+        the read-write lock for writing.
+
+        These functions shall not return an error code of [EINTR].
+*/
+
+specification typedef struct RwlockLockCall RwlockLockCall = {};
+
+RwlockLockCall* create_RwlockLockCall(CallContext context, PThreadRwlockTPtr rwlock)
+{
+  return create(&type_RwlockLockCall, context, rwlock);
+}
+
+specification
+void pthread_rwlock_rdlock_spec(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+    bool isWriter = false;
+
+    pre
+    {
+        VERBOSE("pthread_rwlock_rdlock_spec: pre\n");
+
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        /*
+         * The effect of subsequent use of the lock is undefined until the lock is 
+         * reinitialized by another call to pthread_rwlock_init().
+         */
+        /*
+         * Once initialized, the lock can be used any number of times without being 
+         * reinitialized.
+         * 
+         * Results are undefined if a read-write lock is used without first being 
+         * initialized.
+         */
+        /*
+         * Only the object referenced by rwlock may be used for performing synchronization. 
+         * The result of referring to copies of that object in calls to 
+         * pthread_rwlock_destroy(), pthread_rwlock_rdlock(), pthread_rwlock_timedrdlock(), 
+         * pthread_rwlock_timedwrlock(), pthread_rwlock_tryrdlock(), 
+         * pthread_rwlock_trywrlock(), pthread_rwlock_unlock(), or pthread_rwlock_wrlock() 
+         * is undefined.
+         */
+        IMPLEMENT_REQ("app.pthread.rwlock.rwlock.01.rdlock;app.pthread.rwlock.rwlock.02.01.rdlock;app.pthread.rwlock.rwlock.03.rdlock");
+
+        if(!POSIX_PTHREAD_RWLOCK_RDLOCK_FAILS_WITH_EINVAL)
+        {
+            /*
+             * Results are undefined if any of these functions are called with an 
+             * uninitialized read-write lock.
+             */
+            REQ("app.pthread_rwlock_rdlock.13", "rwlock should be valid", pre_rwlock != NULL);
+        }
+
+        if(!POSIX_PTHREAD_RWLOCK_RDLOCK_FAILS_WITH_EDEADLK)
+        {
+            isWriter = isWriter_Rwlock(pre_rwlock, context);
+
+            /*
+             * The calling thread may deadlock if at the time the call is made it holds a 
+             * write lock.
+             */
+            REQ("app.pthread_rwlock_rdlock.10", "The thread must not be locking the same rwlock", !isWriter);
+        }
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(pre_rwlock));
+
+       
+        VERBOSE("pthread_rwlock_rdlock_spec: pre finish\n");
+
+        return true;
+    }
+
+    coverage ThreadSharedC
+    {
+        if (pre_rwlock->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_RDLOCK_FAILS_WITH_EINVAL
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    } 
+#endif 
+
+#if POSIX_PTHREAD_RWLOCK_RDLOCK_FAILS_WITH_EDEADLK
+    coverage WriterC
+    {
+        if (isWriter)
+            return {WrDeadlock, "A 'writer reads' deadlock"};
+        else
+            return {NotWrDeadlock, "No 'writer reads' deadlock"};
+    }
+#endif
+
+    post
+    {
+        VERBOSE("pthread_rwlock_rdlock_spec: post\n");
+
+        /* [Check scheduling policy] */
+        if(POSIX_RWLOCK_SCHEDULING_POLICY == 1)
+        {
+            /* [(LSB default)] */
+
+            if (isWaiterWithHigherPriority(context, pre_rwlock->writer_wait_list))
+            {
+                /*
+                 * If the Thread Execution Scheduling option is supported, and the threads 
+                 * involved in the lock are executing with the scheduling policies SCHED_FIFO or 
+                 * SCHED_RR, the calling thread shall not acquire the lock if a writer holds the 
+                 * lock or if writers of higher or equal priority are blocked on the lock;
+                 */
+                REQ("pthread_rwlock_rdlock.03", "reader should block", TODO_REQ());
+            }
+        }
+        /*
+         * If the read lock is not acquired, the calling thread shall block until it can 
+         * acquire the lock.
+         */
+        REQ("pthread_rwlock_rdlock.09", "reader should block", TODO_REQ());
+
+        /* [The thread has been blocked by call of the pthread_rwlock_lock() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                                  create_RwlockLockCall(context, rwlock)
+                                                 )
+           );
+
+        VERBOSE("pthread_rwlock_rdlock_spec: post finish\n");
+
+        return true;
+    }
+}
+
+void onPThreadRwlockRdlock(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+
+    VERBOSE("onPThreadRwlockRdlock: \n");
+    
+    startBlockedCall(context, create_RwlockLockCall(context, rwlock));
+    if (pre_rwlock != NULL)
+    {
+        // ***** insert_ThreadIdList(pre_rwlock->reader_wait_list, context);
+        add_Set(pre_rwlock->reader_wait_list,create_ThreadIdObj(context));
+        if(isReadAvailable(pre_rwlock, context))
+        {
+            threadShouldBeRun(context);
+        }
+    }
+    
+    VERBOSE("onPThreadRwlockRdlock: finish\n");
+}
+
+
+specification typedef struct RwlockLockReturnType  RwlockLockReturnType = {};
+
+RwlockLockReturnType * create_RwlockLockReturnType(
+  CallContext context,
+  ErrorCode*  returned_value
+)
+{
+    return create(&type_RwlockLockReturnType,
+        context,
+        returned_value);
+}
+
+reaction RwlockLockReturnType* pthread_rwlock_rdlock_return(void)
+{
+    post
+    {
+        CallContext context = pthread_rwlock_rdlock_return->context;
+        RwlockLockCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+
+        PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+        Rwlock* pre_rwlock = findRwlock(@getAllRwlocks(), rwlock);
+        Rwlock* post_rwlock = getRwlock(rwlock);
+
+        /* [Consistency of test suite] */
+        REQ("","Rwlock should exist", pre_rwlock != NULL);
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_RDLOCK, "pthread_rwlock_rdlock.16",
+                    *(pthread_rwlock_rdlock_return->returned_value) != 0, *(pthread_rwlock_rdlock_return->returned_value))
+            /*
+             * The pthread_rwlock_rdlock() and pthread_rwlock_tryrdlock() functions may fail 
+             * if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock does not refer to an initialized read-write lock 
+             * object. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_RDLOCK, EINVAL, "pthread_rwlock_rdlock.17.01", pre_rwlock == NULL)
+
+            /*
+             * The pthread_rwlock_rdlock() and pthread_rwlock_tryrdlock() functions may fail 
+             * if:
+             * 
+             * [EAGAIN] 
+             * 
+             * The read lock could not be acquired because the maximum number of read locks 
+             * for rwlock has been exceeded. 
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_RWLOCK_RDLOCK, EAGAIN, "pthread_rwlock_rdlock.17.02", "Hard to check system resources")
+
+            /*
+             * The pthread_rwlock_rdlock() function may fail if:
+             * 
+             * [EDEADLK] 
+             * 
+             * A deadlock condition was detected or the current thread already owns the read- 
+             * write lock for writing. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_RDLOCK, EDEADLK, "pthread_rwlock_rdlock.18.01", isWriter_Rwlock(pre_rwlock, context))
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_RDLOCK, EINTR, "pthread_rwlock_rdlock.19")
+
+        ERROR_END()
+
+        /* [Implicit requirement] */
+        REQ("", "The thread should be removed from wait list", 
+            isThreadIdRemovedSet(pre_rwlock->reader_wait_list, context, post_rwlock->reader_wait_list)
+           );
+
+        /*
+         * The pthread_rwlock_rdlock() function shall apply a read lock to the read-write 
+         * lock referenced by rwlock.
+         */
+        REQ("pthread_rwlock_rdlock.01", "", TODO_REQ());
+
+
+        /* [Check scheduling policy] */
+        if(POSIX_RWLOCK_SCHEDULING_POLICY == 1)
+        {
+            /* [(LSB default)] */
+
+            /*
+             * otherwise, the calling thread shall acquire the lock.
+             */
+            REQ("pthread_rwlock_rdlock.04", 
+                "Writers wait list may not involve threads with higher priority than the priority of this thread", 
+                !isWaiterWithHigherPriority(context, post_rwlock->writer_wait_list));
+
+            /*
+             * The calling thread acquires the read lock if a writer does not hold the lock 
+             * and there are no writers blocked on the lock.
+             */
+            REQ("pthread_rwlock_rdlock.02", "The rwlock should be locked for reading by the current thread", 
+                isReader_Rwlock(post_rwlock, context) 
+                && 
+                !isWaiterWithHigherPriority(context, post_rwlock->writer_wait_list)
+                &&
+                isReadAvailable(post_rwlock, context)
+                );
+
+        }
+        else if(POSIX_RWLOCK_SCHEDULING_POLICY == 2)
+        {
+
+            /*
+             * 2 - the calling thread shall acquire the read lock even if 
+             * there are writers blocked on the lock.
+             */
+            REQ("pthread_rwlock_rdlock.02", "The rwlock should be locked for reading by the current thread", 
+                isReader_Rwlock(post_rwlock, context) 
+                && 
+                isReadAvailable(post_rwlock, context)
+                );
+        }
+        else if(POSIX_RWLOCK_SCHEDULING_POLICY == 3)
+        {
+            /*
+             * 3 - the calling thread shall not acquire the read lock if
+             * there are any writers blocked on the lock.
+             */
+
+            REQ("pthread_rwlock_rdlock.02", "The rwlock should be locked for reading by the current thread", 
+                isReader_Rwlock(post_rwlock, context) 
+                && 
+                !isWaitedWriterExist(post_rwlock)
+                &&
+                isReadAvailable(post_rwlock, context)
+                );
+
+        }
+        else
+        {
+            /* [Unrecognized option value] */
+            REQ("", "[Invalid option value]", false);
+        }
+
+        /*
+         * If the Threads Execution Scheduling option is supported, and the threads 
+         * involved in the lock are executing with the SCHED_SPORADIC scheduling policy, 
+         * the calling thread shall not acquire the lock if a writer holds the lock or if 
+         * writers of higher or equal priority are blocked on the lock;
+         */
+        REQ("pthread_rwlock_rdlock.05", "", TODO_REQ());
+
+        /*
+         * otherwise, the calling thread shall acquire the lock.
+         */
+        REQ("pthread_rwlock_rdlock.06", "", TODO_REQ());
+
+        /*
+         * If the Thread Execution Scheduling option is not supported, it is 
+         * implementation-defined whether the calling thread acquires the lock when a 
+         * writer does not hold the lock and there are writers blocked on the lock.
+         */
+        REQ("pthread_rwlock_rdlock.07", "", TODO_REQ());
+
+        /*
+         * If a writer holds the lock, the calling thread shall not acquire the read lock.
+         */
+        REQ("pthread_rwlock_rdlock.08", "", TODO_REQ());
+
+        /*
+         * A thread may hold multiple concurrent read locks on rwlock (that is, 
+         * successfully call the pthread_rwlock_rdlock() function n times).
+         */
+        REQ("pthread_rwlock_rdlock.11", "", TODO_REQ());
+
+        /*
+         * If a signal is delivered to a thread waiting for a read-write lock for reading, 
+         * upon return from the signal handler the thread resumes waiting for the read- 
+         * write lock for reading as if it was not interrupted.
+         */
+        REQ("pthread_rwlock_rdlock.14", "", TODO_REQ());
+
+        /*
+         * If successful, the pthread_rwlock_rdlock() function shall return zero;
+         */
+        REQ("pthread_rwlock_rdlock.15", "return value should be zero",
+            *(pthread_rwlock_rdlock_return->returned_value) == 0);
+
+        return true;
+    }
+}
+
+void onPThreadRwlockRdlockReturn(CallContext context, ErrorCode* pthread_rwlock_rdlock_spec)
+{
+    RwlockLockCall* blocked_call = finishBlockedCall(context);
+    PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+    //verbose("onPThreadRwlockRdlockReturn: \n");
+
+    if (pre_rwlock != NULL)
+    {
+        /* Remove thread from wait list */
+        remove_ThreadIdSet(pre_rwlock->reader_wait_list, context);
+
+        if (*pthread_rwlock_rdlock_spec == 0)
+        {
+            /* Set up a new owner */
+            add_MultiSet(pre_rwlock->readers_list, create_ThreadIdObj(context));
+        }
+    }
+}
+
+specification
+ErrorCode* pthread_rwlock_tryrdlock_spec(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock should not be NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        /*
+         * The effect of subsequent use of the lock is undefined until the lock is 
+         * reinitialized by another call to pthread_rwlock_init().
+         */
+        /*
+         * Once initialized, the lock can be used any number of times without being 
+         * reinitialized.
+         * 
+         * Results are undefined if a read-write lock is used without first being 
+         * initialized.
+         */
+        /*
+         * Only the object referenced by rwlock may be used for performing synchronization. 
+         * The result of referring to copies of that object in calls to 
+         * pthread_rwlock_destroy(), pthread_rwlock_rdlock(), pthread_rwlock_timedrdlock(), 
+         * pthread_rwlock_timedwrlock(), pthread_rwlock_tryrdlock(), 
+         * pthread_rwlock_trywrlock(), pthread_rwlock_unlock(), or pthread_rwlock_wrlock() 
+         * is undefined.
+         */
+        IMPLEMENT_REQ("app.pthread.rwlock.rwlock.01.tryrdlock;app.pthread.rwlock.rwlock.02.01.tryrdlock;app.pthread.rwlock.rwlock.03.tryrdlock");
+
+        if(!POSIX_PTHREAD_RWLOCK_TRYRDLOCK_FAILS_WITH_EINVAL)
+        {
+            /*
+             * Results are undefined if any of these functions are called with an 
+             * uninitialized read-write lock.
+             */
+            REQ("app.pthread_rwlock_tryrdlock.11", "The value specified by rwlock is invalid", (pre_rwlock != NULL));
+        }
+
+        return true;
+    }
+
+    coverage ThreadSharedC
+    {
+        if (pre_rwlock->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_TRYRDLOCK_FAILS_WITH_EINVAL
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    }
+#endif
+
+    post
+    {
+        Rwlock* post_rwlock = getRwlock(rwlock);
+
+        /*
+         * Otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_TRYRDLOCK, "pthread_rwlock_tryrdlock.13",
+                    *pthread_rwlock_tryrdlock_spec != 0, *pthread_rwlock_tryrdlock_spec)
+            /*
+             * If a writer holds the lock, the calling thread shall not acquire the read lock.
+             */
+            /*
+             * the function shall fail if the equivalent pthread_rwlock_rdlock() call would 
+             * have blocked the calling thread.
+             * 
+             * or fails and returns immediately.
+             */
+            /*
+             * The pthread_rwlock_tryrdlock() function shall fail if:
+             * 
+             * [EBUSY] 
+             * 
+             * The read-write lock could not be acquired for reading because a writer holds 
+             * the lock or a writer with the appropriate priority was blocked on it. 
+             */
+
+            ERROR_SHALL(POSIX_PTHREAD_RWLOCK_TRYRDLOCK, EBUSY, "pthread_rwlock_tryrdlock.07;pthread_rwlock_tryrdlock.10.02;pthread_rwlock_tryrdlock.14.01",
+                        !isWrong_ThreadId(post_rwlock->writer)
+                        ||
+                        (POSIX_RWLOCK_SCHEDULING_POLICY==1 && isWaiterWithHigherPriority(context, post_rwlock->writer_wait_list))
+                        ||
+                        (POSIX_RWLOCK_SCHEDULING_POLICY==3 && isWaitedWriterExist(post_rwlock))
+                       )
+
+            /*
+             * The pthread_rwlock_rdlock() and pthread_rwlock_tryrdlock() functions may fail 
+             * if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock does not refer to an initialized read-write lock 
+             * object. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_TRYRDLOCK, EINVAL, "pthread_rwlock_tryrdlock.15.01", pre_rwlock == NULL)
+
+            /*
+             * The pthread_rwlock_rdlock() and pthread_rwlock_tryrdlock() functions may fail 
+             * if:
+             * 
+             * [EAGAIN] 
+             * 
+             * The read lock could not be acquired because the maximum number of read locks 
+             * for rwlock has been exceeded. 
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_RWLOCK_TRYRDLOCK, EAGAIN, "pthread_rwlock_tryrdlock.15.02", "Hard to check system resources")
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_TRYRDLOCK, EINTR, "pthread_rwlock_tryrdlock.16")
+
+        ERROR_END()
+
+
+        /*
+         * If the Thread Execution Scheduling option is supported, and the threads 
+         * involved in the lock are executing with the scheduling policies SCHED_FIFO or 
+         * SCHED_RR, the calling thread shall not acquire the lock if a writer holds the 
+         * lock or if writers of higher or equal priority are blocked on the lock;
+         */
+        REQ("pthread_rwlock_tryrdlock.02", "", TODO_REQ());
+
+        /* [Check scheduling policy] */
+        if(POSIX_RWLOCK_SCHEDULING_POLICY == 1)
+        {
+            /* [(LSB default)] */
+
+            /*
+             * otherwise, the calling thread shall acquire the lock.
+             */
+            REQ("pthread_rwlock_tryrdlock.03",
+                "Writers wait list may not involve threads with higher priority than the priority of this thread",
+                !isWaiterWithHigherPriority(context, post_rwlock->writer_wait_list)
+               );
+
+           REQ("pthread_rwlock_tryrdlock.01", 
+               "The rwlock should be locked for reading by the current thread", 
+               isReader_Rwlock(post_rwlock, context) 
+               && 
+               !isWaiterWithHigherPriority(context, post_rwlock->writer_wait_list)
+               &&
+               isReadAvailable(post_rwlock, context)
+               );
+
+        }
+        else if(POSIX_RWLOCK_SCHEDULING_POLICY == 2)
+        {
+            /*
+             * 2 - the calling thread shall acquire the read lock even if 
+             * there are writers blocked on the lock.
+             */
+            /*
+             * The calling thread acquires the read lock if a writer does not hold the lock 
+             * and there are no writers blocked on the lock.
+             */
+            REQ("pthread_rwlock_tryrdlock.01", 
+                "The rwlock should be locked for reading by the current thread", 
+                isReader_Rwlock(post_rwlock, context) 
+                &&
+                isReadAvailable(post_rwlock, context)
+                );
+
+        }
+        else if(POSIX_RWLOCK_SCHEDULING_POLICY == 3)
+        {
+            /*
+             * 3 - the calling thread shall not acquire the read lock if
+             * there are any writers blocked on the lock.
+             */
+            REQ("pthread_rwlock_tryrdlock.01", 
+                "The rwlock should be locked for reading by the current thread", 
+                isReader_Rwlock(post_rwlock, context) 
+                && 
+                !isWaitedWriterExist(post_rwlock)
+                &&
+                isReadAvailable(post_rwlock, context)
+                );
+        }
+        else
+        {
+            /* [Unrecognized option value] */
+            REQ("", "[Invalid option value]", false);
+        }
+
+        /*
+         * If the Threads Execution Scheduling option is supported, and the threads 
+         * involved in the lock are executing with the SCHED_SPORADIC scheduling policy, 
+         * the calling thread shall not acquire the lock if a writer holds the lock or if 
+         * writers of higher or equal priority are blocked on the lock;
+         */
+        REQ("pthread_rwlock_tryrdlock.04", "", TODO_REQ());
+
+        /*
+         * otherwise, the calling thread shall acquire the lock.
+         */
+        REQ("pthread_rwlock_tryrdlock.05", "", TODO_REQ());
+
+        /*
+         * If the Thread Execution Scheduling option is not supported, it is 
+         * implementation-defined whether the calling thread acquires the lock when a 
+         * writer does not hold the lock and there are writers blocked on the lock.
+         */
+        REQ("pthread_rwlock_tryrdlock.06", "", TODO_REQ());
+
+        /*
+         * A thread may hold multiple concurrent read locks on rwlock (that is, 
+         * successfully call the pthread_rwlock_rdlock() function n times).
+         */
+        REQ("pthread_rwlock_tryrdlock.08", "", TODO_REQ());
+
+        /*
+         * The pthread_rwlock_tryrdlock() function shall apply a read lock as in the 
+         * pthread_rwlock_rdlock() function, with the exception
+         */
+        REQ("pthread_rwlock_tryrdlock.09", "", TODO_REQ());
+
+        /*
+         * the function shall fail if the equivalent pthread_rwlock_rdlock() call would 
+         * have blocked the calling thread.
+         * 
+         * In no case shall the pthread_rwlock_tryrdlock() function ever block; it always 
+         * either acquires the lock
+         */
+        REQ("pthread_rwlock_tryrdlock.10.01", "", TODO_REQ());
+
+        /*
+         * The pthread_rwlock_tryrdlock() function shall return zero if the lock for
+         * reading on the read-write lock object referenced by rwlock is acquired.
+         */
+        REQ("pthread_rwlock_tryrdlock.12", 
+            "read lock aquired", 
+            *pthread_rwlock_tryrdlock_spec == 0 
+            &&
+            contains_MultiSet(post_rwlock->readers_list, create_ThreadIdObj(context))
+            &&
+            !contains_Set(post_rwlock->reader_wait_list, create_ThreadIdObj(context))
+        );
+
+        return true;
+    }
+}
+
+void onPThreadRwlockTryRdlock(CallContext context, PThreadRwlockTPtr rwlock, ErrorCode* pthread_rwlock_tryrdlock_spec)
+{
+    if (*pthread_rwlock_tryrdlock_spec == 0)
+    {
+        Rwlock* pre_rwlock = getRwlock(rwlock);
+        if (pre_rwlock != NULL)
+        {
+            add_MultiSet(pre_rwlock->readers_list,create_ThreadIdObj(context));
+        }
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    pthread_rwlock_timedrdlock - lock a read-write lock for reading
+
+SYNOPSIS
+    #include <pthread.h>
+    #include <time.h>
+
+    int pthread_rwlock_timedrdlock(pthread_rwlock_t *restrict rwlock,
+           const struct timespec *restrict abs_timeout); 
+
+DESCRIPTION
+
+    The pthread_rwlock_timedrdlock() function shall apply a read lock to the
+    read-write lock referenced by rwlock as in the pthread_rwlock_rdlock()
+    function. However, if the lock cannot be acquired without waiting for other
+    threads to unlock the lock, this wait shall be terminated when the
+    specified timeout expires. The timeout shall expire when the absolute time
+    specified by abs_timeout passes, as measured by the clock on which timeouts
+    are based (that is, when the value of that clock equals or exceeds
+    abs_timeout), or if the absolute time specified by abs_timeout has already
+    been passed at the time of the call.
+
+    If the Timers option is supported, the timeout shall be based on the
+    CLOCK_REALTIME clock.  If the Timers option is not supported, the timeout
+    shall be based on the system clock as returned by the time() function. The
+    resolution of the timeout shall be the resolution of the clock on which it
+    is based. The timespec data type is defined in the <time.h> header. Under
+    no circumstances shall the function fail with a timeout if the lock can be
+    acquired immediately. The validity of the abs_timeout parameter need not be
+    checked if the lock can be immediately acquired.
+
+    If a signal that causes a signal handler to be executed is delivered to a
+    thread blocked on a read-write lock via a call to
+    pthread_rwlock_timedrdlock(), upon return from the signal handler the
+    thread shall resume waiting for the lock as if it was not interrupted.
+
+    The calling thread may deadlock if at the time the call is made it holds a
+    write lock on rwlock. The results are undefined if this function is called
+    with an uninitialized read-write lock.
+
+RETURN VALUE
+
+    The pthread_rwlock_timedrdlock() function shall return zero if the lock for
+    reading on the read-write lock object referenced by rwlock is acquired.
+    Otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_rwlock_timedrdlock() function shall fail if:
+
+    [ETIMEDOUT]
+        The lock could not be acquired before the specified timeout expired.
+
+    The pthread_rwlock_timedrdlock() function may fail if:
+
+    [EAGAIN]
+        The read lock could not be acquired because the maximum number of read
+        locks for lock would be exceeded.
+
+    [EDEADLK]
+        A deadlock condition was detected or the calling thread already holds a
+        write lock on rwlock.
+
+    [EINVAL]
+        The value specified by rwlock does not refer to an initialized
+        read-write lock object, or the abs_timeout nanosecond value is less
+        than zero or greater than or equal to 1000 million.
+
+    This function shall not return an error code of [EINTR].
+
+*/
+
+specification typedef struct RwlockTimedLockCall RwlockTimedLockCall = {};
+
+RwlockTimedLockCall* create_RwlockTimedLockCall(CallContext context, PThreadRwlockTPtr rwlock, TimeInterval t_stamp, TimeUnit delta)
+{
+    return create(&type_RwlockTimedLockCall, context, rwlock, t_stamp, delta);
+}
+
+specification
+void pthread_rwlock_timedrdlock_spec(CallContext context, PThreadRwlockTPtr rwlock, TimeUnit delta)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+    bool isWriter;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        if(!POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK_FAILS_WITH_EINVAL_ON_BAD_RWLOCK)
+        {
+            /*
+             * The effect of subsequent use of the lock is undefined until the lock is 
+             * reinitialized by another call to pthread_rwlock_init().
+             */
+            /*
+             * Once initialized, the lock can be used any number of times without being 
+             * reinitialized.
+             * 
+             * Results are undefined if a read-write lock is used without first being 
+             * initialized.
+             */
+            /*
+             * Only the object referenced by rwlock may be used for performing synchronization. 
+             * The result of referring to copies of that object in calls to 
+             * pthread_rwlock_destroy(), pthread_rwlock_rdlock(), pthread_rwlock_timedrdlock(), 
+             * pthread_rwlock_timedwrlock(), pthread_rwlock_tryrdlock(), 
+             * pthread_rwlock_trywrlock(), pthread_rwlock_unlock(), or pthread_rwlock_wrlock() 
+             * is undefined.
+             */
+            /*
+             * The results are undefined if this function is called with an uninitialized 
+             * read-write lock.
+             */
+            REQ("app.pthread.rwlock.rwlock.01.timedrdlock;app.pthread.rwlock.rwlock.02.01.timedrdlock;app.pthread.rwlock.rwlock.03.timedrdlock;app.pthread_rwlock_timedrdlock.11",
+                "rwlock should be valid", pre_rwlock != NULL);
+        }
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(pre_rwlock));
+
+        isWriter = isWriter_Rwlock(pre_rwlock, context);
+
+        /*
+         * The validity of the abs_timeout parameter need not be checked if the lock can 
+         * be immediately acquired.
+         */
+        REQ("app.pthread_rwlock_timedrdlock.08", "", TODO_REQ());
+
+        if(!POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK_FAILS_WITH_EDEADLK)
+        {
+            /*
+             * The calling thread may deadlock if at the time the call is made it holds a 
+             * write lock on rwlock.
+             */
+            REQ("app.pthread_rwlock_timedrdlock.10", "thread should not hold a write lock on rwlock", !isWriter);
+        }
+
+
+        return true;
+    }
+    
+    coverage ThreadSharedC
+    {
+        if (pre_rwlock->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK_FAILS_WITH_EINVAL_ON_BAD_RWLOCK
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK_FAILS_WITH_EDEADLK
+    coverage WriterC
+    {
+        if (isWriter)
+            return {WrDeadlock, "A 'writer reads' deadlock"};
+        else
+            return {NotWrDeadlock, "No 'writer reads' deadlock"};
+    }
+#endif
+
+    post
+    {
+        Rwlock* post_rwlock = clone(getRwlock(rwlock));
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(post_rwlock));
+
+        /* [The thread has been blocked by call of the pthread_rwlock_lock() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                                  create_RwlockTimedLockCall(context, rwlock, timestamp, delta)
+                                                 )
+           );
+
+        /* [The thread was added to the readers wait list.] */
+        REQ("", "Thread should be added to the readers wait list",
+            contains_Set(post_rwlock->reader_wait_list, create_ThreadIdObj(context))
+           );
+
+        return true;
+    }
+}
+
+void onPThreadRwlockTimedRdlock(CallContext context, PThreadRwlockTPtr rwlock, TimeInterval timestamp, TimeUnit delta)
+{
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+
+    startBlockedCall(context, create_RwlockTimedLockCall(context, rwlock, timestamp, delta));
+    if (pre_rwlock != NULL)
+    {
+        add_Set(pre_rwlock->reader_wait_list, create_ThreadIdObj(context));
+        if(isReadAvailable(pre_rwlock, context))
+        {
+            threadShouldBeRun(context);
+        }
+    }
+}
+
+reaction RwlockLockReturnType* pthread_rwlock_timedrdlock_return(void)
+{
+    post
+    {
+        CallContext context = pthread_rwlock_timedrdlock_return->context;
+        RwlockTimedLockCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+
+        PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+        Rwlock* pre_rwlock = findRwlock(@getAllRwlocks(), rwlock);
+        Rwlock* post_rwlock = getRwlock(rwlock);
+
+        if(!POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK_FAILS_WITH_EINVAL_ON_BAD_RWLOCK)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "Rwlock should exists", pre_rwlock != NULL);
+        }
+
+        /* [Invariants checking.] */
+        REQ("", "rwlock invariant failed", T(invariant(pre_rwlock)) && T(invariant(post_rwlock)));
+
+        /*
+         * Otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, "pthread_rwlock_timedrdlock.13",
+                    *(pthread_rwlock_timedrdlock_return->returned_value) != 0, *(pthread_rwlock_timedrdlock_return->returned_value))
+            /*
+             * The pthread_rwlock_timedrdlock() function shall fail if:
+             * 
+             * [ETIMEDOUT] 
+             * 
+             * The lock could not be acquired before the specified timeout expired. 
+             */
+            ERROR_SHALL(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, ETIMEDOUT, "pthread_rwlock_timedrdlock.14.01",
+                        lessOrEqualTimeMarks(addTimeMarks(blocked_call->t_stamp.minMark, blocked_call->delta), timestamp.maxMark)
+                       )
+
+            /*
+             * The pthread_rwlock_timedrdlock() function may fail if:
+             * 
+             * [EAGAIN] 
+             * 
+             * The read lock could not be acquired because the maximum number of read locks 
+             * for lock would be exceeded. 
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, EAGAIN, "pthread_rwlock_timedrdlock.15.01", "Hard to check system resources")
+
+            /*
+             * The pthread_rwlock_timedrdlock() function may fail if:
+             * 
+             * [EDEADLK] 
+             * 
+             * A deadlock condition was detected or the calling thread already holds a write 
+             * lock on rwlock. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, EDEADLK, "pthread_rwlock_timedrdlock.15.02", isWriter_Rwlock(pre_rwlock, context))
+
+            /*
+             * The pthread_rwlock_timedrdlock() function may fail if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock does not refer to an initialized read-write lock 
+             * object, or the abs_timeout nanosecond value is less than zero or greater than 
+             * or equal to 1000 million. 
+             */
+            /* [TimeUnit does not allow to pass an incorrect timeout!] */
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, BAD_RWLOCK, EINVAL, "pthread_rwlock_timedrdlock.15.03",
+                          pre_rwlock == NULL
+                         )
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, BAD_TIMEOUT_FREE_LOCK, EINVAL, "pthread_rwlock_timedrdlock.15.03", TODO_ERR(EINVAL))
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, BAD_TIMEOUT_BUSY_LOCK, EINVAL, "pthread_rwlock_timedrdlock.15.03", TODO_ERR(EINVAL))
+
+            /*
+             * This function shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK, EINTR, "pthread_rwlock_timedrdlock.16")
+
+        ERROR_END()
+
+        /* [Implicit requirement] */
+        REQ("", "The thread should be removed from wait list", 
+            isThreadIdRemovedSet(pre_rwlock->reader_wait_list, context, post_rwlock->reader_wait_list)
+           );
+
+        /* [The calling thread shall not acquire the lock if a writer holds the lock] */
+        REQ("", "if this thread has acquired lock writer should be not exist", 
+            isWrong_ThreadId(post_rwlock->writer)
+           );
+        
+        /* 
+         * [The calling thread shall not acquire the lock if a writer 
+         *  holds the lock or if writers of higher or equal priority 
+         *  are blocked on the lock; otherwise, the calling thread 
+         *  shall acquire the lock.]
+         */
+        REQ("", "Writers wait list may not involve threads with higher priority than the priority of this thread",
+            !isWaiterWithHigherPriority(context, post_rwlock->writer_wait_list)
+           );
+
+        /*
+         * The pthread_rwlock_timedrdlock() function shall apply a read lock to the read- 
+         * write lock referenced by rwlock as in the pthread_rwlock_rdlock() function.
+         */
+        REQ("pthread_rwlock_timedrdlock.01", "rwlock should be locked for reading",
+            isReader_Rwlock(post_rwlock, context)
+           );
+
+        /*
+         * However, if the lock cannot be acquired without waiting for other threads to 
+         * unlock the lock, this wait shall be terminated when the specified timeout 
+         * expires.
+         */
+        REQ("pthread_rwlock_timedrdlock.02", "", TODO_REQ());
+
+        /*
+         * The timeout shall expire when the absolute time specified by abs_timeout passes, 
+         * as measured by the clock on which timeouts are based (that is, when the value 
+         * of that clock equals or exceeds abs_timeout), or if the absolute time specified 
+         * by abs_timeout has already been passed at the time of the call.
+         */
+        REQ("pthread_rwlock_timedrdlock.03", "", TODO_REQ());
+
+        /*
+         * If the Timers option is supported, the timeout shall be based on the 
+         * CLOCK_REALTIME clock.
+         */
+        REQ("pthread_rwlock_timedrdlock.04", "", TODO_REQ());
+
+        /*
+         * If the Timers option is not supported, the timeout shall be based on the system 
+         * clock as returned by the time() function.
+         */
+        REQ("pthread_rwlock_timedrdlock.05", "", TODO_REQ());
+
+        /*
+         * The resolution of the timeout shall be the resolution of the clock on which it 
+         * is based.
+         */
+        REQ("pthread_rwlock_timedrdlock.06", "", TODO_REQ());
+
+        /*
+         * Under no circumstances shall the function fail with a timeout if the lock can 
+         * be acquired immediately.
+         */
+        REQ("pthread_rwlock_timedrdlock.07", "", TODO_REQ());
+
+        /*
+         * If a signal that causes a signal handler to be executed is delivered to a 
+         * thread blocked on a read-write lock via a call to pthread_rwlock_timedrdlock(), 
+         * upon return from the signal handler the thread shall resume waiting for the 
+         * lock as if it was not interrupted.
+         */
+        REQ("pthread_rwlock_timedrdlock.09", "", TODO_REQ());
+
+        /*
+         * The pthread_rwlock_timedrdlock() function shall return zero if the lock for 
+         * reading on the read-write lock object referenced by rwlock is acquired.
+         */
+        REQ("pthread_rwlock_timedrdlock.12", "return value should be zero",
+            *(pthread_rwlock_timedrdlock_return->returned_value) == 0
+           );
+
+        return true;
+    }
+}
+
+void onPThreadRwlockTimedRdlockReturn(CallContext context, ErrorCode* pthread_rwlock_timedrdlock_spec)
+{
+    RwlockTimedLockCall* blocked_call = finishBlockedCall(context);
+    PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+
+    if (pre_rwlock != NULL)
+    {
+        /* Remove thread from wait list */
+        remove_ThreadIdSet(pre_rwlock->reader_wait_list, context);
+
+        if (*pthread_rwlock_timedrdlock_spec == 0)
+        {
+            /* Set up a new owner */
+            add_MultiSet(pre_rwlock->readers_list, create_ThreadIdObj(context));
+        }
+    }
+}
+
+specification
+ErrorCode* pthread_rwlock_timedrdlock_bad_spec(CallContext context, PThreadRwlockTPtr rwlock, IntT nsec)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        /* [The value specified by rwlock is invalid. Behaviour is unspecified.] */
+        REQ("", "The value specified by rwlock is invalid", (pre_rwlock != NULL));
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(pre_rwlock));
+
+        /* [Checking the nsec value] */
+        REQ("", "nsec should be incorrect", T(nsec < 0) || T(nsec > MILLIARD));
+
+        return true;
+    }
+
+    coverage SecondsC
+    {
+        if (nsec < 0)
+            return {NegativeNSec, "Negative nsec value"};
+        else
+            return {TooLargeNSec, "Too large nsec value"};
+    }
+
+    post
+    {
+        Rwlock* post_rwlock = clone(getRwlock(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Rwlock should exist", post_rwlock != NULL);
+    
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(post_rwlock));
+
+        /* [Return value should be EINVAL as the timeout value is incorrect] */
+        REQ("", "return value should be EINVAL", *pthread_rwlock_timedrdlock_bad_spec == SUT_EINVAL);
+
+        /* The calling thread acquires the read lock */
+        REQ("", "The rwlock should not be locked for reading by the current thread", !isReader_Rwlock(post_rwlock, context));
+            
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    pthread_rwlock_timedwrlock - lock a read-write lock for writing
+
+SYNOPSIS
+    #include <pthread.h>
+    #include <time.h>
+
+    int pthread_rwlock_timedwrlock(pthread_rwlock_t *restrict rwlock,
+           const struct timespec *restrict abs_timeout); 
+
+DESCRIPTION
+
+    The pthread_rwlock_timedwrlock() function shall apply a write lock to the
+    read-write lock referenced by rwlock as in the pthread_rwlock_wrlock()
+    function. However, if the lock cannot be acquired without waiting for other
+    threads to unlock the lock, this wait shall be terminated when the
+    specified timeout expires. The timeout shall expire when the absolute time
+    specified by abs_timeout passes, as measured by the clock on which timeouts
+    are based (that is, when the value of that clock equals or exceeds
+    abs_timeout), or if the absolute time specified by abs_timeout has already
+    been passed at the time of the call.
+
+    If the Timers option is supported, the timeout shall be based on the
+    CLOCK_REALTIME clock.  If the Timers option is not supported, the timeout
+    shall be based on the system clock as returned by the time() function. The
+    resolution of the timeout shall be the resolution of the clock on which it
+    is based. The timespec data type is defined in the <time.h> header. Under
+    no circumstances shall the function fail with a timeout if the lock can be
+    acquired immediately. The validity of the abs_timeout parameter need not be
+    checked if the lock can be immediately acquired.
+
+    If a signal that causes a signal handler to be executed is delivered to a
+    thread blocked on a read-write lock via a call to
+    pthread_rwlock_timedwrlock(), upon return from the signal handler the
+    thread shall resume waiting for the lock as if it was not interrupted.
+
+    The calling thread may deadlock if at the time the call is made it holds
+    the read-write lock. The results are undefined if this function is called
+    with an uninitialized read-write lock.
+
+RETURN VALUE
+
+    The pthread_rwlock_timedwrlock() function shall return zero if the lock for
+    writing on the read-write lock object referenced by rwlock is acquired.
+    Otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_rwlock_timedwrlock() function shall fail if:
+
+    [ETIMEDOUT]
+        The lock could not be acquired before the specified timeout expired.
+
+    The pthread_rwlock_timedwrlock() function may fail if:
+
+    [EDEADLK]
+        A deadlock condition was detected or the calling thread already holds
+        the rwlock.
+
+    [EINVAL]
+        The value specified by rwlock does not refer to an initialized
+        read-write lock object, or the abs_timeout nanosecond value is less
+        than zero or greater than or equal to 1000 million.
+
+    This function shall not return an error code of [EINTR].
+
+*/
+
+specification
+void pthread_rwlock_timedwrlock_spec(CallContext context, PThreadRwlockTPtr rwlock, TimeUnit delta)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+    bool isReader, isWriter;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        /*
+         * The validity of the abs_timeout parameter need not be checked if the lock can 
+         * be immediately acquired.
+         */
+        REQ("app.pthread_rwlock_timedwrlock.08", "", TODO_REQ());
+
+        if(!POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EINVAL_ON_BAD_RWLOCK)
+        {
+            /*
+             * The effect of subsequent use of the lock is undefined until the lock is 
+             * reinitialized by another call to pthread_rwlock_init().
+             */
+            /*
+             * Once initialized, the lock can be used any number of times without being 
+             * reinitialized.
+             * 
+             * Results are undefined if a read-write lock is used without first being 
+             * initialized.
+             */
+            /*
+             * Only the object referenced by rwlock may be used for performing synchronization. 
+             * The result of referring to copies of that object in calls to 
+             * pthread_rwlock_destroy(), pthread_rwlock_rdlock(), pthread_rwlock_timedrdlock(), 
+             * pthread_rwlock_timedwrlock(), pthread_rwlock_tryrdlock(), 
+             * pthread_rwlock_trywrlock(), pthread_rwlock_unlock(), or pthread_rwlock_wrlock() 
+             * is undefined.
+             */
+            /*
+             * The results are undefined if this function is called with an uninitialized 
+             * read-write lock.
+             */
+            REQ("app.pthread.rwlock.rwlock.01.timedwrlock;app.pthread.rwlock.rwlock.02.01.timedwrlock;app.pthread.rwlock.rwlock.03.timedwrlock;app.pthread_rwlock_timedwrlock.11",
+                "rwlock should be valid",
+                pre_rwlock != NULL
+               );
+        }
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(pre_rwlock));
+
+        isReader = isReader_Rwlock(pre_rwlock, context);
+        isWriter = isWriter_Rwlock(pre_rwlock, context);
+
+        if(!POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EDEADLK_ON_READLOCK)
+        {
+            /*
+             * The calling thread may deadlock if at the time the call is made it holds the 
+             * read-write lock.
+             */
+            REQ("app.pthread_rwlock_timedwrlock.10", "rwlock should not be locked for reading", !isReader);
+        }
+
+        if(!POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EDEADLK_ON_WRITELOCK)
+        {
+            /*
+             * The calling thread may deadlock if at the time the call is made it holds the 
+             * read-write lock.
+             */
+            REQ("app.pthread_rwlock_timedwrlock.10", "rwlock should not be locked for writing", !isWriter);
+        }
+
+       
+
+        return true;
+    }
+
+    coverage ThreadSharedC
+    {
+        if (pre_rwlock->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EINVAL_ON_BAD_RWLOCK
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EDEADLK_ON_READLOCK
+    coverage ReaderC
+    {
+        if (isReader)
+            return {RdDeadlock, "A 'reader writes' deadlock"};
+        else
+            return {NotRdDeadlock, "No 'reader writes' deadlock"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EDEADLK_ON_WRITELOCK
+    coverage WriterC
+    {
+        if (isWriter)
+            return {WrDeadlock, "A 'writer writes' deadlock"};
+        else
+            return {NotWrDeadlock, "No 'writer writes' deadlock"};
+    }
+#endif
+
+    post
+    {
+        Rwlock* post_rwlock = clone(getRwlock(rwlock));
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(post_rwlock));
+
+        /* [The thread has been blocked by call of the pthread_rwlock_lock() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                                  create_RwlockTimedLockCall(context, rwlock, timestamp, delta)
+                                                 )
+           );
+
+        /* [The thread was added to the writers wait list.] */
+        REQ("", "Thread should be added to the writers wait list",
+            contains_List(post_rwlock->writer_wait_list, create_ThreadIdObj(context))
+           );
+
+        return true;
+    }
+}
+
+void smartInsert_ThreadIdList(List* listt, ThreadId threadid);
+
+void onPThreadRwlockTimedWrlock(CallContext context, PThreadRwlockTPtr rwlock, TimeInterval timestamp, TimeUnit delta)
+{
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+
+    startBlockedCall(context, create_RwlockTimedLockCall(context, rwlock, timestamp, delta));
+    if (pre_rwlock != NULL)
+    {
+        /*insert_ThreadIdList*/smartInsert_ThreadIdList(pre_rwlock->writer_wait_list, context);
+        if (isWriteAvailable(pre_rwlock, context))
+        {
+            threadShouldBeRun(context);
+        }
+    }
+}
+
+reaction RwlockLockReturnType* pthread_rwlock_timedwrlock_return(void)
+{
+    post
+    {
+        CallContext context = pthread_rwlock_timedwrlock_return->context;
+
+        RwlockTimedLockCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+        PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+
+        Rwlock* pre_rwlock = findRwlock(@getAllRwlocks(), rwlock);
+        Rwlock* post_rwlock = getRwlock(rwlock);
+
+        if(!POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EINVAL_ON_BAD_RWLOCK)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "Rwlock should exists", pre_rwlock != NULL);
+        }
+
+        /* [Invariants checking.] */
+        REQ("", "rwlock invariant failed", T(invariant(pre_rwlock)) && T(invariant(post_rwlock)));
+
+        /*
+         * Otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, "pthread_rwlock_timedwrlock.13",
+                    *(pthread_rwlock_timedwrlock_return->returned_value) != 0, *(pthread_rwlock_timedwrlock_return->returned_value))
+            /*
+             * The pthread_rwlock_timedwrlock() function shall fail if:
+             * 
+             * [ETIMEDOUT] 
+             * 
+             * The lock could not be acquired before the specified timeout expired. 
+             */
+            ERROR_SHALL(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, ETIMEDOUT, "pthread_rwlock_timedwrlock.14.01",
+                        lessOrEqualTimeMarks(addTimeMarks(blocked_call->t_stamp.minMark, blocked_call->delta), timestamp.maxMark)
+                       )
+
+            /*
+             * The pthread_rwlock_timedwrlock() function may fail if:
+             * 
+             * [EDEADLK] 
+             * 
+             * A deadlock condition was detected or the calling thread already holds the 
+             * rwlock. 
+             */
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, READLOCK, EDEADLK, "pthread_rwlock_timedwrlock.15.01",
+                          isReader_Rwlock(pre_rwlock, context)
+                         )
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, WRITELOCK, EDEADLK, "pthread_rwlock_timedwrlock.15.01",
+                          isWriter_Rwlock(pre_rwlock, context)
+                         )
+
+            /*
+             * The pthread_rwlock_timedwrlock() function may fail if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock does not refer to an initialized read-write lock 
+             * object, or the abs_timeout nanosecond value is less than zero or greater than 
+             * or equal to 1000 million. 
+             */
+            /* [TimeUnit does not allow to pass an incorrect timeout!] */
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, BAD_RWLOCK, EINVAL, "pthread_rwlock_timedwrlock.15.02",
+                          pre_rwlock == NULL
+                         )
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, BAD_TIMEOUT_FREE_LOCK, EINVAL, "pthread_rwlock_timedwrlock.15.02", TODO_ERR(EINVAL))
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, BAD_TIMEOUT_BUSY_LOCK, EINVAL, "pthread_rwlock_timedwrlock.15.02", TODO_ERR(EINVAL))
+
+            /*
+             * This function shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK, EINTR, "pthread_rwlock_timedwrlock.16")
+
+        ERROR_END()
+
+        /* [Implicit requirement] */
+        REQ("","The thread should be removed from wait list", 
+            isThreadIdRemovedList(pre_rwlock->writer_wait_list, context, post_rwlock->writer_wait_list)
+           );
+
+        /*
+         * The pthread_rwlock_timedwrlock() function shall apply a write lock to the read- 
+         * write lock referenced by rwlock as in the pthread_rwlock_wrlock() function.
+         */
+        REQ("pthread_rwlock_timedwrlock.01", "rwlock should become locked for writing",
+            isWriter_Rwlock(post_rwlock, context)
+           );
+
+        /*
+         * However, if the lock cannot be acquired without waiting for other threads to 
+         * unlock the lock, this wait shall be terminated when the specified timeout 
+         * expires.
+         */
+        REQ("pthread_rwlock_timedwrlock.02", "", TODO_REQ());
+
+        /*
+         * The timeout shall expire when the absolute time specified by abs_timeout passes, 
+         * as measured by the clock on which timeouts are based (that is, when the value 
+         * of that clock equals or exceeds abs_timeout), or if the absolute time specified 
+         * by abs_timeout has already been passed at the time of the call.
+         */
+        REQ("pthread_rwlock_timedwrlock.03", "", TODO_REQ());
+
+        /*
+         * If the Timers option is supported, the timeout shall be based on the 
+         * CLOCK_REALTIME clock.
+         */
+        REQ("pthread_rwlock_timedwrlock.04", "", TODO_REQ());
+
+        /*
+         * If the Timers option is not supported, the timeout shall be based on the system 
+         * clock as returned by the time() function.
+         */
+        REQ("pthread_rwlock_timedwrlock.05", "", TODO_REQ());
+
+        /*
+         * The resolution of the timeout shall be the resolution of the clock on which it 
+         * is based.
+         */
+        REQ("pthread_rwlock_timedwrlock.06", "", TODO_REQ());
+
+        /*
+         * Under no circumstances shall the function fail with a timeout if the lock can 
+         * be acquired immediately.
+         */
+        REQ("pthread_rwlock_timedwrlock.07", "", TODO_REQ());
+
+        /*
+         * If a signal that causes a signal handler to be executed is delivered to a 
+         * thread blocked on a read-write lock via a call to pthread_rwlock_timedwrlock(), 
+         * upon return from the signal handler the thread shall resume waiting for the 
+         * lock as if it was not interrupted.
+         */
+        REQ("pthread_rwlock_timedwrlock.09", "", TODO_REQ());
+
+        /*
+         * The pthread_rwlock_timedwrlock() function shall return zero if the lock for 
+         * writing on the read-write lock object referenced by rwlock is acquired.
+         */
+        REQ("pthread_rwlock_timedwrlock.12", "return value should be zero",
+            *(pthread_rwlock_timedwrlock_return->returned_value) == 0
+           );
+
+        return true;
+    }
+}
+
+void onPThreadRwlockTimedWrlockReturn(CallContext context, ErrorCode* pthread_rwlock_timedwrlock_spec)
+{
+    RwlockTimedLockCall* blocked_call = finishBlockedCall(context);
+    PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+
+    if (pre_rwlock != NULL)
+    {
+        /* Remove thread from wait list */
+        remove_ThreadIdList(pre_rwlock->writer_wait_list, context);
+
+        if (*pthread_rwlock_timedwrlock_spec == 0)
+        {
+            /* Set up a new writer */
+            pre_rwlock->writer = context;
+        }
+    }
+}
+
+specification
+ErrorCode* pthread_rwlock_timedwrlock_bad_spec(CallContext context, PThreadRwlockTPtr rwlock, IntT nsec)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("","rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("","Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        /* [The value specified by rwlock is invalid. Behaviour is unspecified.] */
+        REQ("","The value specified by rwlock is invalid", (pre_rwlock != NULL));
+
+        /* [Invariant checking.] */
+        REQ("","rwlock invariant failed", invariant(pre_rwlock));
+
+        /* [Checking the nsec value] */
+        REQ("","nsec should be incorrect", T(nsec < 0) || T(nsec > MILLIARD));
+
+        return true;
+    }
+
+    coverage SecondsC
+    {
+        if (nsec < 0)
+            return {NegativeNSec, "Negative nsec value"};
+        else
+            return {TooLargeNSec, "Too large nsec value"};
+    }
+
+    post
+    {
+        Rwlock* post_rwlock = clone(getRwlock(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("","Rwlock should exists", post_rwlock != NULL);
+    
+        /* [Invariant checking.] */
+        REQ("","rwlock invariant failed", invariant(post_rwlock));
+
+        /* [Return value should be EINVAL as the timeout value is incorrect] */
+        REQ("","return value should be EINVAL", *pthread_rwlock_timedwrlock_bad_spec == SUT_EINVAL);
+
+        /* The calling thread acquires the read lock */
+        REQ("","The rwlock should not be locked for reading by the current thread", !isReader_Rwlock(post_rwlock, context));
+            
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_rwlock_unlock - unlock a read-write lock object
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    int pthread_rwlock_unlock(pthread_rwlock_t *rwlock); 
+
+DESCRIPTION
+
+    The pthread_rwlock_unlock() function shall release a lock held on the
+    read-write lock object referenced by rwlock. Results are undefined if the
+    read-write lock rwlock is not held by the calling thread.
+
+    If this function is called to release a read lock from the read-write lock
+    object and there are other read locks currently held on this read-write
+    lock object, the read-write lock object remains in the read locked state.
+    If this function releases the last read lock for this read-write lock
+    object, the read-write lock object shall be put in the unlocked state with
+    no owners.
+
+    If this function is called to release a write lock for this read-write lock
+    object, the read-write lock object shall be put in the unlocked state.
+
+    If there are threads blocked on the lock when it becomes available, the
+    scheduling policy shall determine which thread(s) shall acquire the lock.
+    If the Thread Execution Scheduling option is supported, when threads
+    executing with the scheduling policies SCHED_FIFO, SCHED_RR, or
+    SCHED_SPORADIC are waiting on the lock, they shall acquire the lock in
+    priority order when the lock becomes available. For equal priority threads,
+    write locks shall take precedence over read locks.  If the Thread Execution
+    Scheduling option is not supported, it is implementation-defined whether
+    write locks take precedence over read locks.
+
+    Results are undefined if any of these functions are called with an
+    uninitialized read-write lock.
+
+RETURN VALUE
+
+    If successful, the pthread_rwlock_unlock() function shall return zero;
+    otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_rwlock_unlock() function may fail if:
+
+    [EINVAL]
+        The value specified by rwlock does not refer to an initialized
+        read-write lock object.
+
+    [EPERM]
+        The current thread does not hold a lock on the read-write lock.
+
+    The pthread_rwlock_unlock() function shall not return an error code of [EINTR].
+
+*/
+
+specification
+void pthread_rwlock_unlock_spec(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        if(!POSIX_PTHREAD_RWLOCK_UNLOCK_FAILS_WITH_EINVAL)
+        {
+            /*
+             * The effect of subsequent use of the lock is undefined until the lock is 
+             * reinitialized by another call to pthread_rwlock_init().
+             */
+            /*
+             * Once initialized, the lock can be used any number of times without being 
+             * reinitialized.
+             * 
+             * Results are undefined if a read-write lock is used without first being 
+             * initialized.
+             */
+            /*
+             * Only the object referenced by rwlock may be used for performing synchronization. 
+             * The result of referring to copies of that object in calls to 
+             * pthread_rwlock_destroy(), pthread_rwlock_rdlock(), pthread_rwlock_timedrdlock(), 
+             * pthread_rwlock_timedwrlock(), pthread_rwlock_tryrdlock(), 
+             * pthread_rwlock_trywrlock(), pthread_rwlock_unlock(), or pthread_rwlock_wrlock() 
+             * is undefined.
+             */
+            /*
+             * Results are undefined if any of these functions are called with an 
+             * uninitialized read-write lock.
+             */
+            REQ("app.pthread.rwlock.rwlock.01.unlock;app.pthread.rwlock.rwlock.02.01.unlock;app.pthread.rwlock.rwlock.03.unlock;app.pthread_rwlock_unlock.10",
+                "rwlock should be valid",
+                pre_rwlock != NULL
+               );
+        }
+
+        if(!POSIX_PTHREAD_RWLOCK_UNLOCK_FAILS_WITH_EPERM)
+        {
+            /*
+             * Results are undefined if the read-write lock rwlock is not held by the calling 
+             * thread.
+             */
+            REQ("app.pthread_rwlock_unlock.02", "rwlock should be held by the current thread",
+                isOwner_Rwlock(pre_rwlock, context)
+               );
+        }
+
+        /*
+         * If so, the application shall ensure that the thread performs matching unlocks ( 
+         * that is, it calls the pthread_rwlock_unlock() function n times).
+         */
+        IMPLEMENT_REQ("app.pthread_rwlock_unlock.pthread_rwlock_rdlock.01");
+
+        return true;
+    }
+
+    coverage C
+    {
+        return {A, "The only"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_UNLOCK_FAILS_WITH_EINVAL
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_UNLOCK_FAILS_WITH_EPERM
+    coverage OwnerC
+    {
+        if (isOwner_Rwlock(pre_rwlock, context))
+            return {OwnRwlock, "Thread owns the rwlock"};
+        else
+            return {NotOwnRwlock, "Thread does not own the rwlock"};
+    }
+#endif
+
+    post
+    {
+        Rwlock* post_rwlock = getRwlock(rwlock);
+        ThreadId thread;
+
+        /* [The thread has been blocked by call of the pthread_rwlock_unlock() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context),
+                                                  create_RwlockUnlockCall(context, rwlock)
+                                                 )
+           );
+
+        if (isWriter_Rwlock(pre_rwlock, context))
+        {
+            /* [The rwlock should not be locked.] */
+            REQ("", "the rwlock should not be locked", isWrong_ThreadId(post_rwlock->writer));
+        }
+        else
+        {
+            /* [The current thread should be removed from the readers list.] */
+            REQ("", "current thread should be removed from the lockers list",
+                isThreadIdRemovedMultiSet(pre_rwlock->readers_list, context, post_rwlock->readers_list)
+               );
+        }
+
+        if (!isLocked_Rwlock(pre_rwlock))
+        {
+            thread = getNextRwlockThread_SchedulingPolicy(context, pre_rwlock);
+
+            if (!isWrong_ThreadId(thread))
+            {
+                /*
+                 * If there are threads blocked on the lock when it becomes available,
+                 * the scheduling policy shall determine which thread(s) shall acquire
+                 * the lock.
+                 */
+                REQ("", "Thread determined by the scheduling policy shall become unblocked",
+                    isThreadReadyToBeRun(thread)
+                   );
+            }
+        }
+
+        return true;
+    }
+}
+
+void onPThreadRwlockUnlock(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+    ThreadId thread;
+
+    startBlockedCall(context, create_RwlockUnlockCall(context, rwlock));
+    threadShouldBeRun(context);
+
+    if ((pre_rwlock != NULL) && isOwner_Rwlock(pre_rwlock, context))
+    {
+        if (equals_ThreadId(pre_rwlock->writer, context))
+        {
+            // The thread is a writer.
+            pre_rwlock->writer = WrongThreadId;
+        }
+        else
+        {
+            // The thread is a reader.
+            bool exist = contains_MultiSet(pre_rwlock->readers_list, create_ThreadIdObj(context));
+            assertion(exist, "The thread was not locking this rwlock!");
+            remove_MultiSet(pre_rwlock->readers_list, create_ThreadIdObj(context));
+        }
+        if (!isLocked_Rwlock(pre_rwlock))
+        {
+            // Thread determined by the scheduling policy shall become unblocked.
+            thread = getNextRwlockThread_SchedulingPolicy(context, pre_rwlock);
+            if (!isWrong_ThreadId(thread))
+                threadShouldBeRun(thread);
+        }
+    }
+}
+
+reaction RwlockUnlockReturnType* pthread_rwlock_unlock_return(void)
+{
+    post
+    {
+        CallContext context = pthread_rwlock_unlock_return->context;
+        RwlockUnlockCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+        PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+        Rwlock* pre_rwlock = findRwlock(@getAllRwlocks(), rwlock);
+
+        if(!POSIX_PTHREAD_RWLOCK_UNLOCK_FAILS_WITH_EINVAL)
+        {
+            /* [Consistency of test suite] */    
+            REQ("", "rwlock should eb valid", pre_rwlock != NULL);
+        }
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_UNLOCK, "pthread_rwlock_unlock.12",
+                    *(pthread_rwlock_unlock_return->returned_value) != 0, *(pthread_rwlock_unlock_return->returned_value))
+            /*
+             * The pthread_rwlock_unlock() function may fail if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock does not refer to an initialized read-write lock 
+             * object. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_UNLOCK, EINVAL, "pthread_rwlock_unlock.13.01", pre_rwlock == NULL)
+
+            /*
+             * The pthread_rwlock_unlock() function may fail if:
+             * 
+             * [EPERM] 
+             * 
+             * The current thread does not hold a lock on the read-write lock. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_UNLOCK, EPERM, "pthread_rwlock_unlock.13.02",
+                      !isOwner_Rwlock(pre_rwlock, context)
+                     )
+
+            /*
+             * The pthread_rwlock_unlock() function shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_UNLOCK, EINTR, "pthread_rwlock_unlock.14")
+
+        ERROR_END()
+
+        /*
+         * The pthread_rwlock_unlock() function shall release a lock held on the read- 
+         * write lock object referenced by rwlock.
+         */
+        REQ("pthread_rwlock_unlock.01", "", TODO_REQ());
+
+        /*
+         * If this function is called to release a read lock from the read-write lock 
+         * object and there are other read locks currently held on this read-write lock 
+         * object, the read-write lock object remains in the read locked state.
+         */
+        REQ("pthread_rwlock_unlock.03", "", TODO_REQ());
+
+        /*
+         * If this function releases the last read lock for this read-write lock object, 
+         * the read-write lock object shall be put in the unlocked state with no owners.
+         */
+        REQ("pthread_rwlock_unlock.04", "", TODO_REQ());
+
+        /*
+         * If this function is called to release a write lock for this read-write lock 
+         * object, the read-write lock object shall be put in the unlocked state.
+         */
+        REQ("pthread_rwlock_unlock.05", "", TODO_REQ());
+
+        /*
+         * If there are threads blocked on the lock when it becomes available, the 
+         * scheduling policy shall determine which thread(s) shall acquire the lock.
+         */
+        REQ("pthread_rwlock_unlock.06", "", TODO_REQ());
+
+        /*
+         * If the Thread Execution Scheduling option is supported, when threads executing 
+         * with the scheduling policies SCHED_FIFO, SCHED_RR, or SCHED_SPORADIC are 
+         * waiting on the lock, they shall acquire the lock in priority order when the 
+         * lock becomes available.
+         */
+        REQ("pthread_rwlock_unlock.07", "", TODO_REQ());
+
+        /*
+         * For equal priority threads, write locks shall take precedence over read locks.
+         */
+        REQ("pthread_rwlock_unlock.08", "", TODO_REQ());
+
+        /*
+         * If the Thread Execution Scheduling option is not supported, it is 
+         * implementation-defined whether write locks take precedence over read locks.
+         */
+        REQ("pthread_rwlock_unlock.09", "", TODO_REQ());
+
+        /*
+         * If successful, the pthread_rwlock_unlock() function shall return zero;
+         */
+        REQ("pthread_rwlock_unlock.11", "return value should be zero",
+            *(pthread_rwlock_unlock_return->returned_value) == 0
+           );
+
+        return true;
+    }
+}
+
+void onPThreadRwlockUnlockReturn(CallContext context, ErrorCode* pthread_rwlock_unlock_spec)
+{
+    finishBlockedCall(context);
+//    RwlockLockCall* blocked_call = finishBlockedCall(context);
+//
+//    if (*pthread_rwlock_unlock_spec != 0)
+//    {
+//        PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+//        Rwlock* pre_rwlock = getRwlock(rwlock);
+//
+//        /*
+//         * Error code was returned, the rwlock cannot be unlocked. Return the
+//         * model state back to the locked state.
+//         */
+//        if (pre_rwlock->oldWasWriter)
+//        {
+//            pre_rwlock->writer = context;
+//        }
+//        else
+//        {
+//            insert_ThreadIdList(pre_rwlock->readers_list, context);
+//        }
+//    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_rwlock_trywrlock, pthread_rwlock_wrlock - lock a read-write lock
+    object for writing
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock);
+    int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock); 
+
+DESCRIPTION
+
+    The pthread_rwlock_trywrlock() function shall apply a write lock like the
+    pthread_rwlock_wrlock() function, with the exception that the function
+    shall fail if any thread currently holds rwlock (for reading or writing).
+
+    The pthread_rwlock_wrlock() function shall apply a write lock to the
+    read-write lock referenced by rwlock. The calling thread acquires the write
+    lock if no other thread (reader or writer) holds the read-write lock
+    rwlock. Otherwise, the thread shall block until it can acquire the lock.
+    The calling thread may deadlock if at the time the call is made it holds
+    the read-write lock (whether a read or write lock).
+
+    Implementations may favor writers over readers to avoid writer starvation.
+
+    Results are undefined if any of these functions are called with an
+    uninitialized read-write lock.
+
+    If a signal is delivered to a thread waiting for a read-write lock for
+    writing, upon return from the signal handler the thread resumes waiting for
+    the read-write lock for writing as if it was not interrupted.
+
+RETURN VALUE
+
+    The pthread_rwlock_trywrlock() function shall return zero if the lock for
+    writing on the read-write lock object referenced by rwlock is acquired.
+    Otherwise, an error number shall be returned to indicate the error.
+
+    If successful, the pthread_rwlock_wrlock() function shall return zero;
+    otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_rwlock_trywrlock() function shall fail if:
+
+    [EBUSY]
+        The read-write lock could not be acquired for writing because it was
+        already locked for reading or writing.
+
+    The pthread_rwlock_trywrlock() and pthread_rwlock_wrlock() functions may
+    fail if:
+
+    [EINVAL]
+        The value specified by rwlock does not refer to an initialized
+        read-write lock object.
+
+    The pthread_rwlock_wrlock() function may fail if:
+
+    [EDEADLK]
+        A deadlock condition was detected or the current thread already owns
+        the read-write lock for writing or reading.
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+
+specification
+void pthread_rwlock_wrlock_spec(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+    bool isReader, isWriter;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        if(!POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EINVAL)
+        {
+            /*
+             * The effect of subsequent use of the lock is undefined until the lock is 
+             * reinitialized by another call to pthread_rwlock_init().
+             */
+            /*
+             * Once initialized, the lock can be used any number of times without being 
+             * reinitialized.
+             * 
+             * Results are undefined if a read-write lock is used without first being 
+             * initialized.
+             */
+            /*
+             * Only the object referenced by rwlock may be used for performing synchronization. 
+             * The result of referring to copies of that object in calls to 
+             * pthread_rwlock_destroy(), pthread_rwlock_rdlock(), pthread_rwlock_timedrdlock(), 
+             * pthread_rwlock_timedwrlock(), pthread_rwlock_tryrdlock(), 
+             * pthread_rwlock_trywrlock(), pthread_rwlock_unlock(), or pthread_rwlock_wrlock() 
+             * is undefined.
+             */
+            /*
+             * Results are undefined if any of these functions are called with an 
+             * uninitialized read-write lock.
+             */
+            REQ("app.pthread.rwlock.rwlock.01.wrlock;app.pthread.rwlock.rwlock.02.01.wrlock;app.pthread.rwlock.rwlock.03.wrlock;app.pthread_rwlock_wrlock.05",
+                "rwlock should be valid",
+                pre_rwlock != NULL
+               );
+        }
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(pre_rwlock));
+
+        isReader = isReader_Rwlock(pre_rwlock, context);
+        isWriter = isWriter_Rwlock(pre_rwlock, context);
+
+        if(!POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EDEADLK_ON_READLOCK)
+        {
+            /*
+             * The calling thread may deadlock if at the time the call is made it
+             * holds the read-write lock (whether a read or write lock).
+             */
+            REQ("", "The thread must not be locking the same rwlock", !isReader);
+        }
+
+        if(!POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EDEADLK_ON_WRITELOCK)
+        {
+            /*
+             * The calling thread may deadlock if at the time the call is made it
+             * holds the read-write lock (whether a read or write lock).
+             */
+            REQ("", "The thread must not be locking the same rwlock", !isWriter);
+        }
+
+     
+
+        return true;
+    }
+
+    coverage ThreadSharedC
+    {
+        if (pre_rwlock->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EINVAL
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EDEADLK_ON_READLOCK
+    coverage ReaderC
+    {
+        if (isReader)
+            return {RdDeadlock, "A 'reader writes' deadlock"};
+        else
+            return {NotRdDeadlock, "No 'reader writes' deadlock"};
+    }
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EDEADLK_ON_WRITELOCK
+    coverage WriterC
+    {
+        if (isWriter)
+            return {WrDeadlock, "A 'writer writes' deadlock"};
+        else
+            return {NotWrDeadlock, "No 'writer writes' deadlock"};
+    }
+#endif
+
+    post
+    {
+        Rwlock* post_rwlock = clone(getRwlock(rwlock));
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(post_rwlock));
+
+        /* [The thread has been blocked by call of the pthread_rwlock_lock() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                                  create_RwlockLockCall(context, rwlock)
+                                                 )
+           );
+
+        /* [The thread was added to the writers wait list.] */
+        REQ("", "Thread should be added to the writers wait list",
+            contains_List(post_rwlock->writer_wait_list, create_ThreadIdObj(context))
+           );
+
+        return true;
+    }
+}
+
+void smartInsert_ThreadIdList(List* listt, ThreadId threadid)
+{
+    List* cl_list = clone(listt);
+    int size, i;
+    Map* threads;
+    ThreadId thread;
+
+    append_List(cl_list, create_ThreadIdObj(threadid));
+    clear_List(listt);
+
+    threads = getThreads(threadid);
+    size = size_List(cl_list);
+    for(i=0; i<size; i++)
+    {
+        if(isEmpty_List(cl_list)) break;
+        thread = getNextThread_SchedulingPolicy(threads, cl_list);
+        append_List(listt, create_ThreadIdObj(thread));
+        VERBOSE("Thread added to waiting writers: %u \n", thread.thread);
+        remove_List(cl_list, indexOf_List( cl_list, create_ThreadIdObj(thread)));
+    }
+}
+
+void onPThreadRwlockWrlock(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+
+    startBlockedCall(context, create_RwlockLockCall(context, rwlock));
+    if (pre_rwlock != NULL)
+    {
+        /*insert_ThreadIdList*/smartInsert_ThreadIdList(pre_rwlock->writer_wait_list, context);
+        if (isWriteAvailable(pre_rwlock, context))
+        {
+            threadShouldBeRun(context);
+            return;
+        }
+    }
+}
+
+reaction RwlockLockReturnType* pthread_rwlock_wrlock_return(void)
+{
+    post
+    {
+        CallContext context = pthread_rwlock_wrlock_return->context;
+
+        RwlockLockCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+        PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+
+        //why we cannot write pre_rwlock = @getRwlock(rwlock) ??????????????
+        Rwlock* pre_rwlock = findRwlock(@getAllRwlocks(), rwlock);
+        Rwlock* post_rwlock = getRwlock(rwlock);
+
+        if(!POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EINVAL)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "Rwlock should exists", pre_rwlock != NULL);
+        }
+
+        /* [Invariants checking.] */
+        REQ("", "rwlock invariant failed", T(invariant(pre_rwlock)) && T(invariant(post_rwlock)));
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_WRLOCK, "pthread_rwlock_wrlock.08",
+                    *(pthread_rwlock_wrlock_return->returned_value) != 0, *(pthread_rwlock_wrlock_return->returned_value))
+            /*
+             * The pthread_rwlock_trywrlock() and pthread_rwlock_wrlock() functions may fail 
+             * if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock does not refer to an initialized read-write lock 
+             * object. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_WRLOCK, EINVAL, "pthread_rwlock_wrlock.09.01", pre_rwlock == NULL)
+
+            /*
+             * The pthread_rwlock_wrlock() function may fail if:
+             * 
+             * [EDEADLK] 
+             * 
+             * A deadlock condition was detected or the current thread already owns the read- 
+             * write lock for writing or reading. 
+             */
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_WRLOCK, READLOCK, EDEADLK, "pthread_rwlock_wrlock.10.01", isReader_Rwlock(pre_rwlock, context))
+            ERROR_MAY_EXT(POSIX_PTHREAD_RWLOCK_WRLOCK, WRITELOCK, EDEADLK, "pthread_rwlock_wrlock.10.01", isWriter_Rwlock(pre_rwlock, context))
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_WRLOCK, EINTR, "pthread_rwlock_wrlock.11")
+
+        ERROR_END()
+
+        /* Implicit requirement */
+        REQ("", "The thread should be removed from wait list", 
+            isThreadIdRemovedList(pre_rwlock->writer_wait_list, context, post_rwlock->writer_wait_list)
+           );
+
+        /*
+         * The pthread_rwlock_wrlock() function shall apply a write lock to the read-write 
+         * lock referenced by rwlock.
+         */
+        REQ("pthread_rwlock_wrlock.01", "rwlock should be locked for writing", isWriter_Rwlock(post_rwlock, context));
+
+        /*
+         * The calling thread acquires the write lock if no other thread (reader or 
+         * writer) holds the read-write lock rwlock.
+         */
+        REQ("pthread_rwlock_wrlock.02", "", TODO_REQ());
+
+        /*
+         * Otherwise, the thread shall block until it can acquire the lock.
+         */
+        REQ("pthread_rwlock_wrlock.03", "", TODO_REQ());
+
+        /*
+         * The calling thread may deadlock if at the time the call is made it holds the 
+         * read-write lock (whether a read or write lock).
+         */
+        REQ("pthread_rwlock_wrlock.04", "", TODO_REQ());
+
+        /*
+         * If a signal is delivered to a thread waiting for a read-write lock for writing, 
+         * upon return from the signal handler the thread resumes waiting for the read- 
+         * write lock for writing as if it was not interrupted.
+         */
+        REQ("pthread_rwlock_wrlock.06", "", TODO_REQ());
+
+        /*
+         * If successful, the pthread_rwlock_wrlock() function shall return zero;
+         */
+        REQ("pthread_rwlock_wrlock.07", "return value should be zero", *(pthread_rwlock_wrlock_return->returned_value) == 0);
+
+        return true;
+    }
+}
+
+void onPThreadRwlockWrlockReturn(CallContext context, ErrorCode* pthread_rwlock_wrlock_spec)
+{
+    RwlockLockCall* blocked_call = finishBlockedCall(context);
+    PThreadRwlockTPtr rwlock = blocked_call->rwlock;
+    Rwlock* pre_rwlock = getRwlock(rwlock);
+
+    if (pre_rwlock != NULL)
+    {
+        /* Remove thread from wait list */
+        remove_ThreadIdList(pre_rwlock->writer_wait_list, context);
+
+        if (*pthread_rwlock_wrlock_spec == 0)
+        {
+            /* Set up a new writer */
+            pre_rwlock->writer = context;
+        }
+    }
+}
+
+specification
+ErrorCode* pthread_rwlock_trywrlock_spec(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    Rwlock* pre_rwlock = clone(getRwlock(rwlock));
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "rwlock is not NULL", !isNULL_VoidTPtr(rwlock));
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context, rwlock));
+
+        if(!POSIX_PTHREAD_RWLOCK_TRYWRLOCK_FAILS_WITH_EINVAL)
+        {
+            /*
+             * The effect of subsequent use of the lock is undefined until the lock is 
+             * reinitialized by another call to pthread_rwlock_init().
+             */
+            /*
+             * Once initialized, the lock can be used any number of times without being 
+             * reinitialized.
+             * 
+             * Results are undefined if a read-write lock is used without first being 
+             * initialized.
+             */
+            /*
+             * Only the object referenced by rwlock may be used for performing synchronization. 
+             * The result of referring to copies of that object in calls to 
+             * pthread_rwlock_destroy(), pthread_rwlock_rdlock(), pthread_rwlock_timedrdlock(), 
+             * pthread_rwlock_timedwrlock(), pthread_rwlock_tryrdlock(), 
+             * pthread_rwlock_trywrlock(), pthread_rwlock_unlock(), or pthread_rwlock_wrlock() 
+             * is undefined.
+             */
+            /*
+             * Results are undefined if any of these functions are called with an 
+             * uninitialized read-write lock.
+             */
+            REQ("app.pthread.rwlock.rwlock.01.trywrlock;app.pthread.rwlock.rwlock.02.01.trywrlock;app.pthread.rwlock.rwlock.03.trywrlock;app.pthread_rwlock_trywrlock.04",
+                "rwlock should be valid",
+                pre_rwlock != NULL
+               );
+        }
+
+        /* [Invariant checking.] */
+        REQ("", "rwlock invariant failed", invariant(pre_rwlock));
+
+       
+
+        return true;
+    }
+    
+    coverage ThreadSharedC
+    {
+        if (pre_rwlock->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+    
+    coverage LockedC
+    {
+        if (!isWrong_ThreadId(pre_rwlock->writer))
+            return {LockedByWriter, "Rwlock is locked by a writer"};
+        else if (!isEmpty_MultiSet(pre_rwlock->readers_list))
+            return {LockedByReader, "Rwlock is locked by some reader(s)"};
+        else
+            return {NotLocked, "Rwlock is not locked"};
+    }
+
+#if POSIX_PTHREAD_RWLOCK_TRYWRLOCK_FAILS_WITH_EINVAL
+    coverage InvalidC
+    {
+        if (pre_rwlock == NULL)
+            return {InvalidRwlock, "Rwlock is not initialized"};
+        else
+            return {GoodRwlock, "Rwlock is initialized"};
+    }
+#endif
+
+    post
+    {
+        Rwlock* post_rwlock = getRwlock(rwlock);
+
+        /* [Invariant checking.] */
+        REQ("","rwlock invariant failed", invariant(post_rwlock));
+
+        if (*pthread_rwlock_trywrlock_spec != 0)
+        {
+            /* [If error, rwlock must not change.] */
+            REQ("", "rwlock must not change", equals(pre_rwlock, post_rwlock));
+        }
+
+        /*
+         * Otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_RWLOCK_TRYWRLOCK, "pthread_rwlock_trywrlock.06",
+                    *pthread_rwlock_trywrlock_spec != 0, *pthread_rwlock_trywrlock_spec)
+            /*
+             * The pthread_rwlock_trywrlock() function shall fail if:
+             * 
+             * [EBUSY] 
+             * 
+             * The read-write lock could not be acquired for writing because it was already 
+             * locked for reading or writing. 
+             */
+            ERROR_SHALL(POSIX_PTHREAD_RWLOCK_TRYWRLOCK, EBUSY, "pthread_rwlock_trywrlock.07.01", isLocked_Rwlock(pre_rwlock))
+
+            /*
+             * The pthread_rwlock_trywrlock() and pthread_rwlock_wrlock() functions may fail 
+             * if:
+             * 
+             * [EINVAL] 
+             * 
+             * The value specified by rwlock does not refer to an initialized read-write lock 
+             * object. 
+             */
+            ERROR_MAY(POSIX_PTHREAD_RWLOCK_TRYWRLOCK, EINVAL, "pthread_rwlock_trywrlock.08.01", pre_rwlock == NULL)
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_RWLOCK_TRYWRLOCK, EINTR, "pthread_rwlock_trywrlock.09")
+
+        ERROR_END()
+
+        /*
+         * The pthread_rwlock_trywrlock() function shall apply a write lock like the 
+         * pthread_rwlock_wrlock() function, with the exception that
+         */
+        REQ("pthread_rwlock_trywrlock.01", "the thread shall apply a write lock for the rwlock",
+            equals_ThreadId(post_rwlock->writer, context)
+           );
+
+        /*
+         * the function shall fail if any thread currently holds rwlock (for reading or 
+         * writing).
+         */
+        REQ("pthread_rwlock_trywrlock.02", "", TODO_REQ());
+
+        /*
+         * The calling thread acquires the write lock if no other thread (reader or 
+         * writer) holds the read-write lock rwlock.
+         */
+        REQ("pthread_rwlock_trywrlock.03", "", TODO_REQ());
+
+        /*
+         * The pthread_rwlock_trywrlock() function shall return zero if the lock for 
+         * writing on the read-write lock object referenced by rwlock is acquired.
+         */
+        REQ("pthread_rwlock_trywrlock.05", "return value should be zero", *pthread_rwlock_trywrlock_spec == 0);
+
+        return true;
+    }
+}
+
+void onPThreadRwlockTryWrlock(CallContext context, PThreadRwlockTPtr rwlock, ErrorCode* pthread_rwlock_trywrlock_spec)
+{
+    if (*pthread_rwlock_trywrlock_spec == 0)
+    {
+        Rwlock* pre_rwlock = getRwlock(rwlock);
+        if (pre_rwlock != NULL)
+        {
+            pre_rwlock->writer = context;
+        }
+    }
+}
+
+/********************************************************************/
+/**                             Rwlock                             **/
+/********************************************************************/
+specification invariant typedef struct Rwlock Rwlock = {};
+
+specification typedef struct RwlockUnlockCall RwlockUnlockCall = {};
+
+specification typedef struct RwlockUnlockReturnType RwlockUnlockReturnType = {};
+
+RwlockUnlockReturnType * create_RwlockUnlockReturnType(
+  CallContext context,
+  ErrorCode*  returned_value
+)
+{
+    return create(&type_RwlockUnlockReturnType,
+        context,
+        returned_value);
+}
+
+invariant (Rwlock* rwlock)
+{
+    /* Non-existent rwlock is consifered to be correct. */
+    if (rwlock == NULL)
+        return true;
+
+    /* There cannot be both reader and writer locking the object. */
+    return isWrong_ThreadId(rwlock->writer) || isEmpty_MultiSet(rwlock->readers_list);
+}
+
+/********************************************************************/
+/**                          Rwlock Storage                        **/
+/********************************************************************/
+RwlockUnlockCall* create_RwlockUnlockCall(CallContext context, PThreadRwlockTPtr rwlock)
+{
+    return create(&type_RwlockUnlockCall, context, rwlock);
+}
+
+Rwlock* getRwlock(PThreadRwlockTPtr prwlock)
+{
+    return getObjectInMemory(prwlock);
+}
+
+Rwlock* findRwlock(ObjectsInMemory* objects,PThreadRwlockTPtr prwlock)
+{
+    return findObjectInMemory(objects, prwlock);
+}
+
+ObjectsInMemory* getAllRwlocks(void)
+{
+    return getAllTypedObjectsInMemory(&type_Rwlock);
+}
+
+int getNumberOfRwlocks(CallContext context)
+{
+  return getNumberOfTypedObjectsInMemory(context,&type_Rwlock);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+Rwlock* create_Rwlock(PThreadRwlockTPtr prwlock, PThreadPShared pshared)
+{
+    return create(&type_Rwlock, prwlock, WrongThreadId, create_MultiSet(&type_ThreadIdObj),
+                  create_Set(&type_ThreadIdObj), create_List(&type_ThreadIdObj), pshared);
+}
+
+void registerRwlock(PThreadRwlockTPtr prwlock, PThreadPShared pshared)
+{
+  registerObjectInMemory(prwlock,
+                         sizeof_SUTType("pthread_rwlock_t"),
+                         create_Rwlock(prwlock, pshared)
+                        );
+}
+
+void unregisterRwlock(PThreadRwlockTPtr prwlock)
+{
+    unregisterObjectInMemory(prwlock);
+}
+
+bool isLocked_Rwlock(Rwlock* rwlock)
+{
+    return !isWrong_ThreadId(rwlock->writer) || !isEmpty_MultiSet(rwlock->readers_list);
+}
+
+bool isWaitedWriterExist(Rwlock* rwlock)
+{
+    return (size_List(rwlock->writer_wait_list)>0);
+}
+
+bool isOwner_Rwlock(Rwlock* rwlock, CallContext context)
+{
+    return equals_ThreadId(rwlock->writer, context) || contains_MultiSet(rwlock->readers_list, create_ThreadIdObj(context));
+}
+
+bool isWriter_Rwlock(Rwlock* rwlock, CallContext context)
+{
+  return equals_ThreadId(rwlock->writer, context);
+}
+
+bool isReader_Rwlock(Rwlock* rwlock, CallContext context)
+{
+    return contains_MultiSet(rwlock->readers_list, create_ThreadIdObj(context));
+}
+
+bool isReadAvailable(Rwlock* rwlock, CallContext context)
+{
+    return isWrong_ThreadId(rwlock->writer);
+}
+
+bool isRwlockFullyFree(Rwlock* rwlock)
+{
+    return (
+        isWrong_ThreadId(rwlock->writer)
+        && isEmpty_MultiSet( rwlock->readers_list)
+        && isEmpty_Set( rwlock->reader_wait_list)
+        && isEmpty_List( rwlock->writer_wait_list)
+        );
+}
+
+/*
+    Set*              reader_wait_list;
+    List*             writer_wait_list;
+*/
+
+List* getLockedThreads(Rwlock* rwlock)
+{
+    List *locked_threads = create_List(&type_ThreadIdObj);
+    locked_threads = clone(rwlock->writer_wait_list);
+    appendAll_List(locked_threads, toList_Set(clone(rwlock->reader_wait_list)));
+    return locked_threads;
+}
+
+List* getOwners(Rwlock* rwlock)
+{
+    List *owner_threads = create_List(&type_ThreadIdObj);
+    if(!isWrong_ThreadId(rwlock->writer))
+    {
+        append_List(owner_threads, create_ThreadIdObj(rwlock->writer));
+        return owner_threads;
+    }
+    appendAll_List(owner_threads, toList_MultiSet(clone(rwlock->readers_list)));
+    return owner_threads;
+}
+
+
+bool isWriteAvailable(Rwlock* rwlock, CallContext context)
+{
+    return isEmpty_MultiSet(rwlock->readers_list);
+}
+
+int compare_ThreadPriority(ThreadPriority x1, ThreadPriority x2)
+{
+    if(x1>x2) return 1;
+    if(x1==x2) return 0;
+    if(x1<x2) return -1;
+}
+
+bool isWaiterWithHigherPriority(CallContext context, List* waiters)
+{
+    ThreadState *thread_state;
+    int i; bool priority_ordinary = false;
+    ThreadPriority p1,p2;
+
+    Map* threads_map = getThreads(context);
+
+    thread_state = get_Map(threads_map, create_ThreadIdObj(context));
+    p1 = thread_state->priority;
+
+    for(i=0;i<size_List(waiters);i++)
+    {
+        thread_state = get_Map(threads_map, get_List(waiters, i));
+        p2 = thread_state->priority;
+        if(compare_ThreadPriority(p1, p2)<=0) priority_ordinary = true;
+    }
+
+    return priority_ordinary;
+}
+
+ThreadId getNextRwlockThread_SchedulingPolicy(CallContext context, Rwlock* rwlock)
+{
+    Map* threads;
+    ThreadId thread = WrongThreadId, rthread = WrongThreadId;
+    ThreadState* tstate;
+    ThreadState* rtstate;
+
+    // Thread determined by the scheduling policy shall become unblocked.
+    threads = getThreads(context);
+    if (!isEmpty_List(rwlock->writer_wait_list))
+    {
+        thread = getNextThread_SchedulingPolicy(threads, rwlock->writer_wait_list);
+    }
+    if (!isEmpty_Set(rwlock->reader_wait_list))
+    {
+        rthread = getNextThread_SchedulingPolicy(threads, toList_Set(rwlock->reader_wait_list));
+
+        // For equal priority threads, write locks shall take precedence over read locks.
+        if (!isWrong_ThreadId(thread))
+        {
+            tstate = get_Map(threads, create_ThreadIdObj(thread));
+            rtstate = get_Map(threads, create_ThreadIdObj(rthread));
+            if (rtstate->priority > tstate->priority)
+                thread = rthread;
+        }
+        else
+        {
+            thread = rthread;
+        }
+    }
+    return thread;
+}
+
+void printRwlock(Rwlock *rwlock)
+{
+    int i;
+    verbose("rwlock %u\n", rwlock->address.address);
+    //print writer
+    verbose("    writer: %u\n", rwlock->writer.thread);
+
+    //print reader list
+    verbose("    readers: ");
+    for(i=0;i<size_MultiSet(rwlock->readers_list);i++)
+    {
+        verbose("    %u ", ((ThreadIdObj*)get_MultiSet(rwlock->readers_list, i))->thread);
+    }
+    verbose("\n");
+
+    //print reader_wait_list
+    verbose("    wait readers: ");
+    for(i=0;i<size_Set(rwlock->reader_wait_list);i++)
+    {
+        verbose("    %u ", ((ThreadIdObj*)get_Set(rwlock->reader_wait_list, i))->thread);
+    }
+    verbose("\n");
+
+    //print writer_wait_list
+    verbose("    wait writers: ");
+    for(i=0;i<size_List(rwlock->writer_wait_list);i++)
+    {
+        verbose("    %u ", ((ThreadIdObj*)get_List(rwlock->writer_wait_list, i))->thread);
+    }
+    verbose("\n");
+
+    verbose("\n");
+}

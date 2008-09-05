@@ -1,0 +1,275 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/sem/sem_model.seh"
+#include "pthread/sem/tests/sem_scenario.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include <atl/integer.h>
+
+#include "sem_scenario.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+#define SEM_THREAD_NUM 2  // has to be bigger than 1
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static CallContext contexts[SEM_THREAD_NUM];
+static PThreadSemaphoreTPtr unnamed_semaphore[SEM_THREAD_NUM];
+
+#define maxSize 1024
+
+static StringTPtr semaphore_name[SEM_THREAD_NUM];
+static char* sem_name = "/semaphore-973";
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+void cleanup_sem_close_open_scenario(void)
+{
+    int i;
+
+    /* delete threads */
+    for(i = 1; i < SEM_THREAD_NUM; i++)
+    {
+        if(!isWrong_ThreadId(contexts[i]))
+        {
+            // TODO: delete thread
+        }
+    }    
+
+    // deallocate memory 
+    for(i = 1; i < SEM_THREAD_NUM; i++)
+    {
+        if (!isNULL_VoidTPtr(semaphore_name[i]))
+        {
+            deallocateMemoryBlock(contexts[i], semaphore_name[i]);
+        }
+    }
+}
+
+bool init_sem_close_open_scen_data()
+{
+    int i;
+    for(i=0; i<SEM_THREAD_NUM; i++)
+    {
+        writeCString_VoidTPtr(semaphore_name[i], create_CString(sem_name));
+    }
+    return true;
+}
+
+void printThreadM(ThreadId thread)
+{
+    verbose("    process: %u\n", thread.process);
+    verbose("    thread: %u\n", thread.thread);
+}
+
+void printProcesses(void)
+{
+    int i;
+    for(i=0;i<SEM_THREAD_NUM;i++)
+    {
+        printThreadM(contexts[i]);
+        verbose("\n");
+    } 
+}
+
+bool init_sem_close_open_scenario(int argc, char** argv)
+{
+    int i;
+    bool result=true;
+    context = getContext();
+    contexts[0] = context;
+
+    for(i=1;i<SEM_THREAD_NUM;i++)
+    {
+        contexts[i] = createProcess();
+        if(isWrong_ThreadId(contexts[i])) result = false;
+    }
+    
+    printProcesses();
+
+    for(i=0;i<SEM_THREAD_NUM;i++)
+    {
+        semaphore_name[i] = allocateMemoryBlock(contexts[i], maxSize);
+        if (isNULL_VoidTPtr(semaphore_name[i]))
+            return false;
+    }
+    
+    for(i=0;i<SEM_THREAD_NUM;i++)
+    {
+        unnamed_semaphore[i] = allocateMemoryBlock(contexts[i], 1024);
+        if (isNULL_VoidTPtr(unnamed_semaphore[i]))
+            return false;
+    }
+
+    if(!init_sem_close_open_scen_data()) result = false;
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(3*SERIALIZATION_TIME);
+
+    set_assertion_exit_callback();
+
+    if(!result) cleanup_sem_close_open_scenario();
+    return result;
+}
+
+void finish_sem_close_open_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(sem_close_open_scenario);
+    cleanup_sem_close_open_scenario();
+    return ;
+}
+
+bool isClose_OpenModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+Integer* get_Sem_Open_Close_State(void)
+{
+    return create_Integer(0);
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+Map* saveClose_OpenModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreClose_OpenModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool close_open_scen()
+{
+    /* create open flags */
+    int init_value = 1;
+    OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    FilePermissions *filePermisions = create_FilePermissions(owner, group, other, Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+
+    PThreadSemaphoreTPtr sem1, sem2;    
+    
+    // open -> close -> unlink
+    sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+    sem2 = sem_open_spec(contexts[1], semaphore_name[1], openFlags, filePermisions, init_value, errno_model);
+    sem_close_spec(contexts[0], sem1, errno_model);
+    sem_close_spec(contexts[1], sem2, errno_model);
+    sem_unlink_spec(contexts[1], semaphore_name[1], errno_model);
+    sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+    sem_unlink_spec(contexts[1], semaphore_name[1], errno_model);
+
+    // open -> unlink -> open -> open -> close
+    sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+    sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+    sem2 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+    sem2 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+    sem_close_spec(contexts[0], sem1, errno_model);
+    sem_close_spec(contexts[0], sem2, errno_model);
+    sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+    return true;
+}
+
+scenario
+bool init_destroy_scen()
+{
+    int init_value = 1, init_phared = 1;
+    sem_init_spec(contexts[0], unnamed_semaphore[0], init_phared, init_value, errno_model);
+    sem_destroy_spec(contexts[0], unnamed_semaphore[0], errno_model);
+    return true;
+}
+
+void printVoidTPtr(VoidTPtr ptr)
+{
+    verbose("ptr.process %u\n", ptr.process);
+    verbose("ptr.address %u\n", ptr.address);
+}
+
+scenario
+bool timedwait_scen()
+{
+    /* create open flags */
+    int init_value = 1;
+    OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    FilePermissions *filePermisions = create_FilePermissions(owner, group, other, Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+
+    TimeUnit time_unit = 1;
+
+    PThreadSemaphoreTPtr sem1;    
+    
+    sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+    sem_timedwait_spec(contexts[0], sem1, time_unit);
+    
+    sem_close_spec(contexts[0], sem1, errno_model);
+    sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm sem_open_close_scenario =
+{
+    .init = init_sem_close_open_scenario,
+    .finish = finish_sem_close_open_scenario,
+    .getState = (PtrGetState)get_Sem_Open_Close_State,
+    .saveModelState = (PtrSaveModelState)saveClose_OpenModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreClose_OpenModelState,
+    .isStationaryState = (PtrIsStationaryState)isClose_OpenModelStateStationary,
+    .actions = {
+        close_open_scen,
+        init_destroy_scen,
+        timedwait_scen,
+        NULL
+    }
+};

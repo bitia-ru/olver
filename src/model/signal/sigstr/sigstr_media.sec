@@ -1,0 +1,106 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "process/process/process_common.seh"
+#include "signal/sigstr/sigstr_media.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+CString * a_signalAsCString( CallContext context, IntT s ) {
+    CString * res = NULL;
+    TSCommand command = create_TSCommand();
+    format_TSCommand( & command, "a_signalAsCString:$(int)", create_IntTObj( s ) );
+    executeCommandInContext( context, & command );
+    if ( ! isBadVerdict() ) {
+        if ( readInt_TSStream( & command.response ) != 0 ) { res = readCString_TSStream( & command.response ); }
+    }
+    destroy_TSCommand( & command );
+    return res;
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initSignalSigstrSubsystem( void ) {
+    // Set up mediators
+    set_mediator_psignal_spec  ( psignal_media   );
+    set_mediator_strsignal_spec( strsignal_media );
+}
+
+void initSignalToString( CallContext context ) {
+    SystemState * systemState = getSystemState_CallContext( context );
+    Map /* IntTObj +> CString */ * signalToString = create_Map( & type_IntTObj, & type_CString );
+    IntT i;
+    for ( i = 1; ; i++ ) {
+        CString * signalAsCString = a_signalAsCString( context, i );
+        if ( signalAsCString == NULL ) { break; }
+        put_Map( signalToString, create_IntTObj( i ), signalAsCString );
+    }
+    systemState->signalToString = signalToString;
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** psignal_spec **/
+mediator psignal_media for specification
+void psignal_spec( CallContext context, IntT sig, CString * s, CString * errput, CString * stderrAsFile ) {
+    call {
+        TSCommand command = create_TSCommand();
+        format_TSCommand( & command, "psignal:$(int)$(str)$(str)", create_IntTObj( sig ), s, stderrAsFile );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            copy( getFileContents( context, stderrAsFile ), errput );
+        }
+        destroy_TSCommand( & command );
+        return;
+    }
+}
+
+/** strsignal_spec **/
+mediator strsignal_media for specification
+CString * strsignal_spec( CallContext context, IntT sig )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        CString * res;
+
+        // encoding of parameters
+        format_TSCommand( &command, "strsignal:$(int)", create_IntTObj(sig));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readCString_TSStream(&command.response);
+
+            // Process response
+        }
+
+        destroy_TSCommand(&command);
+
+        return res; // Return needed value
+  }
+}

@@ -1,0 +1,228 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/dl/dl_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilDlSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_dladdr_spec(dladdr_media);
+    set_mediator_dlclose_spec(dlclose_media);
+    set_mediator_dlerror_spec(dlerror_media);
+    set_mediator_dlopen_spec(dlopen_media);
+    set_mediator_dlsym_spec(dlsym_media);
+}
+
+/********************************************************************/
+/**                      Specification Types                       **/
+/********************************************************************/
+
+DLInfo* readDLInfo_TSStream(CallContext context, TSStream* stream)
+{
+    DLInfo* dlinfo;
+
+    dlinfo = create_DLInfo();
+
+    dlinfo->fname = readCString_TSStream(stream);
+    dlinfo->fbase = readPointer_TSStream(context, stream);
+    dlinfo->sname = readCString_TSStream(stream);
+    dlinfo->saddr = readPointer_TSStream(context, stream);
+
+    return dlinfo;
+}
+
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** dladdr_spec **/
+
+mediator dladdr_media for specification
+IntT dladdr_spec(CallContext context, VoidTPtr addr, DLInfo* dlip)
+{
+    call
+    {
+        IntT res;
+        CString *sname;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "dladdr:$(ptr)$(ptr)$(ptr)$(ptr)$(ptr)",
+            create_VoidTPtrObj(addr),
+            create_VoidTPtrObj(NULL_VoidTPtr),
+            create_VoidTPtrObj(dlip->fbase),
+            create_VoidTPtrObj(NULL_VoidTPtr),
+            create_VoidTPtrObj(dlip->saddr));
+
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            copy(readDLInfo_TSStream(context, &command.response), dlip);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+
+    state
+    {
+        onDLAddr(context, addr, dlip, dladdr_spec);
+    }
+}
+
+/** dlclose_spec **/
+
+mediator dlclose_media for specification
+IntT dlclose_spec(CallContext context, VoidTPtr handle)
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "dlclose:$(ptr)", create_VoidTPtrObj(handle));
+        executeCommandInContext(context, &command);
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+
+    state
+    {
+        onDLClose(context, handle, dlclose_spec);
+    }
+}
+
+
+/** dlerror_spec **/
+
+mediator dlerror_media for specification
+CString* dlerror_spec(CallContext context)
+{
+    call
+    {
+        CString* res;
+
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "dlerror");
+        executeCommandInContext(context, &command);
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readCString_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+
+    state
+    {
+        onDLError(context, dlerror_spec);
+    }
+}
+
+
+/** dlopen_spec **/
+
+mediator dlopen_media for specification
+VoidTPtr dlopen_spec(CallContext context, CString* file, IntT mode)
+{
+    call
+    {
+        VoidTPtr res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "dlopen:$(str)$(int)",
+            file, create_IntTObj(mode));
+
+        executeCommandInContext(context, &command);
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+
+    state
+    {
+        onDLOpen(context, file, mode, dlopen_spec);
+    }
+}
+
+
+/** dlsym_spec **/
+
+mediator dlsym_media for specification
+VoidTPtr dlsym_spec(CallContext context, VoidTPtr handle, CString* name)
+{
+    call
+    {
+        VoidTPtr res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "dlsym:$(ptr)$(str)",
+            create_VoidTPtrObj(handle), name);
+
+        executeCommandInContext(context, &command);
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+
+    state
+    {
+        onDLSym(context, handle, name, dlsym_spec);
+    }
+}
+
+
+

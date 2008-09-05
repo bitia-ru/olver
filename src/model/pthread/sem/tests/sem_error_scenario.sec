@@ -1,0 +1,809 @@
+  /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/sem/pthread_sem_config.h"
+#include "pthread/sem/sem_model.seh"
+#include "pthread/sem/tests/sem_scenario.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/explicit_fsm.h"
+#include <atl/integer.h>
+
+#include "sem_scenario.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/*
+   The number of processes and threads.
+*/
+#define SEM_PROCESS_NUM 3
+
+/*
+    The number of threads. This constant has to be less or equal to 
+    SEM_PROCESS_NUM.
+ */
+#define SEM_THREAD_NUM 2
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static CallContext contexts[SEM_PROCESS_NUM];
+
+#define maxSize 1024
+
+static StringTPtr semaphore_name[SEM_PROCESS_NUM];
+static StringTPtr semaphore_invalid_name[SEM_PROCESS_NUM];
+static PThreadSemaphoreTPtr unnamed_semaphore;
+
+static char* sem_name = "/semaphore-1013";
+static char* sem_invalid_name = "/semaphore-i2013";
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+StringTPtr create_StringOnTargetMachine(CallContext context, CString* str)
+{
+    StringTPtr stringTPtr;
+    stringTPtr = allocateMemoryBlock(context, length_CString(str));
+    if (isNULL_VoidTPtr(stringTPtr))
+        return NULL_VoidTPtr;
+    writeCString_VoidTPtr(stringTPtr, str);   
+    return stringTPtr;
+}
+
+void cleanup_sem_error_scenario(void)
+{
+    int i;
+
+    /* delete threads */
+    for(i = 1; i < SEM_PROCESS_NUM; i++)
+    {
+        if(!isWrong_ThreadId(contexts[i]))
+        {
+            // TODO: delete thread
+        }
+    }    
+
+    // deallocate memory 
+    for(i = 1; i < SEM_PROCESS_NUM; i++)
+    {
+        if (!isNULL_VoidTPtr(semaphore_name[i]))
+        {
+            deallocateMemoryBlock(contexts[i], semaphore_name[i]);
+        }
+        if (!isNULL_VoidTPtr(semaphore_invalid_name[i]))
+        {
+            deallocateMemoryBlock(contexts[i], semaphore_invalid_name[i]);
+        }
+    }
+
+    if (!isNULL_VoidTPtr(unnamed_semaphore))
+        deallocateMemoryBlock(contexts[0], unnamed_semaphore);
+}
+
+bool init_sem_error_scen_data()
+{
+    int i;
+    for(i=0; i<SEM_PROCESS_NUM; i++)
+    {
+        writeCString_VoidTPtr(semaphore_name[i], create_CString(sem_name));
+        writeCString_VoidTPtr(semaphore_invalid_name[i], create_CString(sem_invalid_name));
+    }
+    return true;
+}
+
+void printThreadME(ThreadId thread)
+{
+    traceFormattedUserInfo("    process: %u\n", thread.process);
+    traceFormattedUserInfo("    thread: %u\n", thread.thread);
+}
+
+void printProcessesE(void)
+{
+    int i;
+    for(i=0;i<SEM_PROCESS_NUM;i++)
+    {
+        printThreadME(contexts[i]);
+        traceFormattedUserInfo("\n");
+    } 
+}
+
+bool init_sem_error_scenario(int argc, char** argv)
+{
+    int i;
+    bool result=true;
+    context = getContext();
+    contexts[0] = context;
+
+    for(i=1;i<SEM_THREAD_NUM;i++)
+    {
+        contexts[i] = createThread();
+        if(isWrong_ThreadId(contexts[i])) result = false;
+    }
+
+    for(i=SEM_THREAD_NUM; i<SEM_PROCESS_NUM;i++)
+    {
+        contexts[i] = createProcess();
+        if(isWrong_ThreadId(contexts[i])) result = false;
+    }
+    
+    /* Comment out if you want to see created threads and processes */
+    //printProcessesE();
+
+    for(i=0;i<SEM_PROCESS_NUM;i++)
+    {
+        semaphore_name[i] = allocateMemoryBlock(contexts[i], maxSize);
+        semaphore_invalid_name[i] = allocateMemoryBlock(contexts[i], maxSize);
+        if (isNULL_VoidTPtr(semaphore_name[i]) || isNULL_VoidTPtr(semaphore_invalid_name[i]))
+            return false;
+    }
+    
+    unnamed_semaphore = allocateMemoryBlock(contexts[0], 1024);
+    if (isNULL_VoidTPtr(unnamed_semaphore))
+        return false;
+
+    if(!init_sem_error_scen_data()) result = false;
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(3*SERIALIZATION_TIME);
+
+    set_assertion_exit_callback();
+
+    if(!result) cleanup_sem_error_scenario();
+    return result;
+}
+
+void finish_sem_error_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(sem_error_scenario);
+    cleanup_sem_error_scenario();
+    return ;
+}
+
+bool isErrorModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+Integer* get_ErrorModel_State(void)
+{
+    return create_Integer(0);
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+Map* saveErrorModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreErrorModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+
+static bool return_sem_wait_value;
+
+void do_sem_wait_error_scen(void)
+{
+    /* create open flags */
+    int init_value = 5;
+    OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    FilePermissions *filePermisions = create_FilePermissions(owner, group, other, false, false, false);
+
+    PThreadSemaphoreTPtr sem1;    
+    return_sem_wait_value = true;
+    
+    /* 
+        {sem_trywait.04.01;sem_wait.04.01} The sem_trywait() and sem_wait() 
+        functions shall return zero if the calling process successfully 
+        performed the semaphore lock operation on the semaphore designated by 
+        sem. 
+    */
+    {
+        Semaphore *tmp;
+
+
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+
+        // named
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+        sem_wait_spec(contexts[0], sem1);
+        serialize();
+
+        tmp = getSemaphore(sem1, contexts[0]);
+        if(tmp->counter != (init_value-1) )
+        {
+            traceFormattedUserInfo("Testing for {sem_trywait.04.01;sem_wait.04.01} failed\n");
+            return_sem_wait_value = false;
+        }
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+        serialize();
+        
+        //unnamed
+        sem_init_spec(contexts[0], unnamed_semaphore, 1, init_value, errno_model);
+        sem_wait_spec(contexts[0], unnamed_semaphore);
+        serialize();
+
+        tmp = getSemaphore(unnamed_semaphore, contexts[0]); 
+        if(tmp->counter != (init_value-1) )
+        {
+            traceFormattedUserInfo("Testing for {sem_trywait.04.01;sem_wait.04.01} failed\n");
+            return_sem_wait_value = false;
+        }
+        sem_destroy_spec(contexts[0], unnamed_semaphore, errno_model);
+        serialize();
+     }
+    
+    /*
+        {sem_trywait.06.01;sem_wait.06.01} 
+        [EDEADLK]
+            A deadlock condition was detected.
+    */
+    {
+        // TODO: parock: I can not imagine case with deadlock. Can you?
+    }
+    
+    /*
+        {sem_trywait.06.03;sem_wait.06.03} 
+        [EINVAL]
+            The sem argument does not refer to a valid semaphore.
+    */
+    if(POSIX_SEM_WAIT_FAILS_WITH_EINVAL == 1)
+    {
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+        sem_wait_spec(contexts[0], sem1);
+        serialize();
+    }
+    return;
+}
+
+scenario
+bool sem_wait_error_scen()
+{
+    EXECUTE_EXPLICIT_FSM(do_sem_wait_error_scen);
+    return return_sem_wait_value;
+}
+
+static bool return_sem_timedwait_value;
+void do_sem_timedwait_error_scen(void)
+{
+    /* create open flags */
+    int init_value = 6;
+    OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    
+    PThreadSemaphoreTPtr sem1;    
+    FilePermissions *filePermisions = create_FilePermissions(owner, group, other, false, false, false);
+
+    return_sem_timedwait_value = true;
+    
+    /* 
+        {sem_timedwait.05.01} The sem_timedwait() function shall return zero if
+        the calling process successfully performed the semaphore lock operation
+        on the semaphore designated by sem.   
+    */
+    {
+        Semaphore *tmp;
+        // named
+
+        sem_unlink_spec(contexts[1], semaphore_name[1], errno_model);
+
+
+        sem1 = sem_open_spec(contexts[1], semaphore_name[1], openFlags, filePermisions, init_value, errno_model);
+
+        if (equals_VoidTPtr(SUT_SEM_FAILED, sem1))
+
+        {
+
+            traceFormattedUserInfo("No semaphore created");
+
+        }
+
+        traceFormattedUserInfo("Trying to lock semaphore");
+
+        sem_timedwait_spec(contexts[1], sem1, 10);
+        serialize();
+
+        tmp = getSemaphore(sem1, contexts[1]);
+        if(tmp->counter != (init_value-1) )
+        {
+            traceFormattedUserInfo("Testing for {sem_timedwait.05.01} failed\n");
+            traceFormattedUserInfo("FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE  \n");
+            return_sem_timedwait_value = false;
+        }
+        sem_unlink_spec(contexts[1], semaphore_name[1], errno_model);
+
+        sem_close_spec(contexts[1], sem1, errno_model);
+
+    }
+    /*
+    {sem_timedwait.06.02} 
+    [ETIMEDOUT]
+        The semaphore could not be locked before the specified timeout expired.
+    */
+    {
+        Semaphore *tmp;
+        sem1 = sem_open_spec(contexts[1], semaphore_name[1], openFlags, filePermisions, 0, errno_model);
+
+        sem_timedwait_spec(contexts[1], sem1, 100);
+        serialize();
+
+
+        sem_unlink_spec(contexts[1], semaphore_name[1], errno_model);
+
+        sem_close_spec(contexts[1], sem1, errno_model);
+
+    }
+    /*
+        {sem_trywait.06.01;sem_wait.06.01} 
+        [EDEADLK]
+            A deadlock condition was detected.
+    */
+    {
+        // TODO: parock: I can not imagine case with deadlock. Can you?
+    }
+
+    if(POSIX_SEM_TIMEDWAIT_FAILS_WITH_EINVAL == 1)
+    {
+        sem1 = sem_open_spec(contexts[1], semaphore_name[1], openFlags, filePermisions, init_value, errno_model);
+        sem_unlink_spec(contexts[1], semaphore_name[1], errno_model);
+        sem_close_spec(contexts[1], sem1, errno_model);
+
+        sem_timedwait_spec(contexts[1], sem1, 100);
+        serialize();
+    }
+}
+
+scenario
+bool sem_timedwait_error_scen()
+{
+    EXECUTE_EXPLICIT_FSM(do_sem_timedwait_error_scen);
+    return return_sem_timedwait_value;
+}
+scenario
+bool sem_trywait_error_scen()
+{
+    /* create open flags */
+    int init_value = 10;
+    OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    FilePermissions *filePermisions = create_FilePermissions(owner, group, other, false, false, false);
+
+    PThreadSemaphoreTPtr sem1;    
+
+    /* 
+        {sem_trywait.04.01;sem_wait.04.01} The sem_trywait() and sem_wait() 
+        functions shall return zero if the calling process successfully 
+        performed the semaphore lock operation on the semaphore designated by 
+        sem. 
+    */
+    {
+        // named
+        IntT result;
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+        result = sem_trywait_spec(contexts[0], sem1, errno_model);
+        if(result != 0)
+        {
+            traceFormattedUserInfo("Testing for  {sem_trywait.04.01;sem_wait.04.01} failed\n");
+            return false;
+        }
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+
+        //unnamed
+        sem_init_spec(contexts[0], unnamed_semaphore, 1, 1, errno_model);
+        result = sem_trywait_spec(contexts[0], unnamed_semaphore, errno_model);
+        if(result != 0)
+        {
+            traceFormattedUserInfo("Testing for {sem_trywait.04.01;sem_wait.04.01} failed\n");
+            return false;
+        }
+        sem_destroy_spec(contexts[0], unnamed_semaphore, errno_model);
+    }
+
+    /*
+    {sem_trywait.05.01} 
+        [EAGAIN]
+        The semaphore was already locked, so it cannot be immediately locked by the sem_trywait() operation ( sem_trywait() only).
+    */
+    {
+        IntT result;
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, 0, errno_model);
+        result = sem_trywait_spec(contexts[0], sem1, errno_model);
+        if(result == 0 || *errno_model != SUT_EAGAIN)
+        {
+            traceFormattedUserInfo("Testing for {sem_trywait.05.01} failed\n");
+            return false;
+        }
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+    }
+    
+    /*
+        {sem_trywait.06.01;sem_wait.06.01} 
+        [EDEADLK]
+            A deadlock condition was detected.
+    */
+    {
+        // TODO: parock: I can not imagine case with deadlock. Can you?
+    }
+    
+    /*
+        {sem_trywait.06.03;sem_wait.06.03} 
+        [EINVAL]
+            The sem argument does not refer to a valid semaphore.
+    */
+    if(POSIX_SEM_TRYWAIT_FAILS_WITH_EINVAL == 1)
+    {
+        IntT result;
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+        result = sem_trywait_spec(contexts[0], sem1, errno_model);
+        if(result == 0 || *errno_model != SUT_EINVAL)
+        {
+            traceFormattedUserInfo("Testing for {sem_trywait.06.03;sem_wait.06.03} failed\n");
+            return false;
+        }
+
+    }
+    return true;
+}
+
+static bool return_sem_post_value;
+void do_sem_post_error_scen(void)
+{
+    /* create open flags */
+    int init_value = 0;
+    OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    FilePermissions *filePermisions = create_FilePermissions(owner, group, other, false, false, false);
+
+    PThreadSemaphoreTPtr sem1;    
+
+    return_sem_post_value = true;
+    
+    /* {sem_post.06.01} If successful, the sem_post() function shall return zero */
+    {
+
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+
+        // named
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+        sem_post_spec(contexts[0], sem1);
+        serialize();
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+
+        //unnamed
+        sem_init_spec(contexts[0], unnamed_semaphore, 1, 1, errno_model);
+        sem_post_spec(contexts[0], unnamed_semaphore);
+        sem_destroy_spec(contexts[0], unnamed_semaphore, errno_model);
+    }
+
+    /*
+        {sem_post.07.01} 
+            [EINVAL]
+            The sem argument does not refer to a valid semaphore.
+    */
+    if(POSIX_SEM_POST_FAILS_WITH_EINVAL == 1)
+    {
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+
+        /* TODO: parock: I do not know how can we dicide that error code is valid! */
+        sem_post_spec(contexts[0], sem1);
+
+    }
+    return;
+}
+
+scenario
+bool sem_post_error_scen()
+{
+    EXECUTE_EXPLICIT_FSM(do_sem_post_error_scen);
+    return return_sem_post_value;
+}
+
+scenario
+bool sem_open_error_scen()
+{
+    /* create open flags */
+    int init_value = 7;
+    OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    FilePermissions *filePermisions = create_FilePermissions(owner, group, other, false, false, false);
+
+    PThreadSemaphoreTPtr sem1;    
+    
+
+    /* {sem_open.16.01} Upon successful completion, the sem_open() function shall return the address of the semaphore. */
+    {    
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+
+        if(equals_VoidTPtr(SUT_SEM_FAILED, sem1)) 
+        {
+            traceFormattedUserInfo("Testing for {sem_open.16.01} failed\n");
+            return false;
+        }
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+    }
+    /*  {sem_open.17.04} 
+        [EINVAL]
+        The sem_open() operation is not supported for the given name, or O_CREAT 
+        was specified in oflag and value was greater than {SEM_VALUE_MAX}.
+    */
+
+    /* TODO: I can't create invalid name!!!!!!!!
+    sem1 = sem_open_spec(contexts[0], semaphore_invalid_name[0], openFlags, filePermisions, init_value, errno_model);
+
+    if(!equals_VoidTPtr(SUT_SEM_FAILED, sem1)) 
+    {
+        traceFormattedUserInfo("Testing for {sem_open.17.04} failed\n");
+        return false;
+    }
+    */
+
+    /*
+    {sem_open.17.06} 
+        [ENAMETOOLONG]
+        The length of the name argument exceeds {PATH_MAX} or a pathname component is longer than {NAME_MAX}.
+    */
+    {
+        CString *cstring;
+        StringTPtr stringTPtr;
+        char* str = malloc(SUT_PATH_MAX+2);
+        memset( str, 'A', SUT_PATH_MAX+1);
+        str[0] = '/';
+        str[SUT_PATH_MAX+1] = '\0';
+        cstring = create_CString(str);
+        free(str);
+
+        stringTPtr = create_StringOnTargetMachine(contexts[0], cstring);
+        if(equals_VoidTPtr(stringTPtr, NULL_VoidTPtr)) {traceFormattedUserInfo("String creation on target machine has failed\n"); return false;}
+        sem1 = sem_open_spec(contexts[0], stringTPtr, openFlags, filePermisions, init_value, errno_model);
+
+        if(!equals_VoidTPtr(SUT_SEM_FAILED, sem1) || *errno_model != SUT_ENAMETOOLONG)
+        {
+            traceFormattedUserInfo("Testing for {sem_open.17.06} failed\n");
+            return false;
+        }
+
+
+        sem_unlink_spec(contexts[0], stringTPtr, errno_model);
+
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+    }
+
+    /*
+        {sem_open.17.08}
+        [ENOENT]
+            O_CREAT is not set and the named semaphore does not exist.
+    */
+    {
+        int init_value = 5;
+        OpenFlags openFlags = {ReadOnly, Blocking, false, false, false, false, false, false};
+
+        FilePermission* owner = create_FilePermission(true, true, false);
+        FilePermission* group = create_FilePermission(false, false, false);
+        FilePermission* other = create_FilePermission(false, false, false);
+        FilePermissions *filePermisions = create_FilePermissions(owner, group, other, false, false, false);
+
+        PThreadSemaphoreTPtr sem1;    
+
+        sem1 = sem_open_spec(contexts[0], semaphore_name[0], openFlags, filePermisions, init_value, errno_model);
+
+        if(!equals_VoidTPtr(SUT_SEM_FAILED, sem1) || *errno_model != SUT_ENOENT) 
+        {
+            traceFormattedUserInfo("Testing for {sem_open.17.08} failed\n");
+            return false;
+        }
+
+        sem_unlink_spec(contexts[0], semaphore_name[0], errno_model);
+
+        sem_close_spec(contexts[0], sem1, errno_model);
+
+
+    }
+    return true;
+
+}
+
+scenario
+bool sem_init_error_scen()
+{
+    IntT result;
+    
+    /* {sem_init.09.01} Upon successful completion, the sem_init() function shall initialize the semaphore in sem */
+    {
+        result = sem_init_spec(contexts[0], unnamed_semaphore, 1, 1, errno_model);
+        if(result != 0)
+        {
+            traceFormattedUserInfo("Testing for {sem_init.09.01} failed\n");
+            return false;
+        }
+        sem_destroy_spec(contexts[0], unnamed_semaphore, errno_model);
+    }
+
+    /*
+        {sem_init.10.01} 
+            [EINVAL]
+            The value argument exceeds {SEM_VALUE_MAX}.
+    */
+    {
+        result = sem_init_spec(contexts[0], unnamed_semaphore, 1, SUT_SEM_VALUE_MAX + 1, errno_model);
+        if(result == 0 || *errno_model != SUT_EINVAL)
+        {
+            traceFormattedUserInfo("Testing for {sem_init.10.01} failed\n");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool sem_destroy_return_value;
+void do_sem_destroy_error_scen(void)
+{
+    IntT result;
+    sem_destroy_return_value = true;
+    /* {sem_destroy.05.01} Upon successful completion, a value of zero shall be returned */
+    {
+        /*
+        sem_init_spec(contexts[0], unnamed_semaphore, 1, 1, errno_model);
+        result = sem_destroy_spec(contexts[0], unnamed_semaphore, errno_model);
+        if(result != 0)
+        {
+            traceFormattedUserInfo("Testing for {sem_destroy.05.01} failed\n");
+            sem_destroy_return_value = false;
+            return;
+        }
+        */
+    }
+
+    if(POSIX_SEM_DESTROY_FAILS_WITH_EINVAL == 1)
+    {
+        /*
+            {sem_destroy.06.01} 
+                [EINVAL]
+                The sem argument is not a valid semaphore.
+        */
+        result = sem_destroy_spec(contexts[0], NULL_VoidTPtr, errno_model);
+        if(result == 0 || *errno_model != SUT_EINVAL)
+        {
+            traceFormattedUserInfo("Testing for {sem_destroy.06.01} failed\n");
+            sem_destroy_return_value = false;
+            return;
+        }
+    }
+
+    if(POSIX_SEM_DESTROY_FAILS_WITH_EBUSY == 1)
+    {
+        /*
+        {sem_destroy.06.02} 
+            [EBUSY]
+            There are currently processes blocked on the semaphore.
+        */
+        sem_init_spec(contexts[0], unnamed_semaphore, 1, 0, errno_model);
+        
+        sem_wait_spec(contexts[1], unnamed_semaphore);
+        serialize();
+
+        sem_destroy_spec(contexts[0], unnamed_semaphore, errno_model);
+        if(*errno_model == SUT_EBUSY)
+        {
+            traceFormattedUserInfo("Testing for {sem_destroy.06.02} failed\n");
+            sem_destroy_return_value = false;
+            return;
+        }
+        return;
+    }
+}
+
+scenario
+bool sem_destroy_error_scen()
+{
+    EXECUTE_EXPLICIT_FSM(do_sem_destroy_error_scen);
+    return sem_destroy_return_value;
+}
+
+scenario
+bool nextScen()
+{
+    fiber_execution_finished = 0;
+
+    finishFibers();
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm sem_error_scenario =
+{
+    .init = init_sem_error_scenario,
+    .finish = finish_sem_error_scenario,
+    .getState = (PtrGetState)get_ErrorModel_State,
+    .saveModelState = (PtrSaveModelState)saveErrorModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreErrorModelState,
+    .isStationaryState = (PtrIsStationaryState)isErrorModelStateStationary,
+    .actions = {
+
+        sem_wait_error_scen,
+        nextScen,
+        sem_timedwait_error_scen,
+        NULL
+    }
+};

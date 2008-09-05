@@ -1,0 +1,375 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "process/resources/resources_media.seh"
+#include "common/common_media.seh"
+#include "config/interpretation.seh"
+#include "process/resources/resources_config.h"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initProcessResourcesSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_getrlimit_spec(getrlimit_media);
+    set_mediator_setrlimit_spec(setrlimit_media);
+
+    set_mediator_getrusage_spec(getrusage_media);
+    set_mediator_getrlimit64_spec(getrlimit64_media);
+    set_mediator_setrlimit64_spec(setrlimit64_media);
+
+    set_mediator_ulimit_spec(ulimit_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** getrlimit_spec **/
+mediator getrlimit_media for specification
+IntT getrlimit_spec( CallContext context, IntT resource, RLimitT * rlp, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "getrlimit:$(int)$(int)$(int)", create_IntTObj(resource),
+                            create_IntTObj(rlp==NULL),errno);
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            if(rlp!=NULL)
+            {
+                rlp->rlim_cur = readULong_TSStream(&command.response);
+                rlp->rlim_max = readULong_TSStream(&command.response);
+            }
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        RSavedLimitT * saved_lim;
+      
+        if( (getrlimit_spec==0) && !containsKey_Map(RSavedLimits,create_IntTObj(resource)) )
+        {
+            if(rlp==NULL)
+                setBadVerdict("setrlimit_media: rlp==NULL on successful result");
+
+            saved_lim = create_RSavedLimitT_RLimitT(rlp);
+            put_Map(RSavedLimits,create_IntTObj(resource),saved_lim);
+        }
+    }
+}
+
+
+/** setrlimit_spec **/
+mediator setrlimit_media for specification
+IntT setrlimit_spec( CallContext context, IntT resource, RLimitT * rlp, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        if(rlp==NULL)
+        {
+            format_TSCommand( &command, "setrlimit:$(int)$(int)$(int)",
+                              create_IntTObj(resource), create_IntTObj(rlp==NULL), errno
+                            );
+        }
+        else
+        {
+            format_TSCommand( &command, "setrlimit:$(int)$(int)$(ulong)$(ulong)$(int)",
+                              create_IntTObj(resource), create_IntTObj(rlp==NULL),
+                              create_ULongTObj(rlp->rlim_cur), create_ULongTObj(rlp->rlim_max), errno
+                            );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        RSavedLimitT * saved_lim;
+
+        if(setrlimit_spec==0)
+        {
+            if(rlp==NULL)
+                setBadVerdict("setrlimit_media: rlp==NULL on successful result");
+
+            saved_lim = create_RSavedLimitT_RLimitT(rlp);
+            put_Map(RSavedLimits,create_IntTObj(resource),saved_lim);
+        }
+    }
+}
+
+
+/** getrusage_spec **/
+mediator getrusage_media for specification
+IntT getrusage_spec( CallContext context, IntT who, RusageT * r_usage, ErrorCode * errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "getrusage:$(int)", create_IntTObj(who)  );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res = readInt_TSStream(&command.response);
+            readRUsage_TSStream(&command.response,r_usage);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+  }
+}
+
+/** getrlimit64_spec **/
+mediator getrlimit64_media for specification
+IntT getrlimit64_spec( CallContext context, IntT resource, RLimit64T * rlp, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "getrlimit64:$(int)$(int)$(int)", create_IntTObj(resource),
+                            create_IntTObj(rlp==NULL),errno);
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            if(rlp!=NULL)
+            {
+                rlp->rlim_cur = readULLong_TSStream(&command.response);
+                rlp->rlim_max = readULLong_TSStream(&command.response);
+            }
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        RSavedLimitT * saved_lim;
+
+        if( (getrlimit64_spec==0) && !containsKey_Map(RSavedLimits,create_IntTObj(resource)) )
+        {
+            if(rlp==NULL)
+                setBadVerdict("setrlimit64_media: rlp==NULL on successful result");
+
+            saved_lim = create_RSavedLimitT_RLimit64T(rlp);
+            put_Map(RSavedLimits,create_IntTObj(resource),saved_lim);
+        }
+    }
+}
+
+
+/** setrlimit_spec **/
+//This mediator refers to: setrlimit64, setrlimit
+mediator setrlimit64_media for specification
+IntT setrlimit64_spec( CallContext context, IntT resource, RLimit64T * rlp, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        if(rlp==NULL)
+        {
+            format_TSCommand( &command, "setrlimit64:$(int)$(int)$(int)",
+                              create_IntTObj(resource), create_IntTObj(rlp==NULL), errno
+                            );
+        }
+        else
+        {
+            format_TSCommand( &command, "setrlimit64:$(int)$(int)$(ullong)$(ullong)$(int)",
+                              create_IntTObj(resource), create_IntTObj(rlp==NULL),
+                              create_ULLongTObj(rlp->rlim_cur), create_ULLongTObj(rlp->rlim_max), errno
+                            );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        RSavedLimitT * saved_lim;
+
+        if(setrlimit64_spec==0)
+        {
+            if(rlp==NULL)
+                setBadVerdict("setrlimit64_media: rlp==NULL on successful result");
+
+            saved_lim = create_RSavedLimitT_RLimit64T(rlp);
+            put_Map(RSavedLimits,create_IntTObj(resource),saved_lim);
+        }
+    }
+}
+
+
+/** ulimit_spec **/
+mediator ulimit_media for specification
+LongT ulimit_spec( CallContext context, IntT cmd, List * params, ErrorCode * errno )
+{
+    IntT olderrno=0;
+    call
+    {
+        TSCommand command = create_TSCommand();
+        LongT res;
+
+        olderrno = *errno;
+
+        if(size_List(params)==0)
+            format_TSCommand( &command, "ulimit:$(int)$(int)$(int)",create_IntTObj(cmd), 
+                              create_IntTObj(size_List(params)), 
+                              errno
+                            );
+        else if(size_List(params)==1 && type(get_List(params,0)) == &type_LongTObj )
+        {
+            format_TSCommand( &command, "ulimit:$(int)$(int)$(long)$(int)",create_IntTObj(cmd), 
+                              create_IntTObj(size_List(params)), get_List(params,0),
+                              errno
+                            );
+        }
+        else
+            setBadVerdict("Too many parameters in params list or wrong parameter type");
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        RSavedLimitT * saved_lim;
+        RLimitT * rlp;
+        LongT param1;
+        LLongT tmp;
+        RLimT lim;
+        bool success=false;
+
+        if(cmd == SUT_UL_SETFSIZE)
+        {
+            if(getUlimitBehaviorKind() == UlimitBehaviorLSB)
+            {
+                success = !(ulimit_spec == -1 && *errno != olderrno);
+            }
+            else /* [Behaviour == Glibc] */
+            { 
+                success = ulimit_spec == 0 && *errno == olderrno;
+            }
+
+            if(success)
+            {
+                if(size_List(params)==0)
+                    setBadVerdict("ulimit_media: not enough parameters");
+                
+                param1 = *(LongTObj *)get_List(params,0);
+                
+                tmp = param1;
+                if(canBeRepresentedAsRLimT(tmp*512))
+                    lim = tmp*512;
+                else
+                    lim = SUT_RLIM_INFINITY;
+
+                rlp = create_RLimitT(lim,lim);
+                
+                saved_lim = create_RSavedLimitT_RLimitT(rlp);
+                put_Map(RSavedLimits,create_IntTObj(SUT_RLIMIT_FSIZE),saved_lim);
+            }
+        }
+    }
+}
+
+
+
+/************************************************************************/
+/*                       Helper Functions                               */
+/************************************************************************/
+
+void readRUsage_TSStream(TSStream* stream, RusageT * r_usage)
+{
+    r_usage->ru_utime.sec = readLong_TSStream(stream);
+    r_usage->ru_utime.nsec = readLong_TSStream(stream);
+    r_usage->ru_stime.sec = readLong_TSStream(stream);
+    r_usage->ru_stime.nsec = readLong_TSStream(stream);
+    r_usage->ru_maxrss = readLong_TSStream(stream);
+    r_usage->ru_ixrss = readLong_TSStream(stream);
+    r_usage->ru_idrss = readLong_TSStream(stream);
+    r_usage->ru_isrss = readLong_TSStream(stream);
+    r_usage->ru_minflt = readLong_TSStream(stream);
+    r_usage->ru_majflt = readLong_TSStream(stream);
+    r_usage->ru_nswap = readLong_TSStream(stream);
+    r_usage->ru_inblock = readLong_TSStream(stream);
+    r_usage->ru_oublock = readLong_TSStream(stream);
+    r_usage->ru_msgsnd = readLong_TSStream(stream);
+    r_usage->ru_msgrcv = readLong_TSStream(stream);
+    r_usage->ru_nsignals = readLong_TSStream(stream);
+    r_usage->ru_nvcsw = readLong_TSStream(stream);
+    r_usage->ru_nivcsw = readLong_TSStream(stream);
+}

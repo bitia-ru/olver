@@ -1,0 +1,410 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "data/errno_model.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "io/term/term_media.seh"
+#include "io/term/tests/rw_case_b_scenario.seh"
+#include "io/term/tests/term_scenario.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+#define MIN             3
+#define MAX_BUFFER_SIZE 2
+#define MAX_QUEUE_SIZE  3
+
+/********************************************************************/
+/**                      Test Scenario Debug                       **/
+/********************************************************************/
+#ifdef IO_TERM_LOCAL_MAIN
+
+static AssertionExit system_assertion_handler;
+
+void io_term_rw_case_b_assertion_exit(const char *format, va_list arg_list)
+{
+    system_assertion_handler(format, arg_list);
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext read_context;
+static CallContext write_context;
+static FileDescId ptm_desc_id;
+static FileDescId pts_desc_id;
+static VoidTPtr ptm_termp;
+static VoidTPtr pts_termp;
+static ErrorCode *error;
+static bool is_case_b;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_rw_case_b_scenario(int argc, char **argv)
+{
+#ifdef IO_TERM_LOCAL_MAIN
+
+    system_assertion_handler = atAssertion(io_term_rw_case_b_assertion_exit);
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+    read_context = getContext();
+    write_context = createThreadInContext(read_context);
+    initPathSystemConfiguration();
+    ptm_desc_id = WrongFileDescId;
+    pts_desc_id = WrongFileDescId;
+
+    ptm_termp = allocateMemoryBlock(read_context, sizeof_Type(read_context, "struct termios"));
+    pts_termp = allocateMemoryBlock(read_context, sizeof_Type(read_context, "struct termios"));
+
+    if(isNULL_VoidTPtr(ptm_termp) || isNULL_VoidTPtr(pts_termp))
+        return false;
+
+    error = create_ErrorCode(SUT_EOK);
+    is_case_b = false;
+
+//    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(60);
+
+    return true;
+}
+
+static void finish_rw_case_b_scenario(void)
+{
+    deallocateMemoryBlock(read_context, ptm_termp);
+    deallocateMemoryBlock(read_context, pts_termp);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(rw_case_b_scenario);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+specification typedef struct RWCaseBStateType
+{
+    bool is_open;
+    bool is_case_b;
+    unsigned size;
+    bool is_read_blocked;
+    SizeT nbyte;
+} RWCaseBStateType;
+
+RWCaseBStateType * create_RWCaseBStateType
+(
+    bool is_open,
+    bool is_case_b,
+    unsigned size,
+    bool is_read_blocked,
+    SizeT nbyte
+)
+{
+    return create(&type_RWCaseBStateType,
+        is_open,
+        is_case_b,
+        size,
+        is_read_blocked,
+        nbyte
+        );
+}
+
+static String* rw_case_b_scenario_state_to_string(struct RWCaseBStateType *s)
+{
+    String *res = create_String(s->is_open ? "Opened" : "Closed");
+    
+    if(s->is_open)
+    {
+        res = concat_String(res, create_String(s->is_case_b ? ", case B" : ", not a case B"));
+
+        if(s->is_case_b)
+        {
+            res = concat_String(res, create_String(", queue size: "));
+            res = concat_String(res, valueOfUInt_String(s->size));
+
+            if(s->is_read_blocked)
+            {
+                res = concat_String(res, create_String(", read request: "));
+                res = concat_String(res, valueOfUInt_String(s->nbyte));
+            }
+        }
+    }
+
+    return res;
+}
+
+static int rw_case_b_scenario_state_compare(struct RWCaseBStateType *lhs,
+                                            struct RWCaseBStateType *rhs)
+{
+    if(lhs == NULL || rhs == NULL)
+        return lhs == rhs ? 0 : 1;
+
+    if(!lhs->is_open || !rhs->is_open)
+        return lhs->is_open == rhs->is_open ? 0 : 1;
+
+    if(!lhs->is_case_b || !rhs->is_case_b)
+        return lhs->is_case_b == rhs->is_case_b ? 0 : 1;
+
+    return (lhs->size == rhs->size)
+        && (lhs->is_read_blocked == rhs->is_read_blocked)
+        && (lhs->is_read_blocked => (lhs->nbyte == rhs->nbyte)) ? 0 : 1;
+}
+
+specification typedef struct RWCaseBStateType RWCaseBStateType =
+{
+    .to_string = (ToString)rw_case_b_scenario_state_to_string,
+    .compare = (Compare)rw_case_b_scenario_state_compare
+};
+
+static RWCaseBStateType* rw_case_b_scenario_state(void) 
+{
+    unsigned size = 0;
+    ReadTTYCall *blocked_call = NULL;
+
+    if(!isWrong_FileDescId(pts_desc_id))
+    {
+        Terminal *pts = getTerminal_FileDescId(pts_desc_id);
+        TerminalQueue *queue = getInputQueue_Terminal(pts);
+
+        size = size_TerminalQueue(queue);
+        blocked_call = getBlockedCall(read_context);
+    }
+
+    return create_RWCaseBStateType(
+        !isWrong_FileDescId(pts_desc_id),
+        is_case_b,
+        size,
+        blocked_call != NULL,
+        blocked_call != NULL ? blocked_call->nbyte : 0
+    );
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+bool is_rw_case_b_state_stationary(void)
+{
+    if(getNumberOfThreadsReadyToBeRun() > 0)
+    {
+        Object *blocked_call = getBlockedCall(read_context);
+
+        if(blocked_call == NULL || type(blocked_call) != &type_ReadTTYCall)
+        {
+            traceThreadsReadyToBeRun();
+            return false;
+        }
+        else
+        {
+            Terminal *pts = getTerminal_FileDescId(pts_desc_id);
+            TerminalQueue *queue = getInputQueue_Terminal(pts);
+            TermIOS *pts_termios = getTermIOS(pts_termp);
+            unsigned size = size_TerminalQueue(queue);
+            unsigned min = getControlCharacter_TermIOS(pts_termios, SUT_VMIN);
+    
+            if(size >= min)
+            {
+                traceFormattedUserInfo("size=%u, min=%u", size, min);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool open_b_scen()
+{
+    if(isWrong_FileDescId(ptm_desc_id))
+    {
+        openpty_spec(read_context, &ptm_desc_id, &pts_desc_id, NULL, pts_termp, NULL, error);
+
+        tcgetattr_spec(read_context, ptm_desc_id, ptm_termp, error);
+        tcgetattr_spec(read_context, pts_desc_id, pts_termp, error);
+
+        is_case_b = false;
+    }
+
+    return true;
+}
+
+scenario
+bool setattr_b_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        TermIOS *pts_termios = getTermIOS(pts_termp);
+
+        if(!is_case_b)
+        {
+            setControlCharacter_TermIOS(pts_termios, SUT_VTIME, 0);
+            setControlCharacter_TermIOS(pts_termios, SUT_VMIN, MIN);
+
+            settermios_spec(read_context, pts_termp, pts_termios);
+            tcsetattr_spec(read_context, pts_desc_id, SUT_TCSANOW, pts_termp);
+
+            tcgetattr_spec(read_context, ptm_desc_id, ptm_termp, error);
+            tcgetattr_spec(read_context, pts_desc_id, pts_termp, error);
+
+            is_case_b = true;
+        }
+    }
+}
+
+scenario
+bool read_b_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        TermIOS *pts_termios = getTermIOS(pts_termp);
+
+        if(is_case_b && equals(getBlockedCall(read_context), NULL))
+        {
+            iterate(int i = 0; i < MAX_BUFFER_SIZE; i++;)
+            {
+                read_tty_spec(read_context, pts_desc_id, i);
+            }
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool write_b_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        TermIOS *pts_termios = getTermIOS(pts_termp);
+
+        if(is_case_b && equals(getBlockedCall(write_context), NULL))
+        {
+            Terminal *pts = getTerminal_FileDescId(pts_desc_id);
+            TerminalQueue *queue = getInputQueue_Terminal(pts);
+
+            if(size_TerminalQueue(queue) < MAX_QUEUE_SIZE)
+            {
+                iterate(int i = 0; i < MAX_BUFFER_SIZE; i++;)
+                {
+                    write_tty_spec(write_context, ptm_desc_id, generateCByteArray(i), i);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool close_b_scen()
+{
+    if(!isWrong_FileDescId(ptm_desc_id))
+    {
+        TermIOS *pts_termios = getTermIOS(pts_termp);
+
+        if(is_case_b &&
+           equals(getBlockedCall(read_context), NULL) &&
+           equals(getBlockedCall(write_context), NULL))
+        {
+            tcflush_spec(read_context, ptm_desc_id, SUT_TCIOFLUSH);
+            tcflush_spec(read_context, pts_desc_id, SUT_TCIOFLUSH);
+
+            close_tty_spec(read_context, ptm_desc_id);
+            close_tty_spec(read_context, pts_desc_id);
+
+            ptm_desc_id = WrongFileDescId;
+            pts_desc_id = WrongFileDescId;
+        }
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm rw_case_b_scenario =
+{
+    .init = init_rw_case_b_scenario,
+    .finish = finish_rw_case_b_scenario,
+    .getState = (PtrGetState)rw_case_b_scenario_state,
+    .saveModelState = (PtrSaveModelState)saveIoTermModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreIoTermModelState,
+    .isStationaryState = (PtrIsStationaryState)is_rw_case_b_state_stationary,
+    .actions = 
+    {
+        open_b_scen,
+        setattr_b_scen,
+        read_b_scen,
+        write_b_scen,
+        close_b_scen,
+        NULL
+    }
+};
+
+bool main_io_term_rw_case_b(int argc, char **argv)
+{
+    rw_case_b_scenario(argc, argv);
+    return true;
+}
+
+#ifdef IO_TERM_LOCAL_MAIN
+
+#include "common/init.seh"
+#include "common/control_center.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+    initIoFileSubsystem();
+    initIoTermSubsystem();
+}
+
+int main(int argc, char **argv)
+{
+    initTestSystem();
+    loadSUT();
+    addTraceToFile("trace.xml");
+    main_io_term_rw_case_b(argc, argv);
+    
+    return 0;
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */

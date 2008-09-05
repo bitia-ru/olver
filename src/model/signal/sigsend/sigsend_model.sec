@@ -1,0 +1,1578 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "signal/sigsend/sigsend_config.h"
+#include "signal/sigsend/sigsend_model.seh"
+#include "signal/sigaction/sigaction_model.seh"
+
+
+#pragma SEC subsystem sigsend "signal.sigsend"
+
+/*
+   The group of functions 'signal.sigsend' consists of:
+       kill [1]                     b0
+       killpg [2]                   b0
+       pthread_kill [2]             b0
+       raise [2]                    b0
+       sigqueue [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    kill -- send a signal
+
+SYNOPSIS
+
+    #include <signal.h>
+    int kill(pid_t pid, int sig);
+
+DESCRIPTION
+
+    kill() is as specified in the ISO POSIX (2003), but with differences as
+    listed below. Process ID -1 doesn't affect calling process
+
+    If pid is specified as -1, sig shall not be sent to the calling process.
+    Other than this, the rules in the ISO POSIX (2003) apply.
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    kill - send a signal to a process or a group of processes
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int kill(pid_t pid, int sig);
+
+
+DESCRIPTION
+
+    The kill() function shall send a signal to a process or a group of
+    processes specified by pid. The signal to be sent is specified by sig
+    and is either one from the list given in <signal.h> or 0. If sig is 0
+    (the null signal), error checking is performed but no signal is actually
+    sent. The null signal can be used to check the validity of pid.
+
+    For a process to have permission to send a signal to a process designated
+    by pid, unless the sending process has appropriate privileges, the real or
+    effective user ID of the sending process shall match the real or saved
+    set-user-ID of the receiving process.
+
+    If pid is greater than 0, sig shall be sent to the process whose process
+    ID is equal to pid.
+
+    If pid is 0, sig shall be sent to all processes (excluding an unspecified
+    set of system processes) whose process group ID is equal to the process
+    group ID of the sender, and for which the process has permission to send a
+    signal.
+
+    If pid is -1, sig shall be sent to all processes (excluding an unspecified
+    set of system processes) for which the process has permission to send that
+    signal.
+
+    If pid is negative, but not -1, sig shall be sent to all processes
+    (excluding an unspecified set of system processes) whose process group ID
+    is equal to the absolute value of pid, and for which the process has
+    permission to send a signal.
+
+    If the value of pid causes sig to be generated for the sending process,
+    and if sig is not blocked for the calling thread and if no other thread
+    has sig unblocked or is waiting in a sigwait() function for sig, either
+    sig or at least one pending unblocked signal shall be delivered to the
+    sending thread before kill() returns.
+
+    The user ID tests described above shall not be applied when sending
+    SIGCONT to a process that is a member of the same session as the sending
+    process.
+
+    An implementation that provides extended security controls may impose
+    further implementation-defined restrictions on the sending of signals,
+    including the null signal. In particular, the system may deny the
+    existence of some or all of the processes specified by pid.
+
+    The kill() function is successful if the process has permission to send
+    sig to any of the processes specified by pid. If kill() fails, no signal
+    shall be sent.
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned. Otherwise, -1 shall be
+    returned and errno set to indicate the error.
+
+ERRORS
+
+    The kill() function shall fail if:
+    [EINVAL]
+        The value of the sig argument is an invalid or unsupported signal
+        number.
+    [EPERM]
+        The process does not have permission to send the signal to any
+        receiving process.
+    [ESRCH]
+        No process or process group can be found corresponding to that
+        specified by pid.
+*/
+
+//This specification refers to: raise, killpg, kill
+specification
+void kill_spec(CallContext context, ProcessId proc_id, Signal* sig, KillCallTypes callType)
+{
+    pre
+    {
+        ProcessState* pr_st_call;
+        verbose( "kill_spec : pre\n" );
+        pr_st_call = getProcessState_CallContext(context);
+
+        if (callType == KILL_RAISE_CALL)
+        {
+            if (THREADS_OPTION_SUPPORTED)
+            {
+                /*[Implicit precondition]*/
+                REQ("", "Call pthread_kill() function with isRaise parameter set to true instead of kill()", false);
+            }
+            else
+            {
+                proc_id = create_ProcessId(context.system, context.process);
+                FILTER("raise");
+            }
+
+
+
+        }
+        else if (callType==KILL_KILLPG_CALL)
+        {
+            /*
+            * If pgrp is less than or equal to 1, the behavior of killpg() is undefined.
+            */
+            REQ("app.killpg.03", "Argument shall be greater than 1", proc_id.process > 1);
+
+            proc_id.process = (-proc_id.process);
+
+            FILTER("killpg");
+        }
+        else
+        {
+            FILTER("kill");
+        }
+
+
+        traceFormattedUserInfo("Kill was called in process $(obj) for process $(obj) with signal $(obj)", create_IntTObj(context.process), create_IntTObj(proc_id.process), create_IntTObj(*sig));
+
+
+        /*[Implicit precondition]*/
+        REQ("", "Process shall not be a zombie for this call", !isProcessZombie(pr_st_call));
+
+        return true;
+    }
+    post
+    {
+        verbose( "kill_spec : post\n" );
+        //VERBOSE("Kill start\n");
+
+        /*
+         * If the value of pid causes sig to be generated for the sending
+         * process, and if sig is not blocked for the calling thread and if no
+         * other thread has sig unblocked or is waiting in a sigwait()
+         * function for sig, either sig  or at least one pending unblocked
+         * signal shall be delivered to the sending thread before kill()
+         * returns.
+         */
+        REQ("kill.08;killpg.kill.08", "", TODO_REQ());
+
+        /*
+         * The user ID tests described above shall not be applied when sending
+         * SIGCONT to a process that is a member of the same session as the
+         * sending process.
+         */
+        REQ("kill.09;raise.kill.09;killpg.kill.09", "", TODO_REQ());
+
+        /*
+         * An implementation that provides extended security controls may
+         * impose further implementation-defined restrictions on the sending
+         * of signals, including the null signal. In particular, the system
+         * may deny the existence of some or all of the processes specified
+         * by pid.
+         */
+        REQ("kill.10;killpg.kill.10", "", TODO_REQ());
+
+        /*
+         * The kill() function is successful if the process has permission to
+         * send sig to any of the processes specified by pid.
+         */
+        REQ("kill.11.01;raise.kill.11.01;killpg.kill.11.01", "", TODO_REQ());
+
+        /*
+        * If a signal handler is called, the raise() function shall not return until
+        * after the signal handler does
+        */
+        REQ("raise.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+void processSendingSignalToProcess(CallContext context, Signal* sig, ProcessId pid, bool is_param_int, IntT value_int, VoidTPtr value_ptr)
+{
+    SigAction* sa;
+    ProcessState* pr_st_get = getProcessState(pid);
+    IntT temp_id = 0;
+    List* temp_list;
+    List* prcs = create_List(&type_ProcessState);
+    List* uids = create_List(&type_IntTObj);
+
+    sa = get_Map(pr_st_get->signal_actions, create_SignalObj(*sig));
+
+    if (equals(create_SignalObj(*sig), create_SignalObj(SUT_SIGCONT)))
+    { //send a SIGCONT signal
+        pr_st_get->is_stopped = false;
+        remove_Map(pr_st_get->signal_queue, create_SignalObj(SUT_SIGSTOP));
+        remove_Map(pr_st_get->signal_queue, create_SignalObj(SUT_SIGTSTP));
+        remove_Map(pr_st_get->signal_queue, create_SignalObj(SUT_SIGTTIN));
+        remove_Map(pr_st_get->signal_queue, create_SignalObj(SUT_SIGTTOU));
+        if (!isHasHandlerFunction(sa) && isCanBeDelivered(pr_st_get, sig))
+        {
+            /*
+             * signal SIGCONT is not blocked in one of get process
+             * thread and there is no signal handler for this signal,
+             * so this signal is regarded as processed
+             */
+            startBlockedCall(context, create_BlockedKillParams(pid, sig, NULL, NULL));//DO NOTHING
+        }
+        else
+        {  //signal processed as usial signals
+            temp_id = add_Signal_to_Process(pr_st_get, sig, context, is_param_int, value_int, value_ptr);
+
+            append_List(prcs, pr_st_get);
+            append_List(uids, create_IntTObj(temp_id));
+            startBlockedCall(context, create_BlockedKillParams(pid, sig, prcs, uids));
+        }
+    }
+    else if (equals(create_SignalObj(*sig), create_SignalObj(SUT_SIGSTOP)))
+    { //send SIGSTOP signal
+        pr_st_get->is_stopped = true;
+        remove_Map(pr_st_get->signal_queue, create_SignalObj(SUT_SIGCONT));
+        startBlockedCall(context, create_BlockedKillParams(pid, sig, NULL, NULL));
+    }
+    else if (equals(create_SignalObj(*sig), create_SignalObj(SUT_SIGTSTP)) ||
+             equals(create_SignalObj(*sig), create_SignalObj(SUT_SIGTTIN)) ||
+             equals(create_SignalObj(*sig), create_SignalObj(SUT_SIGTTOU)))
+    { //send one of STOP-signals but not SIGSTOP
+        remove_Map(pr_st_get->signal_queue, create_SignalObj(SUT_SIGCONT));
+        if (!isHasHandlerFunction(sa) && isCanBeDelivered(pr_st_get, sig))
+        {
+            /*
+             * STOP-signal is not blocked in one of get process
+             * thread and there is no signal handler for this signal,
+             * so this signal stops the process
+             */
+            pr_st_get->is_stopped = true;
+            startBlockedCall(context, create_BlockedKillParams(pid, sig, NULL, NULL));
+        }
+        else
+        {  //signal processed as usual signals
+            temp_id = add_Signal_to_Process(pr_st_get, sig, context, is_param_int, value_int, value_ptr);
+
+            append_List(prcs, pr_st_get);
+            append_List(uids, create_IntTObj(temp_id));
+            startBlockedCall(context, create_BlockedKillParams(pid, sig, prcs, uids));
+        }
+    }
+    else if (equals(create_SignalObj(*sig), create_SignalObj(SUT_SIGKILL))) //signal is SIGKILL
+    {
+        setProcessZombie(pr_st_get);
+
+        append_List(prcs, pr_st_get);
+        append_List(uids, create_IntTObj(temp_id));
+        startBlockedCall(context, create_BlockedKillParams(pid, sig, prcs, uids));
+    }
+    else //Signals are not SIGCONT or STOP-signals or SIGKILL
+    {
+        if ((sa == NULL) || !isHasHandlerFunction(sa))
+        {
+
+            traceFormattedUserInfo("No signal handler for process $(obj) and signal $(obj)", create_IntTObj(pid.process), create_IntTObj(*sig));
+
+
+            setProcessZombie(pr_st_get);
+        }
+
+        temp_id = add_Signal_to_Process(pr_st_get, sig, context, is_param_int, value_int, value_ptr);
+
+        append_List(prcs, pr_st_get);
+        append_List(uids, create_IntTObj(temp_id));
+        startBlockedCall(context, create_BlockedKillParams(pid, sig, prcs, uids));
+    }
+}
+
+
+void kill_model(CallContext context, Signal* sig, ProcessId pid)
+{
+    IntT temp_id;
+
+    List* prcs = create_List(&type_ProcessState);
+    List* uids = create_List(&type_IntTObj);
+
+
+    if (!equals(create_SignalObj(*sig), create_SignalObj(0)))
+    {
+        /*
+         * If sig is 0 (the null signal), error checking is performed but no
+         * signal is actually sent.
+         */
+        IMPLEMENT_REQ("kill.02");
+
+        if (pid.process > 0)
+        {
+            /*
+             * If pid is greater than 0, sig shall be sent to the process whose
+             * process ID is equal to pid.
+             */
+            IMPLEMENT_REQ("kill.04;raise.kill.04");
+
+            processSendingSignalToProcess(context, sig, pid, true, 0, NULL_VoidTPtr);
+        }
+        else //signal was sent to a process group
+        {
+            SystemState* st = getSystemState(context.system);
+            IntT i=0;
+            ProcessState* callPs = getProcessState_CallContext(context);
+
+            if (pid.process < -1)
+            {
+                ProcessId tmpId = create_ProcessId(pid.system, -pid.process);
+
+                 /*
+                 * If pid is negative, but not -1, sig shall be sent to all processes
+                 * (excluding an unspecified set of system processes) whose process
+                 * group ID is equal to the absolute value of pid, and for which the
+                 * process has permission to send a signal.
+                 */
+                IMPLEMENT_REQ("kill.07;killpg.kill.07");
+
+                for (i=0;i<size_Map(st->processes);i++)
+                {
+                    ProcessId* curId = key_Map(st->processes, i);
+                    ProcessState* curPs = get_Map(st->processes, curId);
+
+                    if (curPs->meta.pgroup.process == tmpId.process &&
+                        curPs->meta.pgroup.system == tmpId.system )
+                    {
+                        temp_id = add_Signal_to_Process(curPs, sig, context, true, 0, NULL_VoidTPtr);
+                        append_List(prcs, curPs);
+                        append_List(uids, create_IntTObj(temp_id));
+                    }
+                }
+
+                startBlockedCall(context, create_BlockedKillParams(pid, sig, prcs, uids));
+            }
+            else if (pid.process==0)
+            {
+
+                /*
+                 * If pid is 0, sig shall be sent to all processes (excluding an
+                 * unspecified set of system processes) whose process group ID is
+                 * equal to the process group ID of the sender, and for which the
+                 * process has permission to send a signal.
+                 */
+                IMPLEMENT_REQ("kill.05");
+
+                for (i=0;i<size_Map(st->processes);i++)
+                {
+                    ProcessId*    curId = key_Map(st->processes, i);
+                    ProcessState* curPs = get_Map(st->processes, curId);
+
+                    if (curPs->meta.pgroup.process == callPs->meta.pgroup.process &&
+                        curPs->meta.pgroup.system == callPs->meta.pgroup.system )
+                    {
+                        temp_id = add_Signal_to_Process(curPs, sig, context, true, 0, NULL_VoidTPtr);
+                        append_List(prcs, curPs);
+                        append_List(uids, create_IntTObj(temp_id));
+                    }
+                }
+            }
+            else
+            {
+
+                /*
+                 * If pid is -1, sig shall be sent to all processes (excluding an
+                 * unspecified set of system processes) for which the process has
+                 * permission to send that signal.
+                 */
+                IMPLEMENT_REQ("kill.06");
+
+                /*
+                 * If pid is specified as -1, sig shall not be sent to the calling
+                 * process. Other than this, the rules in the ISO POSIX (2003) apply.
+                 */
+                IMPLEMENT_REQ("kill.06.01");
+
+                for (i=0;i<size_Map(st->processes);i++)
+                {
+                    ProcessId*    curId = key_Map(st->processes, i);
+                    ProcessState* curPs = get_Map(st->processes, curId);
+
+                    if (curPs->meta.pgroup.process == callPs->meta.pgroup.process &&
+                        curPs->meta.pgroup.system == callPs->meta.pgroup.system
+                        && (!equals(curPs, callPs)))
+                    {
+                        temp_id = add_Signal_to_Process(curPs, sig, context, true, 0, NULL_VoidTPtr);
+                        append_List(prcs, curPs);
+                        append_List(uids, create_IntTObj(temp_id));
+                    }
+                }
+
+            }
+
+        }
+    }
+    else
+    {
+        startBlockedCall(context, create_BlockedKillParams(pid, sig, NULL, NULL));
+    }
+}
+
+void onKill(CallContext context, Signal* sig, ProcessId pid)
+{
+    verbose( "onKill\n" );
+    kill_model(context, sig, pid);
+}
+
+reaction KillReactionType* kill_react(void)
+{
+    post
+    {
+        ThreadState* thr_st;
+        ProcessState* pr_st;
+        verbose( "kill_react : post\n" );
+        thr_st = getThreadState_CallContext(kill_react->context);
+        pr_st = getProcessState_CallContext(kill_react->context);
+
+
+
+        traceFormattedUserInfo("Kill reaction was recieved in process $(obj) for process $(obj) and signal $(obj)", create_IntTObj(kill_react->context.process), create_IntTObj(kill_react->params->get_pid.process), create_IntTObj(*(kill_react->params->sig)));
+
+
+        //VERBOSE("Kill reaction start\n");
+        /*
+         * Otherwise, -1 shall be returned and errno set to indicate the error.
+         * [kill.13 requirement if function fails]
+         */
+        /*
+         * If kill() fails, no signal shall be sent.
+         * [kill.12 requirement if function fails]
+         */
+        /*
+        * Otherwise, a non-zero value shall be returned [CX] and errno shall be set to
+        * indicate the error.
+        */
+        ERROR_BEGIN(POSIX_KILL, "kill.13;kill.12;raise.06;killpg.kill.12;killpg.kill.13", kill_react->return_value != 0, *(kill_react->errno))
+            /*
+             * The kill() function shall fail if:
+             *
+             * [EINVAL]
+             * The value of the sig argument is an invalid or unsupported
+             * signal number.
+             */
+            ERROR_SHALL(POSIX_KILL, EINVAL, "kill.14.01;killpg.kill.14.01;raise.07.01", TODO_ERR(EINVAL))
+
+            /*
+             * The kill() function shall fail if:
+             *
+             * [EPERM]
+             * The process does not have permission to send the signal to any
+             * receiving process.
+             */
+             /*
+             * For a process to have permission to send a signal to a process
+             * designated by pid, unless the sending process has appropriate
+             * privileges, the real or effective user ID of the sending process
+             * shall match the real or saved set-user-ID of the receiving process.
+             */
+            ERROR_SHALL(POSIX_KILL, EPERM, "kill.14.02;kill.03;killpg.kill.14.02", TODO_ERR(EPERM))
+
+            /*
+             * The kill() function shall fail if:
+             *
+             * [ESRCH]
+             * No process or process group can be found corresponding to that
+             * specified by pid.
+             */
+            ERROR_SHALL(POSIX_KILL, ESRCH, "kill.14.03;killpg.kill.14.03", TODO_ERR(ESRCH)/*(!isValidProcessId(kill_react->params->get_pid))*/)
+
+        ERROR_END()
+
+        /*
+         * Can't react when process is zombie
+         */
+        REQ("", "Process should not be zombie to do this call", !isProcessZombie(pr_st));
+
+        /*
+         * Upon successful completion, 0 shall be returned.
+         */
+        REQ("kill.11.02;raise.05;killpg.kill.11.02", "Function shall return zero", kill_react->return_value == 0);
+
+
+
+
+        FILTER_CLEAN;
+
+        return true;
+    }
+}
+
+void onKillReact(KillReactionType* reaction_params)
+{
+
+    ProcessState* pr_st_get;
+    BlockedKillParams* params;
+    int temp_int;
+    List* temp_list;
+    bool is_ok;
+    SignalParams* temp_params;
+    IntT i=0;
+
+    verbose( "onKillReact\n" );
+    //verbose("start on kill react\n");
+
+    params = (BlockedKillParams*)finishBlockedCall(reaction_params->context);
+    reaction_params->params = params;
+    if (equals(create_SignalObj(*(params->sig)), create_SignalObj(0)))
+    {
+        return;
+    }
+    pr_st_get = getProcessState(params->get_pid);
+
+    if (params->unique_id == NULL)
+    {
+        return;
+    }
+    /*
+     * if error while kill call occured, reaction shall delete signal from
+     * signal queue or delete signal catched signals blocks, because this
+     * call of kill can't be reason for call catcher, if it was last signal
+     * in block, then kill.12 requirement failed
+     */
+    if (reaction_params->return_value != 0)
+    {
+
+        for (i=0;i<size_List(params->processes);i++)
+        {
+            IntTObj* tmpInt = get_List(params->unique_id, i);
+            IntT unique_id = *tmpInt;
+            pr_st_get = get_List(params->processes, i);
+            if (params->get_pid.process > 0)
+            {
+                temp_int = remove_Signal_from_Model(pr_st_get, params->sig, unique_id);
+                if (temp_int == 0) //signal wasn't in the signal queue
+                {
+                    temp_list = get_Map(pr_st_get->processed_signals, create_SignalObj(*(params->sig)));
+                    is_ok = signal_generated_bad(unique_id, temp_list);
+                }
+            }
+        }
+    }
+    /*
+     * if kill success, then we had to mark not catched signal as successed
+     * kill return or delete all catched signals from corresponding block
+     * because there was at least one successed call of kill for called catcher
+     */
+    else
+    {
+        for (i=0;i<size_List(params->processes);i++)
+        {
+            IntTObj* tmpInt = get_List(params->unique_id, i);
+            IntT unique_id = *tmpInt;
+            pr_st_get = get_List(params->processes, i);
+
+            temp_list = get_Map(pr_st_get->signal_queue, create_SignalObj(*(params->sig)));
+            if (temp_list == NULL)
+            { //signal wasn't in the signal queue
+                temp_list = get_Map(pr_st_get->processed_signals, create_SignalObj(*(params->sig)));
+
+                signal_generated_good(unique_id, temp_list);
+            }
+            else
+            {
+                temp_int = find_unique_id_in_SignalParamsList(unique_id, temp_list);
+                if (temp_int == -1)
+                { //other case, when signal wasn't in the signal queue
+                    temp_list = get_Map(pr_st_get->processed_signals, create_SignalObj(*(params->sig)));
+                    signal_generated_good(unique_id, temp_list);
+                }
+                else
+                { //signal is in the signal queue
+                    temp_params = get_List(temp_list, temp_int);
+                    temp_params->returned_kill = true;
+                }
+            }
+        }
+    }
+    verbose("end on kill react\n");
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    killpg - send a signal to a process group
+
+SYNOPSIS
+
+    [XSI]  #include <signal.h>
+    int killpg(pid_t pgrp, int sig);
+
+DESCRIPTION
+
+    The killpg() function shall send the signal specified by sig to the
+    process group specified by pgrp.
+    If pgrp is greater than 1, killpg(pgrp, sig) shall be equivalent to kill(-
+    pgrp, sig). If pgrp is less than or equal to 1, the behavior of killpg()
+    is undefined.
+
+RETURN VALUE
+
+    Refer to kill().
+
+ERRORS
+
+    Refer to kill().
+*/
+/****
+specification
+ReturnType killpg_spec( CallContext context, ... )
+{
+  pre
+  {
+    return true;
+  }
+  coverage C
+  {
+    return { TheOnlyBranch, "The only branch" };
+  }
+  post
+  {
+    return true;
+  }
+}
+****/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_kill - send a signal to a thread
+
+SYNOPSIS
+
+    #include <signal.h>
+
+    int pthread_kill(pthread_t thread, int sig);
+
+DESCRIPTION
+
+    The pthread_kill() function shall request that a signal be delivered to
+    the specified thread.
+
+    As in kill(), if sig is zero, error checking shall be performed but no
+    signal shall actually be sent.
+
+RETURN VALUE
+
+    Upon successful completion, the function shall return a value of zero.
+    Otherwise, the function shall return an error number. If the
+    pthread_kill() function fails, no signal shall be sent.
+
+ERRORS
+
+    The pthread_kill() function shall fail if:
+
+    [ESRCH]
+        No thread could be found corresponding to that specified by the given
+        thread ID.
+    [EINVAL]
+        The value of the sig argument is an invalid or unsupported signal
+        number.
+
+    The pthread_kill() function shall not return an error code of [EINTR].
+
+*/
+
+//This specification refers to: raise, pthread_kill
+specification
+void pthread_kill_spec( CallContext context, ThreadId thrId, Signal* sig, bool isRaise)
+{
+    pre
+    {
+        ProcessState* pr_st;
+        pr_st = getProcessState_CallContext(context);
+
+        if (isRaise)
+        {
+            if (!THREADS_OPTION_SUPPORTED)
+            {
+                /*[Implicit precondition]*/
+                REQ("", "Call kill() function with isRaise parameter set to KILL_RAISE_CALL instead of pthread_kill()", false);
+            }
+            else
+            {
+
+                thrId = context;
+                FILTER("raise");
+            }
+        }
+        else
+        {
+            FILTER("pthread_kill");
+        }
+
+
+        /*
+         * Can't react when process is zombie
+         */
+        REQ("", "Process should not be zombie to do this call", !isProcessZombie(pr_st));
+
+        return true;
+    }
+    post
+    {
+
+        /*
+         * If the pthread_kill() function fails, no signal shall be sent
+         */
+        REQ("pthread_kill.04.02", "", TODO_REQ());
+
+        /*
+        * If a signal handler is called, the raise() function shall not return until
+        * after the signal handler does
+        */
+        REQ("raise.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+void pthread_kill_model(CallContext context, ThreadId thrId, Signal* sig)
+{
+    ThreadState* thr_st_call = getThreadState_CallContext(context);
+    ThreadState* thr_st_get = getThreadState_CallContext(thrId);
+
+    SignalParams* params;
+    IntT temp_id;
+    List* temp_list;
+
+     /*
+     * As in kill(), if sig is zero, error checking shall be performed but no signal
+     * shall actually be sent.
+     */
+    IMPLEMENT_REQ("pthread_kill.02");
+
+    if (!equals(create_SignalObj(*sig), create_SignalObj(0)))
+    {
+        temp_id = add_Signal_to_Thread(thr_st_get, sig, context, true, 0, NULL_VoidTPtr);
+        startBlockedCall(context, create_BlockedPthread_killParams(thrId, sig, temp_id));
+
+    }
+}
+
+void onPthread_kill(CallContext context, ThreadId thrId, Signal* sig)
+{
+    pthread_kill_model(context, thrId, sig);
+}
+
+reaction
+Pthread_killReactionType* pthread_kill_react(void)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        ProcessState* pr_st;
+        pr_st = getProcessState_CallContext(pthread_kill_react->context);
+
+        VERBOSE("Pthread_kill reaction start\n");
+
+        if (pthread_kill_react->return_value != 0)
+        {
+             /*
+             * The pthread_kill() function shall not return an error code of [EINTR]
+             */
+            REQ("pthread_kill.06", "The pthread_kill() function shall not return an error code of [EINTR]",
+                *(pthread_kill_react->errno) != SUT_EINTR);
+        }
+
+        /*
+         * Otherwise, the function shall return an error number
+         */
+         /*
+         * Otherwise, a non-zero value shall be returned [CX] and errno shall be set to
+         * indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_KILL, "pthread_kill.04.01;raise.06", pthread_kill_react->return_value != 0,
+            *(pthread_kill_react->errno))
+
+        /*
+         * The pthread_kill() function shall fail if
+         *
+         * [ESRCH] No thread could be found corresponding to that specified by the given
+         * thread ID.
+         */
+        ERROR_SHALL(POSIX_PTHREAD_KILL, ESRCH, "pthread_kill.05.01", TODO_ERR(ESRCH))
+
+        /*
+         * The pthread_kill() function shall fail if
+         *
+         * [EINVAL] The value of the sig argument is an invalid or unsupported signal
+         * number.
+         */
+        ERROR_SHALL(POSIX_PTHREAD_KILL, EINVAL, "pthread_kill.05.02", TODO_ERR(EINVAL))
+
+        ERROR_END()
+
+        /*
+         * Upon successful completion, the function shall return a value of zero.
+         */
+         /*
+         * Upon successful completion, 0 shall be returned
+         */
+        REQ("pthread_kill.03;raise.05", "Function shall return zero", pthread_kill_react->return_value == 0);
+
+        /*
+         * Can't react when process is zombie
+         */
+        REQ("", "Process should not be zombie to do this call", !isProcessZombie(pr_st));
+
+
+
+
+        FILTER_CLEAN;
+        return true;
+    }
+}
+
+void onPthread_killReact(CallContext context, IntT res, ErrorCode* errno)
+{
+    ProcessState* ps_st_get;
+    BlockedPthread_killParams* params;
+    int temp_int;
+    List* temp_list;
+    bool is_ok;
+    SignalParams* temp_params;
+
+    params = (BlockedPthread_killParams*)finishBlockedCall(context);
+    if (params!=NULL)
+    {
+        ps_st_get =  getProcessState_ThreadId(params->get_thrid);
+    }
+
+    /*
+     * if error while kill call occured, reaction shall delete signal from
+     * signal queue or delete signal catched signals blocks, because this
+     * call of kill can't be reason for call catcher, if it was last signal
+     * in block, then kill.12 requirement failed
+     */
+    if (res != 0)
+    {
+        temp_int = remove_Signal_from_Model(ps_st_get, params->sig, params->unique_id);
+        if (temp_int == 0) //signal wasn't in the signal queue
+        {
+            temp_list = get_Map(ps_st_get->processed_signals, create_SignalObj(*(params->sig)));
+            is_ok = signal_generated_bad(params->unique_id, temp_list);
+        }
+    }
+    /*
+     * if kill success, then we had to mark not catched signal as successed
+     * kill return or delete all catched signals from corresponding block
+     * because there was at least one successed call of kill for called catcher
+     */
+    else
+    {
+        if (params!=NULL)
+        {
+            temp_list = get_Map(ps_st_get->signal_queue, create_SignalObj(*(params->sig)));
+            if (temp_list == NULL)
+            {
+                //signal wasn't in the signal queue
+                temp_list = get_Map(ps_st_get->processed_signals, create_SignalObj(*(params->sig)));
+                signal_generated_good(params->unique_id, temp_list);
+            }
+            else
+            {
+                temp_int = find_unique_id_in_SignalParamsList(params->unique_id, temp_list);
+                if (temp_int == -1)
+                {
+                    //signal wasn't in the signal queue
+                    temp_list = get_Map(ps_st_get->processed_signals, create_SignalObj(*(params->sig)));
+                    signal_generated_good(params->unique_id, temp_list);
+                }
+                else
+                {
+                    //signal is in the signal queue
+                    temp_params = get_List(temp_list, temp_int);
+                    temp_params->returned_kill = true;
+                }
+            }
+        }
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    raise - send a signal to the executing process
+
+SYNOPSIS
+
+    #include <signal.h>
+    int raise(int sig);
+
+DESCRIPTION
+
+    [CX]  The functionality described on this reference page is aligned with
+    the ISO C standard. Any conflict between the requirements described here
+    and the ISO C standard is unintentional. This volume of IEEE Std 1003.1-
+    2001 defers to the ISO C standard.
+    The raise() function shall send the signal sig to the executing [CX]
+    thread or process.  If a signal handler is called, the raise() function
+    shall not return until after the signal handler does.
+
+    [THR]  If the implementation supports the Threads option, the effect of
+    the raise() function shall be equivalent to calling:
+
+    pthread_kill(pthread_self(), sig);
+
+    [CX]  Otherwise, the effect of the raise() function shall be equivalent to
+    calling:
+    kill(getpid(), sig);
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned. Otherwise, a non-zero
+    value shall be returned [CX]   and errno shall be set to indicate the error.
+
+ERRORS
+
+    The raise() function shall fail if:
+
+    [EINVAL]
+    [CX]  The value of the sig argument is an invalid signal number.
+*/
+/****
+specification
+ReturnType raise_spec( CallContext context, ... )
+{
+  pre
+  {
+    return true;
+  }
+  coverage C
+  {
+    return { TheOnlyBranch, "The only branch" };
+  }
+  post
+  {
+    return true;
+  }
+}
+****/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    sigqueue - queue a signal to a process (REALTIME)
+
+SYNOPSIS
+
+    [RTS]  #include <signal.h>
+    int sigqueue(pid_t pid, int signo, const union sigval value);
+
+DESCRIPTION
+
+    The sigqueue() function shall cause the signal specified by signo to be
+    sent with the value specified by value to the process specified by pid. If
+    signo is zero (the null signal), error checking is performed but no signal
+    is actually sent. The null signal can be used to check the validity of pid.
+
+    The conditions required for a process to have permission to queue a signal
+    to another process are the same as for the kill() function.
+
+    The sigqueue() function shall return immediately. If SA_SIGINFO is set for
+    signo and if the resources were available to queue the signal, the signal
+    shall be queued and sent to the receiving process. If SA_SIGINFO is not
+    set for signo, then signo shall be sent at least once to the receiving
+    process; it is unspecified whether value shall be sent to the receiving
+    process as a result of this call.
+
+    If the value of pid causes signo to be generated for the sending process,
+    and if signo is not blocked for the calling thread and if no other thread
+    has signo unblocked or is waiting in a sigwait() function for signo,
+    either signo or at least the pending, unblocked signal shall be delivered
+    to the calling thread before the sigqueue() function returns. Should any
+    multiple pending signals in the range SIGRTMIN to SIGRTMAX be selected for
+    delivery, it shall be the lowest numbered one. The selection order between
+    realtime and non-realtime signals, or between multiple pending non-
+    realtime signals, is unspecified.
+
+RETURN VALUE
+
+    Upon successful completion,the specified signal shall have been queued,
+    and the sigqueue() function shall return a value of zero. Otherwise, the
+    function shall return a value of -1 and set errno to indicate the error.
+
+ERRORS
+
+    The sigqueue() function shall fail if:
+
+        [EAGAIN]
+        No resources are available to queue the signal. The process has already
+        queued {SIGQUEUE_MAX} signals that are still pending at the receiver(s),
+        or a system-wide resource limit has been exceeded.
+        [EINVAL]
+        The value of the signo argument is an invalid or unsupported signal number.
+        [EPERM]
+        The process does not have the appropriate privilege to send the signal to
+        the receiving process.
+        [ESRCH]
+        The process pid does not exist.
+
+*/
+
+specification
+void sigqueue_spec( CallContext context, PidT pid, Signal* sig, bool is_param_int, IntT value_int, VoidTPtr value_ptr)
+{
+    pre
+    {
+        ProcessState* pr_st_call = getProcessState_CallContext(context);
+
+        /*[Implicit precondition]*/
+        REQ("", "Process shall not be a zombie for this call", !isProcessZombie(pr_st_call));
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void sigqueue_model(CallContext context, PidT pid, Signal* sig, bool is_param_int, IntT value_int, VoidTPtr value_ptr)
+{
+    if (!equals(create_SignalObj(*sig), create_SignalObj(0)))
+    {
+        processSendingSignalToProcess(context, sig, create_ProcessId(context.system, pid), is_param_int, value_int, value_ptr);
+    }
+    else
+    {
+        /*
+        * If signo is zero (the null signal), error checking is performed but no signal
+        * is actually sent
+        */
+        IMPLEMENT_REQ("sigqueue.02");
+
+        startBlockedCall(context, create_BlockedKillParams(create_ProcessId(context.system, pid), sig, NULL, NULL));
+    }
+}
+
+
+void onSigqueue(CallContext context, PidT pid, Signal* sig, bool is_param_int, IntT value_int, VoidTPtr value_ptr)
+{
+    sigqueue_model(context, pid, sig, is_param_int, value_int, value_ptr);
+}
+
+
+reaction KillReactionType* sigqueue_react(void)
+{
+    post
+    {
+
+        /*
+        * Otherwise, the function shall return a value of -1 and set errno to indicate
+        * the error
+        */
+        ERROR_BEGIN(POSIX_SIGQUEUE, "sigqueue.11", sigqueue_react->return_value, *(sigqueue_react->errno))
+
+        /*
+        * The sigqueue() function shall fail if:
+        *
+        * [EAGAIN] No resources are available to queue the signal. The process has
+        * already queued {SIGQUEUE_MAX} signals that are still pending at the
+        * receiver(s), or a system-wide resource limit has been exceeded.
+        */
+        ERROR_SHALL(POSIX_SIGQUEUE, EAGAIN, "sigqueue.12.01", TODO_ERR(EAGAIN) )
+
+        /*
+        * The sigqueue() function shall fail if:
+        *
+        * [EINVAL] The value of the signo argument is an invalid or unsupported signal
+        * number.
+        */
+        ERROR_SHALL(POSIX_SIGQUEUE, EINVAL, "sigqueue.12.02", TODO_ERR(EINVAL) )
+
+        /*
+        * The sigqueue() function shall fail if:
+        *
+        * [EPERM] The process does not have the appropriate privilege to send the signal
+        * to the receiving process.
+        */
+        ERROR_SHALL(POSIX_SIGQUEUE, EPERM, "sigqueue.12.03", TODO_ERR(EPERM) )
+
+        /*
+        * The sigqueue() function shall fail if:
+        *
+        * [ESRCH] The process pid does not exist.
+        */
+        ERROR_SHALL(POSIX_SIGQUEUE, ESRCH, "sigqueue.12.04", getProcessState(sigqueue_react->params->get_pid)==NULL)
+
+        ERROR_END()
+
+        /*
+        * Upon successful completion
+        *
+        * and the sigqueue() function shall return a value of zero
+        */
+        REQ("sigqueue.10.02", "Function shall return zero", sigqueue_react->return_value==0);
+
+        /*
+        * If the value of pid causes signo to be generated for the sending process, and
+        * if signo is not blocked for the calling thread and if no other thread has signo
+        * unblocked or is waiting in a sigwait() function for signo, either signo or at
+        * least the pending, unblocked signal shall be delivered to the calling thread
+        * before the sigqueue() function returns
+        */
+        REQ("sigqueue.08", "", TODO_REQ());
+
+        /*
+        * Should any multiple pending signals in the range SIGRTMIN to SIGRTMAX be
+        * selected for delivery, it shall be the lowest numbered one
+        */
+        REQ("sigqueue.09", "", TODO_REQ());
+
+
+   
+
+        return true;
+    }
+}
+
+void onSigqueueReact(KillReactionType* reaction_params)
+{
+    onKillReact(reaction_params);
+}
+
+/********************************************************************/
+/**                 Sigsend Types                                  **/
+/********************************************************************/
+
+specification typedef struct KillReactionType   KillReactionType  = {};
+specification typedef struct BlockedKillParams  BlockedKillParams = {};
+
+specification typedef struct Pthread_killReactionType   Pthread_killReactionType  = {};
+specification typedef struct BlockedPthread_killParams  BlockedPthread_killParams = {};
+
+/********************************************************************/
+/**                 Helper Functions                               **/
+/********************************************************************/
+
+/********************************************************************/
+/**        Signals done function(checks that all reaction had got) **/
+/********************************************************************/
+specification
+void signals_done_spec(CallContext context, ProcessState* pr1, ProcessState* pr2, bool* ex1, bool* ex2)
+{
+    ProcessState* prSt;
+    ThreadState* thSt;
+    Set* can_be_delivered;
+    List* temp_list;
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        *ex1 = !isProcessZombie (pr1);
+        *ex2 = !isProcessZombie (pr2);
+        return true;
+    }
+}
+
+void onSignals_done_spec(ProcessState* pr1, ProcessState* pr2, bool* ex1, bool* ex2)
+{
+    return;
+}
+
+/********************************************************************/
+/**           Helper Function, termination of the process          **/
+/********************************************************************/
+/*
+ * Updetes model, if process with CallContext context was terminated
+ */
+void onProcessTermination(CallContext context)
+{
+    SystemState *systemState = getSystemState(context.system);
+    ProcessId processId = create_ProcessId(context.system, context.process);
+    ProcessId specialSystemParent = getSpecialSystemParent(context.system);
+    int i;
+    remove_Map(systemState->processes, create_ProcessIdObj(processId));
+    for (i = 0; i < size_Map(systemState->processes); i++) {
+        ProcessIdObj * key = key_Map(systemState->processes, i);
+        ProcessState * processState = get_Map(systemState->processes, key);
+        if (processState->meta.parent.process == context.process)
+        {
+            processState->meta.parent = specialSystemParent;
+        }
+    }
+}
+
+/********************************************************************/
+/**           Helper Functions For Signal Model In Process         **/
+/********************************************************************/
+int find_unique_id_in_SignalParamsList(IntT unique_id, List* list)
+{
+    SignalParams* param;
+    int size, counter;
+
+    if (list == NULL)
+    {
+        return -1;
+    }
+    size = size_List(list);
+    for (counter = 0; counter < size; counter++)
+    {
+        param = get_List(list, counter);
+        if (param->unique_id == unique_id)
+        {
+            return counter;
+        }
+    }
+    return -1;
+}
+int find_containedList_in_lists(IntT unique_id, List* lists)
+{
+    List* temp_list;
+    int size, counter;
+
+    if (lists == NULL)
+    {
+        return -1;
+    }
+    size = size_List(lists);
+    for(counter = 0; counter < size; counter++)
+    {
+        temp_list = get_List(lists, counter);
+        if (contains_List(temp_list, create_IntTObj(unique_id)))
+        {
+            return counter;
+        }
+    }
+    return -1;
+}
+
+
+void signal_generated_good(IntT unique_id, List* lists)
+{
+    int temp_int;
+    temp_int = find_containedList_in_lists(unique_id, lists);
+    if (temp_int == -1)
+    {
+        return;
+    }
+    remove_List(lists, temp_int);
+    return;
+}
+
+/*
+ * return true if signal wasn't in processed signals Lists or
+ * if signal was in processed signals Lists and in list it wasn't last
+ */
+bool signal_generated_bad(IntT unique_id, List* lists)
+{
+    int temp_int;
+    List* temp_list;
+    temp_int = find_containedList_in_lists(unique_id, lists);
+    if (temp_int == -1)
+    {
+        return true;
+    }
+    temp_list = get_List(lists, temp_int);
+    if (size_List(temp_list) <= 1)
+    {
+        remove_List(lists, temp_int);
+        return false;
+    }
+    else
+    {
+        temp_int = indexOf_List(temp_list, create_IntTObj(unique_id));
+        remove_List(temp_list, temp_int);
+    }
+    return true;
+}
+
+IntT add_Signal_to_Process(ProcessState* pr_st_get, Signal* sig, CallContext call_context,
+                         bool is_param_int, IntT value_int, VoidTPtr value_ptr)
+{
+    SignalParams* params;
+    List*      temp_list;
+    int              uid;
+    uid = MakeNewCurrentUID(pr_st_get);
+    params = create_SignalParams(is_param_int, value_int, value_ptr, call_context,
+                                 uid, false);
+
+    temp_list = get_Map(pr_st_get->signal_queue, create_SignalObj(*sig));
+    if (temp_list == NULL)
+    {
+        temp_list = create_List(&type_SignalParams);
+    }
+    append_List(temp_list, params);
+    put_Map(pr_st_get->signal_queue, create_SignalObj(*sig), temp_list);
+
+    return uid;
+}
+
+IntT add_Signal_to_Thread(ThreadState* thr_st_get, Signal* sig, CallContext call_context,
+                          bool is_param_int, IntT value_int, VoidTPtr value_ptr)
+{
+    SignalParams* params;
+    List*      temp_list;
+    int              uid;
+    ProcessState*   prSt;
+
+    prSt = getProcessState_ThreadId(thr_st_get->id);
+    uid = MakeNewCurrentUID(prSt);
+    params = create_SignalParams(is_param_int, value_int, value_ptr, call_context,
+                                 uid, false);
+
+    temp_list = get_Map(thr_st_get->signal_queue, create_SignalObj(*sig));
+    if (temp_list == NULL)
+    {
+        temp_list = create_List(&type_SignalParams);
+    }
+    append_List(temp_list, params);
+    put_Map(prSt->signal_queue, create_SignalObj(*sig), temp_list);
+
+    return uid;
+}
+int remove_Signal_from_Model(ProcessState* pr_st_get, Signal* sig, IntT unique_id)
+{ //return 1 if there was signal with such number and 0 in other case
+    int res, temp_int, size;
+    SignalParams* params;
+    List* temp_list = get_Map(pr_st_get->signal_queue, create_SignalObj(*sig));
+
+    if (temp_list == NULL)
+    {
+        return 0;
+    }
+
+    size = size_List(temp_list);
+    res = 0;
+    for (temp_int = 0; temp_int < size; temp_int++)
+    {
+        params = get_List(temp_list, temp_int);
+        if (params->unique_id == unique_id)
+        {
+            remove_List(temp_list, temp_int);
+            res = 1;
+            break;
+        }
+    }
+    put_Map(pr_st_get->signal_queue, create_SignalObj(*sig), temp_list);
+    return res;
+}
+
+KillReactionType* create_KillReactionType(CallContext context, IntT res, ErrorCode* err, BlockedKillParams* params)
+{
+    return create(&type_KillReactionType, context, res, err, params);
+}
+
+BlockedKillParams* create_BlockedKillParams(ProcessId get_pid, Signal* sig, List* processes, List* unique_id)
+{
+    return create(&type_BlockedKillParams, get_pid, sig, processes, unique_id);
+}
+
+Pthread_killReactionType* create_Pthread_killReactionType(CallContext context, IntT res, ErrorCode* err)
+{
+    return create(&type_Pthread_killReactionType, context, res, err);
+}
+
+BlockedPthread_killParams* create_BlockedPthread_killParams(ThreadId get_thrid, Signal* sig, IntT unique_id)
+{
+    return create(&type_BlockedPthread_killParams, get_thrid, sig, unique_id);
+}
+
+bool eqProcessId(ProcessId pid1, ProcessId pid2)
+{
+    return (pid1.system == pid2.system) &&
+           (pid1.process == pid2.process);
+}
+
+bool eqThreadId(ThreadId thr_id1, ThreadId thr_id2)
+{
+    return (thr_id1.system == thr_id2.system) &&
+           (thr_id1.process == thr_id2.process) &&
+           (thr_id1.thread == thr_id2.thread);
+}
+
+bool checkOnlyThisThreadCanHandle(CallContext context, Signal* sig)
+{
+    ProcessState* process_state = getProcessState_CallContext(context);
+    ThreadState* thr_st;
+    StartedThread* thr_ind;
+    ThreadId thr_id;
+    int i;
+
+    thr_st = getThreadState_CallContext(context);
+    thr_id = thr_st->id;
+
+    for (i = size_Set(process_state->startedThreads) - 1; i >=0; i--)
+    {
+        thr_ind = get_Set(process_state->startedThreads, i);
+        thr_st = getThread(thr_ind->thid);
+        if (!eqThreadId(thr_ind->thid, thr_id))
+        {
+            Set* sig_mask = get_List(thr_st->signal_masks_stack, 0);
+            if ((!contains_Set(sig_mask, create_SignalObj(*sig))))
+                //TODO add when waiting the signal and add whith or
+            {
+                return false;
+            }
+        }
+        else
+        {
+            ;
+        }
+    }
+    return true;
+}
+
+bool isCanBeDelivered(ProcessState* prSt, Signal* sig)
+{
+    ThreadState* thSt;
+    int number_of_threads;
+    int i;
+    Set* sig_mask;
+
+    number_of_threads = size_Map(prSt->threads);
+    for (i = 0; i < number_of_threads; i++)
+    {
+        thSt = get_Map(prSt->threads, key_Map(prSt->threads, i));
+        sig_mask = get_List(thSt->signal_masks_stack, 0);
+        if (!contains_Set(sig_mask, create_SignalObj(*sig)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+bool isHasHandlerFunction(SigAction* sa)
+{
+    if (sa == NULL)
+    {
+        return false;
+    }
+
+    if (sa->m_sa_flag.SA_SIGINFO_Flag == false)
+    {
+        if ((sa->m_sa_handler == SIG_UNDEFINED) ||
+            (sa->m_sa_handler == SUT_SIG_DFL) ||
+            (sa->m_sa_handler == SUT_SIG_IGN))
+        {
+            return false;
+        }
+    }
+    else
+    {
+        if ((sa->m_sa_sigaction == SUT_SIGACT_DFL) ||
+            (sa->m_sa_sigaction == SUT_SIGACT_IGN) ||
+            (sa->m_sa_sigaction == SIGACT_UNDEFINED))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+

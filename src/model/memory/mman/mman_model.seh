@@ -1,0 +1,350 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#ifndef MEMORY_MMAN_MODEL_SEH
+#define MEMORY_MMAN_MODEL_SEH
+#include "common/common_model.seh"
+#include "data/sys/types_model.seh"
+#include "data/errno_model.seh"
+#include "data/basis.seh"
+#include "fs/fs/fs_model.seh"
+#include "config/interpretation.seh"
+#include "memory/mman/mman_config.h"
+#include "pthread/pthread/pthread_model.seh"
+#include "process/process/process_model.seh"
+
+/************************************************************************/
+/*                    Config defines                                    */
+/************************************************************************/
+/*
+ * Is read access to memory always allowed when PROT_NONE is not set
+ */
+#define READ_ACCESS_ALWAYS_ALLOWED true 
+/*
+ * Is execute access to memory always allowed when PROT_NONE is not set
+ */
+#define EXECUTE_ACCESS_ALWAYS_ALLOWED true
+/********************************************************************/
+/**      Flag values for transaction between mediator and agent    **/
+/********************************************************************/
+
+#define SUT_MCL_CURRENT    1
+#define SUT_MCL_FUTURE     2
+
+#define SUT_PROT_READ      1
+#define SUT_PROT_WRITE     2
+#define SUT_PROT_EXEC      4
+#define SUT_PROT_NONE      8
+
+#define SUT_MAP_SHARED     1
+#define SUT_MAP_PRIVATE    2
+#define SUT_MAP_FIXED      4
+
+#define SUT_MS_ASYNC       1
+#define SUT_MS_SYNC        2
+#define SUT_MS_INVALIDATE  4
+
+#define SUT_O_RDONLY       1
+#define SUT_O_RDWR         2
+#define SUT_O_CREAT        4
+#define SUT_O_EXCL         8
+#define SUT_O_TRUNC        16
+
+/********************************************************************/
+/**                            Types                               **/
+/********************************************************************/
+
+typedef struct MLockallFlags
+{
+    bool MCL_CURRENT_Flag;
+    bool MCL_FUTURE_Flag;
+} MLockallFlags;
+
+typedef struct MmanProtFlags
+{
+    bool PROT_READ_Flag;
+    bool PROT_WRITE_Flag;
+    bool PROT_EXEC_Flag;
+    bool PROT_NONE_Flag;
+} MmanProtFlags;
+
+typedef struct MmapFlags
+{
+    bool MAP_SHARED_Flag;
+    bool MAP_PRIVATE_Flag;
+    bool MAP_FIXED_Flag;
+} MmapFlags;
+
+typedef struct MsyncFlags
+{
+    bool MS_ASYNC_Flag;
+    bool MS_SYNC_Flag;
+    bool MS_INVALIDATE_Flag;
+} MsyncFlags;
+
+typedef struct Shm_openOflags
+{
+    bool O_RDONLY_Flag;
+    bool O_RDWR_Flag;
+    bool O_CREAT_Flag;
+    bool O_EXCL_Flag;
+    bool O_TRUNC_Flag;
+} Shm_openOflags;
+
+
+specification typedef
+struct MappedMemoryBlock
+{
+    OffT           start_off;
+    SizeT               size;
+    CByteArray*         data;
+} MappedMemoryBlock;
+
+specification typedef 
+struct SharedMemoryFileDescriptor {
+    OffT offset;
+}SharedMemoryFileDescriptor;
+
+SharedMemoryFileDescriptor * create_SharedMemoryFileDescriptor(
+    OffT offset
+);
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** mlock_spec **/
+specification
+IntT mlock_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno);
+
+/** mlockall_spec **/
+specification
+IntT mlockall_spec(CallContext context, MLockallFlags flags, ErrorCode* errno);
+
+/** mmap_spec **/
+specification
+VoidTPtr mmap_spec(CallContext context, VoidTPtr addr, SizeT len, MmanProtFlags prot, 
+                   MmapFlags flags, FileDescId fildes, OffT off, bool is64bits, ErrorCode* errno);
+
+void onMmap(CallContext context, SizeT len, MmanProtFlags prot, 
+            MmapFlags flags, FileDescId fildes, OffT off, VoidTPtr mmap_res);
+
+/** mmap64_spec **/
+//specification
+//ReturnType mmap64_spec( CallContext context, ... );
+
+//int mprotect(void *addr, size_t len, int prot); 
+
+/** mprotect_spec **/
+specification
+IntT mprotect_spec(CallContext context, VoidTPtr addr, SizeT len, 
+                   MmanProtFlags prot, ErrorCode* errno);
+
+void onMProtect(CallContext context, VoidTPtr addr, SizeT len, MmanProtFlags newProt);
+
+//int msync(void *addr, size_t len, int flags);
+/** msync_spec **/
+specification
+void msync_spec( CallContext context, VoidTPtr addr, SizeT len, MsyncFlags flags, ErrorCode* errno);
+
+specification typedef struct MsyncParamsType
+{
+    CallContext context;
+    VoidTPtr addr;
+    SizeT len;
+    MsyncFlags flags;
+} MsyncParamsType;
+
+MsyncParamsType * create_MsyncParamsType(
+    CallContext context,
+    VoidTPtr addr,
+    SizeT len,
+    MsyncFlags flags
+);
+
+specification typedef struct MsyncReactionType
+{
+    ThreadState*  thr_st;
+    IntT return_value;
+    IntT errno;
+    MsyncParamsType* params;
+} MsyncReactionType;
+
+MsyncReactionType * create_MsyncReactionType(
+    ThreadState*  thr_st,
+    IntT return_value,
+    IntT errno,
+    MsyncParamsType* params
+);
+
+reaction MsyncReactionType* msync_react(void);
+
+/** munlock_spec **/
+specification
+IntT munlock_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno);
+
+/** munlockall_spec **/
+specification
+IntT munlockall_spec( CallContext context);
+
+//int munmap(void *addr, size_t len); 
+/** munmap_spec **/
+specification
+IntT munmap_spec( CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno);
+void onMunmap(CallContext context, VoidTPtr addr, SizeT len, IntT munmap_spec);
+
+/** shm_open_spec **/
+specification
+FileDescId shm_open_spec( CallContext context, CString* name, Shm_openOflags oflag, FilePermissions* mode, ErrorCode* errno);
+
+void onShm_open(CallContext context, CString* name, Shm_openOflags oflag, 
+                FilePermissions* mode, FileDescId shm_open_spec);
+/** shm_unlink_spec **/
+specification
+IntT shm_unlink_spec( CallContext context, CString* name, ErrorCode* errno);
+
+/** write_mapped_mem_block_spec **/
+specification 
+void write_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, MappedMemoryBlock* mb, ErrorCode* errno);
+void onWrite_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, MappedMemoryBlock* mb);
+
+/** read_mapped_mem_block_spec **/
+specification
+MappedMemoryBlock* read_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno);
+void onRead_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len);
+
+/********************************************************************/
+/**                          MMap Model                            **/
+/********************************************************************/
+/*
+ * case of mapping last page of address space is thinking prohibitive in this 
+ * model
+ */
+specification typedef struct MMapState
+{
+    VoidTPtr startAddr;        // start address of Map, including startAddr
+    VoidTPtr endAddr;          // end address of Map excluding endAddr
+    MmanProtFlags curentProt;  // curent protection flags for this Map
+    MmapFlags flags;
+    OffT off;                  // file offset for this map
+    VoidTPtr begAddr;          // address of Map, from witch map was done
+    SizeT len;                 // length of mapped part
+//get file using: File* getFile_FileId( FileId fileid );
+    FileId file; 
+    AccessMode mode;
+} MMapState;
+
+MMapState* create_MMapState(VoidTPtr startAddr, VoidTPtr endAddr, 
+              MmanProtFlags curentProt, MmapFlags flags, OffT off, 
+              VoidTPtr begAddr, SizeT len, FileId file, AccessMode mode);
+
+void addMMapToMMapsList(List* MMaps, MMapState* elem);
+void addMProtectInterval(List* MMaps, VoidTPtr addr, SizeT len, MmanProtFlags newProt);
+
+void removeMMapFromMMapsList(List* MMaps, int ind);
+void deleteMMapFromMMapsList(List* MMaps, MMapState* elem);
+
+int conteinedMMapInMMapsList(List* MMaps, MMapState* elem);
+List* mMapsInIntervalOfMap(List* MMaps, MMapState* elem);
+List* mMapsInInterval(List* MMaps, VoidTPtr startAddr, VoidTPtr endAddr);
+MmanProtFlags getProtByAddress(List* MMaps, VoidTPtr addr);
+
+int getIndexMMapByStart(List* MMaps, VoidTPtr startAddr); //on fail return -1
+bool isIntersect(List* MMaps, VoidTPtr startAddr, SizeT len);
+bool isContained(List* MMaps, VoidTPtr startAddr, SizeT len);
+
+bool isSolidMaps(CallContext context, VoidTPtr addr, SizeT len);
+/********************************************************************/
+/**                  Memory model for Shm files                    **/
+/********************************************************************/
+MappedMemoryBlock* create_MappedMemoryBlock(OffT start_off, SizeT size, CByteArray* data);
+
+/*specification typedef struct SharedMemoryEntity
+{
+    Map*    memory;  //address -m-> value (value of byte type Integer)
+} SharedMemoryEntity;
+
+SharedMemoryEntity* create_SharedMemoryEntity();
+void add_MappedMemoryBlockToSharedMemoryEntity(MappedMemoryBlock* mb, SharedMemoryEntity* obj);
+*/
+specification typedef struct SharedMemorySystem
+{
+    Map*    shm_files; //FileIdObj -m-> Map TODO: FileIdObj -m-> Files
+    Map*    shm_names; //CString* -m-> FileIdObj
+    IntT     last_fid;
+} SharedMemorySystem;
+
+SharedMemorySystem* create_SharedMemorySystem();
+
+/********************************************************************/
+/**              Pointers and PageSize Halper Functions            **/
+/********************************************************************/
+
+VoidTPtr getRoundDownByPagesize(VoidTPtr addr, LongT pagesize);
+VoidTPtr getRoundUpByPagesize(VoidTPtr addr, LongT pagesize);
+bool isRounded(VoidTPtr addr, LongT pagesize);
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool isNotValidMlockRange(CallContext context, VoidTPtr addr, SizeT len);
+
+bool hasPrivilegeToLock(CallContext context, VoidTPtr addr, SizeT len);
+
+bool hasPrivilegeToLockall(CallContext context, MLockallFlags flags);
+
+bool isValidProt(MmanProtFlags prot);
+bool isImplementedProt(MmanProtFlags prot);
+
+bool isAccessAllowable(MmanProtFlags prot, AccessMode mode);
+
+bool isAccessAllowableToAllMaps(CallContext context, VoidTPtr addr,  
+                                SizeT len, MmanProtFlags prot);
+
+bool isValidMsyncFlags(MsyncFlags flags);
+
+MsyncReactionType* create_MsyncReactionType(ThreadState*  thr_st, IntT res, IntT er, MsyncParamsType* params);
+
+/********************************************************************/
+/**                  Flag Conversion Functions                     **/
+/********************************************************************/
+
+/* MLockallFlags */
+IntT convertMLockallFlagsToIntT(MLockallFlags flag);
+MLockallFlags convertIntToMLockallFlags(IntT value);
+
+/* MmanProtFlags */
+IntT convertMmanProtFlagsToIntT(MmanProtFlags flag);
+MmanProtFlags convertIntToMmanProtFlags(IntT value);
+
+/* MmapFlags */
+IntT convertMmapFlagsToIntT(MmapFlags flag);
+MmapFlags convertIntToMmapFlags(IntT value);
+
+/* MsyncFlags */
+IntT convertMsyncFlagsToIntT(MsyncFlags flag);
+MsyncFlags convertIntToMsyncFlags(IntT value);
+
+/* Shm_openOflags */
+IntT convertShm_openOflagsToIntT(Shm_openOflags flag);
+Shm_openOflags convertIntToShm_openOflags(IntT value);
+
+#endif
+

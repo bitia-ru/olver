@@ -1,0 +1,272 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <atl/integer.h>
+#include <string.h>
+#include "process/environ/tests/environ_scenario.seh"
+#include "process/environ/environ_model.seh"
+#include "process/environ/environ_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "process/process/process_common.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+
+static char * keys_values_to_iterate[][ 2 ] =
+                 { /**/{ NULL, NULL }, { "", "" }, { "ke=y", "val=ue" }, { "key1", "value1" }, { "key2", "value2" } };
+
+/*
+ * legal keys   from strins_to_iterate <<= legal keys   from keys_values_to_iterate
+ * legal values from strins_to_iterate <<= legal values from keys_values_to_iterate
+ */
+static char * strins_to_iterate[] =
+                 { /*NULL, "", "key - value", "=", */"key1=value1", "key1=value2", "key2=value1", "key2=value2" };
+
+static int len_keys_values_to_iterate = sizeof( keys_values_to_iterate ) / ( 2 * sizeof( char * ) );
+
+static int len_strins_to_iterate = sizeof( strins_to_iterate ) / sizeof( char * );
+
+static char * GetKey  ( int index ) { return keys_values_to_iterate[ index ][ 0 ]; }
+static char * GetValue( int index ) { return keys_values_to_iterate[ index ][ 1 ]; }
+
+/*
+ * key_or_value - null-terminated string
+ * second_index - 0 or 1
+ *
+ * -1 - not found
+ */
+static int GetKeyOrValueIndex( const char * key_or_value, int second_index ) {
+   int index;
+   for ( index = 0; index < len_keys_values_to_iterate; index++ ) {
+      if ( keys_values_to_iterate[ index ][ second_index ] == NULL ) { continue; }
+      if ( strcmp( keys_values_to_iterate[ index ][ second_index ], key_or_value ) == 0 ) { return index; }
+   }
+   return -1;
+}
+
+static int GetKeyIndex  ( const char * key   ) { return GetKeyOrValueIndex( key  , 0 ); }
+static int GetValueIndex( const char * value ) { return GetKeyOrValueIndex( value, 1 ); }
+
+static char * GetString( int index ) { return strins_to_iterate[ index ]; }
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_environ_scenario( int argc, char** argv )
+{
+    verbose( "environ_scenario\n" );
+    dotPrint( 0, 0 );
+    // Init test scenario data
+    context = getContext();
+    initProcessEnvironment( context );
+    return true;
+}
+
+static void finish_environ_scenario(void)
+{
+    verbose( "\n" );
+    TEST_SCENARIO_VERDICT_VERBOSE( environ_scenario );
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+//Integer * get_EnvironGenState( void ) { return create_Integer( size_Map( getProcessEnvironment( context ) ) ); }
+
+//Map * get_EnvironGenState( void ) { return getProcessEnvironment( context ); }
+
+Integer * get_EnvironGenState( void ) {
+   int result = 0;
+   int name_index, value_index;
+   Map * process_environment = getProcessEnvironment( context );
+   CString * key;
+   for ( name_index = 0; name_index < len_keys_values_to_iterate; name_index++ ) {
+      if ( GetKey( name_index ) == NULL ) { continue; }
+      key = create_CString( GetKey( name_index ) );
+      if ( containsKey_Map( process_environment, key ) ) {
+         //value_index = GetValueIndex( toCharArray_String( toString( get_Map( process_environment, key ) ) ) );
+         String * value_as_String = toString( get_Map( process_environment, key ) );
+         value_index = GetValueIndex( toCharArray_String( value_as_String ) );
+         if ( value_index == -1 ) {
+            String * message = create_String( "get_EnvironGenState: value in pair [" );
+            message = concat_String( message, toString( key ) );
+            message = concat_String( message, create_String( "|" ) );
+            //message = concat_String( message, toString( get_Map( process_environment, key ) ) );
+            message = concat_String( message, value_as_String );
+            message = concat_String( message, create_String( "] not found" ) );
+            assertion( false, toCharArray_String( message ) );
+         }
+         result = 100 * result + 10 * ( name_index + 1 ) + ( value_index + 1 );
+      }
+   }
+   return create_Integer( result );
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool getenv_scen()
+{
+    char * key;
+    // GetKey( 0 ) == NULL
+    iterate ( int name_index = 1; name_index < len_keys_values_to_iterate; name_index++; )
+    {
+        key = GetKey( name_index );
+        dotPrint( 10, 50 );
+        getenv_spec( context, ( key == NULL ? NULL : create_CString( key ) ) );
+    }
+    return true;
+}
+
+scenario
+bool putenv_scen()
+{
+    char * string;
+    iterate ( int string_index = 0; string_index < len_strins_to_iterate; string_index++; )
+    {
+        string = GetString( string_index );
+        dotPrint( 10, 50 );
+        putenv_spec( context, ( string == NULL ? NULL : create_CString( string ) ), requestErrorCode() );
+    }
+    return true;
+}
+
+scenario
+bool setenv_scen()
+{
+    char    * key    , * value ;
+    CString * envname, * envval;
+    iterate ( int envname_index = 0; envname_index < len_keys_values_to_iterate; envname_index++; )
+    {
+        // GetValue( 0 ) == NULL
+        iterate ( int envval_index = 1; envval_index < len_keys_values_to_iterate; envval_index++; )
+        {
+            iterate ( int overwrite = -2; overwrite <= 2; overwrite++; )
+            {
+                key   = GetKey  ( envname_index );   envname = ( key   == NULL ? NULL : create_CString( key   ) );
+                value = GetValue( envval_index  );   envval  = ( value == NULL ? NULL : create_CString( value ) );
+                dotPrint( 10, 50 );
+                setenv_spec( context, envname, envval, overwrite, requestErrorCode() );
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool unsetenv_scen()
+{
+    char * key;
+    iterate ( int name_index = 0; name_index < len_keys_values_to_iterate; name_index++; )
+    {
+        key = GetKey( name_index );
+        dotPrint( 10, 50 );
+        unsetenv_spec( context, ( key == NULL ? NULL : create_CString( key ) ), requestErrorCode() );
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm environ_scenario =
+{
+    .init = init_environ_scenario,
+    .finish = finish_environ_scenario,
+    .getState = (PtrGetState)get_EnvironGenState,
+    .actions = { getenv_scen  ,
+                 putenv_scen  ,
+                 setenv_scen  ,
+                 unsetenv_scen,
+                 NULL
+    }
+};
+
+bool main_process_environ_local( int argc, char** argv )
+{
+    addTraceToFile( "trace.xml_CTesK" );
+    environ_scenario( argc, argv );
+    return true;
+}
+
+#ifdef PROCESS_ENVIRON_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/environ/environ_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initProcessEnvironSubsystem();
+}
+
+int main( int argc, char** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    main_process_environ_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

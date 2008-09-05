@@ -1,0 +1,1467 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_model.seh"
+#include "fs/fs/fs_media.seh"
+#include "system/system/system_model.seh"
+#include "common/common_media.seh"
+
+/********************************************************************/
+/**                        Format Functions                        **/
+/********************************************************************/
+
+/* AccessMode */
+void writeAccessMode_TSStream( TSStream* stream, AccessMode value )
+{
+  switch (value)
+   {
+    case ReadOnly :
+      writeStringLiteral_TSStream( stream, "O_RDONLY" );
+      break;
+    case WriteOnly :
+      writeStringLiteral_TSStream( stream, "O_WRONLY" );
+      break;
+    case ReadWrite :
+      writeStringLiteral_TSStream( stream, "O_RDWR" );
+      break;
+    default :
+      assertion( false, "writeAccessMode_TSStream" );
+   }
+}
+
+/* BlockMode */
+void writeBlockMode_TSStream( TSStream* stream, BlockMode value )
+{
+  switch (value)
+   {
+    case Blocking :
+      writeStringLiteral_TSStream( stream, "O_BLOCK" );
+      break;
+    case Nonblocking :
+      writeStringLiteral_TSStream( stream, "O_NONBLOCK" );
+      break;
+    default :
+      assertion( false, "writeBlockMode_TSStream" );
+   }
+}
+
+/* OpenFlags */
+void writeOpenFlags_TSStream( TSStream* stream, OpenFlagsObj* value )
+{
+  writeTypeHeaderTSStream(stream,"openflags");
+  writeAccessMode_TSStream(stream,value->access_mode);
+  writeBlockMode_TSStream(stream,value->block_mode);
+  writeInt_TSStream(stream,value->append);
+  writeInt_TSStream(stream,value->creat);
+  writeInt_TSStream(stream,value->trunc);
+  writeInt_TSStream(stream,value->noctty);
+  writeInt_TSStream(stream,value->large_file);
+
+}
+
+static void open_flags_formatter(TSStream* stream,OpenFlagsObj* value)
+{
+  VERIFY_TYPE( open_flags_formatter, &type_OpenFlagsObj, value );
+
+  writeOpenFlags_TSStream( stream, value );
+}
+
+static void fcntl_F_SETLKW_return_processor(ThreadId threadId, TSStream* stream, 
+                                          TSMetaData* meta)
+{
+    IntT     res;
+    IntT errno;
+    
+    res = readInt_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        fcntl_F_SETLKW_return,
+        create_fcntlSETLKWReturnType( threadId, res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+
+static void lockf_F_LOCK_return_processor(ThreadId threadId, TSStream* stream, 
+                                            TSMetaData* meta)
+{
+    IntT res;
+    IntT errno;
+    
+    res = readInt_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        lockf_F_LOCK_return,
+        create_Lockf_F_LOCKReturnType( threadId, res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+static void flock_return_processor(ThreadId threadId, TSStream* stream, 
+                                          TSMetaData* meta)
+{
+    IntT res;
+    IntT errno;
+    
+    res = readInt_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        flock_return,
+        create_FlockReturnType( threadId, res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initIoFileSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_close_spec(close_media);
+    set_mediator_creat_spec(creat_media);
+    set_mediator_dup_spec(dup_media);
+    set_mediator_dup2_spec(dup2_media);
+//    set_mediator_fcntl_spec(fcntl_media);
+
+    set_mediator_fcntl_F_DUPFD_spec(fcntl_F_DUPFD_media);
+    set_mediator_fcntl_F_GETFD_spec(fcntl_F_GETFD_media);
+    set_mediator_fcntl_F_SETFD_spec(fcntl_F_SETFD_media);
+    set_mediator_fcntl_F_GETFL_spec(fcntl_F_GETFL_media);
+    set_mediator_fcntl_F_SETFL_spec(fcntl_F_SETFL_media);
+    set_mediator_fcntl_F_GETOWN_spec(fcntl_F_GETOWN_media);
+    set_mediator_fcntl_F_SETOWN_spec(fcntl_F_SETOWN_media);
+    set_mediator_fcntl_F_GETLCK_spec(fcntl_F_GETLCK_media);
+    set_mediator_fcntl_F_SETLCK_spec(fcntl_F_SETLCK_media);
+    set_mediator_fcntl_F_SETLKW_spec(fcntl_F_SETLKW_media);
+    set_mediator_fcntl_F_SETLKW_return(fcntl_F_SETLKW_return_media);
+    
+    set_mediator_fdatasync_spec(fdatasync_media);
+    set_mediator_flock_spec(flock_media);
+    set_mediator_flock_return(flock_return_media);
+
+    set_mediator_fsync_spec(fsync_media);
+    set_mediator_ftruncate_spec(ftruncate_media);
+//    set_mediator_ftruncate64_spec(ftruncate64_media);
+
+
+    set_mediator_lockf_F_TLOCK_spec(lockf_F_TLOCK_media);
+    set_mediator_lockf_F_UNLOCK_spec(lockf_F_UNLOCK_media);
+    set_mediator_lockf_F_TEST_spec(lockf_F_TEST_media);
+    set_mediator_lockf_F_LOCK_spec(lockf_F_LOCK_media);
+    set_mediator_lockf_F_LOCK_return(lockf_F_LOCK_return_media);
+
+
+//    set_mediator_lockf64_spec(lockf64_media);
+    set_mediator_lseek_spec(lseek_media);
+    set_mediator_open_spec(open_media);
+    set_mediator_pread_spec(pread_media);
+    set_mediator_pwrite_spec(pwrite_media);
+    set_mediator_read_spec(read_media);
+    set_mediator_readv_spec(readv_media);
+    set_mediator_sync_spec(sync_media);
+    set_mediator_truncate_spec(truncate_media);
+//    set_mediator_truncate64_spec(truncate64_media);
+    set_mediator_write_spec(write_media);
+    set_mediator_writev_spec(writev_media);
+
+  // Set up formatters
+  registerTSFormatter("openflags",(TSFormatterFuncType)open_flags_formatter);
+  registerDRProcessor("fcntl_F_SETLKW_return", fcntl_F_SETLKW_return_processor);
+  registerDRProcessor("lockf_F_LOCK_return", lockf_F_LOCK_return_processor);
+  registerDRProcessor("flock_return", flock_return_processor);
+
+
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** close_spec **/
+mediator close_media for specification
+IntT close_spec( CallContext context,  FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "close:$(int)", 
+            create_IntTObj(fildes.filedesc) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onClose(context, fildes, close_spec);
+    }
+}
+
+
+/** creat_spec **/
+//This mediator refers to: creat64, creat
+mediator creat_media for specification
+FileDescId creat_spec(CallContext context, CString* path, FilePermissions* mode, 
+                ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        FileDescId res = create_FileDescId(context.system, context.process, -1); 
+        TSCommand command = create_TSCommand();
+    
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "creat:$(str)$(perms)",
+                path,
+                mode
+                );
+        }
+        else
+        {
+            format_TSCommand( &command, "creat64:$(str)$(perms)",
+                path,
+                mode
+                );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+
+            res.filedesc=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onCreat(context, path, mode, creat_spec, is64bits);
+    }
+}
+
+
+/** creat64_spec **/
+/****
+mediator creat64_media for specification
+ReturnType creat64_spec( CallContext context, ... )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+
+        format_TSCommand( &command, "creat64" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+   
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+  }
+}
+****/
+
+
+/** dup_spec **/
+mediator dup_media for specification
+FileDescId dup_spec( CallContext context, FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        FileDescId res = create_FileDescId(context.system, context.process, -1); 
+        TSCommand command = create_TSCommand();
+        
+  
+        format_TSCommand( &command, "dup:$(int)", 
+            create_IntTObj(fildes.filedesc) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+
+            res.filedesc=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onDup(context, fildes, dup_spec);
+    }
+}
+
+
+/** dup2_spec **/
+mediator dup2_media for specification
+FileDescId dup2_spec(CallContext context, FileDescId  fildes, FileDescId  fildes2, 
+               ErrorCode* errno)
+{
+    call
+    {
+        FileDescId res = create_FileDescId(context.system, context.process, -1); 
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "dup2:$(int)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(fildes2.filedesc));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res.filedesc=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+  }
+    state
+    {
+        onDup(context, fildes, dup2_spec);
+    }
+}
+
+/** fcntl_spec **/
+mediator fcntl_F_DUPFD_media for specification
+FileDescId fcntl_F_DUPFD_spec(CallContext context, FileDescId  fildes, 
+                              FileDescId arg3, ErrorCode* errno)
+{
+    call
+    {
+        FileDescId res=create_FileDescId(context.system, context.process, -1);
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "fcntl:$(int)$(int)$(int)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(SUT_F_DUPFD),
+            create_IntTObj(1),
+            create_IntTObj(arg3.filedesc));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res.filedesc=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onDup(context, fildes, fcntl_F_DUPFD_spec);
+    }
+}
+
+mediator fcntl_F_GETFD_media for specification
+IntT fcntl_F_GETFD_spec(CallContext context, FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "fcntl:$(int)$(int)$(int)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(SUT_F_GETFD),
+            create_IntTObj(1),
+            create_IntTObj(0));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+           
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+mediator fcntl_F_SETFD_media for specification
+IntT fcntl_F_SETFD_spec(CallContext context, FileDescId  fildes, bool fd_cloexec, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "fcntl:$(int)$(int)$(int)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(SUT_F_SETFD),
+            create_IntTObj(1),
+            create_IntTObj(fd_cloexec));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        if (fcntl_F_SETFD_spec!=-1)
+        {
+            setFD_CLOEXEC_FileDescId(fildes, fd_cloexec);
+        }
+    }
+}
+
+mediator fcntl_F_GETFL_media for specification
+Fcntl_F_GETFL_ReturnType* fcntl_F_GETFL_spec(CallContext context, FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        Fcntl_F_GETFL_ReturnType* res=NULL;
+        AccessMode access_mode;
+        BlockMode  block_mode;
+        bool       append_flag;
+        IntT       retVal;
+        TSCommand  command = create_TSCommand();
+        
+        format_TSCommand( &command, "fcntl_GETFL:$(int)", 
+            create_IntTObj(fildes.filedesc));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            retVal=readInt_TSStream(&command.response);
+            access_mode=readInt_TSStream(&command.response);
+            block_mode= (readInt_TSStream(&command.response) != 0);
+            append_flag= (readInt_TSStream(&command.response) != 0);
+            *errno=readInt_TSStream(&command.response);
+            res=create_Fcntl_F_GETFL_ReturnType( access_mode, block_mode, append_flag, retVal);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+mediator fcntl_F_SETFL_media for specification
+IntT fcntl_F_SETFL_spec(CallContext context, FileDescId  fildes,
+                        BlockMode block_mode, bool append_flag, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "fcntl_SETFL:$(int)$(int)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(block_mode),
+            create_IntTObj(append_flag));
+    
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+    
+        destroy_TSCommand(&command);
+    
+        return res; 
+    }
+    state
+    {
+        if (fcntl_F_SETFL_spec!=-1)
+        {
+            RegularFileDescriptor* desc=getDescriptor_FileDescId(fildes);
+
+            setBlockMode_FileDescId(fildes, block_mode);
+            if (desc!=NULL)
+            {
+                desc->append=append_flag;
+            }
+        }
+    }
+}
+
+
+mediator fcntl_F_GETOWN_media for specification
+IntT fcntl_F_GETOWN_spec(CallContext context, FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "fcntl:$(int)$(int)$(int)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(SUT_F_GETOWN),
+            create_IntTObj(1),
+            create_IntTObj(0));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+mediator fcntl_F_SETOWN_media for specification
+IntT fcntl_F_SETOWN_spec(CallContext context, FileDescId  fildes, IntT thirdArg, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "fcntl:$(int)$(int)$(int)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(SUT_F_SETOWN),
+            create_IntTObj(1),
+            create_IntTObj(thirdArg));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+    }
+}
+
+mediator fcntl_F_GETLCK_media for specification
+Fcntl_F_GETLCKReturnType* fcntl_F_GETLCK_spec(CallContext context, FileDescId  fildes, Flock* lock, ErrorCode* errno)
+{
+    call
+    {
+        Fcntl_F_GETLCKReturnType* res=NULL;
+        IntT functionResult;
+        Flock* lockResult;
+        LockType  l_type    ;
+        IntT  l_whence  ;
+        OffT   l_start  ;
+        OffT   l_len    ;
+        PidT  l_pid     ;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "fcntl_GETLCK:$(int)$(int)$(int)$(llong)$(llong)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(lock->l_type),
+            create_IntTObj(lock->l_whence),
+            create_LLongTObj(lock->l_start),
+            create_LLongTObj(lock->l_len),
+            create_IntTObj(lock->l_pid));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            functionResult=readInt_TSStream(&command.response);
+
+            l_type=readInt_TSStream(&command.response);
+            l_whence=readInt_TSStream(&command.response);
+            l_start=readLLong_TSStream(&command.response);
+            l_len=readLLong_TSStream(&command.response);
+            l_pid=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+
+            lockResult=create_Flock( l_type, l_whence, l_start, l_len, l_pid);
+
+            res=create_Fcntl_F_GETLCKReturnType( functionResult, lockResult);
+        }
+    
+        destroy_TSCommand(&command);
+    
+        return res; 
+    }
+}
+
+mediator fcntl_F_SETLCK_media for specification
+IntT fcntl_F_SETLCK_spec(CallContext context, FileDescId  fildes, Flock* lock, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+    
+
+        format_TSCommand( &command, "fcntl:$(int)$(int)$(int)$(int)$(int)$(llong)$(llong)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(SUT_F_SETLK),
+            create_IntTObj(0),
+            create_IntTObj(lock->l_type),
+            create_IntTObj(lock->l_whence),
+            create_LLongTObj(lock->l_start),
+            create_LLongTObj(lock->l_len),
+            create_IntTObj(lock->l_pid));
+    
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+    
+        destroy_TSCommand(&command);
+    
+        return res; 
+    }
+    state
+    {
+        onFcntl_F_SETLCK_spec(context, fildes, lock, fcntl_F_SETLCK_spec);
+    }
+}
+
+
+mediator fcntl_F_SETLKW_media for specification
+void fcntl_F_SETLKW_spec(CallContext context, FileDescId  fildes, Flock* lock, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+        
+
+        format_TSCommand( &command, "fcntl_SETLKW:$(int)$(int)$(int)$(llong)$(llong)$(int)", 
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(lock->l_type),
+            create_IntTObj(lock->l_whence),
+            create_LLongTObj(lock->l_start),
+            create_LLongTObj(lock->l_len),
+            create_IntTObj(lock->l_pid));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+       
+    }
+    state
+    {
+        onFcntlSETLKW(context, lock, fildes);
+
+    }
+
+}
+
+mediator fcntl_F_SETLKW_return_media for reaction
+fcntlSETLKWReturnType* fcntl_F_SETLKW_return(void)
+{
+    state
+    {
+        onFcntlSETLKWReturn(fcntl_F_SETLKW_return->context, fcntl_F_SETLKW_return->functionResult);
+    }
+}
+ 
+ 
+/** fdatasync_spec **/
+mediator fdatasync_media for specification
+IntT fdatasync_spec( CallContext context, FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+    
+
+        format_TSCommand( &command, "fdatasync:$(int)",  
+            create_IntTObj(fildes.filedesc));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+
+/** flock_spec **/
+mediator flock_media for specification
+void flock_spec(CallContext context, FileDescId  fildes, IntT operation, IntT block,
+                ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+
+        format_TSCommand( &command, "flock:$(int)$(int)$(int)",
+             create_IntTObj(fildes.filedesc),
+             create_IntTObj(operation),
+             create_IntTObj(block));
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onFlock(context, fildes, operation, block);
+    }
+}
+
+
+mediator flock_return_media for 
+reaction FlockReturnType* flock_return(void)
+{
+    state
+    {
+        onFlockReturn(flock_return->context, flock_return->functionResult);
+    }
+}
+
+
+
+/** fsync_spec **/
+mediator fsync_media for specification
+IntT fsync_spec( CallContext context, FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+
+        format_TSCommand( &command, "fsync:$(int)",
+            create_IntTObj(fildes.filedesc));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+ 
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+
+/** ftruncate_spec **/
+//This mediator refers to: ftruncate, ftruncate64
+mediator ftruncate_media for specification
+IntT ftruncate_spec(CallContext context, FileDescId  fildes, 
+                    OffT length, ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "ftruncate:$(int)$(llong)",
+                 create_IntTObj(fildes.filedesc),
+                 create_LLongTObj(length));
+        }
+        else
+        {
+            format_TSCommand( &command, "ftruncate64:$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_LLongTObj(length));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onFtruncate(context, fildes, length, ftruncate_spec);
+    }
+}
+
+/** lockf_spec **/
+//This mediator refers to: lockf64, lockf
+mediator lockf_F_LOCK_media for specification
+void lockf_F_LOCK_spec(CallContext context, FileDescId  fildes,
+                OffT size, ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "lockf_lock:$(int)$(llong)",
+                 create_IntTObj(fildes.filedesc),
+                 create_LLongTObj(size));
+        }
+        else
+        {
+            format_TSCommand( &command, "lockf64_lock:$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_LLongTObj(size));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onLockf_F_LOCK(context, fildes, size, is64bits);
+    }
+}
+
+mediator lockf_F_LOCK_return_media for reaction
+Lockf_F_LOCKReturnType* lockf_F_LOCK_return(void)
+{
+    state
+    {
+        onLockf_F_LOCKReturn(lockf_F_LOCK_return->context, lockf_F_LOCK_return->functionResult);
+    }
+}
+
+//This mediator refers to: lockf64, lockf
+mediator lockf_F_TLOCK_media for specification
+IntT lockf_F_TLOCK_spec(CallContext context, FileDescId  fildes, 
+                OffT size, ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "lockf:$(int)$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_IntTObj(SUT_F_TLOCK),
+                create_LLongTObj(size));
+        }
+        else
+        {
+            format_TSCommand( &command, "lockf64:$(int)$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_IntTObj(SUT_F_TLOCK),
+                create_LLongTObj(size));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onLockf_F_TLOCK(context, fildes, size, is64bits, lockf_F_TLOCK_spec);
+    }
+}
+
+//This mediator refers to: lockf64, lockf
+mediator lockf_F_UNLOCK_media for specification
+IntT lockf_F_UNLOCK_spec(CallContext context, FileDescId  fildes, OffT size, 
+                        ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "lockf:$(int)$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_IntTObj(SUT_F_UNLCK),
+                create_LLongTObj(size));
+        }
+        else
+        {
+            format_TSCommand( &command, "lockf64:$(int)$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_IntTObj(SUT_F_UNLCK),
+                create_LLongTObj(size));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onLockf_F_UNLOCK(context, fildes, size, is64bits, lockf_F_UNLOCK_spec);
+    }
+}
+
+//This mediator refers to: lockf64, lockf
+mediator lockf_F_TEST_media for specification
+IntT lockf_F_TEST_spec(CallContext context, FileDescId  fildes, OffT size, 
+                       ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "lockf:$(int)$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_IntTObj(SUT_F_TEST),
+                create_LLongTObj(size));
+        }
+        else
+        {
+            format_TSCommand( &command, "lockf64:$(int)$(int)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_IntTObj(SUT_F_TEST),
+                create_LLongTObj(size));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** lseek_spec **/
+//This mediator refers to: lseek64, lseek
+mediator lseek_media for specification
+OffT lseek_spec(CallContext context, FileDescId  fildes,
+                OffT offset,  IntT whence, ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        OffT res;
+        TSCommand command = create_TSCommand();
+    
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "lseek:$(int)$(llong)$(int)",
+                 create_IntTObj(fildes.filedesc),
+                 create_LLongTObj(offset),
+                 create_IntTObj(whence));
+        }
+        else
+        {
+            format_TSCommand( &command, "lseek64:$(int)$(llong)$(int)",
+                create_IntTObj(fildes.filedesc),
+                create_LLongTObj(offset),
+                create_IntTObj(whence));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readLLong_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onLseek(context, fildes, offset, whence, lseek_spec);
+
+    }
+}
+
+
+/** open_spec **/
+//This mediator refers to: open64, open
+mediator open_media for specification
+FileDescId open_spec(CallContext context, CString* path, OpenFlags oflag, 
+                     FilePermissions* mode, ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        FileDescId res = create_FileDescId(context.system,context.process,-1);
+        TSCommand command = create_TSCommand();
+        
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "open:$(str)$(openflags)$(perms)",
+                path,
+                create_OpenFlagsObj(oflag),
+                mode
+                );
+        }
+        else
+        {
+            format_TSCommand( &command, "open64:$(str)$(openflags)$(perms)",
+                path,
+                create_OpenFlagsObj(oflag),
+                mode
+                );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res.filedesc = readInt_TSStream( &command.response );
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onOpen( context, path, oflag, mode, open_spec, is64bits );
+    }
+}
+
+
+/** pread_spec **/
+//This mediator refers to: pread64, pread
+mediator pread_media for specification
+SSizeT pread_spec(CallContext context, FileDescId fildes, VoidTPtr buf, 
+                  SizeT nbyte, OffT offset, ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        
+
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "pread:$(int)$(ptr)$(size)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_VoidTPtrObj(buf),
+                create_SizeTObj(nbyte),
+                create_LLongTObj(offset));
+        }
+        else
+        {
+            format_TSCommand( &command, "pread64:$(int)$(ptr)$(size)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_VoidTPtrObj(buf),
+                create_SizeTObj(nbyte),
+                create_LLongTObj(offset));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res=readSSize_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onPread(context, fildes, buf, nbyte, offset, pread_spec);
+
+    }
+}
+
+
+/** pwrite_spec **/
+//This mediator refers to: pwrite64, pwrite
+mediator pwrite_media for specification
+SSizeT pwrite_spec(CallContext context, FileDescId fildes,
+                   VoidTPtr buf, SizeT nbyte, OffT offset, ErrorCode* errno,
+                   bool is64bits)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        
+
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "pwrite:$(int)$(ptr)$(size)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_VoidTPtrObj(buf),
+                create_SizeTObj(nbyte),
+                create_LLongTObj(offset));
+        }
+        else
+        {
+            format_TSCommand( &command, "pwrite64:$(int)$(ptr)$(size)$(llong)",
+                create_IntTObj(fildes.filedesc),
+                create_VoidTPtrObj(buf),
+                create_SizeTObj(nbyte),
+                create_LLongTObj(offset));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readSSize_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onPwrite(context, fildes, buf, nbyte, offset, pwrite_spec);
+    }
+}
+
+
+/** read_spec **/
+mediator read_media for specification
+SSizeT read_spec(CallContext context, FileDescId fildes, VoidTPtr buf, 
+                 SizeT nbyte, ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "read:$(int)$(ptr)$(size)",
+            create_IntTObj(fildes.filedesc),
+            create_VoidTPtrObj(buf),
+            create_SizeTObj(nbyte));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readSSize_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onRead(context, fildes, buf, nbyte, read_spec);
+    }
+}
+
+
+/** readv_spec **/
+mediator readv_media for specification
+SSizeT readv_spec(CallContext context, FileDescId fildes, List* iov, 
+                  ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        IntT i=0;
+        IOvec* curElement;
+        
+         
+        format_TSCommand( &command, "readv:$(int)$(int)",
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(size_List(iov)));
+        for (i=0;i<size_List(iov);i++)
+        {
+            curElement=(IOvec*)get_List(iov, i);
+            writePointer_TSStream(&command.command, curElement->iov_base);
+            writeSize_TSStream(&command.command, curElement->iov_len);
+        }
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readSSize_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        destroy_TSCommand(&command);
+        return res;
+    }
+    state
+    {
+        onReadv(context, fildes, iov, readv_spec);
+    }
+}
+
+
+/** sync_spec **/
+mediator sync_media for specification
+void sync_spec(CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+       
+         
+        format_TSCommand( &command, "sync");
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+}
+
+/** truncate_spec **/
+//This mediator refers to: truncate, truncate64
+mediator truncate_media for specification
+IntT truncate_spec(CallContext context, CString* path, OffT length, 
+                   ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "truncate:$(str)$(llong)",
+                 path,
+                 create_LLongTObj(length));
+        }
+        else
+        {
+            format_TSCommand( &command, "truncate64:$(str)$(llong)",
+                path,
+                create_LLongTObj(length));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onTruncate(context, path, length, truncate_spec);
+    }
+}
+
+
+/** write_spec **/
+mediator write_media for specification
+SSizeT write_spec(CallContext context, FileDescId fildes, VoidTPtr buf, 
+                  SizeT nbyte, ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "write:$(int)$(ptr)$(size)",
+            create_IntTObj(fildes.filedesc),
+            create_VoidTPtrObj(buf),
+            create_SizeTObj(nbyte));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             res=readSSize_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onWrite(context, fildes, buf, nbyte, write_spec);
+    }
+}
+
+
+/** writev_spec **/
+mediator writev_media for specification
+SSizeT writev_spec(CallContext context, FileDescId fildes, List* iov, 
+                   ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        IntT i=0;
+        IOvec* curElement;
+        
+         
+        format_TSCommand( &command, "writev:$(int)$(int)",
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(size_List(iov)));
+        for (i=0;i<size_List(iov);i++)
+        {
+            curElement=(IOvec*)get_List(iov, i);
+            writePointer_TSStream(&command.command, curElement->iov_base);
+            writeSize_TSStream(&command.command, curElement->iov_len);
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readSSize_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onWritev(context, fildes, iov, writev_spec);
+    }
+}
+
+
+

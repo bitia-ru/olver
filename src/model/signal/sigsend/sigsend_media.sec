@@ -1,0 +1,283 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "signal/sigsend/sigsend_media.seh"
+#include "signal/sigwait/sigwait_model.seh"
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void kill_react_processor(ThreadId threadId, TSStream* stream,
+                                 TSMetaData* meta)
+{
+    IntT res;
+    ErrorCode* err;
+
+    res = readInt_TSStream(stream);
+    err = create_ErrorCode(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        kill_react,
+        create_KillReactionType(threadId, res, err, NULL),
+        meta->timestamp);
+    VERBOSE("kill_react reaction registered...\n");
+}
+
+
+static void pthread_kill_react_processor(ThreadId threadId, TSStream* stream,
+                                 TSMetaData* meta)
+{
+    IntT res;
+    ErrorCode* err;
+
+    res = readInt_TSStream(stream);
+    err = create_ErrorCode(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_kill_react,
+        create_Pthread_killReactionType(threadId, res, err),
+        meta->timestamp);
+    VERBOSE("pthread_kill_react reaction registered...\n");
+}
+
+
+static void sigqueue_react_processor(ThreadId threadId, TSStream* stream,
+                                         TSMetaData* meta)
+{
+    IntT res;
+    ErrorCode* err;
+
+    res = readInt_TSStream(stream);
+    err = create_ErrorCode(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        sigqueue_react,
+        create_KillReactionType(threadId, res, err, NULL),
+        meta->timestamp);
+    VERBOSE("sigqueue_react reaction registered...\n");
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSignalSigsendSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_kill_spec(kill_media);
+    set_mediator_kill_react(kill_react_media);
+    set_mediator_signals_done_spec(signals_done_media);
+    set_mediator_pthread_kill_spec(pthread_kill_media);
+    set_mediator_pthread_kill_react(pthread_kill_react_media);
+    set_mediator_sigqueue_spec(sigqueue_media);
+    set_mediator_sigqueue_react(sigqueue_react_media);
+
+  // Set up dr processors
+    registerDRProcessor("kill_react",
+        kill_react_processor);
+    registerDRProcessor("pthread_kill_react",
+        pthread_kill_react_processor);
+
+    registerDRProcessor("sigqueue_react",
+        sigqueue_react_processor);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** kill_spec **/
+//This mediator refers to: raise, killpg, kill
+mediator kill_media for specification
+void kill_spec( CallContext context, ProcessId proc_id, Signal* sig,  KillCallTypes callType)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        String* str;
+
+        verbose( "kill_media : call\n" );
+        if (callType==KILL_RAISE_CALL)
+        {
+            format_TSCommand( &command, "raise:$(int)$(int)", create_IntTObj(THREADS_OPTION_SUPPORTED), create_IntTObj(*sig));
+        }
+        else if (callType==KILL_KILLPG_CALL)
+        {
+            format_TSCommand( &command, "killpg:$(int)$(int)", create_IntTObj(proc_id.process), create_IntTObj(*sig));
+        }
+        else
+        {
+            format_TSCommand( &command, "kill:$(int)$(int)",
+                create_IntTObj(proc_id.process), create_IntTObj(*sig));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            str = readString_TSStream(&command.response);
+
+        }
+
+        destroy_TSCommand(&command);
+
+        return; // res;
+    }
+    state
+    {
+        verbose( "kill_media : state\n" );
+        showSignalsInfoInProcessState( context );
+        onKill(context, sig, proc_id);
+        showSignalsInfoInProcessState( context );
+    }
+}
+
+mediator kill_react_media for
+reaction KillReactionType* kill_react(void)
+{
+    state
+    {
+        verbose( "kill_react_media : state\n" );
+        showSignalsInfoInProcessState( kill_react->context );
+        onKillReact(kill_react);
+        showSignalsInfoInProcessState( kill_react->context );
+    }
+}
+
+
+/** pthread_kill_spec **/
+//This mediator refers to: raise, pthread_kill
+mediator pthread_kill_media for specification
+void pthread_kill_spec( CallContext context, ThreadId thrId, Signal* sig, bool isRaise)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        if (!isRaise)
+        {
+            format_TSCommand( &command, "pthread_kill:$(ulong)$(int)", create_ULongTObj(thrId.thread), create_IntTObj(*sig));
+        }
+        else
+        {
+            format_TSCommand( &command, "raise:$(int)$(int)", create_IntTObj(THREADS_OPTION_SUPPORTED), create_IntTObj(*sig));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+        }
+
+        destroy_TSCommand(&command);
+
+        return;
+    }
+    state
+    {
+        onPthread_kill(context, thrId, sig);
+    }
+}
+
+
+mediator pthread_kill_react_media for
+reaction Pthread_killReactionType* pthread_kill_react(void)
+{
+    state
+    {
+        onPthread_killReact(pthread_kill_react->context, pthread_kill_react->return_value, pthread_kill_react->errno);
+    }
+}
+
+
+/** sigqueue_spec **/
+mediator sigqueue_media for specification
+void sigqueue_spec( CallContext context, PidT pid, Signal* sig, bool is_param_int, IntT value_int, VoidTPtr value_ptr)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+
+        format_TSCommand( &command, "sigqueue:$(int)$(int)$(int)$(int)$(ptr)", create_IntTObj(pid), create_IntTObj(*sig),
+            create_IntTObj(is_param_int), create_IntTObj(value_int), create_VoidTPtrObj(value_ptr) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+
+        }
+
+        destroy_TSCommand(&command);
+
+        return;
+    }
+    state
+    {
+        onSigqueue(context, pid, sig, is_param_int, value_int, value_ptr);
+    }
+
+}
+
+mediator sigqueue_react_media for
+reaction KillReactionType* sigqueue_react(void)
+{
+    state
+    {
+        onSigqueueReact(sigqueue_react);
+    }
+}
+
+/********************************************************************/
+/**        Signals done function(checks that all reaction had got) **/
+/********************************************************************/
+mediator signals_done_media for specification
+void signals_done_spec(CallContext context, ProcessState* pr1, ProcessState* pr2, bool* ex1, bool* ex2)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        verbose("in signals done call\n");
+
+        format_TSCommand( &command, "signals_done");
+        executeCommandInContext( context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        destroy_TSCommand(&command);
+
+        return;
+    }
+    state
+    {
+        verbose("in signals done state\n");
+        onSignals_done_spec(pr1, pr2, ex1, ex2);
+    }
+}
+

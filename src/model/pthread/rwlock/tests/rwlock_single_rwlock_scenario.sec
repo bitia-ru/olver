@@ -1,0 +1,487 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "pthread/rwlock/rwlock_model.seh"
+#include "pthread/rwlock/tests/rwlock_scenario.seh"
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/control_center.seh"
+
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+#define THREAD_NUM_COMPLETE 3 
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static VoidTPtr rwlock;
+static VoidTPtr rwlock_area;
+static CallContext context_array[THREAD_NUM_COMPLETE];
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+specification typedef struct RwlockStateSpecZ
+{
+    bool initialized;                       // is rwlock initialized
+    bool wlocked;                           // is rwlock locked by writer
+    unsigned int readers;                   // a number of readers that locked rwlock
+    unsigned int readers_wait;              // a number of readers that are waiting the rwlock
+    unsigned int writers_wait;              // a number of writers that are waiting the rwlock
+} RwlockStateSpecZ;
+
+specification typedef struct RwlockStateSpecZ RwlockStateSpecZ = {
+};
+
+RwlockStateSpecZ * create_RwlockStateSpecZ(
+    bool initialized,
+    bool wlocked,
+    unsigned int readers,
+    unsigned int readers_wait,
+    unsigned int writers_wait
+)
+{
+    return create(&type_RwlockStateSpecZ,
+        initialized,
+        wlocked,
+        readers,
+        readers_wait,
+        writers_wait
+        );
+}
+
+void printRwlockStateZ(RwlockStateSpecZ *x);
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+void cleanup_single_rwlock_scenario()
+{
+    int i;
+
+    /* delete threads */
+    for(i = 1; i < THREAD_NUM_COMPLETE; i++)
+    {
+        if(!isWrong_ThreadId(context_array[i]))
+        {
+            // TODO: delete thread
+        }
+    }    
+
+    if (!isNULL_VoidTPtr(rwlock_area))
+        deallocateMemoryBlock(context, rwlock_area);
+}
+
+bool init_complete_scenario(int argc, char** argv)
+{
+    int i;
+    bool result = true;
+
+    context = getContext();
+    context_array[0] = context;
+
+    /* create threads */
+    for(i=1;i<THREAD_NUM_COMPLETE;i++)
+    {
+        context_array[i] = createThread();
+        if(isWrong_ThreadId(context_array[i])) result = false;
+    }
+
+    rwlock_area = allocateMemoryBlock(context, 1024);
+    if (isNULL_VoidTPtr(rwlock_area)) result = false;
+    rwlock = NULL_VoidTPtr;
+
+    setTSTimeModel(NotUseTSTime);
+
+    set_assertion_exit_callback();
+
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME);
+
+    if(!result) cleanup_single_rwlock_scenario();
+    return true;
+}
+
+void finish_complete_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(single_rwlock_scenario);
+    return;
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+RwlockStateSpecZ* get_RwlockStateZ(void)
+{
+    bool initialized = false, wlocked = false;
+    unsigned int readers=0, readers_wait=0, writers_wait=0;
+
+    if(isNULL_VoidTPtr(rwlock)) initialized = false; else initialized = true;
+
+    if(initialized)
+    {
+        Rwlock* rwlock_m = getRwlock(rwlock);
+
+        wlocked = !isWrong_ThreadId(rwlock_m->writer);
+        readers = size_MultiSet(rwlock_m->readers_list);
+        readers_wait = size_Set(rwlock_m->reader_wait_list);
+        writers_wait = size_List(rwlock_m->writer_wait_list);
+    }
+    return create_RwlockStateSpecZ(initialized, wlocked, readers, readers_wait, writers_wait);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool rdlock_takeover_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if (!LockedByWriter(rwlock_m) && !ThreadReader(rwlock_m, tmp) && !ThreadWaitReader(rwlock_m, tmp) 
+                && !ThreadWaitWriter(rwlock_m, tmp))
+            {
+                verbose("RDLOCK          %u\n", tmp.thread);
+                pthread_rwlock_rdlock_spec(context_array[i], rwlock);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool tryrdlock_takeover_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if (!LockedByWriter(rwlock_m) && !ThreadReader(rwlock_m, tmp) && !ThreadWaitReader(rwlock_m, tmp) && !ThreadWaitWriter(rwlock_m, tmp))
+            {
+                verbose("TRYRDLOCK          %u\n", tmp.thread);
+                pthread_rwlock_tryrdlock_spec(context_array[i], rwlock);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool rdlock_stuck_scen()
+{
+    unsigned int i;
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for (i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if(!ThreadWriter(rwlock_m, tmp) && !ThreadReader(rwlock_m, tmp) 
+                && !ThreadWaitReader(rwlock_m, tmp)&& !ThreadWaitWriter(rwlock_m, tmp))
+            {
+                if (LockedByWriter(rwlock_m)&& !ThreadWriter(rwlock_m, tmp))
+                {
+                    verbose("RDLOCK STUCK            %u\n", tmp.thread);
+                    pthread_rwlock_rdlock_spec(context_array[i], rwlock);
+                    break;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool tryrdlock_stuck_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if(!ThreadReader(rwlock_m, tmp) && !ThreadWaitReader(rwlock_m, tmp)&& !ThreadWaitWriter(rwlock_m, tmp))
+            {
+                if (LockedByWriter(rwlock_m)&& !ThreadWriter(rwlock_m, tmp))
+                {
+                    verbose("TRYRDLOCK STUCK            %u\n", tmp.thread);
+                    pthread_rwlock_tryrdlock_spec(context_array[i], rwlock);
+                    break;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wrlock_takeover_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if (!LockedByWriter(rwlock_m)&& !ReaderExist(rwlock_m))
+            {
+                verbose("WRLOCK TAKEOVER         %u\n", tmp.thread);
+                pthread_rwlock_wrlock_spec(context_array[i], rwlock);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool trywrlock_takeover_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if (!LockedByWriter(rwlock_m) && !ReaderExist(rwlock_m))
+            {
+                verbose("TRYWRLOCK TAKEOVER         %u\n", tmp.thread);
+                pthread_rwlock_trywrlock_spec(context_array[i], rwlock);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wrlock_stuck_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if(!ThreadWriter(rwlock_m, tmp) && !ThreadReader(rwlock_m, tmp) && !ThreadWaitReader(rwlock_m, tmp)&& !ThreadWaitWriter(rwlock_m, tmp))
+            {
+                if(ReaderExist(rwlock_m)||
+                    LockedByWriter(rwlock_m)
+                    )
+                {
+                    verbose("WRLOCK STUCK         %u\n", tmp.thread);
+                    pthread_rwlock_wrlock_spec(tmp, rwlock);
+                    break;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool trywrlock_stuck_scen()
+{
+    unsigned int i;
+    
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if(!ThreadWriter(rwlock_m, tmp) && !ThreadReader(rwlock_m, tmp) 
+                && !ThreadWaitReader(rwlock_m, tmp) && !ThreadWaitWriter(rwlock_m, tmp))
+            {
+                if(ReaderExist(rwlock_m)||
+                    LockedByWriter(rwlock_m)
+                    )
+                {
+                    verbose("TRY WRLOCK STUCK         %u\n", tmp.thread);
+                    pthread_rwlock_trywrlock_spec(tmp, rwlock);
+                    break;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool unlock_reader_scen()
+{
+    unsigned int i;
+
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        for(i=0;i<THREAD_NUM_COMPLETE;i++)
+        {
+            CallContext tmp = context_array[i];
+            if (ThreadReader(rwlock_m, tmp))
+            {
+                verbose("UNLOCK READER           %u\n", tmp.thread);
+                pthread_rwlock_unlock_spec(context_array[i], rwlock);
+                ts_sleep_msec(100);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool unlock_writer_scen()
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        Rwlock *rwlock_m = getRwlock(rwlock);
+        if (LockedByWriter(rwlock_m))
+        {
+            verbose("UNLOCK WRITER           %u\n", rwlock_m->writer.thread);
+            pthread_rwlock_unlock_spec(rwlock_m->writer, rwlock);
+            ts_sleep_msec(100);
+            verbose("UNLOCK WRITER  END         %u\n", rwlock_m->writer.thread);
+        }
+    }
+    return true;
+}
+
+scenario
+bool single_rwlock_init_scen()
+{
+    if (isNULL_VoidTPtr(rwlock))
+    {
+        verbose("deadlock_init_scen *****\n");
+        pthread_rwlock_init_spec(context_array[0], rwlock_area, NULL_VoidTPtr);
+        rwlock = rwlock_area;
+    }
+    return true;
+}
+
+scenario
+bool single_rwlock_destroy_scen() 
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        if(isDestroyPossible(rwlock))
+        {
+            verbose("deadlock_destroy_scen *****\n");
+            pthread_rwlock_destroy_spec(context_array[0], rwlock);
+            rwlock = NULL_VoidTPtr;
+        }
+    }
+    return true;
+}
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+Map* saveRwlockSingleModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreRwlockSingleModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+bool isRwlockSingleModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm rwlock_single_rwlock_scenario =
+{
+    .init = init_complete_scenario,
+    .finish = finish_complete_scenario,
+    .getState = (PtrGetState)get_RwlockStateZ,
+    .saveModelState = (PtrSaveModelState)saveRwlockSingleModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreRwlockSingleModelState,
+    .isStationaryState = (PtrIsStationaryState)isRwlockSingleModelStateStationary,
+    .actions = {
+            single_rwlock_init_scen,
+            
+            rdlock_takeover_scen,
+            rdlock_stuck_scen,
+            
+            tryrdlock_takeover_scen,
+            tryrdlock_stuck_scen,
+
+            wrlock_takeover_scen,
+            wrlock_stuck_scen,
+            
+            trywrlock_takeover_scen,
+            trywrlock_stuck_scen,
+
+            unlock_writer_scen,
+            unlock_reader_scen,
+            
+            single_rwlock_destroy_scen,
+            NULL
+    }
+};
+
+/********************************************************************/
+/**                    Debug Functions                             **/
+/********************************************************************/
+
+void printRwlockStateZ(RwlockStateSpecZ *x)
+{
+    verbose("readers: %u", x->readers);
+    //verbose("readers_wait: %u", x->readers_wait);
+    verbose("writers_wait: %u", x->writers_wait);
+    verbose("\n");
+}

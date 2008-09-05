@@ -1,0 +1,661 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "common/tree.seh"
+
+/********************************************************************/
+/**                        Tree Node Children                      **/
+/********************************************************************/
+static int size_Children(Object* children)
+{
+  if (type(children) == &type_MultiSet)
+    return size_MultiSet(children);
+  else
+    return size_List(children);
+}
+
+static Object* get_Children(Object* children,int i)
+{
+  if (type(children) == &type_MultiSet)
+    return get_MultiSet(children,i);
+  else
+    return get_List(children,i);
+}
+
+static void add_Children(Object* children,Object* child)
+{
+  if (type(children) == &type_MultiSet)
+    add_MultiSet(children,child);
+  else
+    append_List(children,child);
+}
+
+
+/********************************************************************/
+/**                           Tree Node                            **/
+/********************************************************************/
+static int indexOfChildren_TreeNode(TreeNode* self,TreeNode* child)
+{
+int i,size;
+
+  assertion( self != NULL, "indexOfChildren_TreeNode: self is NULL" );
+  
+  size = size_Children(self->children);
+  for( i = 0; i < size; i++ )
+   {
+    Object* child_i = get_Children(self->children,i);
+    if ((void*)child_i == (void*)child)
+      return i;
+   }
+  return -1;
+}
+
+static String* to_string_TreeNode(struct TreeNode* node)
+{
+String* res;
+
+  if (type(node->children) == &type_List)
+    res = create_String("<");
+  else
+    res = create_String("{");
+
+  if (node->parent == NULL)
+    res = concat_String( res, create_String("root,") );
+  else
+    res = concat_String( res, format_String("level=%d,childno=%d,",
+                                  level_TreeNode((TreeNode*)node),
+                                  indexOfChildren_TreeNode(node->parent,(TreeNode*)node)
+                                           )
+                       );
+  res = concat_String( res, format_String("numOfChildren=%d,tag=", size_Children(node->children) ) );
+  res = concat_String( res, toString(node->tag) );
+
+  if (type(node->children) == &type_List)
+    res = concat_String( res, create_String(">") );
+  else
+    res = concat_String( res, create_String("}") );
+  
+  return res;
+}
+
+specification typedef struct TreeNode TreeNode = {
+  .to_string = (ToString)to_string_TreeNode
+};
+
+TreeNode* create_TreeNode(Object* tag)
+{
+TreeNode* res;
+
+  res = create(&type_TreeNode,NULL,NULL,NULL);
+  res->children = create_MultiSet(NULL);
+  res->tag = tag;
+  return res;
+}
+
+TreeNode* create_OrderedTreeNode(Object* tag)
+{
+TreeNode* res;
+
+  res = create(&type_TreeNode,NULL,NULL,NULL);
+  res->children = create_List(NULL);
+  res->tag = tag;
+  return res;
+}
+
+bool isOrdered_TreeNode(TreeNode* self)
+{
+  assertion( self != NULL, "isOrdered_TreeNode: self is NULL" );
+
+  return (type(self->children) == &type_List);
+}
+
+void addChild_TreeNode(TreeNode* self,TreeNode* child)
+{
+  assertion( self != NULL, "addChild_TreeNode: self is NULL" );
+  assertion( child != NULL, "addChild_TreeNode: child is NULL" );
+  assertion( child->parent == NULL, "addChild_TreeNode: child has already parent" );
+  
+  add_Children( self->children, child );
+  child->parent = self;
+}
+
+int numberOfChildren_TreeNode(TreeNode* self)
+{
+  assertion( self != NULL, "numberOfChildren_TreeNode: self is NULL" );
+  
+  return size_Children(self->children);
+}
+
+TreeNode* getChild_TreeNode(TreeNode* self,int i)
+{
+  assertion( self != NULL, "numberOfChildren_TreeNode: self is NULL" );
+
+  return get_Children(self->children,i);
+}
+
+int level_TreeNode(TreeNode* self)
+{
+struct TreeNode* tmp;
+int res;
+
+  assertion( self != NULL, "level_TreeNode: self is NULL" );
+
+  res = 0;
+  tmp = (struct TreeNode*)self->parent;
+  for(;tmp!=NULL;tmp=(struct TreeNode*)tmp->parent)
+   {
+    res++;
+   }
+  return res;
+}
+
+
+/********************************************************************/
+/**                             Tree                               **/
+/********************************************************************/
+static String* indent_String(int indent)
+{
+char* buffer;
+String* res;
+  
+  buffer = (char*)malloc(2*indent+1);
+  assertion( buffer != NULL, "indent_String: not enought memory" );
+  memset( buffer, ' ', 2*indent );
+  buffer[2*indent] = 0;
+  res = create_String(buffer);
+  free(buffer);
+  return res;
+}
+
+static String* format_TreeNode(struct TreeNode* node)
+{
+  if (node->tag != NULL)
+    return toString((TreeNode*)node);
+  if (node->parent == NULL)
+   {
+    if (type(node->children) == &type_List)
+      return create_String( "<root>" );
+    else
+      return create_String( "{root}" );
+   }
+
+  if (type(node->children) == &type_List)
+   {
+    return format_String( "<level=%d,childno=%d>",
+                              level_TreeNode((TreeNode*)node),
+                              indexOfChildren_TreeNode(node->parent,(TreeNode*)node)
+                        );
+   }
+  return format_String( "{level=%d,childno=%d}",
+                            level_TreeNode((TreeNode*)node),
+                            indexOfChildren_TreeNode(node->parent,(TreeNode*)node)
+                      );
+}
+
+static struct TreeNode* nextDR_TreeNode(struct TreeNode* node)
+{
+struct TreeNode *current,*previous;
+TreeNode* res2;
+
+  if (size_Children(node->children) > 0)
+   {// Temp
+    res2 = get_Children(node->children,0);
+    return (struct TreeNode*)res2;
+    //return get_Children(node->children,0);
+   }
+  if (node->parent == NULL)
+    return NULL;
+  current = (struct TreeNode*)node->parent;
+  previous = node;
+  for(;;)
+   {
+    int i = indexOfChildren_TreeNode((TreeNode*)current,(TreeNode*)previous);
+    if (i+1 < size_Children(current->children))
+     {// Temp
+      res2 = get_Children(current->children,i+1);
+      return (struct TreeNode*)res2;
+      //return get_Children(current->children,i+1);
+     }
+    if (current->parent == NULL)
+      return NULL;
+    previous = current;
+    current = (struct TreeNode*)current->parent;
+   }
+}
+
+static String* to_string_Tree(struct Tree* tree)
+{
+String* res;
+struct TreeNode* tmp;
+
+  if (tree->root == NULL)
+    return create_String("EmptyTree");
+  
+  tmp = (struct TreeNode*)tree->root;  
+  res = create_String("");
+
+  for(;tmp!=NULL;)
+   {
+    res = concat_String( res, indent_String(level_TreeNode((TreeNode*)tmp)) );
+    res = concat_String( res, format_TreeNode(tmp) );
+    res = concat_String( res, create_String("\n") );
+    tmp = nextDR_TreeNode(tmp);  
+   }
+  return res;
+}
+
+specification typedef struct Tree Tree = {
+  .to_string = (ToString)to_string_Tree
+};
+
+Tree* create_Tree(TreeNode* root)
+{
+Tree* res;
+
+  res = create( &type_Tree, NULL );
+  res->root = root;
+  return res;
+}
+
+static int size_Subtree(struct TreeNode* node)
+{
+int i,size;
+int res;
+
+  res = 1;
+  size = size_Children(node->children);
+  for( i = 0; i < size; i++ )
+   {
+    TreeNode* child = get_Children(node->children,i);
+    res = res + size_Subtree( (struct TreeNode*)child );
+   }
+  return res;
+}
+
+int size_Tree(Tree* self)
+{
+  assertion( self != NULL, "size_Tree: self is NULL" );
+
+  if (self->root == NULL)
+    return 0;
+  return size_Subtree((struct TreeNode*)self->root);
+}
+
+TreeNode* get_Tree(Tree* tree,int i)
+{
+int j,size;
+struct TreeNode* tmp;
+
+  assertion( tree != NULL, "get_Tree: tree is NULL" );
+
+  size = size_Tree(tree);
+
+  assertion( (0 <= i) && (i < size), "get_Tree: %d is out of [0,%d[", i, size );
+
+  tmp = (struct TreeNode*)tree->root;  
+
+  for( j = 0; j < i; j++ )
+   {
+    tmp = nextDR_TreeNode(tmp);
+   }
+
+  return (TreeNode*)tmp;
+}
+
+Object* getTag_Tree(Tree* tree,int i)
+{
+int j,size;
+struct TreeNode* tmp;
+
+  assertion( tree != NULL, "getTag_Tree: tree is NULL" );
+
+  size = size_Tree(tree);
+
+  assertion( (0 <= i) && (i < size), "getTag_Tree: %d is out of [0,%d[", i, size );
+
+  tmp = (struct TreeNode*)tree->root;  
+
+  for( j = 0; j < i; j++ )
+   {
+    tmp = nextDR_TreeNode(tmp);
+   }
+
+  return tmp->tag;
+}
+
+Object* getConditionalTag_Tree(Tree* tree,ConditionFuncType condition,int i)
+{
+int j,k,size;
+struct TreeNode* tmp;
+
+  assertion( tree != NULL, "getConditionalTag_Tree: tree is NULL" );
+
+  size = size_Tree(tree);
+
+  assertion( (0 <= i) && (i < size), "getConditionalTag_Tree: %d is out of range [0,%d[", i, size );
+
+  tmp = (struct TreeNode*)tree->root;  
+
+  k = 0;
+  for( j = 0; (j < size) && (tmp != NULL); j++ )
+   {
+    if(condition(tmp->tag))
+     {
+      if (k == i)
+       {
+        return tmp->tag;
+       }
+      k++;
+     }
+    tmp = nextDR_TreeNode(tmp);
+   }
+
+  assertion( (0 <= i) && (i < size), "getConditionalTag_Tree: %d is out of conditional range [0,%d[", i, k );
+}
+
+static int height_Subtree(struct TreeNode* node)
+{
+int i,size,pretender;
+int res;
+
+  res = 1;
+  size = size_Children(node->children);
+  for( i = 0; i < size; i++ )
+   {
+    TreeNode* child = get_Children(node->children,i);
+    pretender = height_Subtree( (struct TreeNode*)child ) + 1;
+    if (pretender > res)
+      res = pretender;
+   }
+  return res;
+}
+
+int height_Tree(Tree* tree)
+{
+  if (tree->root == NULL)
+    return 0;
+  return height_Subtree((struct TreeNode*)tree->root);
+}
+
+
+/********************************************************************/
+/**                        Tree Gen State                          **/
+/********************************************************************/
+
+Integer* getHeightTreeGenState(Tree* tree)
+{
+  return create_Integer( height_Tree(tree) );
+}
+
+static TreeNode* createISOCopy_TreeNode(TreeNode* node)
+{
+TreeNode* child;
+TreeNode* iso_node;
+int i,size;
+
+  iso_node = isOrdered_TreeNode(node) ? create_OrderedTreeNode(NULL) : create_TreeNode(NULL);
+  size = numberOfChildren_TreeNode(node);
+  for( i = 0; i < size; i++ )
+   {
+    child = createISOCopy_TreeNode( getChild_TreeNode(node,i) );
+    addChild_TreeNode( iso_node, child );
+   }
+  return iso_node; 
+}
+
+Tree* getISOTreeGenState(Tree* tree)
+{
+  assertion( tree != NULL, "getISOTreeGenState: tree is NULL" );
+
+  if (tree->root == NULL)
+    return create_Tree(NULL);
+  return create_Tree(createISOCopy_TreeNode(tree->root));
+}
+
+
+/** ISOGenState **/
+static int compare_NormalizedTree(TreeNode* left,TreeNode* right)
+{
+int i,size1,size2;
+int res2;
+
+  size1 = size_Children(left->children);
+  size2 = size_Children(right->children);
+  if (size1 > size2)
+    return 1;
+  if (size1 < size2)
+    return -1;
+  for( i = 0; i < size1; i++ )
+   {
+    res2 = compare_NormalizedTree( get_Children(left->children,i), get_Children(right->children,i) );
+    if (res2 == 1)
+      return 1;
+    if (res2 == -1)
+      return -1;
+   }
+  return 0;
+}
+
+static bool greater_NormalizedTree(TreeNode* left,TreeNode* right)
+{
+  return (compare_NormalizedTree(left,right) == 1);
+}
+
+static TreeNode* normalizeSubtree(TreeNode* node)
+{
+int i,j,size;
+TreeNode* res;
+
+  res = create_OrderedTreeNode(node->tag);
+  size = size_Children( node->children );
+  for( i = 0; i < size; i++ )
+   {
+    addChild_TreeNode( res, normalizeSubtree( get_Children(node->children,i) ) );
+   }
+  if (type(node->children) == &type_List)
+    return res;
+  // Unordered tree node
+  for( i = 1; i < size; i++ )
+   {
+    TreeNode* right = get_List(res->children,i);
+    for( j = 0; j < i; j++ )
+     {
+      TreeNode* left = get_List(res->children,j);
+      
+      if (greater_NormalizedTree(left,right))
+       {// Insert i before j
+        remove_List(res->children,i);
+        add_List(res->children,j,right);
+        break;
+       }
+     }
+   }
+  return res;
+}
+
+static Tree* normalizeTree(Tree* tree)
+{
+  assertion( tree != NULL, "normalizeTree: tree is NULL" );
+
+  if (tree->root == NULL)
+    return create_Tree(NULL);
+  return create_Tree( normalizeSubtree(tree->root) );
+}
+
+Object* getTag_ISOTreeGenState(Tree* tree,int i)
+{
+  assertion( tree != NULL, "getTag_ISOTreeGenState: tree is NULL" );
+
+  return getTag_Tree(normalizeTree(tree),i);
+}
+
+//#include "common/common_model.seh"
+Object* getConditionalTag_ISOTreeGenState(Tree* tree,ConditionFuncType condition,int i)
+{
+  assertion( tree != NULL, "getConditionalTag_ISOTreeGenState: tree is NULL" );
+  
+/*
+  {
+   Tree* ntree = normalizeTree(tree);
+    TRACE_OBJECT(ntree);
+    return getConditionalTag_Tree(ntree,condition,i);
+  }
+*/
+  return getConditionalTag_Tree(normalizeTree(tree),condition,i);
+}
+
+/** Tagged GenState **/
+static int compare_NormalizedTaggedTree(TreeNode* left,TreeNode* right,CompareFuncType compare)
+{
+int i,size1,size2;
+int res2;
+
+  size1 = size_Children(left->children);
+  size2 = size_Children(right->children);
+  if (size1 > size2)
+    return 1;
+  if (size1 < size2)
+    return -1;
+  for( i = 0; i < size1; i++ )
+   {
+    res2 = compare_NormalizedTaggedTree( get_Children(left->children,i), get_Children(right->children,i), compare );
+    if (res2 > 0)
+      return 1;
+    if (res2 < 0)
+      return -1;
+   }
+  if (compare != NULL)
+    return compare(left->tag,right->tag);
+  return 0;
+}
+
+static bool greater_NormalizedTaggedTree(TreeNode* left,TreeNode* right,CompareFuncType compare)
+{
+  return (compare_NormalizedTaggedTree(left,right,compare) > 0);
+}
+
+static TreeNode* normalizeTaggedSubtree(TreeNode* node,CompareFuncType compare)
+{
+int i,j,size;
+TreeNode* res;
+
+  res = create_OrderedTreeNode(node->tag);
+  size = size_Children( node->children );
+  for( i = 0; i < size; i++ )
+   {
+    addChild_TreeNode( res, normalizeTaggedSubtree( get_Children(node->children,i), compare ) );
+   }
+  if (type(node->children) == &type_List)
+    return res;
+  // Unordered tree node
+  for( i = 1; i < size; i++ )
+   {
+    TreeNode* right = get_List(res->children,i);
+    for( j = 0; j < i; j++ )
+     {
+      TreeNode* left = get_List(res->children,j);
+      
+      if (greater_NormalizedTaggedTree(left,right,compare))
+       {// Insert i before j
+        remove_List(res->children,i);
+        add_List(res->children,j,right);
+        break;
+       }
+     }
+   }
+  return res;
+}
+
+static Tree* normalizeTaggedTree(Tree* tree,CompareFuncType compare)
+{
+  assertion( tree != NULL, "normalizeTaggedTree: tree is NULL" );
+
+  if (tree->root == NULL)
+    return create_Tree(NULL);
+  return create_Tree( normalizeTaggedSubtree(tree->root,compare) );
+}
+
+Object* getTag_TaggedTreeGenState(Tree* tree,int i,CompareFuncType compare)
+{
+  assertion( tree != NULL, "getTag_TaggedTreeGenState: tree is NULL" );
+
+  return getTag_Tree(normalizeTaggedTree(tree,compare),i);
+}
+
+Object* getConditionalTag_TaggedTreeGenState(Tree* tree,ConditionFuncType condition,int i,CompareFuncType compare)
+{
+  assertion( tree != NULL, "getConditionalTag_TaggedTreeGenState: tree is NULL" );
+  
+  return getConditionalTag_Tree(normalizeTaggedTree(tree,compare),condition,i);
+}
+
+
+/** Children Number Tree GenState **/
+static void processSubtree_ChildrenNumberTreeGenState( MultiSet* res, TreeNode* node )
+{
+int i,size;
+
+  add_MultiSet( res, create_Integer( numberOfChildren_TreeNode(node) ) );
+  size = size_Children( node->children );
+  for( i = 0; i < size; i++ )
+   {
+    processSubtree_ChildrenNumberTreeGenState( res, get_Children( node->children, i ) );
+   }
+}
+
+MultiSet* getChildrenNumberTreeGenState(Tree* tree)
+{
+MultiSet* res;
+
+  assertion( tree != NULL, "getChildrenNumberTreeGenState: tree is NULL" );
+
+  res = create_MultiSet(NULL);
+  if (tree->root == NULL)
+    return res;
+  
+  processSubtree_ChildrenNumberTreeGenState(res,tree->root);
+  return res;
+}
+/**
+Object* getTag_ChildrenNumberTreeGenState(Tree* tree,int i)
+{
+MultiSet* genstate;
+List* ordered_genstate;
+int i,j,size;
+
+  assertion( tree != NULL, "getTag_ChildrenNumberTreeGenState: tree is NULL" );
+
+  genstate = getChildrenNumberTreeGenState(tree);
+  ordered_genstate = create_List(NULL);
+  size = size_MultiSet(genstate);
+  for( i = 0; i < size; i++ )
+   {
+    Integer* number = get_MultiSet(genstate,i);
+    for( j = 0; j < i; j++ )
+     {
+       Integer* number2 = get_List(ordered_genstate,j);!!!!!!!!!!!!!!!!!!!!
+       //if 
+       // insert
+     }
+   }
+  
+  return find_in_tree( 0, i - num_other );
+}
+**/
+

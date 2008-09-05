@@ -1,0 +1,471 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "memory/mman/mman_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void msync_react_processor(ThreadId threadId, TSStream* stream, 
+                                 TSMetaData* meta)
+{   
+    IntT res, err;
+    MsyncFlags tmpFlags={false, false, false};
+    MsyncParamsType* params = create_MsyncParamsType(threadId, NULL_VoidTPtr, 0, tmpFlags);
+    res = readInt_TSStream(stream);
+    err = readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        msync_react,
+        create_MsyncReactionType(getThread(threadId), res, err, params),
+        meta->timestamp);
+    VERBOSE("msync_react reaction registered...\n");
+}
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initMemoryMmanSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_mlock_spec(mlock_media);
+    set_mediator_mlockall_spec(mlockall_media);
+    set_mediator_mmap_spec(mmap_media);
+//    set_mediator_mmap64_spec(mmap64_media);
+    set_mediator_mprotect_spec(mprotect_media);
+    set_mediator_msync_spec(msync_media);
+    set_mediator_munlock_spec(munlock_media);
+    set_mediator_munlockall_spec(munlockall_media);
+    set_mediator_munmap_spec(munmap_media);
+    set_mediator_shm_open_spec(shm_open_media);
+    set_mediator_shm_unlink_spec(shm_unlink_media);
+    set_mediator_write_mapped_mem_block_spec(write_mapped_mem_block_media);
+    set_mediator_read_mapped_mem_block_spec(read_mapped_mem_block_media);
+
+    // Set up dr processors
+    registerDRProcessor("msync_react", 
+                         msync_react_processor);
+    initFsFsSubsystem();
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** mlock_spec **/
+mediator mlock_media for specification
+IntT mlock_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand(&command, "mlock:$(ptr)$(size)", 
+                         create_VoidTPtrObj(addr), create_SizeTObj(len));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+/** mlockall_spec **/
+mediator mlockall_media for specification
+IntT mlockall_spec(CallContext context, MLockallFlags flags, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand(&command, "mlockall:$(int)",
+                         create_IntTObj(convertMLockallFlagsToIntT(flags)));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+  }
+}
+
+/** mmap_spec **/
+mediator mmap_media for 
+specification
+VoidTPtr mmap_spec(CallContext context, VoidTPtr addr, SizeT len, MmanProtFlags prot, 
+                   MmapFlags flags, FileDescId fildes, OffT off, bool is64bits, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        VoidTPtr res;
+        if (!is64bits)
+            format_TSCommand(&command, "mmap:$(ptr)$(size)$(int)$(int)$(int)$(llong)",
+                             create_VoidTPtrObj(addr), create_SizeTObj(len),
+                             create_IntTObj(convertMmanProtFlagsToIntT(prot)),
+                             create_IntTObj(convertMmapFlagsToIntT(flags)),
+                             create_IntTObj(fildes.filedesc),
+                             create_LLongTObj(off)
+                             );
+        else
+            format_TSCommand(&command, "mmap64:$(ptr)$(size)$(int)$(int)$(int)$(llong)",
+                             create_VoidTPtrObj(addr), create_SizeTObj(len),
+                             create_IntTObj(convertMmanProtFlagsToIntT(prot)),
+                             create_IntTObj(convertMmapFlagsToIntT(flags)),
+                             create_IntTObj(fildes.filedesc),
+                             create_LLongTObj(off)
+                             );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+            *errno = readInt_TSStream(&command.response);
+         }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        if (*errno == SUT_EOK)
+        {
+            onMmap(context, len, prot, flags, fildes, off, mmap_spec);
+        }        
+    }
+}
+
+/** mmap64_spec **/
+/****
+mediator mmap64_media for specification
+ReturnType mmap64_spec( CallContext context, ... )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "mmap64" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+         }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+****/
+
+
+/** mprotect_spec **/
+mediator mprotect_media for specification
+IntT mprotect_spec(CallContext context, VoidTPtr addr, SizeT len, 
+                   MmanProtFlags prot, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand(&command, "mprotect:$(ptr)$(size)$(int)",
+                         create_VoidTPtrObj(addr), create_SizeTObj(len),
+                         create_IntTObj(convertMmanProtFlagsToIntT(prot)));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        if (*errno == SUT_EOK)
+        {
+            onMProtect(context, addr, len, prot);
+        }        
+    }
+}
+
+/** msync_spec **/
+mediator msync_media for specification
+void msync_spec( CallContext context, VoidTPtr addr, SizeT len, MsyncFlags flags, ErrorCode* errno)
+{
+    call
+    { 
+        TSCommand command = create_TSCommand();
+        String* str;
+        format_TSCommand(&command, "msync:$(ptr)$(size)$(int)",
+                         create_VoidTPtrObj(addr), create_SizeTObj(len),
+                         create_IntTObj(convertMsyncFlagsToIntT(flags)));
+        executeCommandInContext( context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            str = readString_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+  }
+    state
+    {
+        startBlockedCall(context, create_MsyncParamsType(context, addr, len, flags));
+    }
+}
+
+/** msync_react **/
+mediator msync_react_media for 
+reaction MsyncReactionType* msync_react(void)
+{
+    state
+    {
+        //TODO state of file update
+        msync_react->params = finishBlockedCall(msync_react->params->context);
+    }
+}
+
+
+/** munlock_spec **/
+mediator munlock_media for specification
+IntT munlock_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "munlock:$(ptr)$(size)", 
+                         create_VoidTPtrObj(addr), create_SizeTObj(len));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+  }
+}
+
+/** munlockall_spec **/
+mediator munlockall_media for specification
+IntT munlockall_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+         
+        format_TSCommand( &command, "munlockall" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {            
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+  }
+}
+
+/** munmap_spec **/
+mediator munmap_media for specification
+IntT munmap_spec( CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+         
+        format_TSCommand(&command, "munmap:$(ptr)$(size)",
+                         create_VoidTPtrObj(addr), create_SizeTObj(len));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        if (*errno == SUT_EOK)
+        {
+            onMunmap(context, addr, len, munmap_spec);
+        }
+    }
+}
+
+/** shm_open_spec **/
+mediator shm_open_media for specification
+FileDescId shm_open_spec( CallContext context, CString* name, Shm_openOflags oflag, FilePermissions* mode, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        FileDescId res = create_FileDescId(context.system,context.process,-1); 
+    
+         
+        format_TSCommand( &command, "shm_open:$(str)$(int)$(perms)", name,
+                         create_IntTObj(convertShm_openOflagsToIntT(oflag)),
+                         mode);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;            
+            res.filedesc = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+  }
+    state
+    {
+        if (*errno == SUT_EOK)
+        {
+            onShm_open(context, name, oflag, mode, shm_open_spec);
+        }
+    }
+}
+
+/** shm_unlink_spec **/
+mediator shm_unlink_media for specification
+IntT shm_unlink_spec( CallContext context, CString* name, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        format_TSCommand( &command, "shm_unlink:$(str)", name);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+  }
+}
+
+/** write_memory_block **/
+mediator write_mapped_mem_block_media for specification 
+void write_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, MappedMemoryBlock* mb, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "write_mapped_mem_block:$(ba)$(ptr)", mb->data, create_VoidTPtrObj(addr));
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errno = readInt_TSStream(&command.response);
+        }
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        if (*errno == SUT_EOK)
+        {
+            onWrite_mapped_mem_block_spec(context, addr, len, mb);
+        }
+    }
+}
+
+/** read_memory_blocks_spec **/
+mediator read_mapped_mem_block_media for specification
+MappedMemoryBlock* read_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        MappedMemoryBlock* res;
+        CByteArray*  temp_data = NULL;
+
+        format_TSCommand( &command, "read_mapped_mem_block:$(ptr)$(size)", create_VoidTPtrObj(addr), create_SizeTObj(len));
+        //format_TSCommand( &command, "read_mapped_mem_block:$(ptr)", create_VoidTPtrObj(addr));
+        executeCommandInContext(context, &command);
+        traceUserInfo("isBadVerdict==false/true");
+        if (!isBadVerdict())
+        {
+            traceUserInfo("isBadVerdict==false");
+            timestamp = command.meta.timestamp;
+            temp_data = readCByteArray_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            res = create_MappedMemoryBlock(0, len, temp_data);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+}
+
+
+
+

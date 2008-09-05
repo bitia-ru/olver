@@ -1,0 +1,718 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "socket/netdb/tests/netdb_scenario.seh"
+
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "socket/netdb/netdb_model.seh"
+#include "socket/netdb/netdb_media.seh"
+
+#include "socket/netdata/netdata_media.seh"
+
+/********************************************************************/
+/**                      Test Scenario Config                      **/
+/********************************************************************/
+
+
+
+#define SOCKET_NETDB_ENUM_MAX 5
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+bool init_simple_netdb_scenario(int argc, char** argv)
+{
+    context = getContext();
+    
+    return true;
+}
+
+void finish_simple_netdb_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(simple_netdb_scenario);
+    /**/
+}
+
+
+bool init_sp_netdb_scenario(int argc, char** argv)
+{
+    NetdbProcessData * data;
+
+    context = getContext();
+
+    __h_errno_location_spec(context);
+
+    setservent_spec(context, 1);
+
+    data = get_netdb_data(context);
+    data->serv_db_filling = NETDB_FILLING;
+
+    while(getservent_spec(context));
+
+    data->serv_db_filling = NETDB_FILLED;
+
+    endservent_spec(context);
+    
+    return true;
+}
+
+void finish_sp_netdb_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(sp_netdb_scenario);
+    endservent_spec(context);
+}
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool h_errno_netdb_scen(void)
+{
+    __h_errno_location_spec(context);
+
+    return true;
+}
+
+scenario
+bool init_servent_netdb_scen(void)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+
+    reset_serv_db();
+
+    setservent_spec(context, 1);
+
+    data->serv_db_filling = NETDB_FILLING;
+
+    while(getservent_spec(context));
+
+    data->serv_db_filling = NETDB_FILLED;
+
+    endservent_spec(context);
+
+    return true;
+}
+
+scenario
+bool servent_netdb_scen(void)
+{
+    ServentT * se;
+
+    DUMP("$(obj)\n", getservent_spec(context) );
+
+    setservent_spec(context, 0);
+
+    DUMP("$(obj)\n", getservent_spec(context) );
+    DUMP("$(obj)\n", getservent_spec(context) );
+    // se = getservbyport_spec(context, 36965, NULL);
+    //se = getservbyname_spec(context, create_CString("quake"), NULL /*create_CString("udp")*/ );
+    DUMP("$(obj)\n", getservbyname_spec(context, create_CString("tcpmux"), create_CString("tcp") )  );
+
+    //DUMP("$(obj)\n", getservent_spec(context) ); // nondeterministic realization
+    
+//    while(se = getservent_spec(context))
+    /**/
+
+    endservent_spec(context);
+
+    return true;
+}
+
+
+
+scenario
+bool init_protoent_netdb_scen(void)
+{
+    NetdbProcessData * data = get_netdb_data(context);
+    
+    setprotoent_spec(context, 0);
+
+    data->proto_db_filling = NETDB_FILLED;
+
+    while(getprotoent_spec(context));
+
+    data->proto_db_filling = NETDB_FILLED;
+
+    endprotoent_spec(context);
+
+    return true;
+}
+
+scenario
+bool protoent_netdb_scen(void)
+{
+    ProtoentT * pe;
+
+    DUMP("$(obj)\n", getprotoent_spec(context) );
+
+    setprotoent_spec(context, 0);
+
+    DUMP("$(obj)\n", getprotoent_spec(context) );
+    DUMP("$(obj)\n", getprotoent_spec(context) );
+    
+    DUMP("$(obj)\n", getprotobyname_spec(context, create_CString("tcp") )  );
+
+    DUMP("$(obj)\n", getprotobynumber_spec(context, 2 )  );
+
+    // DUMP("$(obj)\n", getprotoent_spec(context) ); // nondeterministic realization
+    
+//    while(se = getservent_spec(context))
+    /**/
+
+    endservent_spec(context);
+
+    return true;
+}
+
+
+scenario
+bool hostent_netdb_scen(void)
+{
+    HostentT * he;
+    VoidTPtr ptr;
+    
+    he = gethostbyname_spec(context, create_CString("localhost"));
+
+    ptr = readPointer_VoidTPtr(context, he->h_addr_list);
+
+    traceFormattedUserInfo("ptr: 0x%x", ptr.address);
+    
+    gethostbyaddr_spec(context, ptr, he->h_length , SUT_AF_INET );
+
+    return true;
+}
+
+scenario
+bool gai_netdb_scen(void)
+{
+    IntT i;
+
+    for(i=4;i>=-12;i--)
+    {
+        gai_strerror_spec(context, i);
+    }
+}
+
+scenario
+bool getaddrinfo_netdb_scen(void)
+{
+    CString *nodename, *servname;
+    AddrInfoT * hints, *hints_ai;
+    AddrInfoT * res_ai;
+
+    hints_ai = create_emptyAddrInfoT(context);
+    res_ai = create_emptyAddrInfoT(context);
+
+    iterate(int i_node =0; i_node<2;  i_node++;)
+    iterate(int i_serv =0; i_serv<3;  i_serv++;)
+    iterate(int i_hints=0; i_hints<2; i_hints++;)
+    {
+        if(i_node==0)
+            nodename = NULL;
+        else
+            nodename = create_CString("localhost");
+
+        if(i_serv==0)
+            servname = NULL;
+        else if(i_serv==1)
+            servname = create_CString("mail");
+        else
+            servname = create_CString("null");
+
+        if(i_hints==0)
+            hints = NULL;
+        else 
+        {
+            hints = hints_ai;
+        }
+
+        getaddrinfo_spec(context, nodename, servname, hints, create_VoidTPtrObj(res_ai->addr) );
+    }
+
+    freeaddrinfo_spec(context, res_ai->addr);
+    freeaddrinfo_spec(context, hints_ai->addr);
+
+    return true;
+}
+
+scenario
+bool flag_getaddrinfo_netdb_scen(void)
+{
+    CString *nodename, *servname;
+    AddrInfoT * hints;
+    AddrInfoT * res_ai;
+
+    nodename = create_CString("localhost");
+    servname = create_CString("mail");
+
+    hints = create_emptyAddrInfoT(context);
+    res_ai = create_emptyAddrInfoT(context);
+
+    iterate(int i_flags=0;i_flags<64;i_flags++;)
+    {
+        if(!hints || !res_ai)
+        {
+            traceUserInfo("Scenario failed");
+            return false;
+        }
+
+        hints->ai_flags = i_flags;
+
+        getaddrinfo_spec(context, nodename, servname, hints, create_VoidTPtrObj(res_ai->addr) );
+    }
+
+    deallocateMemoryBlock(context, res_ai->addr);
+    deallocateMemoryBlock(context, hints->addr);
+
+    return true;
+}
+
+scenario
+bool other_getaddrinfo_netdb_scen(void)
+{
+    CString *nodename, *servname;
+    AddrInfoT * hints;
+    AddrInfoT * res_ai;
+
+    hints = create_emptyAddrInfoT(context);
+    res_ai = create_emptyAddrInfoT(context);
+
+    if(!hints || !res_ai)
+    {
+        traceUserInfo("Scenario failed");
+        return false;
+    }
+
+
+    // wrong service name
+    getaddrinfo_spec(context, NULL, create_CString("wrongservicename"), NULL, create_VoidTPtrObj(res_ai->addr) );
+
+    // wrong flags
+    hints->ai_flags = -1;
+    getaddrinfo_spec(context, create_CString("localhost") ,NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // wrong address family
+    hints->ai_flags = 0;
+    hints->ai_family = -1;
+    getaddrinfo_spec(context, create_CString("localhost") ,NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // wrong nodename
+    getaddrinfo_spec(context, create_CString("wrongnodename$%#@"), NULL, NULL, create_VoidTPtrObj(res_ai->addr) );
+
+    // nodename == NULL && servname == NULL
+    getaddrinfo_spec(context, NULL, NULL, NULL, create_VoidTPtrObj(res_ai->addr) );
+
+    // AI_NUMERICHOST flag with NULL nodename shall cause EAI_NONAME
+    hints->ai_flags = SUT_AI_NUMERICHOST;
+    hints->ai_family = 0;
+    getaddrinfo_spec(context, NULL , create_CString("mail"), hints, create_VoidTPtrObj(res_ai->addr) );
+    getaddrinfo_spec(context, create_CString("localhost") , NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+    getaddrinfo_spec(context, create_CString("127.0.0.1") , NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // AI_PASSIVE flag with NULL nodename
+    hints->ai_flags = SUT_AI_PASSIVE;
+    hints->ai_family = 0;
+    getaddrinfo_spec(context, NULL , create_CString("mail"), hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // AI_CANONNAME flag with NULL nodename
+    hints->ai_flags = SUT_AI_CANONNAME;
+    hints->ai_family = 0;
+    getaddrinfo_spec(context, NULL , create_CString("mail"), hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // numeric service
+    hints->ai_flags = 0;
+    hints->ai_family = 0;
+    getaddrinfo_spec(context, NULL , create_CString("80"), hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // AI_CANONNAME flag with 127.0.0.1 nodename
+    hints->ai_flags = SUT_AI_CANONNAME;
+    hints->ai_family = 0;
+    getaddrinfo_spec(context, create_CString("127.0.0.1"), NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+    
+    // wrong ai_socktype shall cause EAI_SOCKTYPE
+    hints->ai_flags = 0;
+    hints->ai_family = 0;
+    hints->ai_socktype = -1;
+    getaddrinfo_spec(context, create_CString("localhost"), NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // normal ai_socktype
+    hints->ai_flags = 0;
+    hints->ai_family = 0;
+    hints->ai_socktype = SUT_SOCK_DGRAM;
+    getaddrinfo_spec(context, create_CString("localhost"), NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // flag SUT_AI_V4MAPPED
+    hints->ai_flags = SUT_AI_V4MAPPED;
+    hints->ai_family = SUT_AF_INET6;
+    hints->ai_socktype = 0;
+    getaddrinfo_spec(context, create_CString("localhost"), NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // family
+    hints->ai_flags = 0;
+    hints->ai_family = SUT_AF_INET6;
+    hints->ai_socktype = 0;
+    getaddrinfo_spec(context, create_CString("localhost"), NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    // protocol restriction
+    hints->ai_flags = 0;
+    hints->ai_family = 0;
+    hints->ai_socktype = 0;
+    hints->ai_protocol = SUT_IPPROTO_TCP;
+    getaddrinfo_spec(context, create_CString("localhost"), NULL, hints, create_VoidTPtrObj(res_ai->addr) );
+
+    deallocateMemoryBlock(context, res_ai->addr);
+    deallocateMemoryBlock(context, hints->addr);
+
+    return true;
+}
+
+
+scenario
+bool getnameinfo_netdb_scen(void)
+{
+    SockaddrT * sa;
+    CString *node, *service;
+    sut_socklen_t salen, nodelen, servicelen;
+    IntT flags;
+
+    sa = create_SockaddrT_Inet(htons_model(2), 0);
+    node = create_CString("");
+    service = create_CString("");
+    nodelen = 3;
+    servicelen = 3;
+    flags = 0;
+    getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+    node = create_CString("");
+    service = NULL;
+    getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+    node = NULL;
+    service = create_CString("");
+    getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+    node = NULL;
+    service = NULL;
+    getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+    
+    sa = create_SockaddrT_Inet( htons_model(2), htons_model(SUT_INADDR_LOOPBACK) );
+    node = create_CString("");
+    service = create_CString("");
+    nodelen = 255;
+    servicelen = 255;
+    flags = 0;
+    getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+    sa = create_SockaddrT_Inet( htons_model(2), -1);
+    node = create_CString("");
+    service = create_CString("");
+    nodelen = 255;
+    servicelen = 255;
+    flags = 0;
+    getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+
+    /*
+    Not defined NADDR_LOOPBACK
+      sa = create_SockaddrT_Inet( -1, htons_model(NADDR_LOOPBACK));
+    node = create_CString("");
+    service = create_CString("");
+    nodelen = 255;
+    servicelen = 255;
+    flags = 0;
+    getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );*/
+
+    return true;
+}
+
+scenario
+bool flags_getnameinfo_netdb_scen(void)
+{
+    SockaddrT * sa;
+    CString *node, *service;
+    sut_socklen_t salen, nodelen, servicelen;
+    IntT flags;
+
+    nodelen = 255;
+    servicelen = 255;
+
+    iterate(int i_flags=0;i_flags<32;i_flags++;)
+    {
+        flags = i_flags;
+
+        sa = create_SockaddrT_Inet( htons_model(2), 0);
+        node = create_CString("");
+        service = create_CString("");
+        getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+        node = create_CString("");
+        service = NULL;
+        getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+        node = NULL;
+        service = create_CString("");
+        getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+    
+        sa = create_SockaddrT_Inet( htons_model(25), htonl_model(SUT_INADDR_LOOPBACK) );
+        node = create_CString("");
+        service = create_CString("");
+        getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+
+        sa = create_SockaddrT_Inet( htons_model(2), -1);
+        node = create_CString("");
+        service = create_CString("");
+        getnameinfo_spec(context, sa, node, nodelen, service, servicelen, flags );
+    }
+
+    return true;
+}
+scenario
+bool setservent_scen(void)
+{  
+    iterate(IntT stayopen=0;stayopen<=1;stayopen++;)
+    {
+        setservent_spec(context, stayopen);
+    }
+
+    return true;
+}
+
+scenario
+bool getservbyname_scen(void)
+{ 
+    CString *name, *proto;
+    ServentT * se;
+
+    iterate(IntT i_name=0;i_name<=1;i_name++;)
+    iterate(IntT i_proto=0;i_proto<=2;i_proto++;)
+    {
+        switch(i_name)
+        {
+        case 0: 
+            se = getservent_byPos(context, 1);
+            name = se->s_name;
+            break;
+        case 1: 
+            se = getservent_byPos(context, SOCKET_NETDB_ENUM_MAX);
+            name = se->s_name;
+            break;
+        }
+        
+        if(!se)
+            return false;
+
+        switch(i_proto)
+        {
+        case 0: 
+            proto = se->s_proto;
+            break;
+        case 1: 
+            proto = create_CString("wrongprotocol");
+            break;
+        case 2:
+            proto = NULL;
+            break;
+        }
+
+        getservbyname_spec(context, name, proto);
+    }
+
+    return true;
+}
+
+scenario
+bool getservbyport_scen(void)
+{
+    IntT port;
+    CString *proto;
+    ServentT * se;
+
+    iterate(IntT i_port=0;i_port<=2;i_port++;)
+    iterate(IntT i_proto=0;i_proto<=2;i_proto++;)
+    {
+        switch(i_port)
+        {
+        case 0: 
+            se = getservent_byPos(context, 1);
+            port = se->s_port;
+            break;
+        case 1: 
+            se = getservent_byPos(context, SOCKET_NETDB_ENUM_MAX);
+            port = se->s_port;
+            break;
+        case 2:
+            se = NULL;
+            port = 0; // wrong port
+            break;
+        }
+        
+        switch(i_proto)
+        {
+        case 0: 
+            se = getservent_byPos(context, 0);
+            proto = se->s_proto;
+            break;
+        case 1: 
+            se = getservent_byPos(context, SOCKET_NETDB_ENUM_MAX);
+            proto = se->s_proto;
+            break;
+        case 2:
+            se = NULL;
+            proto = NULL;
+            break;
+        }
+
+        getservbyport_spec(context, port, proto);
+    }    
+
+    return true;
+}
+
+scenario
+bool getservent_scen(void)
+{
+    NetdbProcessData * data;
+
+    data = get_netdb_data(context);
+    if(!data)
+        return false;
+
+    if(data->serv_db_pos<SOCKET_NETDB_ENUM_MAX)
+    {
+        getservent_spec(context);
+    }
+
+    return true;
+}
+
+scenario
+bool endservent_scen(void)
+{
+    endservent_spec(context);
+
+    return true;
+}
+
+Map* saveNetDBState(void)
+{
+    return clone(netdb_data);
+}
+
+void restoreNetDBState(Map* saved_state)
+{
+    netdb_data = saved_state;
+}
+
+
+Object* getServentScenarioGenState(void)
+{
+    return clone(netdb_data);
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm ent_netdb_scenario =
+{
+    .init = init_simple_netdb_scenario,
+    .finish = finish_simple_netdb_scenario,
+    .actions = 
+    {
+        h_errno_netdb_scen,
+        
+        init_servent_netdb_scen,
+        init_protoent_netdb_scen,
+
+        servent_netdb_scen,         
+        protoent_netdb_scen, 
+              
+        NULL
+    }
+};
+
+scenario dfsm info_netdb_scenario =
+{
+    .init = init_simple_netdb_scenario,
+    .finish = finish_simple_netdb_scenario,
+    .actions = 
+    {
+        h_errno_netdb_scen,
+        
+        init_servent_netdb_scen,
+        
+        hostent_netdb_scen,
+        
+        getaddrinfo_netdb_scen,
+        flag_getaddrinfo_netdb_scen,
+        other_getaddrinfo_netdb_scen,
+        
+        gai_netdb_scen,
+        
+        getnameinfo_netdb_scen,
+        flags_getnameinfo_netdb_scen,
+        NULL
+    }
+};
+
+scenario dfsm servent_name_port_netdb_scenario =
+{
+    .init = init_sp_netdb_scenario,
+    .finish = finish_sp_netdb_scenario,
+    .getState = getServentScenarioGenState,
+
+    .saveModelState = (PtrSaveModelState)saveNetDBState,
+    .restoreModelState = (PtrRestoreModelState)restoreNetDBState,
+
+    .actions = 
+    {
+        setservent_scen,
+        getservbyname_scen,
+        getservbyport_scen,
+        endservent_scen,
+        NULL
+    }
+};
+
+scenario dfsm servent_netdb_scenario =
+{
+    .init = init_sp_netdb_scenario,
+    .finish = finish_sp_netdb_scenario,
+    .getState = getServentScenarioGenState,
+
+    .saveModelState = (PtrSaveModelState)saveNetDBState,
+    .restoreModelState = (PtrRestoreModelState)restoreNetDBState,
+
+    .actions = 
+    {
+        setservent_scen,
+        getservent_scen,
+        endservent_scen,
+        NULL
+    }
+};

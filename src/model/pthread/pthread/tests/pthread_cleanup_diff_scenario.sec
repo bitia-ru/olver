@@ -1,0 +1,364 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/pthread/tests/pthread_scenario.seh"
+#include "common/common_model.seh"
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+#define NUM_CLEANUP_THREADS 2
+#define NUM_CLEANUP_BRACES 1
+static int curNumThreads;
+static int currBrace=0;
+static CallContext     context;
+static ThreadId        threadIDs[NUM_CLEANUP_THREADS];
+
+static ThreadState* killedThread;
+static bool killed;
+
+/*****************************   Cleanup  Complex   **************************/
+
+
+static bool init_cleanup_diff_scenario(int argc, char** argv)
+{
+    context = createProcess();//getContext();
+
+    curNumThreads=0;
+   
+    killed=false;
+
+    /*
+    cancelStateSet=false;
+    cancelTypeSet=false;
+    */
+    
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME*50);
+
+   
+    return true;
+}
+
+static void finish_cleanup_diff_scenario2(void)
+{
+    terminateProcess(context);
+    TEST_SCENARIO_VERDICT_VERBOSE(pthread_cleanup_diff_scenario);  
+}
+
+
+scenario
+bool pthread_cleanup_create_scen4()
+{
+    if(curNumThreads<NUM_CLEANUP_THREADS)
+    {       
+        if(pthread_create_spec(context,
+            &threadIDs[curNumThreads], NULL_VoidTPtr, NULL_VoidTPtr)==0)
+        {   
+            curNumThreads++;             
+        }      
+    }
+
+    return true;
+}
+
+scenario
+bool pthread_cleanup_cancel_scen2()
+{
+
+    if(curNumThreads>0)    
+    {           
+        ThreadState* ret = getThreadState_CallContext(threadIDs[curNumThreads-1]);
+
+        VERBOSE("ret_cancel_before==%d   called from==%d   thread==%d\n", ret->numberOfExecutableFunctions, (int)context.thread, (int)threadIDs[curNumThreads-1].thread);
+
+        ret->numberOfExecutableFunctions=ret->numberOfPopPushBraces;
+        ret->numberOfPopPushBraces=0;        
+
+        //TODO: 
+        //Depending on lex, i'll make changes...
+        
+        killed=true;
+        killedThread=ret;
+        
+        VERBOSE("bef...\n");
+        pthread_cancel_spec(context, threadIDs[curNumThreads-1]);     
+        
+        pthread_testcancel_spec(threadIDs[curNumThreads-1], cancel_status);
+        VERBOSE("aft...curr==%d\n", threadIDs[curNumThreads-1].thread);        
+        
+        VERBOSE("aft...\n");
+
+        curNumThreads--;
+
+        VERBOSE("ret_cancel_after==%d\n", ret->numberOfExecutableFunctions);
+    }    
+
+    return true;
+}
+
+scenario
+bool pthread_cleanup_exit_scen()
+{
+    if (curNumThreads>0)
+    {
+        ThreadState* ret = getThreadState_CallContext(threadIDs[curNumThreads-1]);
+
+        VERBOSE("ret_cancel_before==%d   called from==%d   thread==%d\n", ret->numberOfExecutableFunctions, (int)context.thread, (int)threadIDs[curNumThreads-1].thread);
+
+        ret->numberOfExecutableFunctions=ret->numberOfPopPushBraces;
+        ret->numberOfPopPushBraces=0;        
+
+        //TODO: 
+        //Depending on lex, i'll make changes...
+        
+        killed=true;
+        killedThread=ret;
+        
+        /*
+        * Any cancellation cleanup handlers that have been pushed and not yet 
+        * popped shall be popped in the reverse order that they were pushed 
+        * and then executed.
+        */
+        IMPLEMENT_REQ("pthread_exit.02");
+
+        VERBOSE("bef...\n");
+        pthread_exit_spec(threadIDs[curNumThreads-1] , generateVirtualPointer(context));        
+        VERBOSE("aft...curr==%d\n", threadIDs[curNumThreads-1].thread);        
+        
+        VERBOSE("aft...\n");
+
+        curNumThreads--;
+
+        VERBOSE("ret_cancel_after==%d\n", ret->numberOfExecutableFunctions);        
+    }
+
+    return true;
+}
+
+scenario
+bool pthread_cleanup_push_diff_scen4()
+{
+    ThreadState* ret;    
+
+    iterate(int i=0;i<NUM_CLEANUP_THREADS;i++;)
+    {
+        if(i<curNumThreads)
+        {
+        
+           ret=getThreadState_CallContext(threadIDs[i]) ;
+    
+            if(ret->numberOfPopPushBraces<NUM_CLEANUP_BRACES)
+            {
+                VERBOSE("braces push==%d thread==%d\n", ret->numberOfPopPushBraces,
+                    (int)threadIDs[i].thread);
+                _pthread_cleanup_push_spec(threadIDs[i], 
+                    createVirtualPointer(context, currBrace++));
+            }
+        }
+    }
+
+    return true;
+}
+scenario
+bool pthread_cleanup_pop_diff4_scen0()
+{
+    ThreadState* ret;
+
+    iterate(int i=0;i<NUM_CLEANUP_THREADS;i++;)
+    {
+        if(i<curNumThreads)
+        {
+        
+           ret=getThreadState_CallContext(threadIDs[i]);
+    
+            if(ret->numberOfPopPushBraces>0)
+            {
+                VERBOSE("braces pop==%d\n", ret->numberOfPopPushBraces);
+                _pthread_cleanup_pop_spec(threadIDs[i],0);
+            }
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool pthread_cleanup_pop_diff4_scen1()
+{
+    ThreadState* ret;
+
+    iterate(int i=0;i<NUM_CLEANUP_THREADS;i++;)
+    {
+        if(i<curNumThreads)
+        {
+        
+           ret=getThreadState_CallContext(threadIDs[i]) ;
+    
+            if(ret->numberOfPopPushBraces>0)
+            {
+                VERBOSE("braces pop==%d\n", ret->numberOfPopPushBraces);
+                _pthread_cleanup_pop_spec(threadIDs[i], 1);
+            }
+        }
+    }
+
+    return true;
+}
+
+void waitForThreadCreation(ThreadId* thid)
+{
+    bool created=false;
+    ProcessState*  ps;
+    ThreadState*   thState;
+    ThreadIdObj* srch=create_ThreadIdObj(*thid);
+
+    VERBOSE("Waiting for creation");
+
+    while(!created)
+    {
+        VERBOSE(".");
+        ps=getProcessState_CallContext(context);  
+        thState = get_Map(ps->threads, srch);
+
+        if (thState!=NULL)
+            if(thState->attr==NULL)
+                created=true;       
+    }
+}
+void waitForThreadCreation2(ThreadId* thid)
+{
+    bool created=false;    
+    ThreadState*   thState;    
+
+    VERBOSE("Waiting for creation");
+
+    while(!created)
+    {
+        VERBOSE(".");        
+        thState = getThreadState_CallContext(*thid);
+
+        if (thState!=NULL)
+            if(thState->attr==NULL)
+                created=true;       
+    }
+}
+scenario
+bool back_arc_scen()
+{
+    int k;    
+
+    iterate(int j=0;j<=NUM_CLEANUP_BRACES;j++;)
+        if(curNumThreads<NUM_CLEANUP_THREADS)
+        {
+           if( pthread_create_spec(context, &threadIDs[curNumThreads],
+                                            NULL_VoidTPtr, NULL_VoidTPtr)==0)
+           {
+                curNumThreads++;               
+                
+                for(k=0;k<0;k++)
+                    _pthread_cleanup_push_spec(threadIDs[curNumThreads-1],
+                                                                NULL_VoidTPtr);
+           }       
+        }
+
+    return true;
+}
+
+bool isPThreadCleanupDiffModelStateStationary3(void)
+{
+    int i;   
+    ThreadState* ret;
+
+    /*
+     * When the cancellation is acted on, the cancellation cleanup handlers for
+     * thread shall be called.
+     */
+    IMPLEMENT_REQ("pthread_cancel.03");
+    
+    for(i=0;i<curNumThreads;i++)
+    {
+        ret=getThreadState_CallContext(threadIDs[i]);
+
+        if((ret->numberOfExecutableFunctions)!=0)
+        {
+            VERBOSE("ret==%d\n", (ret->numberOfExecutableFunctions));
+            return false;
+        }
+    }
+
+    if(killed)
+    {
+        killed=false;
+        
+        ret=killedThread;
+
+        if((ret->numberOfExecutableFunctions)!=0)
+        {
+            VERBOSE("ret==%d\n", (ret->numberOfExecutableFunctions));
+            return false;
+        }
+    }
+
+    return true;
+}
+
+Object* getPThreadCleanupDiffState2(void)
+{  
+    unsigned int num=0;
+    int i;
+    ThreadState* ret;
+    List* res=create_List(&type_Integer);    
+
+    for(i=0;i<curNumThreads;i++)
+    {
+        ret=getThreadState_CallContext(threadIDs[i]);
+
+        add_List(res, 0, create_Integer(ret->numberOfPopPushBraces));       
+    }
+    add_List(res, 0, create_Integer(i));
+    for(;i<NUM_CLEANUP_THREADS;i++)
+        add_List(res, 1, create_Integer(0));
+
+    return res;    
+}
+
+scenario ndfsm pthread_cleanup_diff_scenario =
+{
+    .init = init_cleanup_diff_scenario,
+    .finish = finish_cleanup_diff_scenario2,
+    .getState = getPThreadCleanupDiffState2,
+    .saveModelState = (PtrSaveModelState)savePThreadModelState,
+    .restoreModelState = (PtrRestoreModelState)restorePThreadModelState,
+    .isStationaryState =
+               (PtrIsStationaryState)isPThreadCleanupDiffModelStateStationary3,
+    .actions = {
+      pthread_cleanup_create_scen4,
+      pthread_cleanup_push_diff_scen4,
+      pthread_cleanup_pop_diff4_scen0,
+      pthread_cleanup_pop_diff4_scen1,
+      pthread_cleanup_cancel_scen2,
+      back_arc_scen,
+      pthread_cleanup_exit_scen,
+      NULL
+     } 
+};

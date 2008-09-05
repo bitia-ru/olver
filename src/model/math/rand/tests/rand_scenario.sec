@@ -1,0 +1,371 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "math/rand/tests/rand_scenario.seh"
+#include "math/rand/rand_media.seh"
+#include "math/rand/rand_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "math/math/math_data.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include <stdio.h>
+
+static CallContext context;
+static CallContext contextA;
+static CallContext contextB;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_math_rand_scenario(int argc, char** argv)
+{
+    LongT MAX;
+    TSCommand command = create_TSCommand();
+
+    // Init test scenario data
+    context = getContext();
+    contextA = createProcess();
+    contextB = createProcess();
+    Rand48State = create_Random48State(createZero_Unifloat(1), 
+                                       convertString_Unifloat(create_CString("25214903917"), 1), 
+                                       convertString_Unifloat(create_CString("11"), 1));
+    RandState = create_RandomState();
+    
+    //get SUT_SC_RAND_MAX
+    format_TSCommand( &command, "get_SUT_SC_RAND_MAX" );
+    executeCommandInContext( context, &command );
+    MAX = readLong_TSStream(&command.response);
+    destroy_TSCommand(&command);
+    setSystemConfigurationValue(context, SUT_SC_RAND_MAX, MAX);
+    setSystemConfigurationValue(contextA, SUT_SC_RAND_MAX, MAX);
+    setSystemConfigurationValue(contextB, SUT_SC_RAND_MAX, MAX);
+    
+    initReqFilters();
+    setFinishMode(UNTIL_END); 
+    return true;
+}
+
+static void finish_math_rand_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(math_rand_scenario);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario bool drand48_lrand48_mrand48_erand48_nrand48_jrand48_seed48_srand48_lcong48_scen()
+{
+    IntT i;
+    Map* RandomSample = create_Map(&type_Integer, &type_Unifloat);
+    Unifloat* res;
+    UShortT param[3][7] = {
+        {1, 1, 1, 1, 1, 1, 1},
+        {123, 123, 123, 123, 123, 123, 123},
+        {65535, 65535, 65535, 65535, 65535, 65535, 65535}
+        };
+    UShortT seed16v3[3][3] = {
+        {0, 0, 0},
+        {123, 123, 123},
+        {65535, 65535, 65535}
+        };
+    LongT seedval[3] = {
+        0, 123, 65535
+        };
+    UShortT xsubi[3][3] = {
+        {0, 0, 0},
+        {123, 123, 123},
+        {65535, 65535, 65535}
+        };
+
+    for(i = 1; i <= 100; i++)
+    {
+        res = drand48_spec(context);
+        put_Map(RandomSample, create_Integer(i), clone(res));
+    }
+    /*
+     * The drand48() and erand48() functions shall return non-negative, double- 
+     * precision, floating-point values, uniformly distributed over the 
+     * interval [0.0,1.0).
+     */
+    REQ_SCEN("drand48.02", "uniformly distributed", 
+              Kolmogorov_drand48(RandomSample) == true);
+    
+    for(i = 1; i <= 100; i++)
+    {
+        res = lrand48_spec(context);
+        put_Map(RandomSample, create_Integer(i), clone(res));
+    }
+    /*
+     * The lrand48() and nrand48() functions shall return non-negative, long integers, 
+     * uniformly distributed over the interval [0,231).
+     */
+    REQ_SCEN("lrand48.02", "uniformly distributed", 
+              Kolmogorov_lrand48(RandomSample) == true);
+
+    for(i = 1; i <= 100; i++)
+    {
+        res = mrand48_spec(context);
+        put_Map(RandomSample, create_Integer(i), clone(res));
+    }
+    /*
+     * The mrand48() and jrand48() functions shall return signed long integers 
+     * uniformly distributed over the interval [-231,231).
+     */
+    REQ_SCEN("mrand48.02", "uniformly distributed", 
+              Kolmogorov_mrand48(RandomSample) == true);
+
+    for(i = 0; i < 3; i++)
+    {
+        drand48_spec(context);
+        lrand48_spec(context);
+        mrand48_spec(context);
+    }
+    for(i = 0; i < 3; i++)
+    {
+        erand48_spec(context, xsubi[i]);
+        nrand48_spec(context, xsubi[i]);
+        jrand48_spec(context, xsubi[i]);
+    }
+    for(i = 0; i < 3; i++)
+    {
+        seed48_spec(context, seed16v3[i]);
+        drand48_spec(context);
+        lrand48_spec(context);
+        mrand48_spec(context);
+    }
+    for(i = 0; i < 3; i++)
+    {
+        srand48_spec(context, seedval[i]);
+        drand48_spec(context);
+        lrand48_spec(context);
+        mrand48_spec(context);
+    }
+    for(i = 0; i < 3; i++)
+    {
+        lcong48_spec(context, param[i]);
+        drand48_spec(context);
+        lrand48_spec(context);
+        mrand48_spec(context);
+    }
+    
+    return true;
+}
+
+scenario bool initstate_random_setstate_srandom_scen()
+{
+    IntT i, j;
+    VoidTPtrObj* SPointer;
+    UIntT seed[3] = {0, 123, 65535};
+    IntT size[11] = {4, 8, 16, 32, 48, 64, 96, 128, 192, 256, 272};
+    Unifloat* res_first, * res_second;
+    
+    for(i = 0; i < 10; i++)
+        initstate_spec(contextB, 1, 128);
+
+    res_first = random_spec(contextB);
+    initstate_spec(contextB, 1, 128);
+    res_second = random_spec(contextB);
+    /*
+     * If initstate() has not been called, then random() shall behave as though 
+     * initstate() had been called with seed=1 and size=128.
+     */
+    REQ_SCEN("initstate.08", "initstate() has not been called", 
+              compare_Unifloat(res_first, res_second) == 0);
+
+    initstate_spec(contextB, seed[1], 128);
+    res_first = random_spec(contextB);
+    initstate_spec(contextB, seed[1], 128);
+    res_second = random_spec(contextB);
+    /*
+     * The seed argument specifies a starting point for the random-number sequence and 
+     * provides for restarting at the same point.
+     */
+    REQ_SCEN("initstate.06", "restarting", 
+              compare_Unifloat(res_first, res_second) == 0);
+
+    for(i = 0; i < 3; i++)
+    {
+        for(j = 0; j < 11; j++)
+        {
+            initstate_spec(contextB, seed[i], size[j]);
+        }
+    }
+    for(i = 0; i < 3; i++)
+    {
+        for(j = 1; j < 10; j++)
+        {
+            initstate_spec(contextB, seed[i], size[j]);
+            random_spec(contextB);
+        }
+    }
+    for(i = 0; i < 3; i++)
+    {
+        srandom_spec(contextB, seed[i]);
+        random_spec(contextB);
+    }
+
+    SPointer = get_List(RandState->StatePointer, size_List(RandState->StatePointer) - 2);
+    setstate_spec(contextB, *SPointer);
+}
+
+scenario bool rand_srand_rand_r_scen()
+{
+    UIntT seed[3] = {0, 123, 65535};
+    IntT i;
+    Unifloat* res_first, * res_second;
+
+    res_first = rand_spec(contextA);
+    srand_spec(contextA, 1);
+    res_second = rand_spec(contextA);
+    /*
+     * If rand() is called before any calls to srand() are made, the same sequence 
+     * shall be generated as when srand() is first called with a seed value of 1.
+     */
+    REQ_SCEN("srand.03", "with a seed value of 1", 
+              compare_Unifloat(res_first, res_second) == 0);
+
+    for(i = 0; i < 3; i++)
+    {
+        srand_spec(contextA, seed[i]);
+        rand_spec(contextA);
+    }
+    for(i = 0; i < 3; i++)
+    {
+        rand_r_spec(contextA, seed[i]);
+    }
+
+    res_first = rand_r_spec(contextA, seed[1]);
+    res_second = rand_r_spec(contextA, seed[1]);
+    /*
+     * If rand_r() is called with the same initial value for the object pointed to by 
+     * seed and that object is not modified between successive returns and calls to 
+     * rand_r(), the same sequence shall be generated.
+     */
+    REQ_SCEN("rand_r.03", "with the same initial value", 
+              compare_Unifloat(res_first, res_second) == 0);
+
+    srand_spec(contextA, seed[1]);
+    res_first = rand_spec(contextA);
+    srand_spec(contextA, seed[1]);
+    res_second = rand_spec(contextA);
+    /*
+     * If srand() is then called with the same seed value, the sequence of pseudo- 
+     * random numbers shall be repeated.
+     */
+    REQ_SCEN("srand.02", "with the same seed value", 
+              compare_Unifloat(res_first, res_second) == 0);
+}
+
+/********************************************************************/
+
+/**                    Test Scenario Definition                    **/
+
+/********************************************************************/
+
+scenario dfsm math_rand_scenario =
+{
+    .init = init_math_rand_scenario,
+    .finish = finish_math_rand_scenario,
+    .actions = {    
+                    drand48_lrand48_mrand48_erand48_nrand48_jrand48_seed48_srand48_lcong48_scen,
+                    initstate_random_setstate_srandom_scen,
+                    rand_srand_rand_r_scen,
+                    NULL 
+               }
+};
+
+bool main_math_rand(int argc, char** argv)
+{
+    math_rand_scenario(argc,argv);
+    return true;
+}
+
+#include "math/rand/tests/rand_scenario.seh"
+#include "math/math/math_data.seh"
+
+#ifdef MATH_RAND_LOCAL_MAIN
+
+#include "common/init.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "math/rand/rand_media.seh"
+#include "math/math/math_data.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initMath();
+    initMathRandSubsystem();
+}
+
+#ifdef WIN32
+int main(int argc, char** argv)
+{
+    clock_t start, finish;
+    double duration;
+    initTestSystem();
+    loadSUT();
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+    // Run test scenario
+    addTraceToFile("trace.xml");
+    start = clock();
+    main_math_rand(argc,argv);
+    finish = clock();
+    duration = (double) (finish - start) / CLOCKS_PER_SEC;
+    verbose( "%2.3f seconds\n", duration );        
+    //  unloadSUT();
+    return 0;
+}
+#else
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+    // Run test scenario
+    addTraceToFile("trace.xml");
+    main_math_rand(argc,argv);
+    //  unloadSUT();
+    return 0;
+}
+#endif
+#endif
+
+
+

@@ -1,0 +1,280 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/search/tests/hash_scenario.seh"
+#include "util/search/hash_model.seh"
+
+#include "util/string/wstr_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+
+static int sizes[] = {
+  0, 1, 30, 320, 32769
+};
+
+static int numSizes = sizeof(sizes)/sizeof(int);
+
+
+#define NUM_THREADS   3
+
+#define NUM_ENTRIES 30
+static HashEntryT*  entries[NUM_THREADS][NUM_ENTRIES];
+
+#define NUM_KEYS   (NUM_ENTRIES/3)
+static CharT*      strChars[NUM_KEYS];
+static VoidTPtr    dataPointers[NUM_THREADS][NUM_KEYS];
+
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext contexts[NUM_THREADS];
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static void init_string_table(int curContext)
+{
+    TSCommand command = create_TSCommand();
+    format_TSCommand(&command, "init_string_table");
+    executeCommandInContext( contexts[curContext], &command );
+    if (!isBadVerdict())
+    {
+    }    
+    destroy_TSCommand(&command);
+}
+
+static void destroy_string_table(int curContext)
+{
+    TSCommand command = create_TSCommand();
+    format_TSCommand(&command, "finish_string_table");
+    executeCommandInContext( contexts[curContext], &command );
+    if (!isBadVerdict())
+    {
+    }    
+    destroy_TSCommand(&command);
+}
+
+
+static CharT* generateString(int length)
+{
+    CharT* tmp;
+    int j;
+    tmp=(CharT*)malloc((length+1)*sizeof(CharT));
+    if(tmp!=NULL)
+    {
+        for(j=0;j<length;j++)
+        {
+            tmp[j]=(CharT)('a'+((length+j)*57)%30);
+            if(tmp[j]=='\0')
+                return tmp;
+        }
+        tmp[j]='\0';
+    }
+    return tmp;
+}
+
+
+static bool init_hash_scenario(int argc, char** argv)
+{
+    HashEntryT* entry;
+    CString *str1, *str2;
+    int i=0, k=0;
+
+    // We're creating the following thread structure:
+    //
+    //  processi     --- thread_i1
+    //  process(i+1) --- thread_i2
+    //                \- thread_i3
+    //
+    for(i=0;i<NUM_THREADS;i+=3){
+        if(isWrong_ThreadId(createProcess()))
+            return false;
+        if(i!=0)
+        {
+            if(isWrong_ThreadId(createProcess()))
+                return false;
+        }
+        createThread();
+    }
+
+    // Init test scenario data
+    if(!getContexts(NUM_THREADS, contexts))
+        return false;
+
+    for(i=0; i<NUM_KEYS; i++){
+        strChars[i]=generateString(i);
+    }
+    
+    for(k=0;k<NUM_THREADS;k++)
+    {
+        init_string_table(k);
+        for(i=0; i<NUM_KEYS; i++){
+            dataPointers[k][i]=generateVirtualPointer(contexts[k]);
+        }
+        for(i=0; i<NUM_ENTRIES; i+=2){
+              str1 = create_CString(strChars[i%NUM_KEYS]);
+              str2 = create_CString(strChars[(i+(i%4?0:1))%NUM_KEYS]);
+              entries[k][i] = create_HashEntryT( str1, dataPointers[k][i%NUM_KEYS]);
+              entries[k][i+1] = create_HashEntryT( str2, dataPointers[k][(i+1)%NUM_KEYS]);
+        }
+    }
+
+    return true;
+}
+
+static void finish_hash_scenario(void)
+{
+    int k=0;
+    for(k=0;k<NUM_THREADS;k+=3){
+        destroy_string_table(k);
+        destroy_string_table(k+1);
+    }
+
+    for(k=0; k<NUM_KEYS; k++){
+        free(strChars[k]);
+    }
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool hash_scen()
+{
+    int j, i;
+
+    iterate (int k=0; k<NUM_THREADS; k+=3;)
+    {
+        for (i=0; i<numSizes; i++)
+        {
+            hcreate_spec(contexts[k], sizes[i], requestErrorCode());
+            hcreate_spec(contexts[k+1], sizes[i], requestErrorCode());
+
+            for(j=0; j<NUM_ENTRIES; j++)
+            {
+                hsearch_spec(contexts[k], entries[k][j], SUT_ENTER, requestErrorCode());
+                hsearch_spec(contexts[k+1], entries[k+1][NUM_ENTRIES-1-j], SUT_ENTER, requestErrorCode());
+
+                hsearch_spec(contexts[k], entries[k][j], SUT_FIND, requestErrorCode());
+                hsearch_spec(contexts[k+1], entries[k+1][j], SUT_FIND, requestErrorCode());
+                hsearch_spec(contexts[k+2], entries[k+2][j], SUT_FIND, requestErrorCode());
+
+                hsearch_spec(contexts[k+2], entries[k+2][NUM_ENTRIES-1-j], SUT_FIND, requestErrorCode());
+                hsearch_spec(contexts[k+1], entries[k+1][NUM_ENTRIES-1-j], SUT_FIND, requestErrorCode());
+                hsearch_spec(contexts[k], entries[k][NUM_ENTRIES-1-j], SUT_FIND, requestErrorCode());
+            }
+
+            hdestroy_spec(contexts[k]);
+            hdestroy_spec(contexts[k+1]);
+        }
+    }
+    return true;
+    
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm hash_scenario =
+{
+    .init = init_hash_scenario,
+    .finish = finish_hash_scenario,
+    .actions = {
+        hash_scen,
+        NULL
+    }
+};
+
+#ifdef UTIL_SEARCH_HASH_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/search/hash_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+  reinitControlCenter();
+  initCommonModel();
+  initCommonMedia();
+  initCommonScenarioState();
+
+  initSystemConfiguration();
+  initSystemModel();
+  initProcessModel();
+  initPThreadModel();
+
+  initUtilSearchHashSubsystem();
+}
+
+bool main_util_search_hash( int argc, char** argv )
+{
+  addTraceToFile("trace.xml");
+  hash_scenario(argc,argv);
+  return true;
+}
+
+
+int main(int argc, char** argv)
+{
+  //
+  initTestSystem();
+  loadSUT();
+
+  // Set up tracer
+  //setTraceEncoding("windows-1251");
+
+  // Run test scenario
+  main_util_search_hash(argc,argv);
+
+//  unloadSUT();
+  return 0;
+}
+#endif

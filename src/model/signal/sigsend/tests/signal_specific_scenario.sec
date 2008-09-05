@@ -1,0 +1,370 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "signal/sigsend/tests/signal_specific_scenario.seh"
+#include <stdio.h>
+#include "process/pgroup/pgroup_model.seh"
+
+/********************************************************************/
+/**                  Tests Local Data                              **/
+/********************************************************************/
+
+static CallContext context_send; //process 1
+static CallContext context_rec1; //process 1
+static CallContext context_rec2; //process 2
+static CallContext context_rec3; //process 2
+static CallContext context_rec4; //process 3
+static CallContext context_rec5; //process 3
+
+static ProcessState* process1;
+static ProcessState* process2;
+static ProcessState* process3;
+
+static SigAction* s_oact;
+static SigAction*  s_act;
+static SigSetTPtr  sset1;
+static SigSet*    msset1;
+static SigSetTPtr  sset2;
+static SigSet*    msset2;
+static SigSetTPtr  sset3;
+static SigSet*    msset3;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                 **/
+/********************************************************************/
+
+void cleanup_signal_specific_scenario()
+{
+}
+
+static bool init_signal_specific_scenario(int argc, char** argv)
+{
+    bool result;
+    ProcessState* pr_st;
+
+    CallContext curContext = getContext();
+    ProcessId procGroup = create_ProcessId(curContext.system, curContext.process);
+
+    setpgid_spec(curContext, procGroup, procGroup, requestErrorCode());
+
+    
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME*10);
+
+    result = true;
+    worked_reactions = 0;
+
+    context_send = createProcess();
+    if(isWrong_ThreadId(context_send)) result = false; 
+
+    context_rec1 = createThreadInContext(context_send);
+    if(isWrong_ThreadId(context_rec1)) result = false; 
+    process1 = getProcessState_CallContext(context_send);
+
+    context_rec2 = createProcess();
+    if(isWrong_ThreadId(context_rec2)) result = false; 
+
+    context_rec3 = createThreadInContext(context_rec2);
+    if(isWrong_ThreadId(context_rec3)) result = false; 
+    process2 = getProcessState_CallContext(context_rec2);
+
+    context_rec4 = createProcess();
+    if(isWrong_ThreadId(context_rec4)) result = false; 
+
+    context_rec5 = createThreadInContext(context_rec4);
+    if(isWrong_ThreadId(context_rec5)) result = false; 
+    process3 = getProcessState_CallContext(context_rec4);
+
+    //create sigaction varisble s_act
+    s_oact = create_SigAction();
+    s_act = create_SigAction();
+    s_act->m_sa_handler = SIG_USER_CATCHER;
+    s_act->m_sa_sigaction = SIGACT_USER_CATCHER;
+    if (SIGNAL_SIGINFO_FLAG != 0)
+    {
+        s_act->m_sa_flag.SA_SIGINFO_Flag = true;
+    }    
+    
+    //create sigset variable sset1
+    sset1 = allocateMemoryBlock(context_send, sizeof_SUTType("sigset_t"));
+    if(isNULL_VoidTPtr(sset1)) result = false;
+    msset1 = create_SigSet(sset1);    
+    registerObjectInMemory(sset1, 0, (Object*)msset1);
+    //create sigset variable sset2
+    sset2 = allocateMemoryBlock(context_rec2, sizeof_SUTType("sigset_t"));
+    if(isNULL_VoidTPtr(sset2)) result = false;
+    msset2 = create_SigSet(sset2);    
+    registerObjectInMemory(sset2, 0, (Object*)msset2);
+    //create sigset variable sset3
+    sset3 = allocateMemoryBlock(context_rec4, sizeof_SUTType("sigset_t"));
+    if(isNULL_VoidTPtr(sset3)) result = false;
+    msset3 = create_SigSet(sset3);    
+    registerObjectInMemory(sset3, 0, (Object*)msset3);
+
+    // if some thread or process was not create, remove created objects 
+    // and return false
+    if(!result) cleanup_signal_specific_scenario();
+
+    return result;
+}
+
+/********************************************************************/
+/**                  Test Scenario Finalization                    **/
+/********************************************************************/
+
+static void finish_signal_specific_scenario(void) 
+{
+    cleanup_signal_specific_scenario();
+    TEST_SCENARIO_VERDICT_VERBOSE(signal_specific_scenario);
+}
+
+
+/********************************************************************/
+/**                  Scenario State Functions                      **/
+/********************************************************************/
+
+bool isStationarySignalSpecificState(void)
+{
+
+    ThreadState* thr2 = getThreadState_CallContext(context_rec2);
+    ThreadState* thr3 = getThreadState_CallContext(context_rec3);
+    int i;
+    int signal_number;
+    SignalObj* sigobj;
+    List* temp_list;
+
+    if ((thr2 == NULL) || (thr3 == NULL))
+    {
+        return true; //if threads are aborted, state is stationary
+    }
+    if ((size_List(thr2->stack_of_calls) > 1) || (size_List(thr3->stack_of_calls) > 1))
+    {
+        return false;
+    }
+
+    if (process2 == NULL)
+    {        
+        return true;
+    }
+    signal_number = size_Map(process2->signal_queue);
+    for (i = 0; i < signal_number; i++)
+    {
+        sigobj = key_Map(process2->signal_queue, i);
+        if (isCanBeDelivered(process2, create_Signal(*sigobj)))
+        {
+            temp_list = get_Map(process2->signal_queue, sigobj);
+            if ((temp_list != NULL) && (size_List(temp_list) > 0) && (*sigobj != SUT_SIGKILL))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+Map* saveSignalModelSpecificState(void)
+{
+    return clone(systems);
+}
+
+void restoreSignalModelSpecificState(Map* st)
+{    
+    systems = st;
+    process1 = getProcessState_CallContext(context_send);
+    process2 = getProcessState_CallContext(context_rec2);
+    process3 = getProcessState_CallContext(context_rec4);
+}
+
+Object* getSignalState(void)
+{
+    return create_Integer(1);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario bool stop_continue1_scen()
+{   
+    verbose("scen 1\n");
+    /* 
+     * checking STOP and CONTINUE mechanism.
+     */
+    //set handler for SIGUSR1 for process2
+    sigaction_spec(context_rec2, create_Signal(SUT_SIGUSR1), clone(s_act), s_oact, requestErrorCode());
+
+    //block SIGSTOP, SIGTSTP, SIGSSIN, SIGTTOU to threads of process2
+    sigemptyset_spec(context_rec2, sset2, requestErrorCode());
+    sigaddset_spec(context_rec2, sset2, SUT_SIGSTOP, requestErrorCode());
+    sigaddset_spec(context_rec2, sset2, SUT_SIGTSTP, requestErrorCode());
+    sigaddset_spec(context_rec2, sset2, SUT_SIGTTIN, requestErrorCode());
+    sigaddset_spec(context_rec2, sset2, SUT_SIGTTOU, requestErrorCode());
+
+    pthread_sigmask_spec(context_rec2, SUT_SIG_SETMASK, sset2, NULL_VoidTPtr, false);
+    pthread_sigmask_spec(context_rec3, SUT_SIG_SETMASK, sset2, NULL_VoidTPtr, false);    
+
+    ts_sleep_msec(300);
+
+    //send SIGSTOP form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGSTOP), false);
+
+    //send SIGUSR1 form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGUSR1), false);
+
+    //send SIGCONT form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGCONT), false);
+    return true;
+}
+
+scenario bool stop_continue2_scen()
+{
+    verbose("scen 2\n");
+    //send SIGTSTP form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGTSTP), false);
+
+    //send SIGTTIN form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGTTIN), false);
+
+    //send SIGTTOU form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGTTOU), false);
+
+    //unblock SIGTSTP in thread_rec2 of process2
+    ts_sleep_msec(300);
+
+    sigdelset_spec(context_rec2, sset2, SUT_SIGTSTP, requestErrorCode());
+    sigemptyset_spec(context_send, sset1, requestErrorCode());
+    pthread_sigmask_spec(context_rec2, SUT_SIG_SETMASK, sset2, NULL_VoidTPtr, false);
+
+    ts_sleep_msec(300);
+
+    //send SIGCONT form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGCONT), false);
+
+    ts_sleep_msec(300);
+
+    //unblock SIGTTIN, SIGTTOU
+    sigdelset_spec(context_rec2, sset2, SUT_SIGTTIN, requestErrorCode());
+    sigdelset_spec(context_rec2, sset2, SUT_SIGTTOU, requestErrorCode());
+    pthread_sigmask_spec(context_rec2, SUT_SIG_SETMASK, sset2, NULL_VoidTPtr, false);
+
+    ts_sleep_msec(300);
+
+    //send SIGUSR1 form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGUSR1), false);
+    return true;
+}
+
+scenario bool stop_continue3_scen()
+{
+    verbose("scen 3\n");
+    verbose("\nsigaction start pr1 pr2 pr3 \n");
+    PrintfProcessSignalActions(process1);
+    PrintfProcessSignalActions(process2);
+    PrintfProcessSignalActions(process3);
+    //block SIGCONT to threads of process2 
+    sigaddset_spec(context_rec2, sset2, SUT_SIGCONT, requestErrorCode());
+
+    verbose("\nbefore sigaction pr1 pr2 pr3 \n");
+    PrintfProcessSignalActions(process1);
+    PrintfProcessSignalActions(process2);
+    PrintfProcessSignalActions(process3);
+    //set handler for SIGCONT to process2
+    sigaction_spec(context_rec2, create_Signal(SUT_SIGCONT), clone(s_act), NULL, requestErrorCode());
+    return true;
+}
+
+scenario bool stop_continue4_scen()
+{
+    verbose("scen 4\n");
+
+    //send SIGTSTP form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGTSTP), false);
+
+    //send SIGUSR1 form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGUSR1), false);
+
+    //send SIGCONT form process1 to process2
+    kill_spec(context_send, getProcessId_CallContext(context_rec2), create_Signal(SUT_SIGCONT), false);
+
+    return true;
+}
+
+
+scenario bool abort1_scen(void)
+{
+    /* 
+     * checking terminate mechanism.
+     */
+    //send SIGKILL from thread_rec2(first thread of process 2) to itself
+
+    verbose("a1\n");
+    ts_sleep_msec(300);
+    kill_spec(context_rec2, process2->processid, create_Signal(SUT_SIGKILL), false);
+    return true;
+}
+scenario bool abort2_scen(void)
+{
+    verbose("a2\n");
+    //remove process from model
+    onProcessTermination(context_rec2);
+    //send signal with number 0 from process1 to process2 (error should occure)
+    kill_spec(context_send, process2->processid, create_Signal(0), false);
+
+    return true;
+}
+
+scenario bool abort3_scen(void)
+{
+    verbose("a3\n");
+    //remove process from model
+    onProcessTermination(context_rec4);
+    //send signal with number 0 from process1 to process3 (error should occure)
+    kill_spec(context_send, process3->processid, create_Signal(0), false);
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm signal_specific_scenario =
+{
+    .init   = init_signal_specific_scenario,
+    .finish = finish_signal_specific_scenario,
+    .saveModelState = (PtrSaveModelState)saveSignalModelSpecificState,
+    .restoreModelState = (PtrRestoreModelState)restoreSignalModelSpecificState,
+    .isStationaryState = (PtrIsStationaryState)isStationarySignalSpecificState,
+    .getState = getSignalState,
+
+    .actions = {
+         stop_continue1_scen,
+         stop_continue2_scen,
+         stop_continue3_scen,
+         stop_continue4_scen,
+         abort1_scen,
+         abort2_scen,
+         abort3_scen,
+         NULL
+    }
+};
+

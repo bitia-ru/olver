@@ -1,0 +1,1125 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "math/cexp/cexp_model.seh"
+#include "math/math/math_config.h"
+
+
+#pragma SEC subsystem cexp "math.cexp"
+
+
+
+/* 
+   The group of functions 'math.cexp' consists of: 
+       cexp [2]
+       cexpf [2]
+       cexpl [2]
+       clog [2]
+       clog10 [1]
+       clog10f [1]
+       clog10l [1]
+       clogf [2]
+       clogl [2]
+       cpow [2]
+       cpowf [2]
+       cpowl [2]
+       csqrt [2]
+       csqrtf [2]
+       csqrtl [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    cexp, cexpf, cexpl - complex exponential functions
+
+SYNOPSIS
+
+    #include <complex.h>
+
+    double complex cexp(double complex z);
+
+    float complex cexpf(float complex z);
+
+    long double complex cexpl(long double complex z);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the complex exponent of z,
+    defined as ez.
+
+RETURN VALUE
+
+    These functions shall return the complex exponential value of z.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: cexpf, cexp, cexpl
+specification
+UnifloatComplex* cexp_spec(CallContext context, UnifloatComplex* x)
+{
+    char type[3][10] = {"cexpf", "cexp", "cexpl"};
+    
+    FILTER(type[x->Im->type]);
+
+    pre
+    {
+        /*[Input argument should be not NULL]*/
+        REQ("", "Argument isn't Null", x != NULL);
+
+        /*[Real and Imag part of input arguments should be not NULL]*/
+        REQ("", "Argument isn't Null", (x->Im != NULL) && (x->Re != NULL));
+
+        /*[Image and Real parts of input argument should have the same type]*/
+        REQ("", "Im and Re has the same type", x->Im->type == x->Re->type);
+
+        return true;
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        int type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        UnifloatComplex* model_res = cexp_Unifloat(x);
+        Unifloat* Zero = createZero_Unifloat(type);
+        Unifloat* One = createOne_Unifloat(type);
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        
+        if (CHECK_EXTENDED_REQ)
+        if (x->Im->sign == 1)
+        {
+            if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(±0 + i * 0) returns 1 + i * 0.
+                 */
+                REQ("cexp.ext.04;cexpf.ext.04;cexpl.ext.04", 
+                    "cexp(±0 + i * 0) returns 1 + i * 0",
+                    (compare_Unifloat(cexp_spec->Re, One) == 0) && isZero_Unifloat(cexp_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && (isInfinity_Unifloat(x->Im)))
+            {
+                /*
+                 * cexp(x + i * Inf) returns NaN + i * NaN and raises the "invalid" floating-point
+                 * exception, for finite x.
+                 */
+                REQ("cexp.ext.05;cexpf.ext.05;cexpl.ext.05", 
+                    "cexp(x + i * Inf) returns NaN + i * NaN",
+                    isNan_Unifloat(cexp_spec->Re) && isNan_Unifloat(cexp_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite x.
+                 */
+                REQ("cexp.ext.06;cexpf.ext.06;cexpl.ext.06",
+                    "cexp(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(cexp_spec->Re) && isNan_Unifloat(cexp_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(+Inf + i * 0) returns +Inf + i * 0.
+                 */
+                REQ("cexp.ext.07;cexpf.ext.07;cexpl.ext.07", 
+                    "cexp(+Inf + i * 0) returns +Inf + i * 0",
+                    isInfinity_Unifloat(cexp_spec->Re) && (cexp_spec->Re->sign == 1) &&
+                    isZero_Unifloat(cexp_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(-Inf + i * y) returns +0* cis(y), for finite y (where cis(y) = cos(y) + i *
+                 * sin(y)).
+                 */
+                REQ("cexp.ext.08;cexpf.ext.08;cexpl.ext.08", 
+                    "cexp(-Inf + i * y) returns +0* cis(y)", 
+                    (compareWithPrecision_Unifloat(cexp_spec->Re, mul_Unifloat(Zero, cos_Unifloat(x->Im)), mant) == 0) &&
+                    (compareWithPrecision_Unifloat(cexp_spec->Im, mul_Unifloat(Zero, sin_Unifloat(x->Im)), mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(+Inf + i * y) returns +Inf * cis(y), for finite nonzero y (where cis(y) =
+                 * cos(y) + i * sin(y)).
+                 */
+                REQ("cexp.ext.09;cexpf.ext.09;cexpl.ext.09", 
+                    "cexp(+Inf + i * y) returns +Inf * cis(y)",
+                    (compareWithPrecision_Unifloat(cexp_spec->Re, mul_Unifloat(infinity_Unifloat(type), cos_Unifloat(x->Im)), mant) == 0) &&
+                    (compareWithPrecision_Unifloat(cexp_spec->Im, mul_Unifloat(infinity_Unifloat(type), sin_Unifloat(x->Im)), mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(-Inf + i * Inf) returns ±0 ± i * 0 (where the signs of the real and
+                 * imaginary parts of the result are unspecified).
+                 */
+                REQ("cexp.ext.10;cexpf.ext.10;cexpl.ext.10", 
+                    "cexp(-Inf + i * Inf) returns ±0 ± i * 0",
+                    isZero_Unifloat(cexp_spec->Re) && isZero_Unifloat(cexp_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(+Inf + i * Inf) returns ±Inf + i * NaN and raises the "invalid" floating-
+                 * point exception (where the sign of the real part of the result is unspecified).
+                 */
+                REQ("cexp.ext.11;cexpf.ext.11;cexpl.ext.11", 
+                    "cexp(+Inf + i * Inf) returns ±Inf + i * NaN",
+                    isInfinity_Unifloat(cexp_spec->Re) && isNan_Unifloat(cexp_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(-Inf + i *NaN) returns ±0 ± i * 0 (where the signs of the real and
+                 * imaginary parts of the result are unspecified).
+                 */
+                REQ("cexp.ext.12;cexpf.ext.12;cexpl.ext.12",
+                    "cexp(-Inf + i *NaN) returns ±0 ± i * 0",
+                    isZero_Unifloat(cexp_spec->Re) && isZero_Unifloat(cexp_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(+Inf + i * NaN) returns ±Inf + i * NaN (where the sign of the real part of
+                 * the result is unspecified).
+                 */
+                REQ("cexp.ext.13;cexpf.ext.13;cexpl.ext.13", 
+                    "cexp(+Inf + i * NaN) returns ±Inf + i * NaN",
+                    isInfinity_Unifloat(cexp_spec->Re) && isNan_Unifloat(cexp_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(NaN + i * 0) returns NaN + i * 0.
+                 */
+                REQ("cexp.ext.14;cexpf.ext.14;cexpl.ext.14",
+                    "cexp(NaN + i * 0) returns NaN + i * 0",
+                    isNan_Unifloat(cexp_spec->Re) && isZero_Unifloat(cexp_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && !isNan_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for all non-zero numbers y.
+                 */
+                REQ("cexp.ext.15;cexpf.ext.15;cexpl.ext.15", 
+                    "cexp(NaN + i * y) returns NaN + i * NaN ",
+                    isNan_Unifloat(cexp_spec->Re) && isNan_Unifloat(cexp_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * cexp(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("cexp.ext.16;cexpf.ext.16;cexpl.ext.16", 
+                    "cexp(NaN + i * NaN) returns NaN + i * NaN", 
+                    isNan_Unifloat(cexp_spec->Re) && isNan_Unifloat(cexp_spec->Im));
+            }
+        }
+
+        /*
+         * These functions shall compute the complex exponent of z, defined as ez.
+         *
+         * These functions shall return the complex exponential value of z.
+         */
+        REQ("cexp.01;cexpf.01;cexpl.01;cexp.02;cexpf.02;cexpl.02",
+            "These functions shall return the complex exponential", 
+            compareWithPrecision_UnifloatComplex(model_res, cexp_spec, mant) == 0);
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    clog, clogf, clogl - complex natural logarithm functions
+
+SYNOPSIS
+
+    #include <complex.h>
+
+    double complex clog(double complex z);
+
+    float complex clogf(float complex z);
+
+    long double complex clogl(long double complex z);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the complex natural (base e)
+    logarithm of z, with a branch cut along the negative real axis.
+
+RETURN VALUE
+
+    These functions shall return the complex natural logarithm value, in the range
+    of a strip mathematically unbounded along the real axis and in the interval [-
+    i, +i] along the imaginary axis.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: clogf, clog, clogl
+specification
+UnifloatComplex* clog_spec(CallContext context, UnifloatComplex* x)
+{
+    char type[3][10] = {"clogf", "clog", "clogl"};
+    
+    FILTER(type[x->Im->type]);
+
+    pre
+    {
+        /*[Input argument should be not NULL]*/
+        REQ("", "Argument isn't Null", x != NULL);
+
+        /*[Real and Imag part of input arguments should be not NULL]*/
+        REQ("", "Argument isn't Null", (x->Im != NULL) && (x->Re != NULL));
+
+        /*[Image and Real parts of input argument should have the same type]*/
+        REQ("", "Im and Re has the same type", x->Im->type == x->Re->type);
+
+        return true;
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        int type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+        Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+        Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+        UnifloatComplex* model_res = clog_Unifloat(x);
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+
+        if (CHECK_EXTENDED_REQ)
+        if (x->Im->sign == 1)
+        {
+            if (isZero_Unifloat(x->Re) && (x->Re->sign == -1) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * clog(-0 + i * 0) returns -Inf + i * Pi and raises the "divide-by-zero" floating-
+                 * point exception
+                 */
+                REQ("clog.ext.04;clogf.ext.04;clogl.ext.04", 
+                    "clog(-0 + i * 0) returns -Inf + i * Pi",
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == -1) &&
+                    (compareWithPrecision_Unifloat(clog_spec->Im, Pi[type], mant) == 0));
+            }
+
+            if (isZero_Unifloat(x->Re) && (x->Re->sign == 1) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * clog(+0 + i * 0) returns -Inf + i * 0 and raises the "divide-by-zero" floating-
+                 * point exception.
+                 */
+                REQ("clog.ext.05;clogf.ext.05;clogl.ext.05",
+                    "clog(+0 + i * 0) returns -Inf + i * 0",
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == -1) &&
+                    isZero_Unifloat(clog_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog(x + i * Inf) returns +Inf + i * Pi/2, for finite x.
+                 */
+                REQ("clog.ext.06;clogf.ext.06;clogl.ext.06", 
+                    "clog(x + i * Inf) returns +Inf + i * Pi/2, for finite x",
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog_spec->Im, PiTwo, mant) == 0));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * clog(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite x.
+                 */
+                REQ("clog.ext.07;clogf.ext.07;clogl.ext.07", 
+                    "clog(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(clog_spec->Re) && isNan_Unifloat(clog_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * clog(-Inf + i * y) returns +Inf + i * Pi, for finite positive-signed y.
+                 */
+                REQ("clog.ext.08;clogf.ext.08;clogl.ext.08", 
+                    "clog(-Inf + i * y) returns +Inf + i * Pi", 
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog_spec->Im, Pi[type], mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * clog(+Inf + i * y) returns +Inf + i * 0, for finite positive-signed y.
+                 */
+                REQ("clog.ext.09;clogf.ext.09;clogl.ext.09", 
+                    "clog(+Inf + i * y) returns +Inf + i * 0",
+                    isInfinity_Unifloat(clog_spec->Re) && isZero_Unifloat(clog_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog(-Inf + i * Inf) returns +Inf + i * 3Pi/4.
+                 */
+                REQ("clog.ext.10;clogf.ext.10;clogl.ext.10", 
+                    "clog(-Inf + i * Inf) returns +Inf + i * 3Pi/4",
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog_spec->Im, ThreePiFour, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog(+Inf + i * Inf) returns +Inf + i * Pi/4.
+                 */
+                REQ("clog.ext.11;clogf.ext.11;clogl.ext.11", 
+                    "clog(+Inf + i * Inf) returns +Inf + i * Pi/4",
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog_spec->Im, PiFour, mant) == 0));
+            } 
+
+            if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * clog(±Inf + i * NaN) returns +Inf + i * NaN.
+                 */
+                REQ("clog.ext.12;clogf.ext.12;clogl.ext.12", 
+                    "clog(±Inf + i * NaN) returns +Inf + i * NaN",
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == 1)
+                    && isNan_Unifloat(clog_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * clog(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite y.
+                 */
+                REQ("clog.ext.13;clogf.ext.13;clogl.ext.13",
+                    "clog(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(clog_spec->Re) && isNan_Unifloat(clog_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog(NaN + i * Inf) returns +Inf + i * NaN.
+                 */
+                REQ("clog.ext.14;clogf.ext.14;clogl.ext.14", 
+                    "clog(NaN + i * Inf) returns +Inf + i * NaN",
+                    isInfinity_Unifloat(clog_spec->Re) && (clog_spec->Re->sign == 1) &&
+                    isNan_Unifloat(clog_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * clog(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("clog.ext.15;clogf.ext.15;clogl.ext.15", 
+                    "clog(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(clog_spec->Re) && isNan_Unifloat(clog_spec->Im));
+            }
+        }
+
+        /*
+         * These functions shall return the complex natural logarithm value, in the range
+         * of a strip mathematically unbounded along the real axis and in the interval [-
+         * i*Pi, +i*Pi] along the imaginary axis.
+         */
+        REQ("clog.02;clogf.02;clogl.02", 
+            "Imaginary part is bounded: [-i*Pi, +i*Pi]",
+            compareWithPrecision_Unifloat(abs_Unifloat(clog_spec->Im), Pi[type], mant) != 1);
+
+        /*
+         * These functions shall compute the complex natural (base e) logarithm of z, with
+         * a branch cut along the negative real axis.
+         */
+        REQ("clog.01;clogf.01;clogl.01", 
+            "It shall compute the complex natural logarithm", 
+            compareWithPrecision_UnifloatComplex(model_res, clog_spec, mant) == 0);
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    clog10, clog10f, clog10l - complex natural logarithm functions
+
+SYNOPSIS
+
+    #include <complex.h>
+
+    double complex clog10(double complex z);
+
+    float complex clog10f(float complex z);
+
+    long double complex clog10l(long double complex z);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the complex natural (base e)
+    logarithm of z, with a branch cut along the negative real axis.
+
+RETURN VALUE
+
+    These functions shall return the complex natural logarithm value, in the range
+    of a strip mathematically unbounded along the real axis and in the interval [-
+    i, +i] along the imaginary axis.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: clog10f, clog10, clog10l
+specification
+UnifloatComplex* clog10_spec(CallContext context, UnifloatComplex* x)
+{
+    char type[3][10] = {"clog10f", "clog10", "clog10l"};
+    
+    FILTER(type[x->Im->type]);
+
+    pre
+    {
+        /*[Input argument should be not NULL]*/
+        REQ("", "Argument isn't Null", x != NULL);
+
+        /*[Real and Imag part of input arguments should be not NULL]*/
+        REQ("", "Argument isn't Null", (x->Im != NULL) && (x->Re != NULL));
+
+        /*[Image and Real parts of input argument should have the same type]*/
+        REQ("", "Im and Re has the same type", x->Im->type == x->Re->type);
+
+        return true;
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        int type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        UnifloatComplex* model_res = clog10_Unifloat(x);
+        Unifloat* PiLn10 = div_Unifloat(Pi[type], log_Unifloat(convertInteger_Unifloat(10, type)));
+        Unifloat* PiLn10Four = div_Unifloat(PiLn10, convertInteger_Unifloat(4, type));
+        Unifloat* ThreePiLn10Four = mul_Unifloat(PiLn10Four, convertInteger_Unifloat(3, type));
+        Unifloat* PiLn10Two = div_Unifloat(PiLn10, convertInteger_Unifloat(2, type));
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        
+        if (CHECK_EXTENDED_REQ)
+        if (x->Im->sign == 1)
+        {
+            if (isZero_Unifloat(x->Re) && (x->Re->sign == -1) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(-0 + i * 0) returns -Inf + i * Pi and raises the "divide-by-zero" floating-
+                 * point exception
+                 */
+                REQ("clog10.ext.04;clog10f.ext.04;clog10l.ext.04", 
+                    "clog10(-0 + i * 0) returns -Inf + i * Pi",
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == -1) &&
+                    (compareWithPrecision_Unifloat(clog10_spec->Im, Pi[type], mant) == 0));
+            }
+
+            if (isZero_Unifloat(x->Re) && (x->Re->sign == 1) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(+0 + i * 0) returns -Inf + i * 0 and raises the "divide-by-zero" floating-
+                 * point exception.
+                 */
+                REQ("clog10.ext.05;clog10f.ext.05;clog10l.ext.05",
+                    "clog10(+0 + i * 0) returns -Inf + i * 0",
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == -1) &&
+                    isZero_Unifloat(clog10_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(x + i * Inf) returns +Inf + i * Pi/ (2 * ln10), for finite x.
+                 */
+                REQ("clog10.ext.06;clog10f.ext.06;clog10l.ext.06", 
+                    "clog10(x + i * Inf) returns +Inf + i * Pi/ (2 * ln10), for finite x",
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog10_spec->Im, PiLn10Two, mant) == 0));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite x.
+                 */
+                REQ("clog10.ext.07;clog10f.ext.07;clog10l.ext.07", 
+                    "clog10(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(clog10_spec->Re) && isNan_Unifloat(clog10_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(-Inf + i * y) returns +Inf + i * Pi / ln10, for finite positive-signed y.
+                 */
+                REQ("clog10.ext.08;clog10f.ext.08;clog10l.ext.08", 
+                    "clog10(-Inf + i * y) returns +Inf + i * Pi / 10", 
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog10_spec->Im, PiLn10, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(+Inf + i * y) returns +Inf + i * 0, for finite positive-signed y.
+                 */
+                REQ("clog10.ext.09;clog10f.ext.09;clog10l.ext.09", 
+                    "clog10(+Inf + i * y) returns +Inf + i * 0",
+                    isInfinity_Unifloat(clog10_spec->Re) && isZero_Unifloat(clog10_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(-Inf + i * Inf) returns +Inf + i * 3Pi/ (4 *ln10).
+                 */
+                REQ("clog10.ext.10;clog10f.ext.10;clog10l.ext.10", 
+                    "clog10(-Inf + i * Inf) returns +Inf + i * 3Pi/ (4 * ln10)",
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog10_spec->Im, ThreePiLn10Four, mant) == 0));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(+Inf + i * Inf) returns +Inf + i * Pi/ (4 *ln10).
+                 */
+                REQ("clog10.ext.11;clog10f.ext.11;clog10l.ext.11", 
+                    "clog10(+Inf + i * Inf) returns +Inf + i * Pi/ (4 * ln10)",
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == 1) &&
+                    (compareWithPrecision_Unifloat(clog10_spec->Im, PiLn10Four, mant) == 0));
+            } 
+
+            if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(±Inf + i * NaN) returns +Inf + i * NaN.
+                 */
+                REQ("clog10.ext.12;clog10f.ext.12;clog10l.ext.12", 
+                    "clog10(±Inf + i * NaN) returns +Inf + i * NaN",
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == 1)
+                    && isNan_Unifloat(clog10_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite y.
+                 */
+                REQ("clog10.ext.13;clog10f.ext.13;clog10l.ext.13",
+                    "clog10(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(clog10_spec->Re) && isNan_Unifloat(clog10_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(NaN + i * Inf) returns +Inf + i * NaN.
+                 */
+                REQ("clog10.ext.14;clog10f.ext.14;clog10l.ext.14", 
+                    "clog10(NaN + i * Inf) returns +Inf + i * NaN",
+                    isInfinity_Unifloat(clog10_spec->Re) && (clog10_spec->Re->sign == 1) &&
+                    isNan_Unifloat(clog10_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * clog10(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("clog10.ext.15;clog10f.ext.15;clog10l.ext.15", 
+                    "clog10(NaN + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(clog10_spec->Re) && isNan_Unifloat(clog10_spec->Im));
+            }
+        }
+
+        /*
+         * These functions shall return the complex common logarithm value, in the range
+         * of a strip mathematically unbounded along the real axis and in the interval [-i*Pi,
+         * +i*Pi] along the imaginary axis.
+         */
+        REQ("clog10.02;clog10f.02;clog10l.02", 
+            "Imaginary part is bounded: [-i*Pi, +i*Pi]",
+            compareWithPrecision_Unifloat(abs_Unifloat(clog10_spec->Im), Pi[type], mant) != 1);
+
+        /*
+         * These functions shall compute the complex common (base 10) logarithm of z, with
+         * a branch cut along the negative real axis.
+         */
+        REQ("clog10.01;clog10f.01;clog10l.01", 
+            "It shall compute the complex common logarithm", 
+            compareWithPrecision_UnifloatComplex(model_res, clog10_spec, mant) == 0);
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    cpow, cpowf, cpowl - complex power functions
+
+SYNOPSIS
+
+    #include <complex.h>
+
+    double complex cpow(double complex x, double complex y);
+
+    float complex cpowf(float complex x, float complex y);
+
+    long double complex cpowl(long double complex x,
+
+    long double complex y);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the complex power function xy,
+    with a branch cut for the first parameter along the negative real axis.
+
+RETURN VALUE
+
+    These functions shall return the complex power function value.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: cpowf, cpow, cpowl
+specification
+UnifloatComplex* cpow_spec(CallContext context, UnifloatComplex* x, UnifloatComplex* y)
+{
+    char type[3][10] = {"cpowf", "cpow", "cpowl"};
+    
+    FILTER(type[x->Im->type]);
+
+    pre
+    {
+        /*[Input arguments should be not NULL]*/
+        REQ("", "Argument isn't Null", (x != NULL) && (y != NULL));
+
+        /*[Real and Imag part of input arguments should be not NULL]*/
+        REQ("", "Argument isn't Null", (x->Im != NULL) && (x->Re != NULL) &&
+                                        (y->Im != NULL) && (y->Re != NULL));
+
+        /*[Image and Real parts of input argument should have the same type]*/
+        REQ("", "Im and Re has the same type", (x->Im->type == x->Re->type) &&
+                                                (y->Im->type == y->Re->type));
+
+        return true;
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN)
+            || (y->Im->kind == NaN) || (y->Re->kind == NaN))
+            return {NaN_ARG, "Some part of arguments is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity)
+                || (y->Im->kind == Infinity) || (y->Re->kind == Infinity))
+                return {INF_ARG, "some part of arguments is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of arguments are normal"};
+    }
+    post
+    {
+        int type = x->Im->type;
+        int mant = digMant_Unifloat(type);
+        UnifloatComplex* model_res = cpow_Unifloat(x, y);
+
+        round_Unifloat(model_res->Re, mant);
+        round_Unifloat(model_res->Im, mant);
+        
+        /*
+         * These functions shall compute the complex power function xy, with a branch cut
+         * for the first parameter along the negative real axis.
+         *
+         * These functions shall return the complex power function value.
+         */
+        REQ("cpow.01;cpowf.01;cpowl.01;"
+            "cpow.02;cpowf.02;cpowl.02", 
+            "It shall compute the complex power",
+            compareWithPrecision_UnifloatComplex(model_res, cpow_spec, mant) == 0);
+
+        if (CHECK_EXTENDED_REQ)
+        {
+            /*
+             * The cpow function raise floating-point exception if appropriate for the
+             * calculation of the parts of the result, and may raise spurious exceptions. This
+             * allow cpow(z, c) to be implemented as cexp(c * clog(z)) without precluding
+             * implementations that special cases more carefully.
+             */
+            REQ("cpow.ext.03;cpowf.ext.03;cpowl.ext.03",    
+                "cpow(z, c) is implemented as cexp(c * clog(z))", 
+                compareWithPrecision_UnifloatComplex(model_res, cpow_spec, mant) == 0);
+        }
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    csqrt, csqrtf, csqrtl - complex square root functions
+
+SYNOPSIS
+
+    #include <complex.h>
+
+    double complex csqrt(double complex z);
+
+    float complex csqrtf(float complex z);
+
+    long double complex csqrtl(long double complex z);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the complex square root of z,
+    with a branch cut along the negative real axis.
+
+RETURN VALUE
+
+    These functions shall return the complex square root value, in the range of the
+    right half-plane (including the imaginary axis).
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: csqrtf, csqrt, csqrtl
+specification
+UnifloatComplex* csqrt_spec(CallContext context, UnifloatComplex* x)
+{
+    char type[3][10] = {"csqrtf", "csqrt", "csqrtl"};
+    
+    FILTER(type[x->Im->type]);
+
+    pre
+    {
+        /*[Input argument should be not NULL]*/
+        REQ("", "Argument isn't Null", x != NULL);
+
+        /*[Real and Imag part of input arguments should be not NULL]*/
+        REQ("", "Argument isn't Null", (x->Im != NULL) && (x->Re != NULL));
+
+        /*[Image and Real parts of input argument should have the same type]*/
+        REQ("", "Im and Re has the same type", x->Im->type == x->Re->type);
+
+        return true;
+    }
+    coverage C
+    {
+        if ((x->Im->kind == NaN) || (x->Re->kind == NaN))
+            return {NaN_ARG, "Some part of argument is NaN"};
+        else
+            if ((x->Im->kind == Infinity) || (x->Re->kind == Infinity))
+                return {INF_ARG, "some part of argument is infinity"};
+            else
+                return {NORMAL_ARG, "all parts of argument are normal"};
+    }
+    post
+    {
+        int mant[3] = {digMant_FloatT, digMant_DoubleT, digMant_LongDoubleT};
+        int type = x->Im->type;
+        UnifloatComplex* model_res = csqrt_Unifloat(x);
+
+        round_Unifloat(model_res->Re, mant[type]);
+        round_Unifloat(model_res->Im, mant[type]);
+        
+        if (CHECK_EXTENDED_REQ)
+        if (x->Im->sign == 1)
+        {
+            if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(±0 + i * 0) returns +0 + i * 0.
+                 */
+                REQ("csqrt.ext.04;csqrtf.ext.04;csqrtl.ext.04", 
+                    "csqrt(±0 + i * 0) returns +0 + i * 0",
+                    isZero_Unifloat(csqrt_spec->Re) && (csqrt_spec->Re->sign == 1) &&
+                    isZero_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(x + i * Inf) returns +Inf + i * Inf, for all x (including NaN).
+                 */
+                REQ("csqrt.ext.05;csqrtf.ext.05;csqrtl.ext.05",
+                    "csqrt(x + i * Inf) returns +Inf + i * Inf",
+                    isInfinity_Unifloat(csqrt_spec->Re) && (csqrt_spec->Re->sign) &&
+                    isInfinity_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(x + i * NaN) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite x.
+                 */
+                REQ("csqrt.ext.06;csqrtf.ext.06;csqrtl.ext.06",
+                    "csqrt(x + i * NaN) returns NaN + i * NaN",
+                    isNan_Unifloat(csqrt_spec->Re) && isNan_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(-Inf + i * y) returns +0 + i * Inf, for finite positive-signed y.
+                 */
+                REQ("csqrt.ext.07;csqrtf.ext.07;csqrtl.ext.07",
+                    "csqrt(-Inf + i * y) returns +0 + i * Inf",
+                    isZero_Unifloat(csqrt_spec->Re) && (csqrt_spec->Re->sign == 1) &&
+                    isInfinity_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(+Inf + i * y) returns +Inf + i * 0, for finite positive-signed y.
+                 */
+                REQ("csqrt.ext.08;csqrtf.ext.08;csqrtl.ext.08",
+                    "csqrt(+Inf + i * y) returns +Inf + i * 0",
+                    isInfinity_Unifloat(csqrt_spec->Re) && (csqrt_spec->Re->sign == 1) &&
+                    isZero_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(-Inf + i * NaN) returns NaN ± i * Inf (where the sign of the imaginary
+                 * part of the result is unspecified).
+                 */
+                REQ("csqrt.ext.09;csqrtf.ext.09;csqrtl.ext.09", 
+                    "csqrt(-Inf + i * NaN) returns NaN ± i * Inf", 
+                    isNan_Unifloat(csqrt_spec->Re) && isInfinity_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(+Inf + i * NaN) returns +Inf + i * NaN.
+                 */
+                REQ("csqrt.ext.10;csqrtf.ext.10;csqrtl.ext.10", 
+                    "csqrt(+Inf + i * NaN) returns +Inf + i * NaN",
+                    isInfinity_Unifloat(csqrt_spec->Re) && (csqrt_spec->Re->sign == 1) &&
+                    isNan_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(NaN + i * y) returns NaN + i * NaN and optionally raises the "invalid"
+                 * floating-point exception, for finite y.
+                 */
+                REQ("csqrt.ext.11;csqrtf.ext.11;csqrtl.ext.11", 
+                    "csqrt(NaN + i * y) returns NaN + i * NaN",
+                    isNan_Unifloat(csqrt_spec->Re) && isNan_Unifloat(csqrt_spec->Im));
+            }
+
+            if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            {
+                /*
+                 * csqrt(NaN + i * NaN) returns NaN + i * NaN.
+                 */
+                REQ("csqrt.ext.12;csqrtf.ext.12;csqrtl.ext.12", 
+                    "csqrt(NaN + i * NaN) returns NaN + i * NaN", 
+                    isNan_Unifloat(csqrt_spec->Re) && isNan_Unifloat(csqrt_spec->Im));
+            }
+        }            
+
+        /*
+         * These functions shall return the complex square root value, in the range of the
+         * right half-plane (including the imaginary axis).
+         */
+        REQ("csqrt.02;csqrtf.02;csqrtl.02", 
+            "Result should be in right half-plane",
+            compare_Unifloat(createZero_Unifloat(type), csqrt_spec->Re) != 1);
+
+        /*
+         * These functions shall compute the complex square root of z, with a branch cut
+         * along the negative real axis.
+         */
+        REQ("csqrt.01;csqrtf.01;csqrtl.01", 
+            "It shall compute the complex square root", 
+            compareWithPrecision_UnifloatComplex(model_res, csqrt_spec, mant[type]) == 0);
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+/* [Model functions are placed in math_data.sec] */

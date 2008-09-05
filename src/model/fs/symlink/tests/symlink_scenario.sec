@@ -1,0 +1,252 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/symlink/tests/symlink_scenario.seh"
+#include "fs/symlink/symlink_model.seh"
+
+#include "common/init.seh"
+
+#include "common/common_model.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+
+#include "fs/fs/fs_media.seh"
+#include "fs/dir/dir_media.seh"
+#include "process/meta/fs_media.seh"
+#include "process/process/process_media.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "system/sysconf/sysconf_model.seh"
+
+
+#include "fs/dir/dir_model.seh"
+
+#include "process/meta/fs_model.seh"
+
+#include "process/process/process_model.seh"
+
+void initFsSymlinkSubsystem(void);
+void initProcessModel(void);
+
+
+//static CString *rootpath;
+static CallContext context;
+
+// makes full path string
+#define P(path)  (create_CString(path))
+
+#define MKDIR_A(path, perms)\
+mkdir_spec(context, path, create_FilePermissions_String(perms), requestErrorCode())
+
+
+/********************************************************************/
+/**                          Test Scenario Functions               **/
+/********************************************************************/
+static bool init_fs_symlink_scenario(int argc, char** argv)
+{
+    context = getContext();
+    initPathSystemConfiguration();  
+    
+    // make sure process has appropriate priviledges
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    return true;
+}
+
+static void finish_fs_symlink_scenario(void)
+{
+    removeTestScenarioSandboxDir(context);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool fs_symlink_scen()
+{
+int i;
+
+    // normal create
+    MKDIR_A(SANDBOX_FILE("dir1"), "rwxrwxrwx");
+    
+    MKDIR_A(SANDBOX_FILE("dir1/dir11"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir1/dir11/dir33"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir1/dir22"), "rwxrwxrwx");
+    
+
+    for (i=0;i<5;i++)
+    {
+      symlink_spec(context, SANDBOX_FILE("dir1/dir22/symlink_file1"), 
+        SANDBOX_FILE("dir1/dir11/sym2"), 
+        requestErrorCode(), cancel_status);
+
+
+      symlink_spec(context, SANDBOX_FILE("dir1/dir33/symlink_file1"), 
+       SANDBOX_FILE("dir1/dir11/sym2"), 
+       requestErrorCode(), cancel_status);
+
+      symlink_spec(context, SANDBOX_FILE("dir1/dir11/symlink_file2"), 
+        SANDBOX_FILE("dir1/dir11/dir33"), 
+        requestErrorCode(), cancel_status);
+
+
+      symlink_spec(context, SANDBOX_FILE("dir1/dir11/symlink_file2"), 
+        create_CString(""), 
+        requestErrorCode(), cancel_status);
+
+      symlink_spec(context, SANDBOX_FILE("dir1/dir11/symlink_file2"), 
+        create_CString("ddd/ddaas/wewew"), 
+        requestErrorCode(), cancel_status);
+
+      readlink_spec(context, SANDBOX_FILE("dir1/dir11/sym2"),  
+        1000, requestErrorCode());
+
+      readlink_spec(context, SANDBOX_FILE("dir1/dir11"),  
+        1000, requestErrorCode());
+
+      readlink_spec(context, SANDBOX_FILE("dir1/dir44"),  
+        1000, requestErrorCode());
+  
+      readlink_spec(context, create_CString(""),  
+        1000, requestErrorCode());
+
+      readlink_spec(context, create_CString("dir1/dir22"),  
+        1000, requestErrorCode());
+
+      readlink_spec(context, SANDBOX_FILE("dir1/dir22/symlink_file1"),  
+        1000, requestErrorCode());
+
+      symlink_spec(context, SANDBOX_FILE("dir1/dir11/dir33"), 
+        SANDBOX_FILE("dir1/dir11/sym3"), 
+        requestErrorCode(), cancel_status);
+
+      readlink_spec(context, SANDBOX_FILE("dir1/dir11/sym3"),  
+        1000, requestErrorCode());
+
+      readlink_spec(context, SANDBOX_FILE("dir1/dir11/sym3"),  
+        5, requestErrorCode());
+    }
+  return true;
+}
+
+scenario bool fs_cancel_symlink_scen()
+{
+    ThreadId curTh=createThread();
+
+    pthread_setcancelstate_spec(curTh, SUT_PTHREAD_CANCEL_DISABLE);
+    pthread_cancel_spec(context, curTh);
+    symlink_spec(curTh, SANDBOX_FILE("dir1/dir11/dir33"), 
+        SANDBOX_FILE("dir1/dir11/sym3"), 
+        requestErrorCode(), cancel_status);
+
+    curTh=createThread();
+    pthread_setcancelstate_spec(curTh, SUT_PTHREAD_CANCEL_ENABLE);
+    pthread_cancel_spec(context, curTh);
+    symlink_spec(curTh, SANDBOX_FILE("dir1/dir11/dir33"), 
+        SANDBOX_FILE("dir1/dir11/sym3"), 
+        requestErrorCode(), cancel_status);
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm fs_symlink_scenario =
+{
+    .init = init_fs_symlink_scenario,
+    .finish = finish_fs_symlink_scenario,
+    .actions = {
+        fs_symlink_scen,
+        NULL
+     }
+};
+
+scenario dfsm fs_symlink_cancel_scenario =
+{
+    .init = init_fs_symlink_scenario,
+    .finish = finish_fs_symlink_scenario,
+    .actions = {
+        fs_cancel_symlink_scen,
+        NULL
+    }
+};
+
+bool main_fs_symlink( int argc, char** argv )
+{
+    fs_symlink_scenario(argc, argv);
+    fs_symlink_cancel_scenario(argc, argv);
+    return true;
+}
+
+#ifdef FS_SYMLINK_LOCAL_MAIN
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    
+    initFsSymlinkSubsystem();
+    initFsFsSubsystem();
+    initFsDirSubsystem();
+
+    initProcessMetaFsSubsystem();
+    initProcessProcessSubsystem();
+    initPthreadPthreadSubsystem();
+
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+    addTraceToFile("trace.xml");
+    
+    // Run test scenario
+    main_fs_symlink(argc, argv);
+    
+    //  unloadSUT();
+    return 0;
+}
+#endif
+

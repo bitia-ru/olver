@@ -1,0 +1,302 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "fs/ftw/ftw_media.seh"
+#include "fs/meta/meta_media.seh"
+#include "common/common_media.seh"
+
+/*****************************************************************************/
+/**                            Format Functions                             **/
+/*****************************************************************************/
+void writeNFTWFlagsObj_TSStream(TSStream *stream, NFTWFlagsObj *flags)
+{
+    assertion(stream != NULL, "writeFTWFlagsObj_TSStream: stream is NULL");
+    assertion(flags != NULL, "writeFTWFlagsObj_TSStream: flags is NULL");
+
+    writeTypeHeaderTSStream(stream, "nftwflags");
+
+    writeChar_TSStream(stream, flags->phys  ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->mount ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->depth ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->chdir ? '\xFF' : '\x00');
+}
+
+static void nftwflags_formatter(TSStream *stream, NFTWFlagsObj *flags)
+{
+    VERIFY_TYPE(nftwflags_formatter, &type_NFTWFlagsObj, flags);
+
+    writeNFTWFlagsObj_TSStream(stream, flags);
+}
+
+void writeFTWFunction_TSStream(TSStream *stream, FTWFunction *fn)
+{
+    assertion(stream != NULL, "writeErrorFunction_TSStream: stream is NULL");
+
+    if(fn == NULL)
+    {
+        writeTypeHeaderTSStream(stream, "null");
+        return;
+    }
+    
+    writeTypeHeaderTSStream(stream, "ftwfunc");
+
+    writeInt_TSStream(stream, fn->type);
+    writeInt_TSStream(stream, fn->param);
+    writeInt_TSStream(stream, fn->result);
+}
+
+static void ftwfunc_formatter(TSStream *stream, FTWFunction *fn)
+{
+    VERIFY_TYPE(ftwfunc_formatter, &type_FTWFunction, fn);
+
+    writeFTWFunction_TSStream(stream, fn);
+}
+
+FTWStructure* readFTWStructure_TSStream(TSStream *stream)
+{
+    IntT base, level;
+
+    assertion(stream != NULL, "readFTWStructure_TSStream: stream is NULL");
+
+    if(startsWith_TSStream(stream, "null:"))
+    {
+        verifyType_TSStream(stream, "null");
+        return NULL;
+    }
+
+    verifyType_TSStream(stream, "ftw");
+
+    base = readInt_TSStream(stream);
+    level = readInt_TSStream(stream);
+
+    return create_FTWStructure(base, level);
+}
+
+FTWFunctionCall* readFTWFunctionCall_TSStream(TSStream *stream)
+{
+    FTWFunctionCall *fn_call;
+
+    assertion(stream != NULL, "readFTWStructure_TSStream: stream is NULL");
+
+    if(startsWith_TSStream(stream, "null:"))
+    {
+        verifyType_TSStream(stream, "null");
+        return NULL;
+    }
+
+    verifyType_TSStream(stream, "ftwcall");
+
+    fn_call = default_FTWFunctionCall();
+
+    fn_call->path = readCString_TSStream(stream);
+
+    fn_call->file_stat = create_emptyFileStatus();
+    readFileStatus(stream, fn_call->file_stat);
+
+    fn_call->flag = readInt_TSStream(stream);
+    fn_call->ftw_struct = readFTWStructure_TSStream(stream);
+    fn_call->cwd = readCString_TSStream(stream);
+    fn_call->result = readInt_TSStream(stream);
+
+    return fn_call;
+}
+
+void readFTWFunctionCalls_TSStream(TSStream *stream, FTWFunction *fn)
+{
+    FTWFunctionCall *fn_call;
+
+    assertion(stream != NULL, "readFTWFunctionCalls_TSStream: stream is NULL");
+
+    if(fn != NULL)
+    {
+        reset_FTWFunction(fn);
+    }
+
+    while((fn_call = readFTWFunctionCall_TSStream(stream)) != NULL)
+    {
+        if(fn != NULL)
+        {
+            append_List(fn->calls, fn_call);
+        }
+    }
+}
+
+/*****************************************************************************/
+/**                         Initialization Function                         **/
+/*****************************************************************************/
+void initFsFtwSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_ftw_spec(ftw_media);
+    set_mediator_ftw64_spec(ftw64_media);
+    set_mediator_nftw_spec(nftw_media);
+    set_mediator_nftw64_spec(nftw64_media);
+
+    // Set up formatters
+    registerTSFormatter("nftwflags",(TSFormatterFuncType)nftwflags_formatter);
+    registerTSFormatter("ftwfunc",(TSFormatterFuncType)ftwfunc_formatter);
+}
+
+/*****************************************************************************/
+/**                           Interface Functions                           **/
+/*****************************************************************************/
+
+/** ftw_spec **/
+mediator ftw_media for specification
+IntT ftw_spec(CallContext context, CString *path, FTWFunction *fn, IntT ndirs,
+              ErrorCode *errno)
+{
+    call
+    {
+        IntT res = -1;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "ftw:$(str)$(ftwfunc)$(int)",
+            path,
+            fn,
+            create_IntTObj(ndirs));
+
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readFTWFunctionCalls_TSStream(&command.response, fn);
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onFTW(context, path, fn, ndirs, errno, ftw_spec);
+    }
+}
+
+/** ftw64_spec **/
+mediator ftw64_media for specification
+IntT ftw64_spec(CallContext context, CString *path, FTWFunction *fn, IntT ndirs,
+                ErrorCode *errno)
+{
+    call
+    {
+        IntT res = -1;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "ftw64:$(str)$(ftwfunc)$(int)",
+            path,
+            fn,
+            create_IntTObj(ndirs));
+
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readFTWFunctionCalls_TSStream(&command.response, fn);
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onFTW64(context, path, fn, ndirs, errno, ftw64_spec);
+    }
+}
+
+/** nftw_spec **/
+mediator nftw_media for specification
+IntT nftw_spec(CallContext context, CString *path, FTWFunction *fn, IntT fd_limit,
+               NFTWFlags flags, ErrorCode *errno)
+{
+    call
+    {
+        IntT res = -1;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "nftw:$(str)$(ftwfunc)$(int)$(nftwflags)",
+            path,
+            fn,
+            create_IntTObj(fd_limit),
+            create_NFTWFlagsObj(flags));
+
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readFTWFunctionCalls_TSStream(&command.response, fn);
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onNFTW(context, path, fn, fd_limit, flags, errno, nftw_spec);
+    }
+}
+
+/** nftw64_spec **/
+mediator nftw64_media for specification
+IntT nftw64_spec(CallContext context, CString *path, FTWFunction *fn, IntT fd_limit,
+                 NFTWFlags flags, ErrorCode *errno)
+{
+    call
+    {
+        IntT res = -1;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "nftw64:$(str)$(ftwfunc)$(int)$(nftwflags)",
+            path,
+            fn,
+            create_IntTObj(fd_limit),
+            create_NFTWFlagsObj(flags));
+
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readFTWFunctionCalls_TSStream(&command.response, fn);
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onNFTW64(context, path, fn, fd_limit, flags, errno, nftw64_spec);
+    }
+}
+
+
+

@@ -1,0 +1,198 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "system/host/host_media.seh"
+#include "common/common_media.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSystemHostSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_gethostid_spec(gethostid_media);
+    set_mediator_gethostname_spec(gethostname_media);
+    set_mediator_sethostname_spec(sethostname_media);
+    set_mediator_uname_spec(uname_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** gethostid_spec **/
+mediator gethostid_media for specification
+LongT gethostid_spec( CallContext context )
+{
+    LongT res = -1;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "gethostid" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+
+/** gethostname_spec **/
+mediator gethostname_media for specification
+IntT gethostname_spec( CallContext context, StringTPtr name, SizeT namelen )
+{
+    IntT res;
+    SystemState * sysstate = getSystemState(context.system);
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "gethostname:$(ptr)$(size)",create_VoidTPtrObj(name), create_SizeTObj(namelen) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        if(gethostname_spec==0)
+        {
+            if(old_hostname==NULL)
+                old_hostname = readCString_VoidTPtr(name);
+            
+            if(sysstate->hostname == NULL)
+                sysstate->hostname = readCString_VoidTPtr(name);
+        }
+    }
+}
+
+
+/** sethostname_spec **/
+
+mediator sethostname_media for specification
+IntT sethostname_spec( CallContext context, StringTPtr name, SizeT len, ErrorCode * errno)
+{
+    IntT res;
+    SystemState * sysstate = getSystemState(context.system);
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "sethostname:$(ptr)$(size)",
+                          create_VoidTPtrObj(name), create_SizeTObj(len));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        if(sethostname_spec==0)
+        {
+            if(old_hostname==NULL)
+                old_hostname = readCString_VoidTPtr(name);
+
+            sysstate->hostname = readCString_VoidTPtr(name);
+        }
+    }
+}
+
+
+
+/** uname_spec **/
+mediator uname_media for specification
+IntT uname_spec( CallContext context, UtsnameT * name, ErrorCode * errno)
+{
+    int utsname_size = 6*65*sizeof_CharT; /*[struct has 6 fields by 65 chars]*/
+    VoidTPtr buf;
+    IntT res;
+    StringTPtr tmp;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        if(name!=NULL)
+            buf = allocateMemoryBlock(context,utsname_size);
+        else
+            buf = NULL_VoidTPtr;
+
+        format_TSCommand( &command, "uname:$(ptr)", create_VoidTPtrObj(buf) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            if(name!=NULL)
+            {
+
+#define uname_read_result(val) {tmp = readPointer_TSStream(context,&command.response); \
+                if(!isNULL_VoidTPtr(tmp)) \
+                    val = readCString_VoidTPtr(tmp); \
+                else \
+                    val = NULL; }
+                
+                uname_read_result(name->sysname);
+                uname_read_result(name->nodename);
+                uname_read_result(name->release);
+                uname_read_result(name->version);
+                uname_read_result(name->machine);
+                uname_read_result(name->domainname);
+            }
+            
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        if(name!=NULL)
+            deallocateMemoryBlock(context,buf);
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+

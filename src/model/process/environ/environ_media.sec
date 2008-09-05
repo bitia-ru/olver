@@ -1,0 +1,209 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "process/environ/environ_media.seh"
+#include "common/common_media.seh"
+
+/*
+ * SYNOPSIS
+ *    #include <unistd.h>
+ *    extern char **environ;
+ * DESCRIPTION
+ *    ... the following variable:
+ *    extern char **environ;
+ *    is initialized as a pointer to an array of character pointers to the environment strings.
+ *    ... environ arrays are each terminated by a null pointer.
+ */
+static void readEnviron( CallContext context ) {
+   Map * environ;
+   TSCommand command;
+   CString * string;
+   int EqualSignPosition;
+   CString * name, * value;
+
+   command = create_TSCommand();
+   format_TSCommand( & command, "readEnviron" );
+   executeCommandInContext( context, & command );
+   if ( isBadVerdict() ) {
+      environ = NULL;
+   } else {
+      environ = create_Map( & type_CString, & type_CString );
+      while ( ( string = readCString_TSStream( &command.response ) ) != NULL ) {
+         EqualSignPosition = indexOfChar_CString( string, '=' );
+         if ( EqualSignPosition == -1 ) {
+            String * message = create_String( "readEnviron: Environment string has wrong format [" );
+            message = concat_String( message, toString( string ) );
+            message = concat_String( message, create_String( "]" ) );
+            setBadVerdict( toCharArray_String( message ) );
+         } else {
+            name  = substring_CString    ( string, 0, EqualSignPosition     );
+            value = substringFrom_CString( string,    EqualSignPosition + 1 );
+            put_Map( environ, name, value );
+         }
+      }
+   }
+   destroy_TSCommand(&command);
+
+   setProcessEnvironment( context, environ );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initProcessEnvironSubsystem( void )
+{
+   // Set up mediators
+   set_mediator_getenv_spec(getenv_media);
+   set_mediator_putenv_spec(putenv_media);
+   set_mediator_setenv_spec(setenv_media);
+   set_mediator_unsetenv_spec(unsetenv_media);
+}
+
+void initProcessEnvironment( CallContext context )
+{
+   readEnviron( context );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** getenv_spec **/
+mediator getenv_media for specification
+CString * getenv_spec( CallContext context, CString * name )
+   reads name
+{
+   call
+   {
+      CString * res = NULL;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "getenv:$(str)", name );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readCString_TSStream( &command.response );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      readEnviron( context );
+   }
+}
+
+/** putenv_spec **/
+mediator putenv_media for specification
+IntT putenv_spec( CallContext context, CString * string, ErrorCode * errno )
+   reads   string
+{
+   call
+   {
+      IntT res = 0;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "putenv:$(str)", string );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      readEnviron( context );
+   }
+}
+
+
+/** setenv_spec **/
+mediator setenv_media for specification
+IntT setenv_spec( CallContext context, CString * envname, CString * envval, IntT overwrite, ErrorCode * errno )
+   reads   envname, envval
+   writes  * errno
+{
+   call
+   {
+      IntT res = 0;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "setenv:$(str)$(str)$(int)", envname, envval, create_IntTObj( overwrite ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      readEnviron( context );
+   }
+}
+
+
+/** unsetenv_spec **/
+mediator unsetenv_media for specification
+IntT unsetenv_spec( CallContext context, CString * name, ErrorCode * errno )
+   reads   name
+   writes  * errno
+{
+   call
+   {
+      IntT res = 0;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "unsetenv:$(str)", name );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      readEnviron( context );
+   }
+}

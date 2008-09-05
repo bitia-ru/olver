@@ -1,0 +1,458 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/meta/meta_media.seh"
+#include "common/common_media.seh"
+
+FileKind getFileKind(int sw)
+{
+    switch(sw)
+    {
+        case 1:
+            return BlockFile;
+
+        case 2:
+            return CharacterFile;
+
+        case 3:
+            return FIFOFile;
+
+        case 4:
+            return RegularFile;
+
+        case 5:
+            return DirectoryFile;
+
+        case 6:
+            return SymbolicLinkFile;
+
+        case 7:
+            return Socket;
+
+        case 8:
+            return MessageQueue;
+
+        case 9:
+            return SemaphoreFile;
+
+        case 10:
+            return SharedMemoryObject;
+
+        case 11:
+            return TypedMemoryObject;
+
+        default:
+            return UnknownFileKind;
+    }
+}
+
+void readFileStatus(TSStream* stream, FileStatus* buff)
+{
+    buff->dev=readULLong_TSStream(stream);
+    buff->ino=readULong_TSStream(stream);
+
+    buff->kind=getFileKind(readInt_TSStream(stream));
+
+    buff->permissions->owner=create_FilePermission(false, false, false);
+    buff->permissions->group=create_FilePermission(false, false, false);
+    buff->permissions->other=create_FilePermission(false, false, false);
+
+    buff->permissions->owner->read=readInt_TSStream(stream);
+    buff->permissions->owner->write=readInt_TSStream(stream);
+    buff->permissions->owner->execute=readInt_TSStream(stream);
+
+    buff->permissions->group->read=readInt_TSStream(stream);
+    buff->permissions->group->write=readInt_TSStream(stream);
+    buff->permissions->group->execute=readInt_TSStream(stream);
+
+    buff->permissions->other->read=readInt_TSStream(stream);
+    buff->permissions->other->write=readInt_TSStream(stream);
+    buff->permissions->other->execute=readInt_TSStream(stream);
+
+    buff->permissions->set_uid=readInt_TSStream(stream);
+    buff->permissions->set_gid=readInt_TSStream(stream);
+    buff->permissions->set_vtx=readInt_TSStream(stream);
+
+    buff->nlink=readULong_TSStream(stream);
+
+    buff->uid=readUInt_TSStream(stream);
+
+    buff->gid=readUInt_TSStream(stream);
+
+    buff->rdev=readULLong_TSStream(stream);
+
+    buff->size=readLLong_TSStream(stream);
+
+    buff->atime=readLong_TSStream(stream);
+
+    buff->mtime=readLong_TSStream(stream);
+
+    buff->ctime=readLong_TSStream(stream);
+
+    buff->blksize=readLLong_TSStream(stream);
+
+    buff->blocks=readLLong_TSStream(stream);
+
+}
+
+static void utimbuf_formatter(TSStream* stream,UTimBuf* value)
+{
+    UTimBuf* tmp;
+
+    if(value!=NULL)
+        tmp=clone(value);
+    else
+        tmp=create_UTimBuf(-1, -1);
+
+    VERIFY_TYPE( utimbuf_formatter, &type_UTimBuf, tmp );
+
+    writeTypeHeaderTSStream(stream,"utimbuf");
+    writeLong_TSStream(stream, tmp->actime);
+    writeLong_TSStream(stream, tmp->modtime);
+}
+
+static void timeval_list_formatter(TSStream* stream, List* value)
+{
+    TimeVal* tmp1, *tmp2;
+
+    if(value!=NULL)
+    {
+        tmp1=clone(get_List(value, 0));
+        tmp2=clone(get_List(value, 1));
+    }
+    else
+    {
+        tmp1=create_TimeVal(-1, -1);
+        tmp2=create_TimeVal(-1, -1);
+    }
+
+    VERIFY_TYPE( timeval_list_formatter, &type_TimeVal, tmp1);
+    VERIFY_TYPE( timeval_list_formatter, &type_TimeVal, tmp2);
+
+    writeTypeHeaderTSStream(stream,"timeval_list");
+
+    writeLong_TSStream(stream, tmp1->tv_sec);
+    writeLong_TSStream(stream, tmp1->tv_usec);
+    writeLong_TSStream(stream, tmp2->tv_sec);
+    writeLong_TSStream(stream, tmp2->tv_usec);
+}
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+static void __xstat_return_processor(ThreadId threadId,
+                                         TSStream* stream, TSMetaData* meta)
+{
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        __xstat_return,
+        create___XStatReturnType(threadId, 0),
+        meta->timestamp
+        );
+    VERBOSE("__xstat reaction registered...\n");
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initFsMetaSubsystem(void)
+{
+  // Set up mediators
+      set_mediator___xstat_spec(__xstat_media);
+      set_mediator___xstat64_spec(__xstat64_media);
+
+      set_mediator___lxstat_spec(__lxstat_media);
+      set_mediator___lxstat64_spec(__lxstat64_media);
+
+      set_mediator___fxstat_spec(__fxstat_media);
+      set_mediator___fxstat64_spec(__fxstat64_media);
+
+      set_mediator_utime_spec(utime_media);
+      set_mediator_utimes_spec(utimes_media);
+
+
+    //Set up reactions
+    set_mediator___xstat_return(__xstat_return_media);
+
+    // Set up dr processors
+    registerDRProcessor("__xstat_return",
+        __xstat_return_processor);
+
+    //Set up formatters
+    registerTSFormatter("utimbuf", (TSFormatterFuncType)utimbuf_formatter);
+    registerTSFormatter("timeval_list", (TSFormatterFuncType)timeval_list_formatter);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** __fxstat_spec **/
+
+mediator __fxstat_media for specification
+IntT __fxstat_spec( CallContext context, IntT ver, FileDescId fildes, FileStatus * buff, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__fxstat:$(int)",
+                                            create_IntTObj(fildes.filedesc));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+            readFileStatus(&command.response, buff);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        on__FXStat(context, fildes, buff, __fxstat_spec);
+    }
+}
+
+
+//O_LARGEFILE
+
+/** __fxstat64_spec **/
+mediator __fxstat64_media for specification
+IntT __fxstat64_spec( CallContext context, IntT ver, FileDescId fildes, FileStatus * buff, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__fxstat64:$(int)",
+                                            create_IntTObj(fildes.filedesc));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+            readFileStatus(&command.response, buff);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        on__FXStat(context, fildes, buff, __fxstat64_spec);
+    }
+}
+
+
+/** __lxstat_spec **/
+mediator __lxstat_media for specification
+IntT __lxstat_spec( CallContext context, IntT ver, CString * path, FileStatus * buff, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__lxstat:$(str)", path  );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+            readFileStatus(&command.response, buff);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        on__LXStat(context, path, buff, __lxstat_spec);
+    }
+}
+
+
+/** __lxstat64_spec **/
+mediator __lxstat64_media for specification
+IntT __lxstat64_spec( CallContext context, IntT ver, CString * path, FileStatus * buff, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__lxstat64:$(str)", path  );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+            readFileStatus(&command.response, buff);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        on__LXStat(context, path, buff, __lxstat64_spec);
+    }
+}
+
+
+/** __xstat_spec **/
+
+mediator __xstat_media for specification
+IntT __xstat_spec( CallContext context, IntT ver, CString * path, FileStatus * buff, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__xstat:$(str)", path  );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+            readFileStatus(&command.response, buff);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        on__XStat(context, path, buff, __xstat_spec);
+    }
+}
+
+mediator __xstat_return_media for reaction
+__XStatReturnType* __xstat_return(void)
+{
+    state
+    {
+        on__XStatReturn(__xstat_return->context, __xstat_return->someArg);
+    }
+}
+/** __xstat64_spec **/
+mediator __xstat64_media for specification
+IntT __xstat64_spec( CallContext context, IntT ver, CString * path, FileStatus * buff, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "__xstat64:$(str)", path  );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+            readFileStatus(&command.response, buff);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        on__XStat(context, path, buff, __xstat64_spec);
+    }
+}
+
+
+/** utime_spec **/
+mediator utime_media for specification
+IntT utime_spec( CallContext context, CString* path,
+                            UTimBuf* times, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "utime:$(str)$(utimbuf)", path, times);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onUtime(context, path, times, utime_spec);
+    }
+}
+
+
+/** utimes_spec **/
+mediator utimes_media for specification
+IntT utimes_spec( CallContext context, CString* path,
+                            List* times, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "utimes:$(str)$(timeval_list)", path, times);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onUtimes(context, path, times, utimes_spec);
+    }
+}

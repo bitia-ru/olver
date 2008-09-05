@@ -1,0 +1,421 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#ifndef SIGNAL_SIGACTION_MODEL_SEH
+#define SIGNAL_SIGACTION_MODEL_SEH
+
+#include "common/common_model.seh"
+#include "signal/sigsend/sigsend_model.seh"
+
+
+/************************************************************************/
+/*                         Definitions                                  */
+/************************************************************************/
+
+#define KILL_DONT_NEED_WAIT_HANDLER 0
+#define KILL_WAIT_HANDLER 1
+#define KILL_CALLED_HANDLER 2
+
+#define SUT_SS_ONSTACK    1
+#define SUT_SS_DISABLE    2
+
+/*
+ * Defines, if may error condition (one of the function branch)
+ * in standard works.
+ */
+#define SIGACTION_MAY false
+
+/*
+ * Is SIGCHLD generated when SA_NOCLDSTOP flag was not set for SIGCHLD handler 
+ * and child processes were continued
+ */
+#define IS_SIGCHLD_GENERATED_WHEN_CHILD_CONTINUE true
+
+/************************************************************************/
+/*                         Data Structures                              */
+/************************************************************************/
+
+specification typedef struct StackT {
+    VoidTPtr ss_sp;
+    IntT ss_flags;
+    SizeT ss_size;
+} StackT;
+
+
+specification typedef struct SigaltstackReturnType
+{
+    IntT funcRes;
+    StackT* oldSs;
+    SizeT minsigstcksz;
+} SigaltstackReturnType;
+
+
+/*
+ * Register catchers of signals for every signal
+ *      key   - signal number (SignalObj)
+ *      value - SigAction struct
+ */
+specification typedef Map* SigCatchers;
+
+/*
+ * Remember, which function signal() or sigaction() set the catcher for 
+ * the signal
+ *      key   - signal number (SignalObj)
+ *      value(int) - 1 if catcher for this signal was set by signal() function
+ *                   2 if it was set by sigaction() function
+ */
+specification typedef Map* WhoSetCatcher;
+
+specification typedef struct Pthread_Sigmask_BlockedCallParams
+{
+    int uid;
+    int how;
+    SigSetTPtr set;
+    Set* old_mask;
+    /*
+     * if true, one of previous blocked signals, which is unblocked now  
+     * should be delivered and processed
+     */
+    bool need_handler;
+    bool singleThreaded;
+} Pthread_Sigmask_BlockedCallParams;
+
+specification typedef struct Pthread_SigmaskReactionType
+{
+    CallContext context;
+    //function result
+    IntT res;
+    // description of function from function_called stack of thread
+    CalledFunctionDescription* called_func;
+    // params, which was stacked by startBlockedCall
+    Pthread_Sigmask_BlockedCallParams* params; 
+} Pthread_SigmaskReactionType;
+
+specification typedef struct Sigprocmask_BlockedCallParams
+{
+    int uid;
+    int how;
+    SigSetTPtr set;
+    Set* old_mask;
+    /*
+     * if true, one of previous blocked signals, which is unblocked now  
+     * should be delivered and processed
+     */
+    bool need_handler;
+} Sigprocmask_BlockedCallParams;
+
+specification typedef struct SigprocmaskReactionType
+{
+    CallContext context;
+    //function result
+    IntT res;
+    ErrorCode* errno;
+    // description of function from function_called stack of thread
+    CalledFunctionDescription* called_func;
+    // params, which was stacked by startBlockedCall
+    Pthread_Sigmask_BlockedCallParams* params; 
+} SigprocmaskReactionType;
+
+specification typedef struct UserCatcherHandlerStartReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserCatcherHandlerStartReactionType;
+
+specification typedef struct UserCatcherHandlerFinishReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserCatcherHandlerFinishReactionType;
+
+specification typedef struct UserAgentHandlerStartReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserAgentHandlerStartReactionType;
+
+specification typedef struct UserAgentHandlerFinishReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserAgentHandlerFinishReactionType;
+
+specification typedef struct UserCatcherSigactionStartReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserCatcherSigactionStartReactionType;
+
+specification typedef struct UserCatcherSigactionFinishReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserCatcherSigactionFinishReactionType;
+
+specification typedef struct UserAgentSigactionStartReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserAgentSigactionStartReactionType;
+
+specification typedef struct UserAgentSigactionFinishReactionType
+{
+    ThreadState* thr_st;
+    Signal* signo;
+    bool was_set;
+} UserAgentSigactionFinishReactionType;
+
+
+specification typedef struct PauseCall
+{
+    CallContext context;
+    Map* oldProcessedSignals;
+}PauseCall;
+
+specification typedef struct PauseReturnType
+{
+    CallContext context;
+    IntT funcRes;
+    ErrorCode* errno;
+}PauseReturnType;
+
+specification typedef struct SigsuspendCall
+{
+    CallContext context;
+    SigSet* sigmask;
+    Map* oldProcessedSignals;
+    Set* oldMask;
+}SigsuspendCall;
+
+specification typedef struct SigsuspendReturnType
+{
+    CallContext context;
+    IntT funcRes;
+    ErrorCode* errno;
+}SigsuspendReturnType;
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** __libc_current_sigrtmax_spec **/
+specification
+IntT __libc_current_sigrtmax_spec( CallContext context);
+
+/** __libc_current_sigrtmin_spec **/
+specification
+IntT __libc_current_sigrtmin_spec( CallContext context);
+
+/** __sysv_signal_spec **/
+//specification
+//ReturnType __sysv_signal_spec( CallContext context, ... );
+
+/** bsd_signal_spec **/
+specification
+SignalHandler bsd_signal_spec( CallContext context, Signal* sig, SignalHandler handler, ErrorCode* errno);
+
+void bsd_signal_model(CallContext context, Signal* sig, SignalHandler handler);
+
+void onBsdSignal( CallContext context, Signal* sig, SignalHandler handler, SignalHandler bsd_signal_spec);
+
+/** pause_spec **/
+specification
+void pause_spec( CallContext context);
+
+void onPause(CallContext context);
+
+void onPauseReturn(CallContext context, PauseReturnType* pause_ret_val);
+
+reaction PauseReturnType* pause_return(void);
+
+/** pthread_sigmask_spec **/
+//This specification refers to: sigprocmask, pthread_sigmask
+specification
+void pthread_sigmask_spec( CallContext context, SigMaskAction how, SigSetTPtr set, SigSetTPtr oset, bool singleThreaded); 
+void onPthread_sigmask(CallContext context, SigMaskAction how, SigSetTPtr set, SigSetTPtr oset, bool singleThreaded);
+
+void pthread_sigmask_model(CallContext context, SigMaskAction how, SigSetTPtr set, SigSetTPtr oset, bool singleThreaded);
+
+reaction
+Pthread_SigmaskReactionType* pthread_sigmask_react(void);
+void onPthread_sigmask_react(Pthread_SigmaskReactionType* react);
+
+/** sigaction_spec **/
+specification
+IntT sigaction_spec(CallContext context, Signal* sig, SigAction* s_act, 
+                    SigAction* s_oact, ErrorCode* errno);
+
+void onSigaction(CallContext context, Signal* sig, SigAction* s_oact, SigAction* s_act, 
+                 IntT sigaction_res);
+/** sigaltstack_spec **/
+specification
+SigaltstackReturnType* sigaltstack_spec( CallContext context, StackT* ss, ErrorCode* errno);
+
+/** siginterrupt_spec **/
+specification
+IntT siginterrupt_spec( CallContext context, Signal* sig, IntT flag, ErrorCode* errno);
+
+void siginterrupt_model(CallContext context, Signal* sig, IntT flag);
+
+void onSiginterrupt(CallContext context, Signal* sig, IntT flag, IntT siginterrupt_spec);
+
+/** signal_spec **/
+//This specification refers to: __sysv_signal, signal
+specification
+SignalHandler signal_spec(CallContext context, Signal* sig, SignalHandler handler, 
+                          ErrorCode* errno, bool lsbFunc);
+
+void onSignal(CallContext context, Signal* sig, SignalHandler handler, SignalHandler ret_val);
+
+/** sigpending_spec **/
+specification
+IntT sigpending_spec(CallContext context, SigSetTPtr set, ErrorCode* errno);
+void onSigpending(CallContext context, SigSetTPtr set, IntT res);
+
+/** sigprocmask_spec **/
+//specification
+//void sigprocmask_spec( CallContext context, SigMaskAction how, SigSetTPtr set, SigSetTPtr oset);
+//void onSigprocmask(CallContext context, SigMaskAction how, SigSetTPtr set, SigSetTPtr oset);
+
+//reaction
+//SigprocmaskReactionType* sigprocmask_react(void);
+//void onSigprocmask_react(SigprocmaskReactionType* react);
+
+/** sigreturn_spec **/
+specification
+IntT sigreturn_spec(CallContext context);
+
+/** sigsuspend_spec **/
+specification
+void sigsuspend_spec( CallContext context, SigSetTPtr sigmask);
+
+void onSigsuspend(CallContext context, SigSetTPtr sigmask);
+
+void onSigsuspendReturn(CallContext context, SigsuspendReturnType* sigsuspend_ret_val);
+
+reaction SigsuspendReturnType* sigsuspend_return(void);
+
+
+/********************************************************************/
+/**       Catcher void f(int signo) returns right away as start    **/
+/********************************************************************/
+reaction UserCatcherHandlerStartReactionType* user_catcher_handler_reaction_start(void);
+void on_user_catcher_handler_reaction_start(UserCatcherHandlerStartReactionType* react);
+reaction UserCatcherHandlerFinishReactionType* user_catcher_handler_reaction_finish(void);
+void on_user_catcher_handler_reaction_finish(UserCatcherHandlerFinishReactionType* react);
+
+/********************************************************************/
+/**           Catcher void f(int signo) listen for commands        **/
+/********************************************************************/
+reaction UserAgentHandlerStartReactionType* user_agent_handler_reaction_start(void);
+void on_user_agent_handler_reaction_start(UserAgentHandlerStartReactionType* react);
+reaction UserAgentHandlerFinishReactionType* user_agent_handler_reaction_finish(void);
+void on_user_agent_handler_reaction_finish(UserAgentHandlerFinishReactionType* react);
+
+/********************************************************************/
+/**      Catcher void f(int signo, siginfo_t *info, void *context) **/
+/**                returns right away as start                     **/
+/********************************************************************/
+reaction UserCatcherSigactionStartReactionType* user_catcher_sigaction_reaction_start(void);
+void on_user_catcher_sigaction_reaction_start(UserCatcherSigactionStartReactionType* react);
+reaction UserCatcherSigactionFinishReactionType* user_catcher_sigaction_reaction_finish(void);
+void on_user_catcher_sigaction_reaction_finish(UserCatcherSigactionFinishReactionType* react);
+
+/********************************************************************/
+/**      Catcher void f(int signo, siginfo_t *info, void *context) **/
+/**                      listen for commands                       **/
+/********************************************************************/
+reaction UserAgentSigactionStartReactionType* user_agent_sigaction_reaction_start(void);
+void on_user_agent_sigaction_reaction_start(UserAgentSigactionStartReactionType* react);
+reaction UserAgentSigactionFinishReactionType* user_agent_sigaction_reaction_finish(void);
+void on_user_agent_sigaction_reaction_finish(UserAgentSigactionFinishReactionType* react);
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+/*
+ * return number of deleted signals in the queue and add this signals to 
+ * processed signals
+ */
+int remove_All_Signals_from_Model(ProcessState* pr_st_get, Signal* sig);//similar as in sigsend
+    
+Pthread_SigmaskReactionType* create_Pthread_SigmaskReactionType(CallContext context, IntT res, CalledFunctionDescription* called_func,
+                                                                Pthread_Sigmask_BlockedCallParams* params);
+Pthread_Sigmask_BlockedCallParams* create_Pthread_Sigmask_BlockedCallParams(int uid, int how, SigSetTPtr set, 
+                                                                            Set* old_mask, bool need_handler, bool singleThreaded);
+
+SigprocmaskReactionType* create_SigprocmaskReactionType(CallContext context, IntT res, ErrorCode* errno, CalledFunctionDescription* called_func,
+                                                        Pthread_Sigmask_BlockedCallParams* params);
+Sigprocmask_BlockedCallParams* create_Sigprocmask_BlockedCallParams(int uid, int how, SigSetTPtr set, 
+                                                                    Set* old_mask, bool need_handler);
+
+UserCatcherHandlerStartReactionType* create_UserCatcherHandlerStartReactionType(ThreadState*  thr_st, Signal* sig);
+UserCatcherHandlerFinishReactionType* create_UserCatcherHandlerFinishReactionType(ThreadState*  thr_st, Signal* sig);
+
+UserAgentHandlerStartReactionType* create_UserAgentHandlerStartReactionType(ThreadState*  thr_st, Signal* sig);
+UserAgentHandlerFinishReactionType* create_UserAgentHandlerFinishReactionType(ThreadState*  thr_st, Signal* sig);
+
+UserCatcherSigactionStartReactionType* create_UserCatcherSigactionStartReactionType(ThreadState*  thr_st, Signal* sig);
+UserCatcherSigactionFinishReactionType* create_UserCatcherSigactionFinishReactionType(ThreadState*  thr_st, Signal* sig);
+
+UserAgentSigactionStartReactionType* create_UserAgentSigactionStartReactionType(ThreadState*  thr_st, Signal* sig);
+UserAgentSigactionFinishReactionType* create_UserAgentSigactionFinishReactionType(ThreadState*  thr_st, Signal* sig);
+
+StackT* create_StackT(VoidTPtr ss_sp, IntT ss_flags, SizeT ss_size);
+SigaltstackReturnType* create_SigaltstackReturnType(IntT funcRes, StackT* oldSs, SizeT minsigstcksz);
+PauseCall * create_PauseCall(CallContext context, Map* oldProcessedSignals);
+PauseReturnType* create_PauseReturnType(CallContext context, IntT funcRes, ErrorCode* errno);
+SigsuspendCall * create_SigsuspendCall(CallContext context, SigSet* sigmask, Map* oldProcessedSignals, Set* oldMask);
+SigsuspendReturnType* create_SigsuspendReturnType(CallContext context, IntT funcRes, ErrorCode* errno);
+
+/********************************************************************/
+/**                Helper Informative Functions                    **/
+/********************************************************************/
+/*
+ * Returns set of signals which can be delivered to the thread with CallContext 
+ * context, when signal mask is equals to sigmask
+ */
+Set* CanBeDelivered(CallContext context, Set* sigmask);
+bool isValidNotReaitimeSignal(Signal* sig);
+bool isCannotCatch(Signal* sig);
+bool isCannotIgnore(Signal* sig);
+bool isRealtimeSignal(Signal* sig, CallContext context);
+bool isNotValidSignal(Signal* sig, CallContext context);
+bool isUseUserCatcher(SignalHandler h);
+bool isWaitingForSignal(Signal* sig, CallContext context);
+int  getNumberUnblockedRealtimeSignals(CallContext context, Signal* rt_min_sig, Signal* rt_max_sig);
+bool isMinimalUnblockedRealtimeSignal(CallContext context, Signal* rt_min_sig, Signal* sig);
+
+/********************************************************************/
+/**                  Flag Conversion Functions                     **/
+/********************************************************************/
+IntT convertSignalFlagsToIntT(SigActionFlag* sigflags);
+SigActionFlag SignalConvertIntTToFlags(IntT value);
+
+
+#endif
+

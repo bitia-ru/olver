@@ -1,0 +1,352 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/tls/tls_media.seh"
+#include "common/common_media.seh"
+#include <atl/integer.h>
+
+/* Resets destructor's isActive state to FALSE and increments the num of calls */
+void registerFinishDestructorCall(CallContext context, DestrSpecif * destrSpecif)
+{
+
+    DestructorState * destrState = get_Map(destructorCalls, destrSpecif);
+    if(NULL!=destrState)
+    {
+        int oldVal = destrState->num_calls;
+        put_Map(destructorCalls, destrSpecif, create_DestructorState(oldVal+1,false) );
+    } else {
+        put_Map(destructorCalls, destrSpecif, create_DestructorState(1,false) );
+    }
+}
+
+int getDestructorCallsNum(CallContext context, PThreadKey* key)
+{
+    ThreadState *threadState = getThreadState_CallContext(context);
+    ThreadSpecific * specific = get_Map( threadState->key_specific, key );
+    DestrSpecif * destr_specif = create_DestrSpecif( context, specific);
+
+    DestructorState * destrState = get_Map(destructorCalls, destr_specif);
+    if(destrState==NULL)
+        return 0;
+    else
+        return destrState->num_calls;
+}
+
+int resetDestructorCallsNum(CallContext context, PThreadKey* key)
+{
+    ThreadState *threadState = getThreadState_CallContext(context);
+    ThreadSpecific * specific = get_Map( threadState->key_specific, key );
+
+    DestrSpecif * destr_specif = create_DestrSpecif( context, specific);
+    
+    remove_Map(destructorCalls, destr_specif);
+    return 0;
+}
+
+ThreadSpecific * findSpecificByAddr(CallContext context, VoidTPtr addr)
+{
+    ProcessId currProcess = {addr.system, addr.process};
+    int ind,j;
+    Map * activeThreads = getThreads_ProcessId(currProcess);
+    int mapSize = size_Map(activeThreads);
+    for(ind=0;ind<mapSize;ind++)
+    {
+        ThreadState *threadState = (ThreadState*)get_Map(activeThreads, key_Map(activeThreads, ind));
+        Map * key_specific = threadState->key_specific;
+        int map2size = size_Map(key_specific);
+        for(j=0;j<map2size;j++)
+        {
+            PThreadKey * key = key_Map(key_specific,j);
+            ThreadSpecific *threadSpecific  = (ThreadSpecific*)get_Map(key_specific, key);
+            if( (threadSpecific!=NULL) && ( equals_VoidTPtr(threadSpecific->address,addr) ) )
+                return threadSpecific;
+        }
+    }
+    return NULL;
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initPthreadTlsSubsystem(void)
+{
+    // initializing model
+     initDestructorCounter();
+     initBeforeTerminating();
+     
+    // Set up mediators
+    set_mediator_pthread_getspecific_spec(pthread_getspecific_media);
+    set_mediator_pthread_key_create_spec(pthread_key_create_media);
+    set_mediator_pthread_key_delete_spec(pthread_key_delete_media);
+    set_mediator_pthread_setspecific_spec(pthread_setspecific_media);
+    
+    set_mediator_pthread_key_destructor_call(pthread_key_destructor_call_media);
+    registerDRProcessor("pthread_key_destructor_call", pthread_key_destructor_call_processor);
+}
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void pthread_key_destructor_call_processor(ThreadId threadId, TSStream* stream, TSMetaData* meta)
+{
+    CallContext context = getCallContext_ThreadId(threadId);
+
+    VoidTPtr address = readPointer_TSStream(context, stream);
+ 
+    ThreadSpecific * thr_spec = findSpecificByAddr(context,address);
+
+    registerReactionWithTimeInterval
+        (
+         getThreadChannelID(threadId),
+         NULL,
+         pthread_key_destructor_call,
+         create_PThreadKeyDestructorReturnType( context, clone(thr_spec), thr_spec, 0),
+         meta->timestamp
+        );
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** pthread_getspecific_spec **/
+mediator pthread_getspecific_media for specification
+ThreadSpecific* pthread_getspecific_spec( CallContext context, PThreadKey* key, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        VoidTPtr    resSpecific;
+        ThreadSpecific *res = NULL;
+    
+        format_TSCommand( &command, "pthread_getspecific:$(ptr)$(int)",
+                          create_VoidTPtrObj(key->address), 
+                          errno
+                        );
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            resSpecific = readPointer_TSStream(context, &command.response);
+            *errno = readInt_TSStream(&command.response);
+            
+            res = create_ThreadSpecific( key, resSpecific);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+
+/** pthread_setspecific_spec **/
+mediator pthread_setspecific_media for specification
+IntT pthread_setspecific_spec( CallContext context, PThreadKey* key, VoidTPtr value)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT    res = -1;
+    
+        format_TSCommand( &command, "pthread_setspecific:$(ptr)$(ptr)",
+            create_VoidTPtrObj(key->address),
+            create_VoidTPtrObj(value)
+            );
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+
+    state
+    {
+        if(pthread_setspecific_spec==0)
+        {
+            ThreadState *threadState = getThreadState_CallContext(context);
+            put_Map(
+                threadState->key_specific, 
+                key, 
+                create_ThreadSpecific(key, value)
+                );
+        }
+    }
+}
+
+
+/** pthread_key_create_spec **/
+mediator pthread_key_create_media for specification
+IntT pthread_key_create_spec( CallContext context, VoidTPtr keyaddress, PThreadKeyDestructor destruct )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT    res = -1;
+    
+        format_TSCommand( &command, "pthread_key_create:$(ptr)$(int)",
+            create_VoidTPtrObj(keyaddress),
+            create_IntTObj((IntT)destruct)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+
+    state
+    {
+        if(pthread_key_create_spec==0)
+        {
+            PThreadKey * key = registerPThreadKey(keyaddress, destruct);
+            resetDestructorCallsNum(context,key);
+        }
+    }
+}
+
+
+
+/** pthread_key_delete_spec **/
+mediator pthread_key_delete_media for specification
+PThreadKeyFunctionResult* pthread_key_delete_spec( CallContext context, PThreadKey* key )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        PThreadKeyFunctionResult *res = NULL;
+        
+        resetDestructorCallsNum(context,key);
+    
+        format_TSCommand( &command, "pthread_key_delete:$(ptr)",
+            create_VoidTPtrObj(key->address)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            IntT    errno;
+            int     destructorCallsNum;
+            Integer *destructorCallsInteger;
+            
+            timestamp = command.meta.timestamp;
+
+            errno = readInt_TSStream(&command.response);            
+            destructorCallsNum = getDestructorCallsNum(context, key);
+
+            res = create_PThreadKeyFunctionResult(
+                         errno,
+                         destructorCallsNum
+                        );
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+
+    state
+    {
+        if(pthread_key_delete_spec->errno == 0)
+        {
+            unregisterPThreadKey(key);
+        }
+    }
+}
+
+
+/** pthread_key_destructor_call **/
+mediator pthread_key_destructor_call_media for reaction 
+PThreadKeyDestructorReturnType* pthread_key_destructor_call(void)
+{
+    state
+    {
+        //if(pthread_key_destructor_call->threadSpecific == NULL)
+        onPThreadKeyDestructor(pthread_key_destructor_call);
+    }
+}
+
+void destructor_return(CallContext context, DestrSpecif * destrSpecif)
+{
+    TSCommand command = create_TSCommand();
+      
+    format_TSCommand( &command, "_destructor_return");
+    executeCommandInContext( context, &command );
+   
+    if (!isBadVerdict())
+    {
+        // reading result
+        readString_TSStream(&command.response);
+        
+        // updating model
+        registerFinishDestructorCall(context, destrSpecif);        
+
+        // checking the thread
+        checkThreadDelete(getThreadState_CallContext(context));
+    }
+}
+
+VoidTPtr postpone_thread_cleanup(CallContext context)
+{
+    TSCommand command = create_TSCommand();
+    VoidTPtr res = NULL_VoidTPtr;
+      
+    format_TSCommand( &command, "postpone_thread_cleanup");
+    executeCommandInContext( context, &command );
+    
+    if (!isBadVerdict())
+    {
+       res = readPointer_TSStream( context, &command.response );
+    }
+
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+void deallocate(CallContext context, VoidTPtr address)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+
+    format_TSCommand( &command, "deallocate:$(ptr)", create_VoidTPtrObj(address) );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+    destroy_TSCommand(&command);
+}
+

@@ -1,0 +1,465 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/fifo/fifo_media.seh"
+#include "common/common_media.seh"
+#include "io/file/file_model.seh"
+
+
+
+static void writev_fifo_return_processor(ThreadId threadId, TSStream* stream, 
+                                        TSMetaData* meta)
+{
+    SSizeT res;
+    IntT errno;
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        writev_fifo_return,
+        create_WriteFIFOReturnType( threadId, res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+
+static void write_fifo_return_processor(ThreadId threadId, TSStream* stream, 
+                                   TSMetaData* meta)
+{
+    SSizeT res;
+    IntT errno;
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        write_fifo_return,
+        create_WriteFIFOReturnType( threadId, res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+
+static void read_fifo_return_processor(ThreadId threadId, TSStream* stream, 
+                                        TSMetaData* meta)
+{
+    SSizeT res;
+    IntT errno;
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        read_fifo_return,
+        create_ReadFIFOReturnType( threadId, res, create_ErrorCode(errno), NULL),
+        meta->timestamp
+        );
+}
+
+static void readv_fifo_return_processor(ThreadId threadId, TSStream* stream, 
+                                       TSMetaData* meta)
+{
+    SSizeT res;
+    IntT errno;
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        readv_fifo_return,
+        create_ReadFIFOReturnType( threadId, res, create_ErrorCode(errno), NULL),
+        meta->timestamp
+        );
+}
+
+
+static void open_fifo_return_processor(ThreadId threadId, TSStream* stream, 
+                                  TSMetaData* meta)
+{
+    FileDescId res = create_FileDescId(threadId.system, threadId.process, -1);
+    IntT errno;
+    
+    res.filedesc = readInt_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        open_fifo_return,
+        create_OpenFIFOReturnType( threadId, res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initFsFifoSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_mkfifo_spec(mkfifo_media);
+
+    set_mediator_close_fifo_spec(close_fifo_media);
+
+    set_mediator_write_fifo_spec(write_fifo_media);
+    set_mediator_write_fifo_return(write_fifo_return_media);
+
+    set_mediator_writev_fifo_spec(writev_fifo_media);
+    set_mediator_writev_fifo_return(writev_fifo_return_media);
+
+    set_mediator_read_fifo_spec(read_fifo_media);
+    set_mediator_read_fifo_return(read_fifo_return_media);
+
+    set_mediator_readv_fifo_spec(readv_fifo_media);
+    set_mediator_readv_fifo_return(readv_fifo_return_media);
+
+    set_mediator_open_fifo_spec(open_fifo_media);
+    set_mediator_open_fifo_return(open_fifo_return_media);
+
+    registerDRProcessor("write_fifo_return", write_fifo_return_processor);
+    registerDRProcessor("writev_fifo_return", writev_fifo_return_processor);
+    registerDRProcessor("read_fifo_return", read_fifo_return_processor);
+    registerDRProcessor("readv_fifo_return", readv_fifo_return_processor);
+    registerDRProcessor("open_fifo_return", open_fifo_return_processor);
+
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** open_fifo_spec **/
+//This mediator refers to: open_fifo, open64_fifo
+mediator open_fifo_media for specification
+void open_fifo_spec(CallContext context, CString* path, OpenFlags oflag, 
+               FilePermissions* mode, ErrorCode* errno, bool is64bits)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        if (!is64bits)
+        {
+            format_TSCommand( &command, "open_fifo:$(str)$(openflags)$(perms)",
+                path,
+                create_OpenFlagsObj(oflag),
+                mode
+                );
+        }
+        else
+        {
+            format_TSCommand( &command, "open64_fifo:$(str)$(openflags)$(perms)",
+                path,
+                create_OpenFlagsObj(oflag),
+                mode
+                );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onOpenFIFO( context, path, oflag, mode, is64bits);
+    }
+}
+
+mediator  open_fifo_return_media for
+reaction OpenFIFOReturnType* open_fifo_return(void)
+{
+    state
+    {
+        onOpenFIFOReturn(open_fifo_return->context, open_fifo_return->filedesc);
+        
+    }
+}
+
+/** mkfifo_spec **/
+mediator mkfifo_media for specification
+IntT mkfifo_spec( CallContext context, CString* path, FilePermissions* mode, ErrorCode* errno)
+{
+    call
+    {
+        IntT res = -1; 
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "mkfifo:$(str)$(perms)",
+            path,
+            mode
+            );
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        OnFIFO(context, path, mode, mkfifo_spec);
+    }
+}
+
+
+
+mediator close_fifo_media for specification
+IntT close_fifo_spec( CallContext context,  FileDescId  fildes, ErrorCode* errno)
+{
+    call
+    {
+        IntT res=-1;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "close:$(int)", 
+            create_IntTObj(fildes.filedesc) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onFIFOClose(context, fildes, close_fifo_spec);
+    }
+
+}
+
+
+
+mediator write_fifo_media for specification
+void write_fifo_spec(CallContext context, FileDescId fildes, VoidTPtr buf, 
+                       SizeT nbyte, ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "write_fifo:$(int)$(ptr)$(size)",
+            create_IntTObj(fildes.filedesc),
+            create_VoidTPtrObj(buf),
+            create_SizeTObj(nbyte));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onWriteFIFO(context, fildes, buf, nbyte);
+    }
+}
+
+
+
+mediator write_fifo_return_media for
+reaction WriteFIFOReturnType* write_fifo_return(void)
+{
+    state
+    {
+        onWriteFIFOReturn(write_fifo_return->context, write_fifo_return->functionResult);
+    }
+}
+
+
+
+
+mediator read_fifo_media for specification
+void read_fifo_spec(CallContext context, FileDescId fildes, VoidTPtr buf, 
+                     SizeT nbyte, ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "read_fifo:$(int)$(ptr)$(size)",
+            create_IntTObj(fildes.filedesc),
+            create_VoidTPtrObj(buf),
+            create_SizeTObj(nbyte));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+    state
+    {
+        onReadFIFO(context, fildes, buf, nbyte);
+    }
+}
+
+
+
+mediator read_fifo_return_media for
+reaction ReadFIFOReturnType* read_fifo_return(void)
+{
+    state
+    {
+        onReadFIFOReturn(read_fifo_return->context, read_fifo_return->functionResult, read_fifo_return);
+    }
+}
+
+
+
+/** writev_fifo_spec **/
+mediator writev_fifo_media for specification
+void writev_fifo_spec(CallContext context, FileDescId fildes, List* iov, 
+                      ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        IntT i=0;
+        IOvec* curElement;
+        
+        format_TSCommand( &command, "writev_fifo:$(int)$(int)",
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(size_List(iov)));
+        for (i=0;i<size_List(iov);i++)
+        {
+            curElement=(IOvec*)get_List(iov, i);
+            writePointer_TSStream(&command.command, curElement->iov_base);
+            writeSize_TSStream(&command.command, curElement->iov_len);
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onWritevFIFO(context, fildes, iov);
+    }
+}
+
+
+mediator writev_fifo_return_media for
+reaction WriteFIFOReturnType* writev_fifo_return(void)
+{
+    state
+    {
+        onWritevFIFOReturn(writev_fifo_return->context, writev_fifo_return->functionResult);
+    }
+}
+
+
+
+/** readv_fifo_spec **/
+mediator readv_fifo_media for specification
+void readv_fifo_spec(CallContext context, FileDescId fildes, List* iov, 
+                  ErrorCode* errno)
+{
+    call
+    {
+        SSizeT res;
+        TSCommand command = create_TSCommand();
+        IntT i=0;
+        IOvec* curElement;
+        
+        format_TSCommand( &command, "readv_fifo:$(int)$(int)",
+            create_IntTObj(fildes.filedesc),
+            create_IntTObj(size_List(iov)));
+        for (i=0;i<size_List(iov);i++)
+        {
+            curElement=(IOvec*)get_List(iov, i);
+            writePointer_TSStream(&command.command, curElement->iov_base);
+            writeSize_TSStream(&command.command, curElement->iov_len);
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onReadvFIFO(context, fildes, iov);
+    }
+}
+
+
+mediator readv_fifo_return_media for
+reaction ReadFIFOReturnType* readv_fifo_return(void)
+{
+    state
+    {
+        onReadvFIFOReturn(readv_fifo_return->context, readv_fifo_return->functionResult, readv_fifo_return);
+    }
+}
+

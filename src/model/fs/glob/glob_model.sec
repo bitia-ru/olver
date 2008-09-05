@@ -1,0 +1,2235 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "config/interpretation.seh"
+#include "fs/glob/glob_config.h"
+#include "data/errno_model.seh"
+#include "fs/glob/glob_model.seh"
+#include "fs/fs/fs_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+#pragma SEC subsystem glob "fs.glob"
+
+/* 
+   The group of functions 'fs.glob' consists of: 
+       glob       [SUSv3]
+       glob64     [LSB]
+       globfree   [SUSv3]
+       globfree64 [LSB]
+ */
+
+/*****************************************************************************/
+/**                          Interface Functions                            **/
+/*****************************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    glob, globfree - generate pathnames matching a pattern
+
+SYNOPSIS
+
+    #include <glob.h>
+
+    int glob(const char *restrict pattern, int flags,
+           int(*errfunc)(const char *epath, int eerrno),
+           glob_t *restrict pglob);
+    void globfree(glob_t *pglob);
+
+DESCRIPTION
+
+    The glob() function is a pathname generator that shall implement the rules
+    defined in the Shell and Utilities volume of IEEE Std 1003.1-2001, Section
+    2.13, Pattern Matching Notation, with optional support for rule 3 in the
+    Shell and Utilities volume of IEEE Std 1003.1-2001, Section 2.13.3,
+    Patterns Used for Filename Expansion.
+
+    The structure type glob_t is defined in <glob.h> and includes at least the
+    following members:
+
+    Member Type  Member Name  Description
+
+    size_t       gl_pathc     Count of paths matched by pattern.
+
+    char **      gl_pathv     Pointer to a list of matched pathnames.
+
+    size_t       gl_offs      Slots to reserve at the beginning of gl_pathv.
+
+    The argument pattern is a pointer to a pathname pattern to be expanded. The
+    glob() function shall match all accessible pathnames against this pattern
+    and develop a list of all pathnames that match. In order to have access to
+    a pathname, glob() requires search permission on every component of a path
+    except the last, and read permission on each directory of any filename
+    component of pattern that contains any of the following special characters:
+    '*', '?', and '['.
+
+    The glob() function shall store the number of matched pathnames into
+    pglob->gl_pathc and a pointer to a list of pointers to pathnames into
+    pglob->gl_pathv. The pathnames shall be in sort order as defined by the
+    current setting of the LC_COLLATE category; see the Base Definitions volume
+    of IEEE Std 1003.1-2001, Section 7.3.2, LC_COLLATE. The first pointer after
+    the last pathname shall be a null pointer. If the pattern does not match
+    any pathnames, the returned number of matched paths is set to 0, and the
+    contents of pglob->gl_pathv are implementation-defined.
+
+    It is the caller's responsibility to create the structure pointed to by
+    pglob. The glob() function shall allocate other space as needed, including
+    the memory pointed to by gl_pathv. The globfree() function shall free any
+    space associated with pglob from a previous call to glob().
+
+    The flags argument is used to control the behavior of glob(). The value of
+    flags is a bitwise-inclusive OR of zero or more of the following constants,
+    which are defined in <glob.h>:
+
+    GLOB_APPEND
+        Append pathnames generated to the ones from a previous call to glob().
+    GLOB_DOOFFS
+        Make use of pglob->gl_offs. If this flag is set, pglob->gl_offs is used
+        to specify how many null pointers to add to the beginning of
+        pglob->gl_pathv. In other words, pglob->gl_pathv shall point to
+        pglob->gl_offs null pointers, followed by pglob->gl_pathc pathname
+        pointers, followed by a null pointer.
+    GLOB_ERR
+        Cause glob() to return when it encounters a directory that it cannot
+        open or read. Ordinarily, glob() continues to find matches.
+    GLOB_MARK
+        Each pathname that is a directory that matches pattern shall have a
+        slash appended.
+    GLOB_NOCHECK
+        Supports rule 3 in the Shell and Utilities volume of IEEE Std
+        1003.1-2001, Section 2.13.3, Patterns Used for Filename Expansion. If
+        pattern does not match any pathname, then glob() shall return a list
+        consisting of only pattern, and the number of matched pathnames is 1.
+    GLOB_NOESCAPE
+        Disable backslash escaping.
+    GLOB_NOSORT
+        Ordinarily, glob() sorts the matching pathnames according to the
+        current setting of the LC_COLLATE category; see the Base Definitions
+        volume of IEEE Std 1003.1-2001, Section 7.3.2, LC_COLLATE. When this
+        flag is used, the order of pathnames returned is unspecified.
+
+    The GLOB_APPEND flag can be used to append a new set of pathnames to those
+    found in a previous call to glob(). The following rules apply to
+    applications when two or more calls to glob() are made with the same value
+    of pglob and without intervening calls to globfree():
+
+       1. The first such call shall not set GLOB_APPEND. All subsequent calls
+          shall set it.
+
+       2. All the calls shall set GLOB_DOOFFS, or all shall not set it.
+
+       3. After the second call, pglob->gl_pathv points to a list containing
+          the following:
+
+           1. Zero or more null pointers, as specified by GLOB_DOOFFS and
+              pglob->gl_offs.
+
+           2. Pointers to the pathnames that were in the pglob->gl_pathv list
+              before the call, in the same order as before.
+           
+           3. Pointers to the new pathnames generated by the second call, in
+              the specified order.
+
+       4. The count returned in pglob->gl_pathc shall be the total number of
+          pathnames from the two calls.
+
+       5. The application can change any of the fields after a call to glob().
+          If it does, the application shall reset them to the original value
+          before a subsequent call, using the same pglob value, to globfree()
+          or glob() with the GLOB_APPEND flag.
+
+    If, during the search, a directory is encountered that cannot be opened or
+    read and errfunc is not a null pointer, glob() calls (*errfunc()) with two
+    arguments:
+
+       1. The epath argument is a pointer to the path that failed.
+
+       2. The eerrno argument is the value of errno from the failure, as set by
+          opendir(), readdir(), or stat(). (Other values may be used to report
+          other errors not explicitly documented for those functions.)
+
+    If (*errfunc()) is called and returns non-zero, or if the GLOB_ERR flag is
+    set in flags, glob() shall stop the scan and return GLOB_ABORTED after
+    setting gl_pathc and gl_pathv in pglob to reflect the paths already
+    scanned. If GLOB_ERR is not set and either errfunc is a null pointer or
+    (*errfunc()) returns 0, the error shall be ignored.
+
+    The glob() function shall not fail because of large files.
+
+RETURN VALUE
+
+    Upon successful completion, glob() shall return 0. The argument
+    pglob->gl_pathc shall return the number of matched pathnames and the
+    argument pglob->gl_pathv shall contain a pointer to a null-terminated list
+    of matched and sorted pathnames. However, if pglob->gl_pathc is 0, the
+    content of pglob->gl_pathv is undefined.
+
+    The globfree() function shall not return a value.
+
+    If glob() terminates due to an error, it shall return one of the non-zero
+    constants defined in <glob.h>. The arguments pglob->gl_pathc and
+    pglob->gl_pathv are still set as defined above.
+
+ERRORS
+
+    The glob() function shall fail and return the corresponding value if:
+
+    GLOB_ABORTED
+        The scan was stopped because GLOB_ERR was set or (*errfunc()) returned
+        non-zero.
+    GLOB_NOMATCH
+        The pattern does not match any existing pathname, and GLOB_NOCHECK was
+        not set in flags.
+    GLOB_NOSPACE
+        An attempt to allocate memory failed.
+*/
+specification
+GlobErrorCode glob_spec(CallContext context, CString *pattern, GlobFlags flags,
+                        GlobErrorFunction *errfunc, GlobTPtr pglob)
+{
+    GlobT *pre_glob = clone(getGlobT(pglob));
+
+    List *glob_result = create_List(&type_CString);
+
+    GlobPattern *glob_pattern;
+
+    FindErrorCode glob_error;
+
+    pre
+    {
+        if (equals(pattern, create_CString("/*/local")) && flags.mark==true && flags.err==true)
+        {
+            int i=0;
+            i++;
+            
+        }
+
+        glob_pattern = parse_GlobPattern(pattern, flags);
+        
+        glob_error = find_GlobPattern(context, glob_pattern, flags,
+            errfunc, glob_result);
+
+        /* [Consistency of test suite] */
+        REQ("", "Directories are uptodate", glob_error != FIND_UPTODATE_ERROR);
+    
+        /*
+         * It is the caller's responsibility to create the structure pointed to
+         * by pglob.
+         */
+        REQ("app.glob.00", "pglob is valid", isValidPointer(context, pglob));
+
+        if(pre_glob == NULL)
+        {
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * The first such call shall not set GLOB_APPEND. All subsequent
+             * calls shall set it.
+             */
+            REQ("app.glob.08.01", "GLOB_APPEND shall not be set", !flags.append);
+        }
+        else
+        {
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * All the calls shall set GLOB_DOOFFS, or all shall not set it.
+             */
+            REQ("app.glob.08.02", "GLOB_DOOFFS shall be the same as in the previous call",
+                flags.dooffs == pre_glob->flags.dooffs);
+        }
+        
+        return true;
+    }
+    coverage C
+    {
+        GLOB_PATTERN_COVERAGE(glob_pattern, glob, "glob()");
+    }
+    coverage C_errfunc
+    {
+        GLOB_ERRFUNC_COVERAGE(errfunc, glob, "glob()");
+    }
+    post
+    {
+        int offset;
+        Set *pathv_subset;
+        List *pathv_sublist;
+
+        FileSystem *file_system = getFileSystem(context);
+
+        GlobT *post_glob = getGlobT(pglob);
+
+        traceFormattedUserInfo("glob_spec: glob=%d", glob_spec);
+        traceFormattedUserInfo("glob_spec: pattern=$(obj)", glob_pattern);
+        traceFormattedUserInfo("glob_spec: glob_result=$(obj)", glob_result);
+        traceFormattedUserInfo("glob_spec: pathv=$(obj)", post_glob->pathv);
+        traceFormattedUserInfo("glob_spec: pathc=%I64u", post_glob->pathc);
+        traceFormattedUserInfo("glob_spec: offs=%I64u", post_glob->offs);
+
+    /*
+     * The slash character in a pathname shall be explicitly matched by using one or
+     * more slashes in the pattern; it shall neither be matched by the asterisk or
+     * question-mark special characters nor by a bracket expression.
+     */
+    REQ("sh.pattern.filename.01.01.01","",TODO_REQ());
+
+    /*
+     * Slashes in the pattern shall be identified before bracket expressions; thus, a
+     * slash cannot be included in a pattern bracket expression used for filename
+     * expansion.
+     */
+    REQ("sh.pattern.filename.01.01.02","",TODO_REQ());
+
+    /*
+     * If a slash character is found following an unescaped open square bracket
+     * character before a corresponding closing square bracket is found, the open
+     * bracket shall be treated as an ordinary character.
+     */
+    REQ("sh.pattern.filename.01.01.03","",TODO_REQ());
+
+    /*
+     * If a filename begins with a period ( '.' ), the period shall be explicitly
+     * matched by using a period as the first character of the pattern or immediately
+     * following a slash character.
+     */
+    REQ("sh.pattern.filename.01.02.01","",TODO_REQ());
+
+    /*
+     * The leading period shall not be matched by:
+     *
+     * The asterisk or question-mark special characters
+     */
+    REQ("sh.pattern.filename.01.02.02.01","",TODO_REQ());
+
+    /*
+     * The leading period shall not be matched by:
+     *
+     * A bracket expression containing a non-matching list, such as "[!a]", a range
+     * expression, such as "[%-0]", or a character class expression, such as "[[:punct:]
+     * ]"
+     */
+    REQ("sh.pattern.filename.01.02.02.02","",TODO_REQ());
+
+    /*
+     * The leading period shall not be matched by:
+     *
+     * It is unspecified whether an explicit period in a bracket expression matching
+     * list, such as "[.abc]", can match a leading period in a filename.
+     */
+    REQ("sh.pattern.filename.01.02.03","",TODO_REQ());
+
+    /*
+     * Each component that contains a pattern character shall require read permission
+     * in the directory containing that component.
+     */
+    REQ("sh.pattern.filename.01.03.02","",TODO_REQ());
+
+    /*
+     * Any component, except the last, that does not contain a pattern character shall
+     * require search permission.
+     */
+    REQ("sh.pattern.filename.01.03.03","",TODO_REQ());
+
+    /*
+     * The concatenation of patterns matching a single character is a valid pattern
+     * that shall match the concatenation of the singlecharacters or collating
+     * elements matched by each of the concatenated patterns.
+     */
+    REQ("sh.pattern.multiple.01.02","",TODO_REQ());
+
+    /*
+     * The concatenation of one or more patterns matching a single character with one
+     * or more asterisks is a valid pattern. In suchpatterns, each asterisk shall
+     * match a string of zero or more characters, matching the greatest possible
+     * number of characters that still allows the remainder of the pattern to match the
+     * string.
+     */
+    REQ("sh.pattern.multiple.01.03","",TODO_REQ());
+
+    /*
+     * The shell special characters always require quoting.
+     */
+    REQ("sh.pattern.single.06","",TODO_REQ());
+
+    /*
+     * When unquoted and outside a bracket expression, the following three characters
+     * shall have special meaning in the specification of patterns:
+     *
+     * [
+     *
+     * The open bracket shall introduce a pattern bracket expression.
+     */
+    REQ("sh.pattern.single.07.02","",TODO_REQ());
+
+
+
+        /*
+         * The arguments pglob->gl_pathc and pglob->gl_pathv are still set as
+         * defined above.
+         */
+        REQ("glob.24.02.02", "", TODO_REQ());
+        
+        /*
+         * If glob() terminates due to an error, it shall return one of the
+         * non-zero constants defined in <glob.h>.
+         */
+        ERROR_BEGIN(POSIX_GLOB, "glob.24.02.01", glob_spec != SUT_GLOB_OK, glob_spec);
+
+            /*
+             * GLOB_ABORTED
+             *
+             * The scan was stopped because GLOB_ERR was set or (*errfunc())
+             * returned non-zero.
+             */
+            ERROR_SHALL3(POSIX_GLOB, GLOB_ABORTED, "glob.20.02.01.01",
+            (
+                or_Bool3
+                (
+                    flags.err ? wasCalled_GlobErrorFunction(errfunc) : False_Bool3,
+                    returnedNonZero_GlobErrorFunction(errfunc)
+                )
+            ));
+
+            /*
+             * GLOB_NOMATCH
+             *
+             * The pattern does not match any existing pathname, and
+             * GLOB_NOCHECK was not set in flags.
+             */
+            ERROR_SHALL3(POSIX_GLOB, GLOB_NOMATCH, "glob.20.02.01.02",
+            (
+                and_Bool3
+                (
+                    isEmpty_List(glob_result) ? True_Bool3 : False_Bool3,
+                    flags.nocheck ? False_Bool3 : True_Bool3
+                )
+            ));
+
+            /*
+             * GLOB_NOSPACE
+             *
+             * An attempt to allocate memory failed.
+             */
+            ERROR_UNCHECKABLE(POSIX_GLOB, GLOB_NOSPACE, "glob.20.02.01.03",
+                "Memory allocation failure");
+
+        ERROR_END();
+
+        traceFormattedUserInfo("glob_spec: pathv=$(obj)", post_glob->pathv);
+
+        /* Upon successful completion, glob() shall return 0 */
+        REQ("glob.20.01", "On success, glob() shall return 0", glob_spec == SUT_GLOB_OK);
+
+        if(errfunc != NULL)
+        {
+            /*
+             * If, during the search, a directory is encountered that cannot be
+             * opened or read and errfunc is not a null pointer, glob() calls
+             * (*errfunc()) with two arguments:
+             *
+             * 1. The epath argument is a pointer to the path that failed.
+             *
+             * 2. The eerrno argument is the value of errno from the failure,
+             *    as set by opendir(), readdir(), or stat(). (Other values may
+             *    be used to report other errors not explicitly documented for
+             *    those functions.)
+             */
+            REQ("glob.09", "The epath cannot not be opened or read",
+                checkCalls_GlobErrorFunction(context, errfunc) != False_Bool3);
+        }
+
+        if(wasCalled_GlobErrorFunction(errfunc) == True_Bool3 &&
+          (returnedNonZero_GlobErrorFunction(errfunc) == True_Bool3 || flags.err))
+        {
+            /*
+             * If (*errfunc()) is called and returns non-zero, or if the
+             * GLOB_ERR flag is set in flags, glob() shall stop the scan and
+             * return GLOB_ABORTED after setting gl_pathc and gl_pathv in pglob
+             * to reflect the paths already scanned.
+             */
+            REQ("glob.07.03.01", "glob() shall return GLOB_ABORTED",
+                glob_spec == SUT_GLOB_ABORTED);
+        }
+        
+        if(!flags.err && returnedNonZero_GlobErrorFunction(errfunc) == False_Bool3)
+        {
+            /*
+             * If GLOB_ERR is not set and either errfunc is a null pointer or
+             * (*errfunc()) returns 0, the error shall be ignored.
+             */
+            REQ("glob.07.03.02", "glob() shall not return GLOB_ABORTED",
+                glob_spec != SUT_GLOB_ABORTED);
+        }
+
+        if(flags.nocheck && isEmpty_List(glob_result))
+        {
+            /*
+             * GLOB_NOCHECK
+             *
+             * Supports rule 3 in the Shell and Utilities volume of IEEE Std
+             * 1003.1-2001, Section 2.13.3, Patterns Used for Filename
+             * Expansion. If pattern does not match any pathname, then glob()
+             * shall return a list consisting of only pattern, and the number
+             * of matched pathnames is 1.
+             */
+            REQ("glob.07.05", "glob() shall return a list of only pattern",
+            (
+                size_List(post_glob->pathv) == 1 &&
+                equals(get_List(post_glob->pathv, 0), pattern)
+            ));
+        }
+
+        if(flags.append && pre_glob != NULL)
+        {
+            /*
+             * GLOB_APPEND
+             *
+             * Append pathnames generated to the ones from a previous call to
+             * glob().
+             */
+            IMPLEMENT_REQ("glob.07.01");
+
+            offset = (int)pre_glob->pathc;
+
+            if(flags.dooffs)
+            {
+                /*
+                 * The following rules apply to applications when two or more
+                 * calls to glob() are made with the same value of pglob and
+                 * without intervening calls to globfree():
+                 *
+                 * After the second call, pglob->gl_pathv points to a list
+                 * containing the following:
+                 *
+                 * Zero or more null pointers, as specified by GLOB_DOOFFS and
+                 * pglob->gl_offs.
+                 */
+                IMPLEMENT_REQ("glob.08.03.01");
+            }
+
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * After the second call, pglob->gl_pathv points to a list
+             * containing the following:
+             *
+             * Pointers to the pathnames that were in the pglob->gl_pathv list
+             * before the call, in the same order as before.
+             */
+            REQ("glob.08.03.02", "pre_glob->pathv shall be post_glob->pathv prefix",
+                isPrefix_GlobT(pre_glob, post_glob));
+
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * The count returned in pglob->gl_pathc shall be the total number
+             * of pathnames from the two calls.
+             */
+            REQ("glob.08.04", "pglob->gl_pathc shall be the total number",
+                post_glob->pathc >= pre_glob->pathc + size_List(glob_result));
+
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * The application can change any of the fields after a call to
+             * glob(). If it does, the application shall reset them to the
+             * original value before a subsequent call, using the same pglob
+             * value, to globfree() or glob() with the GLOB_APPEND flag.
+             */
+            REQ("glob.08.05", "", TODO_REQ());
+        }
+        else
+        {
+            offset = 0;
+        }
+
+        if(flags.nosort)
+        {
+            /*
+             * GLOB_NOSORT
+             *
+             * Ordinarily, glob() sorts the matching pathnames according to the
+             * current setting of the LC_COLLATE category; see the Base
+             * Definitions volume of IEEE Std 1003.1-2001, Section 7.3.2,
+             * LC_COLLATE. When this flag is used, the order of pathnames
+             * returned is unspecified.
+             */
+            REQ("glob.07.07", "The order of pathnames is unspecified", true);
+        }
+        else
+        {
+            /*
+             * The pathnames shall be in sort order as defined by the current
+             * setting of the LC_COLLATE category;
+             */
+            REQ("glob.03", "glob() shall sort the pglob->gl_pathv",
+                isSorted_List(post_glob->pathv));
+        }
+
+        /*
+         * The argument pglob->gl_pathc shall return the number of matched
+         * pathnames and the argument pglob->gl_pathv shall contain a pointer
+         * to a null-terminated list of matched and sorted pathnames.
+         */
+        REQ("glob.02", "pglob->gl_pathc shall contain the number of matched pathnames",
+            size_List(post_glob->pathv) == post_glob->pathc);
+
+        pathv_sublist = subList_List(post_glob->pathv, offset, post_glob->pathc);
+        pathv_subset = toSet_List(pathv_sublist);
+
+        traceFormattedUserInfo("glob_spec: pathv_subset=$(obj)", pathv_subset);
+
+        {
+            Set* glob_result_set=toSet_List(glob_result);
+
+            traceFormattedUserInfo("glob_spec: glob_result_set=$(obj)", glob_result_set);
+            /*
+             * The argument pattern is a pointer to a pathname pattern to be
+             * expanded. The glob() function shall match all accessible pathnames
+             * against this pattern and develop a list of all pathnames that match.
+             */
+            REQ("glob.01;glob.02", "pglob->gl_pathv shall contain all the matched pathnames",
+            (
+                wasCalled_GlobErrorFunction(errfunc) != False_Bool3 ?
+                containsAll_Set(glob_result_set, pathv_subset) :
+                equals(glob_result_set, pathv_subset)
+            ));
+        }
+
+        /* [The pglob->pathv does not contain duplicates] */
+        REQ("", "pglob->pathv does not contain duplicates",
+            size_Set(pathv_subset) == size_List(pathv_sublist));
+
+        if(post_glob->pathc == 0)
+        {
+            /*
+             * However, if pglob->gl_pathc is 0, the content of pglob->gl_pathv
+             * is undefined.
+             */
+            REQ("glob64.05", "The content of pglob->gl_pathv is undefined", true);
+        }
+
+        /*
+         * The glob() function shall allocate other space as needed, including
+         * the memory pointed to by gl_pathv.
+         */
+        REQ("glob.06", "", TODO_REQ());
+
+        /* The glob() function shall not fail because of large files */
+        REQ("glob.10", "", TODO_REQ());
+
+        /*
+         * No tilde expansion or parameter substitution is done; see wordexp().
+         */
+        REQ("glob.11", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+Name
+
+    glob64 -- find pathnames matching a pattern (Large File Support)
+
+Synopsis
+
+    #include <glob.h>
+
+    int glob64(const char * pattern,
+        int flags, int (*errfunc) (const char *, int), glob64_t * pglob);
+
+Description
+
+    The glob64() function is a large-file version of the glob() defined in ISO
+    POSIX (2003). It shall search for pathnames matching pattern according to
+    the rules used by the shell, /bin/sh. No tilde expansion or parameter
+    substitution is done; see wordexp().
+
+    The results of a glob64() call are stored in the structure pointed to by
+    pglob, which is a glob64_t declared in glob.h with the following members:
+
+    typedef struct
+    {
+      size_t gl_pathc;
+      char **gl_pathv;
+      size_t gl_offs;
+      int gl_flags;
+      void (*gl_closedir) (void *);
+      struct dirent64 *(*gl_readdir64) (void *);
+      void *(*gl_opendir) (const char *);
+      int (*gl_lstat) (const char *, struct stat *);
+      int (*gl_stat) (const char *, struct stat *);
+    }
+    glob64_t;
+
+    Structure members with the same name as corresponding members of a glob_t
+    as defined in ISO POSIX (2003) shall have the same purpose.
+
+    Other members are defined as follows:
+
+    gl_flags
+
+        reserved for internal use
+
+    gl_closedir
+
+        pointer to a function capable of closing a directory opened by
+        gl_opendir
+
+    gl_readdir64
+
+        pointer to a function capable of reading entries in a large directory
+
+    gl_opendir
+
+        pointer to a function capable of opening a large directory
+
+    gl_stat
+
+        pointer to a function capable of returning file status for a large file
+
+    gl_lstat
+
+        pointer to a function capable of returning file status information for
+        a large file or symbolic link
+
+    A large file or large directory is one with a size which cannot be
+    represented by a variable of type off_t.
+
+Return Value
+
+    On success, 0 is returned. Other possible returns are:
+
+    GLOB_NOSPACE
+
+        out of memory
+
+    GLOB_ABORTED
+
+        read error
+
+    GLOB_NOMATCH
+
+        no match found
+*/
+specification
+GlobErrorCode glob64_spec(CallContext context, CString *pattern, GlobFlags flags,
+                          GlobErrorFunction *errfunc, Glob64TPtr pglob)
+{
+    Glob64T *pre_glob64 = clone(getGlob64T(pglob));
+
+    List *glob64_result = create_List(&type_CString);
+
+    GlobPattern *glob64_pattern = parse_GlobPattern(pattern, flags);
+
+    FindErrorCode glob64_error = find_GlobPattern(context, glob64_pattern,
+        flags, errfunc, glob64_result);
+
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Directories are uptodate", glob64_error != FIND_UPTODATE_ERROR);
+    
+        /*
+         * It is the caller's responsibility to create the structure pointed to
+         * by pglob.
+         */
+        REQ("app.glob64.00", "pglob is valid", isValidPointer(context, pglob));
+
+        if(pre_glob64 == NULL)
+        {
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * The first such call shall not set GLOB_APPEND. All subsequent
+             * calls shall set it.
+             */
+            REQ("app.glob64.08.01", "GLOB_APPEND shall not be set", !flags.append);
+        }
+        else
+        {
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * All the calls shall set GLOB_DOOFFS, or all shall not set it.
+             */
+            REQ("app.glob64.08.02", "GLOB_DOOFFS shall be the same as in the previous call",
+                flags.dooffs == pre_glob64->flags.dooffs);
+        }
+        
+        return true;
+    }
+    coverage C
+    {
+        GLOB_PATTERN_COVERAGE(glob64_pattern, glob64, "glob64()");
+    }
+    coverage C_errfunc
+    {
+        GLOB_ERRFUNC_COVERAGE(errfunc, glob64, "glob64()");
+    }
+    post
+    {
+        int offset;
+        Set *pathv_subset;
+        List *pathv_sublist;
+
+        FileSystem *file_system = getFileSystem(context);
+
+        Glob64T *post_glob64 = getGlob64T(pglob);
+
+        traceFormattedUserInfo("glob64_spec: glob64=%d", glob_spec);
+        traceFormattedUserInfo("glob64_spec: pattern=$(obj)", glob64_pattern);
+        traceFormattedUserInfo("glob64_spec: glob64_result=$(obj)", glob64_result);
+        traceFormattedUserInfo("glob64_spec: pathv=$(obj)", post_glob64->pathv);
+        traceFormattedUserInfo("glob64_spec: pathc=%I64u", post_glob64->pathc);
+        traceFormattedUserInfo("glob64_spec: offs=%I64u", post_glob64->offs);
+
+        /*
+     * The slash character in a pathname shall be explicitly matched by using one or
+     * more slashes in the pattern; it shall neither be matched by the asterisk or
+     * question-mark special characters nor by a bracket expression.
+     */
+    REQ("sh.pattern.filename.01.01.01","",TODO_REQ());
+
+    /*
+     * Slashes in the pattern shall be identified before bracket expressions; thus, a
+     * slash cannot be included in a pattern bracket expression used for filename
+     * expansion.
+     */
+    REQ("sh.pattern.filename.01.01.02","",TODO_REQ());
+
+    /*
+     * If a slash character is found following an unescaped open square bracket
+     * character before a corresponding closing square bracket is found, the open
+     * bracket shall be treated as an ordinary character.
+     */
+    REQ("sh.pattern.filename.01.01.03","",TODO_REQ());
+
+    /*
+     * If a filename begins with a period ( '.' ), the period shall be explicitly
+     * matched by using a period as the first character of the pattern or immediately
+     * following a slash character.
+     */
+    REQ("sh.pattern.filename.01.02.01","",TODO_REQ());
+
+    /*
+     * The leading period shall not be matched by:
+     *
+     * The asterisk or question-mark special characters
+     */
+    REQ("sh.pattern.filename.01.02.02.01","",TODO_REQ());
+
+    /*
+     * The leading period shall not be matched by:
+     *
+     * A bracket expression containing a non-matching list, such as "[!a]", a range
+     * expression, such as "[%-0]", or a character class expression, such as "[[:punct:]
+     * ]"
+     */
+    REQ("sh.pattern.filename.01.02.02.02","",TODO_REQ());
+
+    /*
+     * The leading period shall not be matched by:
+     *
+     * It is unspecified whether an explicit period in a bracket expression matching
+     * list, such as "[.abc]", can match a leading period in a filename.
+     */
+    REQ("sh.pattern.filename.01.02.03","",TODO_REQ());
+
+    /*
+     * Each component that contains a pattern character shall require read permission
+     * in the directory containing that component.
+     */
+    REQ("sh.pattern.filename.01.03.02","",TODO_REQ());
+
+    /*
+     * Any component, except the last, that does not contain a pattern character shall
+     * require search permission.
+     */
+    REQ("sh.pattern.filename.01.03.03","",TODO_REQ());
+
+    /*
+     * The concatenation of patterns matching a single character is a valid pattern
+     * that shall match the concatenation of the singlecharacters or collating
+     * elements matched by each of the concatenated patterns.
+     */
+    REQ("sh.pattern.multiple.01.02","",TODO_REQ());
+
+    /*
+     * The concatenation of one or more patterns matching a single character with one
+     * or more asterisks is a valid pattern. In suchpatterns, each asterisk shall
+     * match a string of zero or more characters, matching the greatest possible
+     * number of characters that still allows the remainder of the pattern to match the
+     * string.
+     */
+    REQ("sh.pattern.multiple.01.03","",TODO_REQ());
+
+    /*
+     * The shell special characters always require quoting.
+     */
+    REQ("sh.pattern.single.06","",TODO_REQ());
+
+    /*
+     * When unquoted and outside a bracket expression, the following three characters
+     * shall have special meaning in the specification of patterns:
+     *
+     * [
+     *
+     * The open bracket shall introduce a pattern bracket expression.
+     */
+    REQ("sh.pattern.single.07.02","",TODO_REQ());
+        /*
+         * The arguments pglob->gl_pathc and pglob->gl_pathv are still set as
+         * defined above.
+         */
+        REQ("glob64.24.02.02", "", TODO_REQ());
+        
+        /*
+         * If glob() terminates due to an error, it shall return one of the
+         * non-zero constants defined in <glob.h>.
+         */
+        ERROR_BEGIN(LSB_GLOB64, "glob64.24.02.01", glob64_spec != SUT_GLOB_OK, glob64_spec);
+
+            /*
+             * GLOB_ABORTED
+             *
+             * The scan was stopped because GLOB_ERR was set or (*errfunc())
+             * returned non-zero.
+             */
+            ERROR_SHALL3(LSB_GLOB64, GLOB_ABORTED, "glob64.20.02.01.01",
+            (
+                or_Bool3
+                (
+                    flags.err ? wasCalled_GlobErrorFunction(errfunc) : False_Bool3,
+                    returnedNonZero_GlobErrorFunction(errfunc)
+                )
+            ));
+
+            /*
+             * GLOB_NOMATCH
+             *
+             * The pattern does not match any existing pathname, and
+             * GLOB_NOCHECK was not set in flags.
+             */
+            ERROR_SHALL3(LSB_GLOB64, GLOB_NOMATCH, "glob64.20.02.01.02",
+            (
+                and_Bool3
+                (
+                    isEmpty_List(glob64_result) ? True_Bool3 : False_Bool3,
+                    flags.nocheck ? False_Bool3 : True_Bool3
+                )
+            ));
+
+            /*
+             * GLOB_NOSPACE
+             *
+             * An attempt to allocate memory failed.
+             */
+            ERROR_UNCHECKABLE(LSB_GLOB64, GLOB_NOSPACE, "glob64.20.02.01.03",
+                "Memory allocation failure");
+
+        ERROR_END();
+
+        traceFormattedUserInfo("glob64_spec: pathv=$(obj)", post_glob64->pathv);
+
+        /* Upon successful completion, glob() shall return 0 */
+        REQ("glob64.20.01", "On success, glob64() shall return 0", glob64_spec == SUT_GLOB_OK);
+
+        if(errfunc != NULL)
+        {
+            /*
+             * If, during the search, a directory is encountered that cannot be
+             * opened or read and errfunc is not a null pointer, glob() calls
+             * (*errfunc()) with two arguments:
+             *
+             * 1. The epath argument is a pointer to the path that failed.
+             *
+             * 2. The eerrno argument is the value of errno from the failure,
+             *    as set by opendir(), readdir(), or stat(). (Other values may
+             *    be used to report other errors not explicitly documented for
+             *    those functions.)
+             */
+            REQ("glob64.09", "The epath cannot not be opened or read",
+                checkCalls_GlobErrorFunction(context, errfunc) != False_Bool3);
+        }
+
+        if(wasCalled_GlobErrorFunction(errfunc) == True_Bool3 &&
+          (returnedNonZero_GlobErrorFunction(errfunc) == True_Bool3 || flags.err))
+        {
+            /*
+             * If (*errfunc()) is called and returns non-zero, or if the
+             * GLOB_ERR flag is set in flags, glob() shall stop the scan and
+             * return GLOB_ABORTED after setting gl_pathc and gl_pathv in pglob
+             * to reflect the paths already scanned.
+             */
+            REQ("glob64.07.03.01", "glob64() shall return GLOB_ABORTED",
+                glob64_spec == SUT_GLOB_ABORTED);
+        }
+        
+        if(!flags.err && returnedNonZero_GlobErrorFunction(errfunc) == False_Bool3)
+        {
+            /*
+             * If GLOB_ERR is not set and either errfunc is a null pointer or
+             * (*errfunc()) returns 0, the error shall be ignored.
+             */
+            REQ("glob64.07.03.02", "glob64() shall not return GLOB_ABORTED",
+                glob64_spec != SUT_GLOB_ABORTED);
+        }
+
+        if(flags.nocheck && isEmpty_List(glob64_result))
+        {
+            /*
+             * GLOB_NOCHECK
+             *
+             * Supports rule 3 in the Shell and Utilities volume of IEEE Std
+             * 1003.1-2001, Section 2.13.3, Patterns Used for Filename
+             * Expansion. If pattern does not match any pathname, then glob()
+             * shall return a list consisting of only pattern, and the number
+             * of matched pathnames is 1.
+             */
+            REQ("glob64.07.05", "glob64() shall return a list of only pattern",
+            (
+                size_List(post_glob64->pathv) == 1 &&
+                equals(get_List(post_glob64->pathv, 0), pattern)
+            ));
+        }
+
+        if(flags.append && pre_glob64 != NULL)
+        {
+            /*
+             * GLOB_APPEND
+             *
+             * Append pathnames generated to the ones from a previous call to
+             * glob().
+             */
+            IMPLEMENT_REQ("glob64.07.01");
+
+            offset = pre_glob64->pathc;
+
+            if(flags.dooffs)
+            {
+                /*
+                 * The following rules apply to applications when two or more
+                 * calls to glob() are made with the same value of pglob and
+                 * without intervening calls to globfree():
+                 *
+                 * After the second call, pglob->gl_pathv points to a list
+                 * containing the following:
+                 *
+                 * Zero or more null pointers, as specified by GLOB_DOOFFS and
+                 * pglob->gl_offs.
+                 */
+                IMPLEMENT_REQ("glob64.08.03.01");
+            }
+
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * After the second call, pglob->gl_pathv points to a list
+             * containing the following:
+             *
+             * Pointers to the pathnames that were in the pglob->gl_pathv list
+             * before the call, in the same order as before.
+             */
+            REQ("glob64.08.03.02", "pre_glob64->pathv shall be post_glob64->pathv prefix",
+                isPrefix_Glob64T(pre_glob64, post_glob64));
+
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * The count returned in pglob->gl_pathc shall be the total number
+             * of pathnames from the two calls.
+             */
+            REQ("glob64.08.04", "pglob->gl_pathc shall be the total number",
+                post_glob64->pathc >= pre_glob64->pathc + size_List(glob64_result));
+
+            /*
+             * The following rules apply to applications when two or more calls
+             * to glob() are made with the same value of pglob and without
+             * intervening calls to globfree():
+             *
+             * The application can change any of the fields after a call to
+             * glob(). If it does, the application shall reset them to the
+             * original value before a subsequent call, using the same pglob
+             * value, to globfree() or glob() with the GLOB_APPEND flag.
+             */
+            REQ("glob64.08.05", "", TODO_REQ());
+        }
+        else
+        {
+            offset = 0;
+        }
+
+        if(flags.nosort)
+        {
+            /*
+             * GLOB_NOSORT
+             *
+             * Ordinarily, glob() sorts the matching pathnames according to the
+             * current setting of the LC_COLLATE category; see the Base
+             * Definitions volume of IEEE Std 1003.1-2001, Section 7.3.2,
+             * LC_COLLATE. When this flag is used, the order of pathnames
+             * returned is unspecified.
+             */
+            REQ("glob64.07.07", "The order of pathnames is unspecified", true);
+        }
+        else
+        {
+            /*
+             * The pathnames shall be in sort order as defined by the current
+             * setting of the LC_COLLATE category;
+             */
+            REQ("glob64.03", "glob64() shall sort the pglob->gl_pathv",
+                isSorted_List(post_glob64->pathv));
+        }
+
+        /*
+         * The argument pglob->gl_pathc shall return the number of matched
+         * pathnames and the argument pglob->gl_pathv shall contain a pointer
+         * to a null-terminated list of matched and sorted pathnames.
+         */
+        REQ("glob64.02", "pglob->gl_pathc shall contain the number of matched pathnames",
+            size_List(post_glob64->pathv) == post_glob64->pathc);
+
+        pathv_sublist = subList_List(post_glob64->pathv, offset, post_glob64->pathc);
+        pathv_subset = toSet_List(pathv_sublist);
+
+        /*
+         * The argument pattern is a pointer to a pathname pattern to be
+         * expanded. The glob() function shall match all accessible pathnames
+         * against this pattern and develop a list of all pathnames that match.
+         */
+        REQ("glob64.01;glob64.02", "pglob->gl_pathv shall contain all the matched pathnames",
+        (
+            wasCalled_GlobErrorFunction(errfunc) != False_Bool3 ?
+            containsAll_Set(toSet_List(glob64_result), pathv_subset) :
+            equals(toSet_List(glob64_result), pathv_subset)
+        ));
+
+        /* [The pglob->pathv does not contain duplicates] */
+        REQ("", "pglob->pathv does not contain duplicates",
+            size_Set(pathv_subset) == size_List(pathv_sublist));
+
+        if(post_glob64->pathc == 0)
+        {
+            /*
+             * However, if pglob->gl_pathc is 0, the content of pglob->gl_pathv
+             * is undefined.
+             */
+            REQ("glob64.05", "The content of pglob->gl_pathv is undefined", true);
+        }
+
+        /*
+         * The glob() function shall allocate other space as needed, including
+         * the memory pointed to by gl_pathv.
+         */
+        REQ("glob64.06", "", TODO_REQ());
+
+        /* The glob() function shall not fail because of large files */
+        REQ("glob64.10", "", TODO_REQ());
+
+        /*
+         * No tilde expansion or parameter substitution is done; see wordexp().
+         */
+        REQ("glob64.11", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+specification
+void globfree_spec(CallContext context, GlobTPtr pglob)
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "pglob is valid", isValidPointer(context, pglob));
+
+        return true;
+    }
+    coverage C
+    {
+        GlobT *glob = getGlobT(pglob);
+
+        GLOB_COVERAGE(glob, globfree, "globfree()");
+    }
+    post
+    {
+        /*
+         * The globfree() function shall free any space associated with pglob
+         * from a previous call to glob().
+         */
+        REQ("?globfree.01", "globfree() shall frees memory",
+            equals(getGlobT(pglob), NULL));
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+Name
+
+    globfree64 -- free memory from glob64() (Large File Support)
+
+Synopsis
+
+    #include <glob.h>
+
+    void globfree64(glob64_t * pglob);
+
+Description
+
+    globfree64() frees the dynamically allocated storage from an earlier call
+    to glob64().
+
+    globfree64() is a 64-bit version of globfree().
+*/
+specification
+void globfree64_spec(CallContext context, Glob64TPtr pglob)
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "pglob is valid", isValidPointer(context, pglob));
+
+        return true;
+    }
+    coverage C
+    {
+        Glob64T *glob64 = getGlob64T(pglob);
+
+        GLOB_COVERAGE(glob64, globfree64, "globfree64()");
+    }
+    post
+    {
+        /*
+         * globfree64() frees the dynamically allocated storage from an earlier
+         * call to glob64().
+         */
+        REQ("?globfree64.01", "globfree64() shall frees memory",
+            equals(getGlob64T(pglob), NULL));
+
+        return true;
+    }
+}
+
+/*****************************************************************************/
+/**                           Glob General Types                            **/
+/*****************************************************************************/
+
+/*
+ * This type represents flags used to control glob() and glob64().
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'glob.h'.
+ */
+GlobFlags default_GlobFlags(void)
+{
+    GlobFlags flags = 
+    {
+        /* SUSv3 */
+        false,      /* GLOB_ERR */
+        false,      /* GLOB_MARK */
+        false,      /* GLOB_NOSORT */
+        false,      /* GLOB_DOOFFS */
+        false,      /* GLOB_NOCHECK */
+        false,      /* GLOB_APPEND */
+        false,      /* GLOB_NOESCAPE */
+        /* LSB */
+        false,      /* GLOB_PERIOD */
+        false,      /* GLOB_MAGCHAR */
+        false,      /* GLOB_ALTDIRFUNC */
+        false,      /* GLOB_BRACE */
+        false,      /* GLOB_NOMAGIC */
+        false,      /* GLOB_TILDE */
+        false,      /* GLOB_ONLYDIR */
+        false,      /* GLOB_TILDE_CHECK */
+    };
+
+    return flags;
+}
+
+specification typedef GlobFlags GlobFlagsObj = {};
+
+GlobFlagsObj* create_GlobFlagsObj(GlobFlags flags)
+{
+    return create
+    (
+        &type_GlobFlagsObj,
+        flags.err,
+        flags.mark,
+        flags.nosort,
+        flags.dooffs,
+        flags.nocheck,
+        flags.append,
+        flags.noescape,
+        flags.period,
+        flags.magchar,
+        flags.altdirfunc,
+        flags.brace,
+        flags.nomagic,
+        flags.tilde,
+        flags.onlydir,
+        flags.tilde_check
+    );
+}
+
+GlobFlagsObj* default_GlobFlagsObj(void)
+{
+    return create_GlobFlagsObj(default_GlobFlags());
+}
+
+/*
+ * This type represents glob_t type
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'glob.h'.
+ */
+specification typedef struct GlobT GlobT = {};
+
+GlobT* create_GlobT
+(
+    GlobTPtr address,
+    SizeT pathc,
+    SizeT offs,
+    List *pathv,
+    GlobFlags flags
+)
+{
+    return create(&type_GlobT, address, pathc, offs, pathv, flags);
+}
+
+GlobT* default_GlobT(void)
+{
+    return create_GlobT
+    (
+        NULL_VoidTPtr,              /* address */
+        0,                          /* pathc */
+        0,                          /* offs */
+        create_List(&type_CString), /* pathv */
+        default_GlobFlags()         /* flags */
+    );
+}
+
+GlobT* getGlobT(GlobTPtr address)
+{
+    return getObjectInMemory(address);
+}
+
+/*
+ * Returns true, iff the lhs->pathv is the prefix of the rhs->pathv.
+ */
+static bool isPrefix_List(List *lhs, List *rhs)
+{
+    int i, size;
+
+    assertion(lhs != NULL, "isPrefix_List: lhs is NULL");
+    assertion(rhs != NULL, "isPrefix_List: rhs is NULL");
+
+    if((size = size_List(lhs)) > size_List(rhs))
+    {
+        return false;
+    }
+
+    for(i = 0; i < size; i++)
+    {
+        if(!equals(get_List(lhs, i), get_List(rhs, i)))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool isPrefix_GlobT(GlobT *lhs, GlobT *rhs)
+{
+    assertion(lhs != NULL, "isPrefix_GlobT: lhs is NULL");
+    assertion(rhs != NULL, "isPrefix_GlobT: rhs is NULL");
+
+    if(lhs->flags.dooffs != rhs->flags.dooffs)
+    {
+        return false;
+    }
+    
+    if(lhs->flags.dooffs && lhs->offs != rhs->offs)
+    {
+        return false;
+    }
+
+    return isPrefix_List(lhs->pathv, rhs->pathv);
+}
+
+/*
+ * This type represents glob64_t type
+ *   Linux Standard Base Core Specification 3.1
+ *   Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *   See section 'Data Definitions for libc', header file 'glob.h'.
+ */
+specification typedef struct Glob64T Glob64T = {};
+
+Glob64T* create_Glob64T
+(
+    Glob64TPtr address,
+    SizeT pathc,
+    SizeT offs,
+    List *pathv,
+    GlobFlags flags
+)
+{
+    return create(&type_Glob64T, address, pathc, offs, pathv, flags);
+}
+
+Glob64T* default_Glob64T(void)
+{
+    return create_Glob64T
+    (
+        NULL_VoidTPtr,              /* address */
+        0,                          /* pathc */
+        0,                          /* offs */
+        create_List(&type_CString), /* pathv */
+        default_GlobFlags()         /* flags */
+    );
+}
+
+Glob64T* getGlob64T(Glob64TPtr address)
+{
+    return getObjectInMemory(address);
+}
+
+bool isPrefix_Glob64T(Glob64T *lhs, Glob64T *rhs)
+{
+    assertion(lhs != NULL, "isPrefix_Glob64T: lhs is NULL");
+    assertion(rhs != NULL, "isPrefix_Glob64T: rhs is NULL");
+
+    if(lhs->flags.dooffs != rhs->flags.dooffs)
+    {
+        return false;
+    }
+    
+    if(lhs->flags.dooffs && lhs->offs != rhs->offs)
+    {
+        return false;
+    }
+
+    return isPrefix_List(lhs->pathv, rhs->pathv);
+}
+
+/*****************************************************************************/
+/**                           Glob Error Function                           **/
+/*****************************************************************************/
+specification typedef struct GlobErrorFunction GlobErrorFunction = {};
+
+specification typedef struct GlobErrorFunctionCall GlobErrorFunctionCall = {};
+
+GlobErrorFunctionCall* create_GlobErrorFunctionCall
+(
+    CString *epath,
+    ErrorCode *eerrno,
+    IntT result
+)
+{
+    return create(&type_GlobErrorFunctionCall, epath, eerrno, result);
+}
+
+GlobErrorFunction* create_GlobErrorFunction(GlobErrorFunctionType type, IntT param)
+{
+    return create
+    (
+        &type_GlobErrorFunction,
+        type,
+        param,
+        create_List(&type_GlobErrorFunctionCall)
+    );
+}
+
+GlobErrorFunction* default_GlobErrorFunction(void)
+{
+    return create_GlobErrorFunction
+    (
+        ZeroGlobErrorFunction,  /* type */
+        0                       /* param */
+    );
+}
+
+/*
+ * Resets error function call history.
+ */
+void reset_GlobErrorFunction(GlobErrorFunction *errfunc)
+{
+    assertion(errfunc != NULL, "reset_GlobErrorFunction: errfunc is NULL");
+
+    clear_List(errfunc->calls);
+}
+
+/*
+ * Returns true, iff the error function was called at least one time.
+ */
+Bool3 wasCalled_GlobErrorFunction(GlobErrorFunction *errfunc)
+{
+    if(errfunc == NULL)
+    {
+        return Unknown_Bool3;
+    }
+
+    return isEmpty_List(errfunc->calls) ? False_Bool3 : True_Bool3;
+}
+
+/*
+ * Checks if the error function returned a non-zero value.
+ */
+Bool3 returnedNonZero_GlobErrorFunction(GlobErrorFunction *errfunc)
+{
+    int i, size;
+
+    if(errfunc == NULL)
+    {
+        return False_Bool3;
+    }
+
+    size = size_List(errfunc->calls);
+    for(i = 0; i < size; i++)
+    {
+        GlobErrorFunctionCall *errcall = get_List(errfunc->calls, i);
+
+        if(errcall->result != 0)
+        {
+            return True_Bool3;
+        }
+    }
+
+    return False_Bool3;
+}
+
+/*
+ * Checks if the error function was called in proper cases.
+ */
+Bool3 checkCalls_GlobErrorFunction(CallContext context, GlobErrorFunction *errfunc)
+{
+    int i, size;
+    FileSystem *file_system;
+
+    Bool3 res = True_Bool3;
+
+    if(errfunc == NULL)
+    {
+        return True_Bool3;
+    }
+
+    file_system = getFileSystem(context);
+
+    assertion(file_system != NULL, "checkCalls_GlobErrorFunction: file_system is NULL");
+
+    res = True_Bool3;
+    size = size_List(errfunc->calls);
+    for(i = 0; i < size; i++)
+    {
+        GlobErrorFunctionCall *errcall = get_List(errfunc->calls, i);
+
+        File *file = getFile_FileSystem(file_system, errcall->epath);
+
+        if(file != NULL)
+        {
+            FilePermission *perm = getProcessAccessOnFile(context, file);
+
+            if(perm == NULL)
+            {
+                res = Unknown_Bool3;
+            }
+            else if(perm->read)
+            {
+                return False_Bool3;
+            }
+        }
+    }
+
+    return res;
+}
+
+/*****************************************************************************/
+/**                         Glob Bracket Expression                         **/
+/*****************************************************************************/
+specification typedef struct GlobBracketExpression GlobBracketExpression = {};
+
+GlobBracketExpression* create_GlobBracketExpression(void)
+{
+    assertion(false, "create_GlobBracketExpression: is not yet specified");
+
+    return NULL;
+}
+
+/*****************************************************************************/
+/**                          Glob Primary Pattern                           **/
+/*****************************************************************************/
+specification typedef struct GlobPrimaryPattern GlobPrimaryPattern = {};
+
+GlobPrimaryPattern* create_GlobPrimaryPattern
+(
+    GlobPrimaryPatternType type,
+    CString *word,
+    GlobBracketExpression* bracket
+)
+{
+    return create
+    (
+        &type_GlobPrimaryPattern,
+        type,
+        word,
+        bracket
+    );
+}
+
+GlobPrimaryPattern* create_GlobStringPattern(CString *word)
+{
+    return create_GlobPrimaryPattern(GlobStringPattern, word, NULL);
+}
+
+GlobPrimaryPattern* create_GlobQuestionPattern(void)
+{
+    return create_GlobPrimaryPattern(GlobQuestionPattern, NULL, NULL);
+}
+
+GlobPrimaryPattern* create_GlobAsteriskPattern(void)
+{
+    return create_GlobPrimaryPattern(GlobAsteriskPattern, NULL, NULL);
+}
+
+GlobPrimaryPattern* create_GlobBracketExpressionPattern(GlobBracketExpression *bracket)
+{
+    return create_GlobPrimaryPattern(GlobBracketExpressionPattern, NULL, bracket);
+}
+
+/*****************************************************************************/
+/**                           Glob File Pattern                             **/
+/*****************************************************************************/
+GlobFilePattern* create_GlobFilePattern(void)
+{
+    return create_List(&type_GlobPrimaryPattern);
+}
+
+/*
+ * Returns true iff, the pattern contains *, ? or [].
+ */
+bool containsPattern_GlobFilePattern(GlobFilePattern *file_pattern)
+{
+    int i, size;
+
+    assertion(file_pattern != NULL,
+        "containsPattern_GlobFilePattern: file_pattern is NULL");
+
+    size = size_List(file_pattern);
+    for(i = 0; i < size; i++)
+    {
+        GlobPrimaryPattern* primary = get_List(file_pattern, i);
+
+        if(primary->type != GlobStringPattern)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Returns true iff, the name matches the pattern.
+ */
+static bool doesNameMatch_GlobFilePattern_Ext
+(
+    GlobFilePattern *file_pattern,
+    CString *name,
+    int file_pattern_pos,
+    int name_pos
+)
+{
+    int size, length;
+
+    size = size_List(file_pattern);
+    length = length_CString(name);
+
+    if(file_pattern_pos < size)
+    {
+        GlobPrimaryPattern *primary_pattern = get_List(file_pattern, file_pattern_pos);
+
+        switch(primary_pattern->type)
+        {
+        case GlobStringPattern:
+            {
+                CString *substring;
+                int word_length = length_CString(primary_pattern->word);
+                
+                traceFormattedUserInfo("doesNameMatch_GlobFilePattern_Ext: word=$(obj)",
+                    primary_pattern->word);
+
+                if(length - name_pos < word_length)
+                {
+                    return false;
+                }
+
+                substring = substring_CString(name, name_pos, name_pos + word_length);
+
+                traceFormattedUserInfo("doesNameMatch_GlobFilePattern_Ext: substring=$(obj)",
+                    substring);
+
+                /*
+                 * An ordinary character is a pattern that shall match itself.
+                 */
+                IMPLEMENT_REQ("sh.pattern.single.03");
+
+                /*
+                 * Matching shall be based on the bit pattern used for encoding
+                 * the character, not on the graphic representationof the
+                 * character.
+                 */
+                IMPLEMENT_REQ("sh.pattern.single.04");
+
+                if(!equals(primary_pattern->word, substring))
+                {
+                    return false;
+                }
+
+                return doesNameMatch_GlobFilePattern_Ext(file_pattern, name,
+                    file_pattern_pos + 1, name_pos + word_length);
+            }
+        /* ? */
+        case GlobQuestionPattern:
+            {
+                /*
+                 * ?
+                 *
+                 * A question-mark is a pattern that shall match any character.
+                 */
+                IMPLEMENT_REQ("sh.pattern.single.07.01");
+
+                traceUserInfo("doesNameMatch_GlobFilePattern_Ext: ?");
+
+                return doesNameMatch_GlobFilePattern_Ext(file_pattern, name,
+                    file_pattern_pos + 1, name_pos + 1);
+            }
+        /* * */
+        case GlobAsteriskPattern:
+            {
+                int i;
+
+                /*
+                 * *
+                 *
+                 * An asterisk is a pattern that shall match multiple
+                 * characters, as described in Patterns Matching Multiple
+                 * Characters.
+                 */
+                IMPLEMENT_REQ("sh.pattern.multiple.01.01");
+
+                traceUserInfo("doesNameMatch_GlobFilePattern_Ext: *");
+            
+                for(i = name_pos; i <= length; i++)
+                {
+                    if(doesNameMatch_GlobFilePattern_Ext(file_pattern, name,
+                        file_pattern_pos + 1, i))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        /* [ */
+        case GlobBracketExpressionPattern:
+            {
+                traceUserInfo("doesNameMatch_GlobFilePattern_Ext: [");
+
+
+                assertion(false, "doesNameMatch_GlobFilePattern_Ext: "
+                    "Bracket expressions are not specified yet");
+
+                return false;
+            }
+        default:
+            {
+                assertion(false, "doesNameMatch_GlobFilePattern_Ext: "
+                    "Unknown primary pattern type");
+
+                return false;
+            }
+        }
+    }
+
+    return name_pos >= length;
+}
+
+bool doesNameMatch_GlobFilePattern(GlobFilePattern *file_pattern, CString *name)
+{
+    assertion(file_pattern != NULL, "doesNameMatch_GlobFilePattern: file_pattern is NULL");
+    assertion(name != NULL, "doesNameMatch_GlobFilePattern: name is NULL");
+
+    return doesNameMatch_GlobFilePattern_Ext(file_pattern, name, 0, 0);
+}
+
+/*
+ * Returns true iff, each name in the list matches the pattern.
+ */
+bool doesNamesMatch_GlobFilePattern(GlobFilePattern *file_pattern, List *names)
+{
+    int i, size;
+
+    assertion(file_pattern != NULL, "doesNamesMatch_GlobFilePattern: file_pattern is NULL");
+    assertion(names != NULL, "doesNamesMatch_GlobFilePattern: names is NULL");
+
+    size = size_List(names);
+    for(i = 0; i < size; i++)
+    {
+        CString *name = get_List(names, i);
+
+        if(!doesNameMatch_GlobFilePattern(file_pattern, name))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/*****************************************************************************/
+/**                           Glob Pattern Item                             **/
+/*****************************************************************************/
+specification typedef struct GlobPatternItem GlobPatternItem = {};
+
+GlobPatternItem* create_GlobPatternItem(bool slash, GlobFilePattern *file_pattern)
+{
+    return create(&type_GlobPatternItem, slash, file_pattern);
+}
+
+GlobPatternItem* create_GlobSlashPatternItem(void)
+{
+    return create_GlobPatternItem(true, NULL);
+}
+
+GlobPatternItem* create_GlobFilePatternItem(GlobFilePattern *file_pattern)
+{
+    return create_GlobPatternItem(false, file_pattern);
+}
+
+/*****************************************************************************/
+/**                             Glob Pattern                                **/
+/*****************************************************************************/
+GlobPattern* create_GlobPattern(void)
+{
+    return create_List(&type_GlobPatternItem);
+}
+
+GlobPattern* parse_GlobPattern(CString *pattern, GlobFlags flags)
+{
+    int i, j;
+    bool is_quoted;
+    GlobPattern* res;
+    GlobFilePattern *file;
+
+    assertion(pattern != NULL, "parse_GlobPattern: pattern is NULL");
+
+    res = create_GlobPattern();
+    file = create_GlobFilePattern();
+
+    is_quoted = false;
+    for(i = j = 0; i < length_CString(pattern); i++)
+    {
+        CharT c = charAt_CString(pattern, i);
+
+        if(c == '\\' && !is_quoted)
+        {
+            if(flags.noescape)
+            {
+                /*
+                 * GLOB_NOESCAPE
+                 *
+                 * Disable backslash escaping.
+                 */
+                IMPLEMENT_REQ("glob.07.06;glob64.07.06");
+            }
+            else
+            {
+                /*
+                 * A backslash character shall escape the following character.
+                 */
+                IMPLEMENT_REQ("sh.pattern.single.01");
+
+                is_quoted = true;
+
+                /*
+                 * The escaping backslash shall be discarded.
+                 */
+                IMPLEMENT_REQ("sh.pattern.single.02");
+                
+                pattern = concat_CString
+                (
+                    substring_CString(pattern, 0, i),
+                    substring_CString(pattern, i + 1, length_CString(pattern))
+                );
+
+                i--;
+
+                /*
+                 * If any character (ordinary, shell special, or pattern
+                 * special) is quoted, that pattern shall match the character
+                 * it self.
+                 */
+                IMPLEMENT_REQ("sh.pattern.single.05");
+            }
+        }
+        else
+        {
+            is_quoted = false;
+
+            if(c == '/')
+            {
+                if(i > j)
+                {
+                    CString *word = substring_CString(pattern, j, i);
+                    append_List(file, create_GlobStringPattern(word));
+                }
+
+                j = i + 1;
+
+                if(!isEmpty_List(file))
+                {
+                    append_List(res, create_GlobFilePatternItem(file));
+                    file = create_GlobFilePattern();
+                }
+
+                append_List(res, create_GlobSlashPatternItem());
+            }
+            else if(c == '?' && !is_quoted)
+            {
+                if(i > j)
+                {
+                    CString *word = substring_CString(pattern, j, i);
+                    append_List(file, create_GlobStringPattern(word));
+                }
+
+                j = i + 1;
+                append_List(file, create_GlobQuestionPattern());
+            }
+            else if(c == '*' && !is_quoted)
+            {
+                if(i > j)
+                {
+                    CString *word = substring_CString(pattern, j, i);
+                    append_List(file, create_GlobStringPattern(word));
+                }
+
+                j = i + 1;
+                append_List(file, create_GlobAsteriskPattern());
+            }
+            else if(c == '[' && !is_quoted)
+            {
+                assertion(false, "parse_GlobPattern: "
+                    "bracket expressions are not specified yet");
+            }
+        }
+    }
+
+    if(i > j)
+    {
+        CString *word = substring_CString(pattern, j, i);
+        append_List(file, create_GlobStringPattern(word));
+    }
+
+    if(!isEmpty_List(file))
+    {
+        append_List(res, create_GlobFilePatternItem(file));
+    }
+
+    return res;
+}
+
+/*
+ * Finds pathnames matching a pattern, returns search status.
+ */
+static FindErrorCode find_GlobPattern_Ext
+(
+    CallContext context,
+    File *dir,
+    CString *path,
+    GlobPattern *pattern,
+    int pos,
+    GlobFlags flags,
+    GlobErrorFunction *errfunc,
+    List *res
+)
+{
+    int i, j, size, count;
+    bool is_file_found;
+
+    GlobPatternItem *pattern_item;
+
+    FileSystem *file_system = getFileSystem(context);
+
+    
+
+    traceFormattedUserInfo("find_GlobPattern_Ext: path=$(obj)", path);
+
+    size = size_List(pattern);
+    for(i = pos; i < size; i++)
+    {
+        pattern_item = get_List(pattern, i);
+
+        if(pattern_item->slash)
+        {
+            path = concat_CString(path, create_CString("/"));
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    if(i == size)
+    {
+        if(flags.mark && dir->kind==DirectoryFile)
+        {
+            /*
+             * GLOB_MARK
+             *
+             * Each pathname that is a directory that matches pattern shall
+             * have a slash appended.
+             */
+            IMPLEMENT_REQ("glob.07.04;glob64.07.04");
+
+            if(charAt_CString(path, length_CString(path) - 1) != '/')
+            {
+                path = concat_CString(path, create_CString("/"));
+            }
+        }
+
+        append_List(res, path);
+
+        return FIND_OK;
+    }
+
+    if(dir->kind!=DirectoryFile)
+    {
+        return FIND_OK;
+    }
+
+    if(containsPattern_GlobFilePattern(pattern_item->file_pattern) &&
+      !isUptodate_Directory(dir))
+    {
+        traceFormattedUserInfo("find_GlobPattern_Ext: Directory $(obj) is not uptodate", path);
+
+        return FIND_UPTODATE_ERROR;
+    }
+
+    is_file_found = false;
+    count = getFileCount_Directory(dir);
+    for(j = 0; j < count; j++)
+    {
+        int k, upward;
+        bool is_parent;
+
+        File* file = getFileAt_Directory(file_system, dir, j);
+        CString *name = getName_File(file_system, file);
+
+        // TODO: Check file permission
+        FilePermission *perm = getProcessAccessOnFile(context, file);
+
+        /* Filter '.' */
+        if(equals_FileId(file->fileid, dir->fileid))
+        {
+            continue;
+        }
+
+        /* Filter '..' */
+        is_parent = false;
+        upward = getUpwardLinksCount_File(dir);
+        for(k = 0; k < upward; k++)
+        {
+            File *parent = getParentDirectory_UpwardLink(file_system, getUpwardLinkAt_File(dir, k));
+
+            if(equals_FileId(file->fileid, parent->fileid))
+            {
+                is_parent = true;
+                break;
+            }
+        }
+
+        if(is_parent)
+        {
+            continue;
+        }
+
+        /*
+         * Specified patterns shall be matched against existing filenames and
+         * pathnames, as appropriate.
+         */
+        IMPLEMENT_REQ("sh.pattern.filename.01.03.01");
+
+        if(doesNameMatch_GlobFilePattern(pattern_item->file_pattern, name))
+        {
+            FindErrorCode find_error = find_GlobPattern_Ext(context, file,
+                concat_Path(path, name), pattern, i + 1, flags, errfunc, res);
+
+            is_file_found = true;
+
+            if(find_error != FIND_OK)
+            {
+                return find_error;
+            }
+        }
+    }
+
+    if(!is_file_found && !isUptodate_Directory(dir))
+    {
+        traceFormattedUserInfo("find_GlobPattern_Ext: Directory $(obj) is not uptodate", path);
+
+        return FIND_UPTODATE_ERROR;
+    }
+
+    return FIND_OK;
+}
+
+FindErrorCode find_GlobPattern
+(
+    CallContext context,
+    GlobPattern *pattern,
+    GlobFlags flags,
+    GlobErrorFunction *errfunc,
+    List *res
+)
+{
+    int pos;
+    File *dir;
+    CString *path;
+    FileSystem *file_system;
+    GlobPatternItem *pattern_item;
+
+    assertion(pattern != NULL, "find_GlobPattern: pattern is NULL");
+    assertion(!isEmpty_List(pattern), "find_GlobPattern: pattern is empty");
+
+    file_system = getFileSystem(context);
+
+    assertion(file_system != NULL, "find_GlobPattern: file_system is NULL");
+    
+    pattern_item = get_List(pattern, 0);
+
+    if(pattern_item->slash)
+    {
+        pos = 1;
+        dir = getFile_FileId(file_system->root);
+        path = create_CString("/");
+    }
+    else
+    {
+        ProcessId processId = getProcessId_CallContext(context);
+        FileId workdir = getWorkDirectory_ProcessId(processId);
+
+        pos = 0;
+        dir = getFile_FileId(workdir);
+        path = create_CString("");
+    }
+    
+    return find_GlobPattern_Ext(context, dir, path, pattern, pos, flags, errfunc, res);
+}
+
+/*****************************************************************************/
+/**                   Auxiliary Specification Functions                     **/
+/*****************************************************************************/
+
+/** setglob_spec **/
+specification
+void setglob_spec(CallContext context, GlobTPtr pglob, GlobT *glob)
+{
+    pre        { return true; }
+    coverage C { return { TheOnlyBranch, "The only branch" }; }
+    post       { return true;}
+}
+
+/** setglob64_spec **/
+specification
+void setglob64_spec(CallContext context, Glob64TPtr pglob, Glob64T *glob64)
+{
+    pre        { return true; }
+    coverage C { return { TheOnlyBranch, "The only branch" }; }
+    post       { return true;}
+}
+
+/*****************************************************************************/
+/**                            Helper Functions                             **/
+/*****************************************************************************/
+
+/*
+ * Returns true, iff the list is sorted as defined by the current setting of
+ * the LC_COLLATE category.
+ */
+bool isSorted_List(List *list)
+{
+    assertion(list != NULL, "isSorted_List: list is NULL");
+
+
+    return true;
+}

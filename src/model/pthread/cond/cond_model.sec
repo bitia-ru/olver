@@ -1,0 +1,1764 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "pthread/cond/cond_config.h"
+#include "pthread/cond/cond_model.seh"
+#include "config/system_config.seh"
+#include "data/errno_model.seh"
+#include "pthread/mutex/mutex_model.seh"
+#include "process/process/process_model.seh"
+
+
+#pragma SEC subsystem cond "pthread.cond"
+
+/* 
+   The group of functions 'pthread.cond.cond' consists of: 
+       pthread_cond_init [2]
+       pthread_cond_destroy [2]
+       pthread_cond_broadcast [2]
+       pthread_cond_signal [2]
+       pthread_cond_wait [2]
+       pthread_cond_timedwait [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_cond_destroy, pthread_cond_init - destroy and initialize condition
+    variables
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    int pthread_cond_destroy(pthread_cond_t *cond);
+    int pthread_cond_init(pthread_cond_t *restrict cond,
+           const pthread_condattr_t *restrict attr);
+    pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+DESCRIPTION
+
+    The pthread_cond_destroy() function shall destroy the given condition
+    variable specified by cond; the object becomes, in effect, uninitialized.
+    An implementation may cause pthread_cond_destroy() to set the object
+    referenced by cond to an invalid value. A destroyed condition variable
+    object can be reinitialized using pthread_cond_init(); the results of
+    otherwise referencing the object after it has been destroyed are undefined.
+
+    It shall be safe to destroy an initialized condition variable upon which no
+    threads are currently blocked. Attempting to destroy a condition variable
+    upon which other threads are currently blocked results in undefined
+    behavior.
+
+    The pthread_cond_init() function shall initialize the condition variable
+    referenced by cond with attributes referenced by attr. If attr is NULL,
+    the default condition variable attributes shall be used; the effect is the
+    same as passing the address of a default condition variable attributes
+    object. Upon successful initialization, the state of the condition variable
+    shall become initialized.
+
+    Only cond itself may be used for performing synchronization. The result of
+    referring to copies of cond in calls to pthread_cond_wait(),
+    pthread_cond_timedwait(), pthread_cond_signal(), pthread_cond_broadcast(),
+    and pthread_cond_destroy() is undefined.
+
+    Attempting to initialize an already initialized condition variable results
+    in undefined behavior.
+
+    In cases where default condition variable attributes are appropriate, the
+    macro PTHREAD_COND_INITIALIZER can be used to initialize condition
+    variables that are statically allocated. The effect shall be equivalent to
+    dynamic initialization by a call to pthread_cond_init() with parameter attr
+    specified as NULL, except that no error checks are performed.
+
+RETURN VALUE
+
+    If successful, the pthread_cond_destroy() and pthread_cond_init() functions
+    shall return zero; otherwise, an error number shall be returned to indicate
+    the error.
+
+    The [EBUSY] and [EINVAL] error checks, if implemented, shall act as if they
+    were performed immediately at the beginning of processing for the function
+    and caused an error return prior to modifying the state of the condition
+    variable specified by cond.
+
+ERRORS
+
+    The pthread_cond_destroy() function may fail if:
+
+    [EBUSY]
+        The implementation has detected an attempt to destroy the object
+        referenced by cond while it is referenced (for example, while being
+        used in a pthread_cond_wait() or pthread_cond_timedwait()) by another
+        thread.
+    [EINVAL]
+        The value specified by cond is invalid.
+
+    The pthread_cond_init() function shall fail if:
+
+    [EAGAIN]
+        The system lacked the necessary resources (other than memory) to
+        initialize another condition variable.
+    [ENOMEM]
+        Insufficient memory exists to initialize the condition variable.
+
+    The pthread_cond_init() function may fail if:
+
+    [EBUSY]
+        The implementation has detected an attempt to reinitialize the object
+        referenced by cond, a previously initialized, but not yet destroyed,
+        condition variable.
+    [EINVAL]
+        The value specified by attr is invalid.
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+
+specification
+ErrorCode* pthread_cond_init_spec(CallContext context, VoidTPtr cond, PThreadCondAttrTPtr attr)
+{
+    PThreadCondAttrT* attributes = !isNULL_VoidTPtr(attr) ? getCondAttributes(attr) : NULL;
+    PThreadCondT* pre_cond;
+
+    VERBOSE("pthread_cond_init_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "cond is not NULL", !isNULL_VoidTPtr(cond));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by cond is available in the context", isValidPointer(context, cond));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by cond is enough", sizeWMemoryAvailable(cond) >= sizeof_Type(context, "pthread_cond_t"));
+
+        pre_cond = getObjectInMemory(cond);
+
+        if(!POSIX_PTHREAD_COND_INIT_FAILS_WITH_EBUSY)
+        {
+            /*
+             * Attempting to initialize an already initialized condition variable results in undefined behavior.
+             */
+            REQ("?app.pthread_cond_init.03", "The cond should not be initialized", pre_cond == NULL);
+        }
+
+        if(!POSIX_PTHREAD_COND_INIT_FAILS_WITH_EINVAL)
+        {
+            /* [Behaviour is undefined if the value specified by attr is invalid] */
+            REQ("", "The value specified by attr should be valid", isNULL_VoidTPtr(attr) || T(attributes != NULL));
+        }
+
+        return true;
+    }
+
+    coverage AttrC
+    {
+        if (isNULL_VoidTPtr(attr))
+            return {DefaultAttribute, "Default initialization"};
+        else if (attributes == NULL)
+            return {IncorrectAttribute, "Non-initialized attribute"};
+        else if (attributes->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_COND_INIT_FAILS_WITH_EBUSY || POSIX_PTHREAD_COND_INIT_FAILS_WITH_EINVAL
+    coverage ErrorsC
+    {
+#if POSIX_PTHREAD_COND_INIT_FAILS_WITH_EBUSY
+            if (pre_cond != NULL)
+                return {InvalidCond, "Cond is already initialized"};
+#endif
+
+#if POSIX_PTHREAD_COND_INIT_FAILS_WITH_EINVAL
+            if ( !isNULL_VoidTPtr(attr) && (attributes == NULL))
+                return {InvalidCondAttr, "CondAttr is not initialized"};
+#endif
+
+        return {Good, "No errors"};
+    }
+#endif
+
+    post
+    {
+        PThreadCondT* post_cond = getCondVariable(cond);
+
+        /*
+         * The [EBUSY] and [EINVAL] error checks, if implemented, shall act as if they were performed immediately at the beginning of
+         * processing for the function and caused an error return prior to modifying the state of the condition variable specified by
+         * cond.
+         */
+        if ((*pthread_cond_init_spec == SUT_EBUSY) || (*pthread_cond_init_spec == SUT_EINVAL))
+            REQ("?pthread_cond_init.05", "The cond should not be changed", equals(pre_cond, post_cond));
+
+        ERROR_BEGIN(POSIX_PTHREAD_COND_INIT, "pthread_cond_init.04.02", *pthread_cond_init_spec != 0, *pthread_cond_init_spec)
+            /*
+             * The pthread_cond_init() function shall fail if:
+             * 
+             * [EAGAIN]
+             * 
+             * The system lacked the necessary resources (other than memory) to initialize another condition variable.
+             * 
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_COND_INIT, EAGAIN, "pthread_cond_init.06.01", "")
+
+            /*
+             * The pthread_cond_init() function shall fail if:
+             * 
+             * [ENOMEM]
+             * 
+             * Insufficient memory exists to initialize the condition variable.
+             * 
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_COND_INIT, ENOMEM, "pthread_cond_init.06.02", "")
+
+            /*
+             * The pthread_cond_init() function may fail if:
+             * 
+             * [EBUSY]
+             * 
+             * The implementation has detected an attempt to reinitialize the object referenced by cond, a previously initialized, but
+             * not yet destroyed, condition variable.
+             * 
+             */
+            ERROR_MAY(POSIX_PTHREAD_COND_INIT, EBUSY, "pthread_cond_init.07.01", pre_cond != NULL)
+
+            /*
+             * The pthread_cond_init() function may fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The value specified by attr is invalid.
+             * 
+             */
+            ERROR_MAY(POSIX_PTHREAD_COND_INIT, EINVAL, "pthread_cond_init.07.02", !isNULL_VoidTPtr(attr) && (attributes == NULL))
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_COND_INIT, EINTR, "pthread_cond_init.08")
+
+        ERROR_END()
+
+        if (attributes == NULL)
+        {
+            /*
+             * If attr is NULL, the default condition variable attributes shall be used; the effect is the same
+             * as passing the address of a default condition variable attributes object.
+             */
+            REQ("?pthread_cond_init.02", "'pshared' shall be initialized with the default value", post_cond->pshared == getDefaultCondPShared());
+        }
+        else
+        {
+            /*
+             * The pthread_cond_init() function shall initialize the condition variable referenced by cond with attributes
+             * referenced by attr.
+             */
+            REQ("?pthread_cond_init.01", "'pshared' shall be initialized with the specified value", post_cond->pshared == attributes->pshared);
+        }
+
+        /*
+         * Upon successful initialization, the state of the
+         * condition variable shall become initialized.
+         */
+        REQ("?pthread_cond_init.09", "The cond should become initialized", post_cond != NULL);
+
+        /* [Wait lists must be empty.] */
+        REQ("", "wait list shall be empty", isEmpty_List(post_cond->wait_list));
+
+        return true;
+    }
+}
+
+void onPThreadCondInit(VoidTPtr cond, PThreadCondAttrTPtr attr, ErrorCode* pthread_cond_init_spec)
+{
+    VERBOSE("onPThreadCondInit\n");
+    if (*pthread_cond_init_spec == 0)
+    {
+        PThreadCondAttrT* attributes = isNULL_VoidTPtr(attr) ? NULL : getCondAttributes(attr);
+        if (attributes != NULL)
+        {
+            register_PThreadCondT(cond, NULL_VoidTPtr, 0, attributes->pshared);
+        }
+        else
+        {
+            register_PThreadCondT(cond, NULL_VoidTPtr, 0, getDefaultCondPShared());
+        }
+    }    
+}
+
+specification
+ErrorCode* pthread_cond_destroy_spec(CallContext context, PThreadCondTPtr cond)
+{
+    PThreadCondT* pre_cond = clone(getCondVariable(cond));
+
+    VERBOSE("pthread_cond_destroy_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "cond is not NULL", !isNULL_VoidTPtr(cond));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by cond is available in the context", isValidPointer(context, cond));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by cond is enough", sizeWMemoryAvailable(cond) >= sizeof_Type(context, "pthread_cond_t"));
+
+        if(!POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EINVAL)
+        {
+            /*
+             * the
+             * results of otherwise referencing the object after it has been destroyed are undefined.
+             */
+            REQ("?app.pthread_cond_destroy.02", "The value specified by cond is invalid", pre_cond != NULL);
+        }
+
+        if(!POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EBUSY)
+        {
+            if (pre_cond != NULL)
+            {
+                /*
+                 * It shall be safe to destroy an initialized condition variable upon which no threads are currently blocked. Attempting to destroy
+                 * a condition variable upon which other threads are currently blocked results in undefined behavior.
+                 */
+                REQ("?app.pthread_cond_destroy.03", "Attempting to destroy a locked cond", !isLocked_Cond(pre_cond));
+            }
+        }
+
+        /*
+         * Only cond itself may be used for performing synchronization. The result of referring to copies of cond in calls to
+         * pthread_cond_wait(), pthread_cond_timedwait(), pthread_cond_signal(), pthread_cond_broadcast(), and pthread_cond_destroy() is undefined.
+         */
+        REQ("app.pthread_cond_destroy.04", 
+            "The result of referring to copies of cond in calls is undefined", 
+            true);
+
+
+        return true;
+    }
+
+    coverage AttrC
+    {
+#if POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EINVAL
+        if (pre_cond == NULL)
+            return {InvalidCond, "Cond is not initialized"};
+        else
+#endif
+
+        if (pre_cond->pshared == SUT_PTHREAD_PROCESS_SHARED)
+            return {Shared, "PTHREAD_PROCESS_SHARED"};
+        else
+            return {Private, "PTHREAD_PROCESS_PRIVATE"};
+    }
+
+#if POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EINVAL || POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EBUSY
+    coverage ErrorsC
+    {
+#if POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EINVAL
+        if (pre_cond == NULL)
+            return {InvalidCond, "Cond is not initialized"};
+        else
+#endif
+
+#if POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EBUSY
+        if (isLocked_Cond(pre_cond))
+            return {CondBusy, "Cond is locked"};
+        else
+#endif
+
+            return {Good, "No errors"};
+    }
+#endif
+
+    post
+    {
+        PThreadCondT* post_cond = getCondVariable(cond);
+
+        /*
+         * The [EBUSY] and [EINVAL] error checks, if implemented, shall act as if they were performed immediately at the beginning of
+         * processing for the function and caused an error return prior to modifying the state of the condition variable specified by
+         * cond.
+         */
+        if ((*pthread_cond_destroy_spec == SUT_EBUSY) || (*pthread_cond_destroy_spec == SUT_EINVAL))
+            REQ("?pthread_cond_destroy.06", "The cond should not be changed", equals(pre_cond, post_cond));
+
+        ERROR_BEGIN(POSIX_PTHREAD_COND_DESTROY, "pthread_cond_destroy.05.02", *pthread_cond_destroy_spec != 0, *pthread_cond_destroy_spec)
+            if (pre_cond != NULL)
+            {
+                /*
+                 * The pthread_cond_destroy() function may fail if:
+                 * 
+                 * [EBUSY]
+                 * 
+                 * The implementation has detected an attempt to destroy the object referenced by cond while it is referenced (for example,
+                 * while being used in a pthread_cond_wait() or pthread_cond_timedwait()) by another thread.
+                 * 
+                 */
+                ERROR_MAY(POSIX_PTHREAD_COND_DESTROY, EBUSY, "pthread_cond_destroy.07.01", isLocked_Cond(pre_cond))
+            }
+
+            /*
+             * The pthread_cond_destroy() function may fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The value specified by cond is invalid.
+             * 
+             */
+            ERROR_MAY(POSIX_PTHREAD_COND_DESTROY, EINVAL, "pthread_cond_destroy.07.02", pre_cond == NULL)
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_COND_DESTROY, EINTR, "pthread_cond_destroy.08")
+
+        ERROR_END()
+
+        if (*pthread_cond_destroy_spec == SUT_EOK)
+        {
+            /*
+             * The pthread_cond_destroy() function shall destroy the given condition variable specified by cond; the object
+             * becomes, in effect, uninitialized.
+             */
+            REQ("?pthread_cond_destroy.01", "pthread_cond_destroy() shall destroy the cond", post_cond == NULL);
+        }
+
+        return true;
+    }
+}
+
+void onPThreadCondDestroy(PThreadCondTPtr cond, ErrorCode* pthread_cond_destroy_spec)
+{
+    VERBOSE("onPThreadCondDestroy\n");
+    if (*pthread_cond_destroy_spec == 0)
+    {
+        unregister_PThreadCondT(cond);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_cond_broadcast, pthread_cond_signal - broadcast or signal a
+    condition
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    int pthread_cond_broadcast(pthread_cond_t *cond);
+    int pthread_cond_signal(pthread_cond_t *cond);
+
+DESCRIPTION
+
+    These functions shall unblock threads blocked on a condition variable.
+
+    The pthread_cond_broadcast() function shall unblock all threads currently
+    blocked on the specified condition variable cond.
+
+    The pthread_cond_signal() function shall unblock at least one of the
+    threads that are blocked on the specified condition variable cond (if any
+    threads are blocked on cond).
+
+    If more than one thread is blocked on a condition variable, the scheduling
+    policy shall determine the order in which threads are unblocked. When each
+    thread unblocked as a result of a pthread_cond_broadcast() or
+    pthread_cond_signal() returns from its call to pthread_cond_wait() or
+    pthread_cond_timedwait(), the thread shall own the mutex with which it
+    called pthread_cond_wait() or pthread_cond_timedwait(). The thread(s) that
+    are unblocked shall contend for the mutex according to the scheduling
+    policy (if applicable), and as if each had called pthread_mutex_lock().
+
+    The pthread_cond_broadcast() or pthread_cond_signal() functions may be
+    called by a thread whether or not it currently owns the mutex that threads
+    calling pthread_cond_wait() or pthread_cond_timedwait() have associated
+    with the condition variable during their waits; however, if predictable
+    scheduling behavior is required, then that mutex shall be locked by the
+    thread calling pthread_cond_broadcast() or pthread_cond_signal().
+
+    The pthread_cond_broadcast() and pthread_cond_signal() functions shall have
+    no effect if there are no threads currently blocked on cond.
+
+RETURN VALUE
+
+    If successful, the pthread_cond_broadcast() and pthread_cond_signal()
+    functions shall return zero; otherwise, an error number shall be returned
+    to indicate the error.
+
+ERRORS
+
+    The pthread_cond_broadcast() and pthread_cond_signal() function may fail if:
+
+    [EINVAL]
+        The value cond does not refer to an initialized condition variable.
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+
+specification typedef struct CondBroadcastCall CondBroadcastCall = {};
+
+CondBroadcastCall* create_CondBroadcastCall(CallContext context, PThreadCondTPtr cond)
+{
+    return create(&type_CondBroadcastCall, context, cond);
+}
+
+specification
+void pthread_cond_broadcast_spec(CallContext context, PThreadCondTPtr cond)
+{
+    PThreadCondT* pre_cond = NULL;
+
+    VERBOSE("pthread_cond_broadcast_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block for cond is available in the context", isValidPointer(context, cond));
+
+        /* [The value specified by cond is valid.] */
+        pre_cond = getCondVariable(cond);
+
+        if(PTHREAD_COND_BROADCAST_FAILS_WITH_EINVAL)
+        {
+            /* [The value specified by rwlock is invalid. Behaviour is unspecified.] */
+            REQ("", "The value specified by cond is valid", (pre_cond != NULL));
+        }
+
+        return true;
+    }
+
+    coverage C
+    {
+#if PTHREAD_COND_BROADCAST_FAILS_WITH_EINVAL
+        if (pre_cond == NULL)
+            return {CondIsNULL, "Cond is invalid"};
+        else
+#endif
+        if (isEmpty_List(pre_cond->wait_list))
+            return {NoWaiters, "Nobody waits"};
+        else if (size_List(pre_cond->wait_list) == 1)
+            return {OneWaiter, "One thread waits"};
+        else
+            return {SeveralWaiters, "Several threads wait"};
+    }
+
+#if PTHREAD_COND_BROADCAST_FAILS_WITH_EINVAL
+    coverage ErrorsC
+    {
+        if (pre_cond == NULL)
+            return {InvalidCond, "Cond is not initialized"};
+        else
+            return {Good, "No errors"};
+    }
+#endif
+
+    post
+    {
+        PThreadCondT* post_cond = getCondVariable(cond);
+        ThreadId thread;
+
+        /* [The thread has been blocked by call of the pthread_cond_broadcast() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                              create_CondBroadcastCall(context, cond)
+                                             )
+           );
+
+        if ((post_cond != NULL) && !isEmpty_List(post_cond->wait_list))
+        {
+            thread = getNextThread_SchedulingPolicy(getThreads(context), post_cond->wait_list);
+            if (!isWrong_ThreadId(thread))
+            {
+                /*
+                 * If more than one thread is blocked on a condition variable, the scheduling policy shall determine the order in which threads are
+                 * unblocked.
+                 */
+                REQ("?pthread_cond_broadcast.02", "Thread determined by the scheduling policy shall become unblocked", isThreadReadyToBeRun(thread));
+            }
+        }
+
+        return true;
+    }
+}
+
+void onPThreadCondBroadcast(CallContext context, PThreadCondTPtr cond)
+{
+    PThreadCondT* pre_cond = getCondVariable(cond);
+    ThreadId thread;
+
+    VERBOSE("onPThreadCondBroadcast: %p\n", context.thread);
+    startBlockedCall(context, create_CondBroadcastCall(context, cond));    
+    threadShouldBeRun(context);
+
+    if ((pre_cond != NULL) && !isEmpty_List(pre_cond->wait_list))
+    {
+        // Thread determined by the scheduling policy shall become unblocked.
+        thread = getNextThread_SchedulingPolicy(getThreads(context), pre_cond->wait_list);
+        if (!isWrong_ThreadId(thread))
+            threadShouldBeRun(thread);
+    }
+}
+
+specification typedef struct CondBroadcastReturnType CondBroadcastReturnType = {};
+
+CondBroadcastReturnType * create_CondBroadcastReturnType(
+    CallContext context,
+    ErrorCode*  errno
+)
+{
+    return create(&type_CondBroadcastReturnType, context, errno);
+}
+
+reaction 
+CondBroadcastReturnType* pthread_cond_broadcast_return(void)
+{
+    post
+    {
+        CallContext context = pthread_cond_broadcast_return->context;
+        CondBroadcastCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+        PThreadCondTPtr cond = blocked_call->cond;
+        PThreadCondT* pre_cond = findCondVariable(@getAllCondVariables(), cond);
+
+        VERBOSE("pthread_cond_broadcast_return: %p\n", context.thread);
+
+        ERROR_BEGIN(PTHREAD_COND_BROADCAST, "pthread_cond_broadcast.06.02", *(pthread_cond_broadcast_return->errno) != 0, *(pthread_cond_broadcast_return->errno))
+            /*
+             * The pthread_cond_broadcast() and pthread_cond_signal() function may fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The value cond does not refer to an initialized condition variable.
+             * 
+             */
+            ERROR_MAY(PTHREAD_COND_BROADCAST, EINVAL, "pthread_cond_broadcast.07.01", pre_cond == NULL)
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(PTHREAD_COND_BROADCAST, EINTR, "pthread_cond_broadcast.08")
+
+        ERROR_END()
+
+        /*
+         * The pthread_cond_broadcast() function shall unblock all threads currently blocked on the specified condition variable
+         * cond.
+         */
+        REQ("pthread_cond_broadcast.01", 
+            "Shall unblock all threads currently blocked", 
+            true);
+
+        /*
+         * The thread(s) that are unblocked shall contend for
+         * the mutex according to the scheduling policy (if applicable), and as if each had called pthread_mutex_lock().
+         */
+        REQ("pthread_cond_broadcast.04", 
+            "Unblocked thread(s) shall contend for the mutex", 
+            true);
+
+        /*
+         * The pthread_cond_broadcast() and pthread_cond_signal() functions shall have no effect if there are no threads
+         * currently blocked on cond.
+         */
+        REQ("pthread_cond_broadcast.05", 
+            "Shall have no effect if there are no blocked threads", 
+            true);
+
+        return true;
+    }
+}
+
+void onPThreadCondBroadcastReturn(CallContext context, ErrorCode* pthread_cond_broadcast_spec)
+{
+    VERBOSE("onPThreadCondBroadcastReturn: %p\n", context.thread);
+    finishBlockedCall(context);
+}
+
+specification typedef struct CondSignalCall CondSignalCall = {};
+
+CondSignalCall* create_CondSignalCall(CallContext context, PThreadCondTPtr cond)
+{
+    return create(&type_CondSignalCall, context, cond);
+}
+
+specification
+void pthread_cond_signal_spec(CallContext context, PThreadCondTPtr cond)
+{
+    PThreadCondT* pre_cond = NULL;
+
+    VERBOSE("pthread_cond_signal_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block for cond is available in the context", isValidPointer(context, cond));
+
+        /* [The value specified by cond is valid.] */
+        pre_cond = getCondVariable(cond);
+        
+        if(!PTHREAD_COND_SIGNAL_FAILS_WITH_EINVAL)
+        {
+            /* [The value specified by rwlock is invalid. Behaviour is unspecified.] */
+            REQ("", "The value specified by cond is valid", (pre_cond != NULL));
+        }   
+
+        return true;
+    }
+
+    coverage C
+    {
+#if PTHREAD_COND_SIGNAL_FAILS_WITH_EINVAL
+        if (pre_cond == NULL)
+            return {CondIsNULL, "Cond is invalid"};
+        else
+#endif
+        if (isEmpty_List(pre_cond->wait_list))
+            return {NoWaiters, "Nobody waits"};
+        else if (size_List(pre_cond->wait_list) == 1)
+            return {OneWaiter, "One thread waits"};
+        else
+            return {SeveralWaiters, "Several threads wait"};
+    }
+
+#if PTHREAD_COND_SIGNAL_FAILS_WITH_EINVAL
+    coverage ErrorsC
+    {
+        if (pre_cond == NULL)
+            return {InvalidCond, "Cond is not initialized"};
+        else
+            return {Good, "No errors"};
+    }
+#endif
+
+    post
+    {
+        PThreadCondT* post_cond = getCondVariable(cond);
+        ThreadId thread;
+
+        /* [The thread has been blocked by call of the pthread_cond_signal() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                              create_CondSignalCall(context, cond)
+                                             )
+           );
+
+        if ((post_cond != NULL) && !isEmpty_List(pre_cond->wait_list))
+        {
+            thread = getNextThread_SchedulingPolicy(getThreads(context), post_cond->wait_list);
+            if (!isWrong_ThreadId(thread))
+            {
+                /*
+                 * If more than one thread is blocked on a condition variable, the scheduling policy shall determine the order in which threads are
+                 * unblocked.
+                 */
+                REQ("?pthread_cond_signal.02", "Thread determined by the scheduling policy shall become unblocked", isThreadReadyToBeRun(thread));
+            }
+        }
+
+        return true;
+    }
+}
+
+void onPThreadCondSignal(CallContext context, PThreadCondTPtr cond)
+{
+    PThreadCondT* pre_cond = getCondVariable(cond);
+    ThreadId thread;
+
+    VERBOSE("onPThreadCondSignal: %p\n", context.thread);
+    startBlockedCall(context, create_CondSignalCall(context, cond));    
+    threadShouldBeRun(context);
+
+    if ((pre_cond != NULL) && !isEmpty_List(pre_cond->wait_list))
+    {
+        // Thread determined by the scheduling policy shall become unblocked.
+        thread = getNextThread_SchedulingPolicy(getThreads(context), pre_cond->wait_list);
+        if (!isWrong_ThreadId(thread))
+            threadShouldBeRun(thread);
+    }
+}
+
+specification typedef struct CondSignalReturnType CondSignalReturnType = {};
+
+CondSignalReturnType * create_CondSignalReturnType(
+    CallContext context,
+    ErrorCode*  errno
+)
+{
+    return create(&type_CondSignalReturnType, context, errno);
+}
+
+reaction 
+CondSignalReturnType* pthread_cond_signal_return(void)
+{
+    post
+    {
+        CallContext context = pthread_cond_signal_return->context;
+        CondSignalCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+        PThreadCondTPtr cond = blocked_call->cond;
+        PThreadCondT* pre_cond = findCondVariable(@getAllCondVariables(), cond);
+
+        VERBOSE("pthread_cond_signal_return: %p\n", context.thread);
+
+        ERROR_BEGIN(PTHREAD_COND_SIGNAL, "pthread_cond_signal.06.02", *(pthread_cond_signal_return->errno) != 0, *(pthread_cond_signal_return->errno))
+            /*
+             * The pthread_cond_broadcast() and pthread_cond_signal() function may fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The value cond does not refer to an initialized condition variable.
+             * 
+             */
+            ERROR_MAY(PTHREAD_COND_SIGNAL, EINVAL, "pthread_cond_signal.07.01", pre_cond == NULL)
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(PTHREAD_COND_SIGNAL, EINTR, "pthread_cond_signal.08")
+
+        ERROR_END()
+
+        /*
+         * The pthread_cond_signal() function shall unblock at least one of the threads that are blocked on the specified condition
+         * variable cond (if any threads are blocked on cond).
+         */
+        REQ("pthread_cond_signal.01", 
+            "Shall unblock at least one of the threads that are blocked", 
+            true);
+
+        /*
+         * The thread(s) that are unblocked shall contend for
+         * the mutex according to the scheduling policy (if applicable), and as if each had called pthread_mutex_lock().
+         */
+        REQ("pthread_cond_signal.04", 
+            "The thread(s) that are unblocked shall contend for the mutex", 
+            true);
+
+        /*
+         * The pthread_cond_broadcast() and pthread_cond_signal() functions shall have no effect if there are no threads
+         * currently blocked on cond.
+         */
+        REQ("pthread_cond_signal.05", 
+            "Shall have no effect if there are no blocked threads", 
+            true);
+
+        return true;
+    }
+}
+
+void onPThreadCondSignalReturn(CallContext context, ErrorCode* pthread_cond_signal_spec)
+{
+    VERBOSE("onPThreadCondSignalReturn: %p\n", context.thread);
+    finishBlockedCall(context);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_cond_timedwait, pthread_cond_wait - wait on a condition
+
+SYNOPSIS
+
+    #include <pthread.h>
+
+    int pthread_cond_timedwait(pthread_cond_t *restrict cond,
+           pthread_mutex_t *restrict mutex,
+           const struct timespec *restrict abstime);
+    int pthread_cond_wait(pthread_cond_t *restrict cond,
+           pthread_mutex_t *restrict mutex); [Option End]
+
+DESCRIPTION
+
+    The pthread_cond_timedwait() and pthread_cond_wait() functions shall block
+    on a condition variable. They shall be called with mutex locked by the
+    calling thread or undefined behavior results.
+
+    These functions atomically release mutex and cause the calling thread to
+    block on the condition variable cond; atomically here means "atomically
+    with respect to access by another thread to the mutex and then the
+    condition variable". That is, if another thread is able to acquire the
+    mutex after the about-to-block thread has released it, then a subsequent
+    call to pthread_cond_broadcast() or pthread_cond_signal() in that thread
+    shall behave as if it were issued after the about-to-block thread has
+    blocked.
+
+    Upon successful return, the mutex shall have been locked and shall be owned
+    by the calling thread.
+
+    When using condition variables there is always a Boolean predicate
+    involving shared variables associated with each condition wait that is true
+    if the thread should proceed. Spurious wakeups from the
+    pthread_cond_timedwait() or pthread_cond_wait() functions may occur. Since
+    the return from pthread_cond_timedwait() or pthread_cond_wait() does not
+    imply anything about the value of this predicate, the predicate should be
+    re-evaluated upon such return.
+
+    When a thread waits on a condition variable, having specified a particular
+    mutex to either the pthread_cond_timedwait() or the pthread_cond_wait()
+    operation, a dynamic binding is formed between that mutex and condition
+    variable that remains in effect as long as at least one thread is blocked
+    on the condition variable. During this time, the effect of an attempt by
+    any thread to wait on that condition variable using a different mutex is
+    undefined. Once all waiting threads have been unblocked (as by the
+    pthread_cond_broadcast() operation), the next wait operation on that
+    condition variable shall form a new dynamic binding with the mutex
+    specified by that wait operation. Even though the dynamic binding between
+    condition variable and mutex may be removed or replaced between the time
+    a thread is unblocked from a wait on the condition variable and the time
+    that it returns to the caller or begins cancellation cleanup, the unblocked
+    thread shall always re-acquire the mutex specified in the condition wait
+    operation call from which it is returning.
+
+    A condition wait (whether timed or not) is a cancellation point. When the
+    cancelability type of a thread is set to PTHREAD_CANCEL_DEFERRED, a side
+    effect of acting upon a cancellation request while in a condition wait is
+    that the mutex is (in effect) re-acquired before calling the first
+    cancellation cleanup handler. The effect is as if the thread were
+    unblocked, allowed to execute up to the point of returning from the call
+    to pthread_cond_timedwait() or pthread_cond_wait(), but at that point
+    notices the cancellation request and instead of returning to the caller of
+    pthread_cond_timedwait() or pthread_cond_wait(), starts the thread
+    cancellation activities, which includes calling cancellation cleanup
+    handlers.
+
+    A thread that has been unblocked because it has been canceled while blocked
+    in a call to pthread_cond_timedwait() or pthread_cond_wait() shall not
+    consume any condition signal that may be directed concurrently at the
+    condition variable if there are other threads blocked on the condition
+    variable.
+
+    The pthread_cond_timedwait() function shall be equivalent to
+    pthread_cond_wait(), except that an error is returned if the absolute time
+    specified by abstime passes (that is, system time equals or exceeds
+    abstime) before the condition cond is signaled or broadcasted, or if the
+    absolute time specified by abstime has already been passed at the time of
+    the call.
+
+    If the Clock Selection option is supported, the condition variable shall
+    have a clock attribute which specifies the clock that shall be used to
+    measure the time specified by the abstime argument. When such timeouts
+    occur, pthread_cond_timedwait() shall nonetheless release and re-acquire
+    the mutex referenced by mutex. The pthread_cond_timedwait() function is
+    also a cancellation point.
+
+    If a signal is delivered to a thread waiting for a condition variable, upon
+    return from the signal handler the thread resumes waiting for the condition
+    variable as if it was not interrupted, or it shall return zero due to
+    spurious wakeup.
+
+RETURN VALUE
+
+    Except in the case of [ETIMEDOUT], all these error checks shall act as if
+    they were performed immediately at the beginning of processing for the
+    function and shall cause an error return, in effect, prior to modifying the
+    state of the mutex specified by mutex or the condition variable specified
+    by cond.
+
+    Upon successful completion, a value of zero shall be returned; otherwise,
+    an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_cond_timedwait() function shall fail if:
+
+    [ETIMEDOUT]
+        The time specified by abstime to pthread_cond_timedwait() has passed.
+    [EINVAL]
+        The value specified by abstime is invalid.
+
+    These functions may fail if:
+
+    [EINVAL]
+        The value specified by cond or mutex is invalid.
+    [EPERM]
+        The mutex was not owned by the current thread at the time of the call.
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+
+specification typedef struct CondWaitCall CondWaitCall = {};
+
+CondWaitCall* create_CondWaitCall(CallContext context, PThreadCondTPtr cond, PThreadMutexTPtr mutex)
+{
+    return create(&type_CondWaitCall, context, cond, mutex);
+}
+
+specification
+void pthread_cond_wait_spec(CallContext context, PThreadCondTPtr cond, PThreadMutexTPtr mutex)
+{
+    Mutex* pre_mutex = NULL;
+    PThreadCondT* pre_cond = NULL;
+    
+    VERBOSE("pthread_cond_wait_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block for mutex is available in the context", isValidPointer(context, mutex));
+        REQ("", "Memory block for cond is available in the context", isValidPointer(context, cond));
+
+        pre_mutex = getMutex(mutex);
+        
+        if(!PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX)
+        {
+            /* [The value specified by mutex is valid.] */
+            REQ("", "mutex should exist", pre_mutex != NULL);
+        }
+
+        if(!PTHREAD_COND_WAIT_FAILS_WITH_EPERM)
+        {
+            if (pre_mutex != NULL)
+            {
+                /*
+                 * They shall be
+                 * called with mutex locked by the calling thread or undefined behavior results.
+                 */
+                REQ("?app.pthread_cond_wait.02", "mutex is locked by the calling thread", equals_ThreadId(pre_mutex->owner, context));
+            }
+        }
+
+        /*
+         * During this time, the effect of an attempt by any
+         * thread to wait on that condition variable using a different mutex is undefined.
+         */
+        /*
+         * [Check if there is at least one blocked condition variable and make sure that
+         *  its mutex is equal to the mutex passed into this wait() function.]
+         */
+        REQ("app.pthread_cond_wait.05", 
+            "The effect of an attempt by any thread to wait on that condition "
+            "variable using a different mutex is undefined", 
+            true);
+
+        pre_cond = getCondVariable(cond);
+
+        if(!PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_COND)
+        {
+            /* [The value specified by cond is valid.] */
+            REQ("", "The value specified by cond is valid", (pre_cond != NULL));
+        }
+
+        if (pre_cond != NULL)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "This thread is locking the cond already", !contains_List(pre_cond->wait_list, create_ThreadIdObj(context)));
+        }
+
+        return true;
+    }
+
+    coverage C
+    {
+#if PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_COND
+        if (pre_cond == NULL)
+            return {CondIsNULL, "Cond is invalid"};
+        else
+#endif
+        if (isEmpty_List(pre_cond->wait_list))
+            return {NoWaiters, "Nobody waits"};
+        else if (size_List(pre_cond->wait_list) == 1)
+            return {OneWaiter, "One thread waits"};
+        else
+            return {SeveralWaiters, "Several threads wait"};
+    }
+
+#if PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_COND || PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX || PTHREAD_COND_WAIT_FAILS_WITH_EPERM
+    coverage ErrorsC
+    {
+#if PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_COND
+        if (pre_cond == NULL)
+            return {InvalidCond, "Cond is not initialized"};
+        else
+#endif
+
+#if PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX
+        if (pre_mutex == NULL)
+            return {InvalidMutex, "Mutex is not initialized"};
+        else
+#endif
+
+#if PTHREAD_COND_WAIT_FAILS_WITH_EPERM
+        if (!equals_ThreadId(pre_mutex->owner, context))
+            return {MutexNotLocked, "Mutex is not locked"};
+        else
+#endif
+
+            return {Good, "No errors"};
+    }
+#endif
+
+    post
+    {
+        Mutex* post_mutex = getMutex(mutex);
+
+        /* [The thread has been blocked by call of the pthread_cond_wait() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                                  create_CondWaitCall(context, cond, mutex)
+                                                 )
+           );
+
+        if ((pre_cond != NULL) && (post_mutex != NULL) && equals_ThreadId(pre_mutex->owner, context))
+        {
+            /*
+             * These functions atomically release mutex and cause the calling thread to block on the condition variable cond;
+             * atomically here means "atomically with respect to access by another thread to the mutex and then the condition variable".
+             */
+            REQ("?pthread_cond_wait.03", "Mutex should be released", isWrong_ThreadId(post_mutex->owner));
+        }
+
+        return true;
+    }
+}
+
+void onPThreadCondWait(CallContext context, PThreadCondTPtr cond, PThreadMutexTPtr mutex)
+{
+    PThreadCondT* condObj = getCondVariable(cond);
+    Mutex* mutexObj = getMutex(mutex);
+
+    VERBOSE("onPThreadCondWait: %p\n", context.thread);
+    startBlockedCall(context, create_CondWaitCall(context, cond, mutex));
+    
+    if ((condObj != NULL) && (mutexObj != NULL) && equals_ThreadId(mutexObj->owner, context))
+    {
+        append_List(condObj->wait_list, create_ThreadIdObj(context));
+
+        /* [Free the mutex inside the wait() function.] */
+        mutexObj->owner = WrongThreadId;
+    }
+}
+
+specification typedef struct CondWaitReturnType CondWaitReturnType = {};
+
+CondWaitReturnType * create_CondWaitReturnType(
+    CallContext context,
+    ErrorCode*  errno
+)
+{
+    return create(&type_CondWaitReturnType, context, errno);
+}
+
+reaction 
+CondWaitReturnType* pthread_cond_wait_return(void)
+{
+    post
+    {
+        CallContext context = pthread_cond_wait_return->context;
+        CondWaitCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+        PThreadCondTPtr cond = blocked_call->cond;
+        PThreadCondT* condObj_pre = findCondVariable(@getAllCondVariables(), cond);
+        PThreadCondT* condObj_post = getCondVariable(cond);
+        Mutex* mutexObj_pre = findMutex(@getAllMutexes(), blocked_call->mutex);
+        Mutex* mutexObj_post = getMutex(blocked_call->mutex);
+
+        VERBOSE("pthread_cond_wait_return: %p\n", context.thread);
+
+        if(!PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_COND)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "Conditional variable exists", condObj_pre != NULL);
+        }
+
+        /*
+         * Except in the case of [ETIMEDOUT], all these error checks shall act as if they were performed immediately at the beginning of
+         * processing for the function and shall cause an error return, in effect, prior to modifying the state of the mutex specified by
+         * mutex or the condition variable specified by cond.
+         */
+        if ((*(pthread_cond_wait_return->errno) == SUT_EPERM) || (*(pthread_cond_wait_return->errno) == SUT_EINVAL))
+        {
+            REQ("?pthread_cond_wait.06", "The cond should not be changed", equals(condObj_pre, condObj_post));
+            REQ("?pthread_cond_wait.06", "The mutex should not be changed", equals(mutexObj_pre, mutexObj_post));
+        }
+
+        ERROR_BEGIN(PTHREAD_COND_WAIT, "pthread_cond_wait.07.02", *(pthread_cond_wait_return->errno) != 0, *(pthread_cond_wait_return->errno))
+            /*
+             * These functions may fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The value specified by cond or mutex is invalid.
+             * 
+             */
+            ERROR_MAY_EXT(PTHREAD_COND_WAIT, BAD_MUTEX, EINVAL, "pthread_cond_wait.08.01", mutexObj_pre == NULL)
+            ERROR_MAY_EXT(PTHREAD_COND_WAIT, BAD_COND, EINVAL, "pthread_cond_wait.08.01", condObj_pre == NULL)
+
+            if (mutexObj_pre != NULL)
+            {
+                /*
+                 * These functions may fail if:
+                 * 
+                 * [EPERM]
+                 * 
+                 * The mutex was not owned by the current thread at the time of the call.
+                 * 
+                 */
+                ERROR_MAY(PTHREAD_COND_WAIT, EPERM, "pthread_cond_wait.08.01", !equals_ThreadId(mutexObj_pre->owner, context))
+            }
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(PTHREAD_COND_WAIT, EINTR, "pthread_cond_wait.09")
+
+        ERROR_END()
+
+        /*
+         * The pthread_cond_timedwait() and pthread_cond_wait() functions shall block on a condition variable.
+         */
+        IMPLEMENT_REQ("pthread_cond_wait.01");
+
+        /*
+         * When each thread unblocked as a result of a pthread_cond_broadcast() or pthread_cond_signal() returns from
+         * its call to pthread_cond_wait() or pthread_cond_timedwait(), the thread shall own the mutex with which it called
+         * pthread_cond_wait() or pthread_cond_timedwait().
+         */
+        /*
+         * Upon successful return, the mutex shall have been locked and shall be owned by the calling thread.
+         */
+        REQ("?pthread_cond_broadcast.03;pthread_cond_signal.03;pthread_cond_wait.04",
+            "Mutex should remained locked by this thread",
+            equals_ThreadId(mutexObj_post->owner, context)
+           );
+
+        /* [The thread should be removed from the wait list.] */
+        REQ("", "The thread should be removed from wait list", 
+            isThreadIdRemovedList(condObj_pre->wait_list, context, condObj_post->wait_list)
+           );
+
+        return true;
+    }
+}
+
+void onPThreadCondWaitReturn(CallContext context, ErrorCode* pthread_cond_wait_spec)
+{
+    CondWaitCall* blocked_call = finishBlockedCall(context);
+    PThreadCondT* condObj = getCondVariable(blocked_call->cond);
+    Mutex* mutexObj = getMutex(blocked_call->mutex);
+
+    VERBOSE("onPThreadCondWaitReturn: %p\n", context.thread);
+    if ((condObj != NULL) && (mutexObj != NULL))
+    {
+        /* [Restore owner of the mutex.] */
+        mutexObj->owner = context;
+
+        /* [Remove thread from wait list] */
+        remove_ThreadIdList(condObj->wait_list, context);
+    }
+}
+
+specification typedef struct CondTimedWaitCall CondTimedWaitCall = {};
+
+CondTimedWaitCall* create_CondTimedWaitCall(CallContext context, PThreadCondTPtr cond, PThreadMutexTPtr mutex, TimeInterval t_stamp, TimeUnit timeout)
+{
+    return create(&type_CondTimedWaitCall, context, cond, mutex, t_stamp, timeout);
+}
+
+specification
+void pthread_cond_timedwait_spec(CallContext context, PThreadCondTPtr cond, PThreadMutexTPtr mutex, TimeUnit timeout)
+{
+    Mutex* pre_mutex = NULL;
+    PThreadCondT* pre_cond = NULL;
+    
+    VERBOSE("pthread_cond_timedwait_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block for mutex is available in the context", isValidPointer(context, mutex));
+        REQ("", "Memory block for cond is available in the context", isValidPointer(context, cond));
+
+        pre_mutex = getMutex(mutex);
+
+        if(!PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX)
+        {
+            /* [The value specified by mutex is valid.] */
+            REQ("", "mutex should exists", pre_mutex != NULL);
+        }
+
+        if(!PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EPERM)
+        {
+            if (pre_mutex != NULL)
+            {
+                /*
+                 * They shall be
+                 * called with mutex locked by the calling thread or undefined behavior results.
+                 */
+                REQ("?app.pthread_cond_timedwait.02", "mutex is locked by the calling thread", equals_ThreadId(pre_mutex->owner, context));
+            }
+        }
+
+        /*
+         * During this time, the effect of an attempt by any
+         * thread to wait on that condition variable using a different mutex is undefined.
+         */
+        /*
+         * [Check if there is at least one blocked condition variable and make sure that
+         *  its mutex is equal to the mutex passed into this wait() function.]
+         */
+        REQ("app.pthread_cond_timedwait.05", 
+            "The effect of an attempt by any thread to wait on that condition "
+            "variable using a different mutex is undefined", 
+            true);
+
+        pre_cond = getCondVariable(cond);
+
+        if(!PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_COND)
+        {
+            /* [The value specified by cond is valid.] */
+            REQ("", "The value specified by cond is valid", (pre_cond != NULL));
+        }
+
+        if (pre_cond != NULL)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "This thread is locking the cond already", !contains_List(pre_cond->wait_list, create_ThreadIdObj(context)));
+        }
+
+        return true;
+    }
+
+    coverage C
+    {
+#if PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_COND
+        if (pre_cond == NULL)
+            return {CondIsNULL, "Cond is invalid"};
+        else
+#endif
+        if (isEmpty_List(pre_cond->wait_list))
+            return {NoWaiters, "Nobody waits"};
+        else if (size_List(pre_cond->wait_list) == 1)
+            return {OneWaiter, "One thread waits"};
+        else
+            return {SeveralWaiters, "Several threads wait"};
+    }
+
+#if PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_COND || PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX || PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EPERM
+    coverage ErrorsC
+    {
+#if PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_COND
+        if (pre_cond == NULL)
+            return {InvalidCond, "Cond is not initialized"};
+        else
+#endif
+
+#if PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX
+        if (pre_mutex == NULL)
+            return {InvalidMutex, "Mutex is not initialized"};
+        else
+#endif
+
+#if PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EPERM
+        if (!equals_ThreadId(pre_mutex->owner, context))
+            return {MutexNotLocked, "Mutex is not locked"};
+        else
+#endif
+
+            return {Good, "No errors"};
+    }
+#endif
+
+    post
+    {
+        Mutex* pre_mutex = @getMutex(mutex);
+        Mutex* post_mutex = getMutex(mutex);
+
+        /* [The thread has been blocked by call of the pthread_cond_wait() function] */
+        REQ("", "Thread has been blocked", equals(getBlockedCall(context), 
+                                                  create_CondTimedWaitCall(context, cond, mutex, timestamp, timeout)
+                                                 )
+           );
+
+        if ((pre_cond != NULL) && (post_mutex != NULL) && equals_ThreadId(pre_mutex->owner, context))
+        {
+            /*
+             * These functions atomically release mutex and cause the calling thread to block on the condition variable cond;
+             * atomically here means "atomically with respect to access by another thread to the mutex and then the condition variable".
+             */
+            REQ("?pthread_cond_timedwait.03", "Mutex should be released", isWrong_ThreadId(post_mutex->owner));
+        }
+
+        return true;
+    }
+}
+
+void onPThreadCondTimedWait(CallContext context, PThreadCondTPtr cond, PThreadMutexTPtr mutex, TimeInterval t_stamp, TimeUnit timeout)
+{
+    PThreadCondT* condObj = getCondVariable(cond);
+    Mutex* mutexObj = getMutex(mutex);
+
+    VERBOSE("onPThreadCondTimedWait: %p\n", context.thread);
+    startBlockedCall(context, create_CondTimedWaitCall(context, cond, mutex, t_stamp, timeout));
+    
+    if ((condObj != NULL) && (mutexObj != NULL) && equals_ThreadId(mutexObj->owner, context))
+    {
+        append_List(condObj->wait_list, create_ThreadIdObj(context));
+
+        /* [Free the mutex inside the wait() function.] */
+        mutexObj->owner = WrongThreadId;
+    }
+}
+
+specification typedef struct CondTimedWaitReturnType CondTimedWaitReturnType = {};
+
+CondTimedWaitReturnType * create_CondTimedWaitReturnType(
+    CallContext context,
+    ErrorCode*  errno
+)
+{
+    return create(&type_CondTimedWaitReturnType, context, errno);
+}
+
+reaction 
+CondTimedWaitReturnType* pthread_cond_timedwait_return(void)
+{
+    post
+    {
+        CallContext context = pthread_cond_timedwait_return->context;
+        CondTimedWaitCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+        PThreadCondTPtr cond = blocked_call->cond;
+        PThreadCondT* condObj_pre = findCondVariable(@getAllCondVariables(), cond);
+        PThreadCondT* condObj_post = getCondVariable(cond);
+        Mutex* mutexObj_pre = findMutex(@getAllMutexes(), blocked_call->mutex);
+        Mutex* mutexObj_post = getMutex(blocked_call->mutex);
+
+        VERBOSE("pthread_cond_timedwait_return: %p\n", context.thread);
+
+        if(!PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_COND)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "Conditional variable exists", condObj_pre != NULL);
+        }
+
+        /*
+         * Except in the case of [ETIMEDOUT], all these error checks shall act as if they were performed immediately at the beginning of
+         * processing for the function and shall cause an error return, in effect, prior to modifying the state of the mutex specified by
+         * mutex or the condition variable specified by cond.
+         */
+        if ((*(pthread_cond_timedwait_return->errno) == SUT_EPERM) || (*(pthread_cond_timedwait_return->errno) == SUT_EINVAL))
+        {
+            REQ("?pthread_cond_timedwait.08", "The cond should not be changed", equals(condObj_pre, condObj_post));
+            REQ("?pthread_cond_timedwait.08", "The mutex should not be changed", equals(mutexObj_pre, mutexObj_post));
+        }
+
+        ERROR_BEGIN(PTHREAD_COND_TIMEDWAIT, "pthread_cond_timedwait.09.02", *(pthread_cond_timedwait_return->errno) != 0, *(pthread_cond_timedwait_return->errno))
+            /*
+             * The pthread_cond_timedwait() function shall fail if:
+             * 
+             * [ETIMEDOUT]
+             * 
+             * The time specified by abstime to pthread_cond_timedwait() has passed.
+             * 
+             */
+
+			{
+          		Bool3 check_ETIMEDOUT=False_Bool3; 
+
+				if( getTSTimeModel()==NotUseTSTime)
+				{
+					check_ETIMEDOUT=Unknown_Bool3;
+				}
+				else
+				{
+					if(T(lessOrEqualTimeMarks(addTimeMarks(blocked_call->t_stamp.minMark, blocked_call->timeout), timestamp.maxMark)) &&
+                        T((mutexObj_pre != NULL)) &&
+                        T((condObj_pre != NULL)) &&
+                        T(equals_ThreadId(mutexObj_post->owner, context)))
+                    {
+                    	check_ETIMEDOUT=True_Bool3;
+                    }
+				}
+				ERROR_SHALL3(PTHREAD_COND_TIMEDWAIT, ETIMEDOUT, "pthread_cond_timedwait.10.01", check_ETIMEDOUT)
+             }
+
+            /*
+             * These functions may fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The value specified by cond or mutex is invalid.
+             * 
+             */
+            ERROR_MAY_EXT(PTHREAD_COND_TIMEDWAIT, BAD_MUTEX, EINVAL, "pthread_cond_timedwait.11.01", mutexObj_pre == NULL)
+            ERROR_MAY_EXT(PTHREAD_COND_TIMEDWAIT, BAD_COND, EINVAL, "pthread_cond_timedwait.11.01", condObj_pre == NULL)
+
+            /*
+             * The pthread_cond_timedwait() function shall fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The value specified by abstime is invalid.
+             * 
+             */
+            ERROR_UNCHECKABLE(PTHREAD_COND_TIMEDWAIT, EINVAL, "pthread_cond_timedwait.10.02",
+                              "The model does not allow to pass incorrect timeout value")
+
+            if (mutexObj_pre != NULL)
+            {
+                /*
+                 * These functions may fail if:
+                 * 
+                 * [EPERM]
+                 * 
+                 * The mutex was not owned by the current thread at the time of the call.
+                 * 
+                 */
+                ERROR_MAY(PTHREAD_COND_TIMEDWAIT, EPERM, "pthread_cond_timedwait.11.02", !equals_ThreadId(mutexObj_post->owner, context))
+            }
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(PTHREAD_COND_TIMEDWAIT, EINTR, "pthread_cond_timedwait.12")
+
+        ERROR_END()
+
+        /*
+         * The pthread_cond_timedwait() and pthread_cond_wait() functions shall block on a condition variable.
+         */
+        REQ("pthread_cond_timedwait.01", 
+            "Shall block on a condition variable", 
+            true);
+
+        /*
+         * When each thread unblocked as a result of a pthread_cond_broadcast() or pthread_cond_signal() returns from
+         * its call to pthread_cond_wait() or pthread_cond_timedwait(), the thread shall own the mutex with which it called
+         * pthread_cond_wait() or pthread_cond_timedwait().
+         */
+        /*
+         * Upon successful return, the mutex shall have been locked and shall be owned by the calling thread.
+         */
+        REQ("?pthread_cond_broadcast.03;pthread_cond_signal.03;pthread_cond_timedwait.04",
+            "Mutex should remained locked by this thread",
+            equals_ThreadId(mutexObj_post->owner, context)
+           );
+
+        /*
+         * The pthread_cond_timedwait() function shall be equivalent to pthread_cond_wait(), except that an error is returned
+         * if the absolute time specified by abstime passes (that is, system time equals or exceeds abstime) before the
+         * condition cond is signaled or broadcasted, or if the absolute time specified by abstime has already been passed at
+         * the time of the call.
+         */
+        IMPLEMENT_REQ("pthread_cond_timedwait.06");
+
+        /*
+         * When such timeouts occur, pthread_cond_timedwait() shall nonetheless release and re-acquire the mutex referenced by
+         * mutex.
+         */
+        IMPLEMENT_REQ("pthread_cond_timedwait.07");
+
+        /* [The thread should be removed from the wait list.] */
+        REQ("", "The thread should be removed from wait list", 
+            isThreadIdRemovedList(condObj_pre->wait_list, context, condObj_post->wait_list)
+           );
+
+        return true;
+    }
+}
+
+void onPThreadCondTimedWaitReturn(CallContext context, ErrorCode* pthread_cond_timedwait_spec)
+{
+    CondTimedWaitCall* blocked_call = finishBlockedCall(context);
+    PThreadCondT* condObj = getCondVariable(blocked_call->cond);
+    Mutex* mutexObj = getMutex(blocked_call->mutex);
+
+    VERBOSE("onPThreadCondTimedWaitReturn: %p\n", context.thread);
+    if ((condObj != NULL) && (mutexObj != NULL))
+    {
+        /* [Restore owner of the mutex.] */
+        mutexObj->owner = context;
+
+        /* [Remove thread from wait list] */
+        remove_ThreadIdList(condObj->wait_list, context);
+    }
+}
+
+specification
+ErrorCode* pthread_cond_timedwait_bad_spec(CallContext context, PThreadCondTPtr cond, PThreadMutexTPtr mutex, IntT nsec)
+{
+    Mutex* pre_mutex = NULL;
+    PThreadCondT* pre_cond = NULL;
+
+    VERBOSE("pthread_cond_timedwait_bad_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block for mutex is available in the context", isValidPointer(context, mutex));
+        REQ("", "Memory block for cond is available in the context", isValidPointer(context, cond));
+
+        pre_mutex = getMutex(mutex);
+
+        /* [The value specified by mutex is valid.] */
+        REQ("", "mutex should exists", pre_mutex != NULL);
+
+        /*
+         * They shall be
+         * called with mutex locked by the calling thread or undefined behavior results.
+         */
+        REQ("?app.pthread_cond_timedwait.02", "mutex is locked by the calling thread", equals_ThreadId(pre_mutex->owner, context));
+
+        pre_cond = getCondVariable(cond);
+
+        /* [The value specified by cond is valid.] */
+        REQ("", "The value specified by cond is valid", (pre_cond != NULL));
+
+        /* [Consistency of test suite] */
+        REQ("", "This thread should not be locking the cond already", !contains_List(pre_cond->wait_list, create_ThreadIdObj(context)));
+
+        /* [Checking the nsec value] */
+        REQ("","nsec should be incorrect", T(nsec < 0) || T(nsec > MILLIARD));
+
+        return true;
+    }
+
+    coverage SecondsC
+    {
+        if (nsec < 0)
+            return {NegativeNSec, "Negative nsec value"};
+        else
+            return {TooLargeNSec, "Too large nsec value"};
+    }
+
+    post
+    {
+        PThreadCondT* post_cond = getCondVariable(cond);
+        Mutex* post_mutex = getMutex(mutex);
+
+        /* [Consistency of test suite] */
+        REQ("", "Conditional variable exists", post_cond != NULL);
+        REQ("", "Mutex exists", post_mutex != NULL);
+
+        /*
+         * The pthread_cond_timedwait() function shall fail if:
+         * 
+         * [EINVAL]
+         * 
+         * The value specified by abstime is invalid.
+         * 
+         */
+        REQ("pthread_cond_timedwait.10.02","return value should be EINVAL", *pthread_cond_timedwait_bad_spec == SUT_EINVAL);
+
+        /*
+         * Except in the case of [ETIMEDOUT], all these error checks shall act as if they were performed immediately at the beginning of
+         * processing for the function and shall cause an error return, in effect, prior to modifying the state of the mutex specified by
+         * mutex or the condition variable specified by cond.
+         */
+        REQ("?pthread_cond_timedwait.08", "The cond should not be changed", equals(pre_cond, post_cond));
+        REQ("?pthread_cond_timedwait.08", "The mutex should not be changed", equals(pre_mutex, post_mutex));
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Condition Types                          **/
+/********************************************************************/
+
+specification invariant typedef struct PThreadCondT PThreadCondT = {};
+
+invariant (PThreadCondT* condVar)
+{
+    /* [NULL conditional variable is valid.] */
+    if (condVar == NULL)
+        return true;
+
+    /* [TODO: add additional checks here] */
+    return true;
+}
+
+PThreadCondT* create_PThreadCondT(PThreadCondTPtr cond, PThreadMutexTPtr mutex, IntT predicate, PThreadPShared pshared)
+{
+    return create(&type_PThreadCondT, cond, mutex, predicate, pshared, create_List(&type_ThreadIdObj));
+}
+
+void register_PThreadCondT(PThreadCondTPtr cond, PThreadMutexTPtr mutex, IntT predicate, PThreadPShared pshared)
+{
+    registerObjectInMemory(cond,
+                           sizeof_SUTType("pthread_cond_t"),
+                           create_PThreadCondT(cond, mutex, predicate, pshared)
+                          );
+}
+
+void unregister_PThreadCondT(PThreadCondTPtr cond)
+{
+    unregisterObjectInMemory(cond);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+PThreadCondT* getCondVariable(PThreadCondTPtr cond)
+{
+    return getObjectInMemory(cond);
+}
+
+PThreadCondT* findCondVariable(ObjectsInMemory* objects, PThreadCondTPtr cond)
+{
+    return findObjectInMemory(objects, cond);
+}
+
+ObjectsInMemory* getAllCondVariables(void)
+{
+    return getAllTypedObjectsInMemory(&type_PThreadCondT);
+}
+
+bool isLocked_Cond(PThreadCondT* cond)
+{
+    return !isEmpty_List(cond->wait_list);
+}
+
+

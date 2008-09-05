@@ -1,0 +1,183 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/search/hash_media.seh"
+#include "common/common_media.seh"
+#include "memory/heap/heap_model.seh"
+
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilSearchHashSubsystem(void)
+{
+  // Set up mediators
+      set_mediator_hcreate_spec(hcreate_media);
+      set_mediator_hdestroy_spec(hdestroy_media);
+      set_mediator_hsearch_spec(hsearch_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** hcreate_spec **/
+mediator hcreate_media for specification
+IntT hcreate_spec (CallContext context, SizeT nel, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT  res = 0;
+        
+        format_TSCommand(&command, "hcreate:$(size)",
+            create_SizeTObj(nel)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( &command.response );
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        ProcessState* ps=getProcessState_CallContext(context);
+        onMalloc( context, 0, NULL_VoidTPtr);
+        if(ps==NULL)
+        {
+            setBadVerdict("ProcessState shall not be NULL");
+            return;
+        }
+        else if(hcreate_spec)
+        {
+           ps->hash_search_table->hash_table = create_Map(&type_CString, (void*)0);
+           ps->hash_search_table->hash_table_nel = nel;
+        }
+        else /* if(!hcreate_spec) */
+        {
+           ps->hash_search_table->hash_table = NULL;
+        }
+    }
+}
+
+
+
+/** hdestroy_spec **/
+mediator hdestroy_media for specification
+void hdestroy_spec (CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand(&command, "hdestroy");
+        executeCommandInContext( context, &command );
+        timestamp = command.meta.timestamp;
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        ProcessState* ps=getProcessState_CallContext(context);
+        onFree( context, NULL_VoidTPtr);
+        if(ps==NULL)
+        {
+           setBadVerdict("ProcessState shall not be NULL");
+           return;
+        }
+
+        else /* if(ps!=NULL) */
+        {
+           ps->hash_search_table->hash_table=NULL;
+        }
+    }
+}
+
+
+/** hsearch_spec **/
+mediator hsearch_media for specification
+HashEntryT* hsearch_spec (CallContext context, HashEntryT* item, HashActionT action, ErrorCode* errno)
+{
+    call
+    {
+        // HashEntryT* hsearch_spec (CallContext context, HashEntryT* item, HashActionT action)
+        // ====
+        // VoidTPtr resEntry, CString* resKey, VoidTPtr resData hsearch_spec (CallContext context, CString* key, VoidTPtr* data, HashActionT action)
+        TSCommand command = create_TSCommand();
+        HashEntryT*  result=NULL;
+        VoidTPtr   resEntry=NULL_VoidTPtr;
+        CString*    resKey=NULL;
+        VoidTPtr   resData=NULL_VoidTPtr;
+        
+        format_TSCommand(&command, "hsearch:$(str)$(ptr)$(int)",
+                item->key,
+                create_VoidTPtrObj(item->data),
+                create_IntTObj(action)
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            resEntry = readPointer_TSStream(context, &command.response );
+            resKey = readCString_TSStream(&command.response);
+            resData = readPointer_TSStream(context, &command.response);
+            *errno = readInt_TSStream(&command.response);
+
+
+            if(!isNULL_VoidTPtr(resEntry))
+            {
+                result = create_HashEntryT( resKey, resData);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return result;
+    }
+    state
+    {
+        ProcessState* ps=getProcessState_CallContext(context);
+        if(ps==NULL)
+        {
+            setBadVerdict("ProcessState shall not be NULL");
+            return;
+        }
+        if(ps->hash_search_table->hash_table==NULL)
+        {
+            setBadVerdict("hash_table shall not be NULL");
+            return;
+        }
+        if(action==SUT_ENTER)
+        {
+            if(hsearch_spec !=NULL)
+            {
+                if(!containsKey_Map(ps->hash_search_table->hash_table, item->key))
+                    put_Map(ps->hash_search_table->hash_table, item->key, create_VoidTPtrObj(item->data));
+            }
+        }
+    }
+}
+

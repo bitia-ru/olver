@@ -1,0 +1,337 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include <common/wstring.seh>
+
+#include <utils/boolean.h>
+#include <utils/assertion.h>
+
+// Temporary here
+#include "ts/version.hh"
+
+
+static void _init_wstring( struct _wchar_string* wstr, WCharT* ptr )
+{
+int i,size;
+
+  for( i = 0; ptr[i]!=0; i++ );
+  wstr->length = i;
+  size = (wstr->length + 1)*sizeof(WCharT);
+  wstr->data = malloc( size );
+  assertion( wstr->data != NULL, FORMAT("Failed to allocate memory") );
+  memcpy(wstr->data, ptr, size );
+}
+
+static void init_WString( struct _wchar_string* wstr, va_list* arg_list )
+{
+  WCharT* ptr = va_arg( *arg_list, void* );
+    
+  _init_wstring( wstr, ptr );
+}
+
+static void copy_WString( struct _wchar_string *src, struct _wchar_string *dst )
+{
+  _init_wstring(dst, src->data);
+}
+
+static int compare_WString( struct _wchar_string *left, struct _wchar_string *right )
+{
+int cmp_len = (left->length < right->length)?left->length : right->length;
+int i,cmp_result = 0;
+   
+  for( i = 0; i < cmp_len; i++ )
+   {
+    cmp_result = left->data[i] - right->data[i];
+    if (cmp_result != 0)
+      return cmp_result;
+   }
+  if (left->length < right->length) 
+    return -1;
+  else if (left->length > right->length) 
+    return 1;
+  return 0;
+}
+
+static bool is_in_portable_character_set( WCharT wch )
+{
+  return (0x20 <= wch) && (wch <= 0x07E);
+}
+
+static String *to_string_WString( struct _wchar_string* wstr )
+{
+int i;
+char* conv;
+String* res;
+
+  for( i = 0; i < wstr->length; i++ )
+   {
+    if ( !is_in_portable_character_set(wstr->data[i]) )
+     {
+      char buf[250];
+      sprintf( buf, "<%p, %u>", wstr->data, wstr->length );
+      return create_String( buf );
+     }
+   }
+  conv = malloc( wstr->length+1 );
+  assertion( wstr->data != NULL, FORMAT("Failed to allocate memory, length %u"),
+             wstr->length+1
+           );
+
+  for( i = 0; i < wstr->length; i++ )
+   {
+    conv[i] = (char)wstr->data[i];
+   }
+  conv[i] = 0;
+  
+  res = create_String( conv );
+  
+  free(conv);
+
+  return res;
+}
+
+static void destroy_WString( struct _wchar_string* wstr )
+{
+  free(wstr->data);
+}
+
+#if CTESK_VERSION >= 25247
+static String* to_xml_WString( struct _wchar_string* wstr )
+{
+ return to_XML_spec( "WString", to_string_WString( wstr ) );
+} 
+
+specification typedef struct _wchar_string WString = {
+    .init      = (Init)init_WString,
+    .copy      = (Copy)copy_WString,
+    .compare   = (Compare)compare_WString,
+    .to_string = (ToString)to_string_WString,
+    .to_XML    = (ToXML)to_xml_WString,
+    .destroy   = (Destroy)destroy_WString
+};
+
+#else // Old CTesK
+
+const Type type_WString
+    = { "WString"
+      , sizeof(struct _wchar_string)
+      , &type_Object
+      , (Init)init_WString
+      , (Copy)copy_WString
+      , (Compare)compare_WString
+      , (ToString)to_string_WString
+      , (CheckInvariant)check_invariant_Default
+      , (Enumerate)enumerate_Default
+      , (Destroy)destroy_WString
+      };
+#endif
+
+
+/*
+ * Constructs a newly allocated WString object
+ * that represents a wide characters null terminated string.
+ */
+WString* create_WString( WCharT* str )
+{
+  return create( &type_WString, str );
+}
+
+/*
+ * Constructs a newly allocated WString object
+ * that represents a wide characters null terminated string
+ * from lone character string.
+ */
+WString* createFromCharArray_WString( CharT* str )
+{
+int i,length;
+WCharT* wstr;
+WString* res;
+
+  length = strlen(str) + 1;
+  wstr = malloc( length*sizeof(WCharT) );
+  assertion( wstr != NULL, FORMAT("Failed to allocate memory, length %u"), length*sizeof(WCharT) );
+  for( i = 0; i < length; i++ )
+   {
+    wstr[i] = str[i];
+   }
+  res = create_WString( wstr );
+  free(wstr);
+  return res;
+}
+
+/*
+ * Returns the value of this WString as a wchar_t*.
+ */
+WCharT* toWCharArray_WString( WString* self )
+{
+    assertion(self != NULL, FORMAT("\"self\" parameter of toWCharArray_WString function is NULL"));
+    return self->data;
+}
+
+/*
+ * Returns the length of this WString.
+ */
+int length_WString( WString* self )
+{
+    assertion(self != NULL, FORMAT("\"self\" parameter of length_WString function is NULL"));
+    return self->length;
+}
+
+
+/*
+ * Returns the wide character at the specified offset from the beginning of this
+ * WString.
+ */
+WCharT wcharAt_WString( WString* self, int offset )
+{
+    assertion(self != NULL, FORMAT("\"self\" parameter of wcharAt_WString function is NULL"));
+  assertion( 0 <= offset, FORMAT("Index is less than zero") );
+  assertion( offset < self->length, FORMAT("Index beyond string boundary, %d (boundary %d)"),
+              offset, self->length);
+  return ((WCharT*)(self->data))[offset];
+}
+
+
+/*
+ * Sets the character at the specified offset from the beginning of this
+ * WString.
+ */
+void setWCharAt_CString( WString* self, int offset, WCharT val )
+{
+    assertion(self != NULL, FORMAT("\"self\" parameter of setWCharAt_CString function is NULL"));
+    assertion( 0 <= offset, FORMAT("Index is less than zero") );
+    assertion( offset < self->length, FORMAT("Index beyond string boundary, %d (boundary %d)"),
+        offset, self->length);
+    ((WCharT*)(self->data))[offset] = val;;
+}
+
+
+/*
+ * Sets the value of the char at the specified offset from the beginning of
+ * this WString.
+void setWCharAt_WString( WString* self, int offset, WCharT value)
+{
+  assertion( 0 <= offset, FORMAT("Index is less than zero") );
+  assertion( offset < self->length, FORMAT("Index beyond string boundary, %d (boundary %d)"),
+             offset, self->length);
+  ((WCharT*)(self->data))[offset] = value;
+}
+ */
+
+/*
+ * Concatenates the specified string to the end of this string.
+ */
+WString* concat_WString( WString* self, WString *wstr )
+{
+WString* res;
+  
+  assertion( self != NULL, FORMAT("self is NULL") );
+  assertion( wstr != NULL, FORMAT("wstr is NULL") );
+
+  if (self->length == 0)
+    return clone(wstr);
+  if (wstr->length == 0)
+    return clone(self);
+  res = clone(self);
+  res->data = realloc( res->data, (self->length + wstr->length + 1)*sizeof(WCharT) );
+  assertion( res->data != NULL, FORMAT("Failed to allocate memory") );
+  memcpy( res->data + self->length, wstr->data, (wstr->length + 1)*sizeof(WCharT) );
+  res->length = self->length + wstr->length;
+  return res;
+}
+
+/*
+ * Returns a new string that is a substring of this string.
+ */
+WString* substring_WString( WString* self, int beginIndex, int endIndex )
+{
+WString* res;
+int i;
+WCharT* res_wstr;
+WCharT* self_wstr;
+
+  CHECK_TYPE_COMPATIBLE( substring_WString, &type_WString, self );
+  assertion(    0 <= beginIndex 
+             && beginIndex <= endIndex 
+             && endIndex <= length_WString( self )
+           , FORMAT( "substring_WString: beginIndex %d or endIndex %d are out of bounds [0,%d]"
+                     " or endIndex < beginIndex" 
+                   )
+           , beginIndex
+           , endIndex
+           , length_WString( self )
+           );
+
+  res_wstr = calloc( endIndex - beginIndex + 1, sizeof(WCharT) );
+  assertion( res_wstr != NULL, "substring_WString: Not enought memory" );
+
+  self_wstr = toWCharArray_WString( self );
+
+  for( i = 0; i < endIndex - beginIndex; i++ )
+   {
+    res_wstr[i] = self_wstr[beginIndex+i];
+   }
+  res_wstr[i] = 0;
+
+  res = create_WString(res_wstr);
+  free(res_wstr);
+
+  return res;
+}
+
+/*
+ * Returns the index within this string of the first occurrence 
+ * of the specified character.
+ */
+int indexOfWChar_WString( WString *self, WCharT ch )
+{
+  return indexOfWCharFrom_WString( self, ch, 0 );
+}
+
+/*
+ * Returns the index within this string of the first occurrence
+ * of the specified character, starting the search at the specified index.
+ */
+int indexOfWCharFrom_WString( WString *self, WCharT ch, int fromIndex )
+{
+int res = - 1;
+
+  CHECK_TYPE_COMPATIBLE( indexOfWCharFrom_WString, &type_WString, self );
+
+  if( fromIndex < 0 ) fromIndex = 0;
+
+  if( ch != 0 && fromIndex < length_WString( self ) )
+   {
+    const WCharT* self_wstr = toWCharArray_WString( self );
+    int i;
+    
+    for( i = fromIndex; self_wstr[i] != 0; i++ )
+     {
+      if (self_wstr[i] == ch)
+       {
+        res = i;
+        break;
+       }
+     }
+   }
+
+  return res;
+}
+
+

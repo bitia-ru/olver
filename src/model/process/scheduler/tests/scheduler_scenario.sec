@@ -1,0 +1,432 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/scheduler/tests/scheduler_scenario.seh"
+#include "process/scheduler/scheduler_model.seh"
+#include "process/meta/user_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "config/interpretation.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+
+#include "data/sched_model.seh"
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static CallContext verifiable_context;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/ 
+static void init_sysconf_data(CallContext context)
+{
+    LongT res;
+    res = sysconf_spec(context, SUT_SS_REPL_MAX, requestErrorCode());
+    setSystemConfigurationValue(context, SUT_SS_REPL_MAX, res);
+    setSystemConfigurationValue(verifiable_context, SUT_SS_REPL_MAX, res);
+    res = sysconf_spec(context, SUT_SC_THREAD_SPORADIC_SERVER, requestErrorCode());
+    setSystemConfigurationValue(context, SUT_SC_THREAD_SPORADIC_SERVER, res);
+    setSystemConfigurationValue(verifiable_context, SUT_SC_THREAD_SPORADIC_SERVER, res);
+    res = sysconf_spec(context, SUT_SC_SPORADIC_SERVER, requestErrorCode());
+    setSystemConfigurationValue(context, SUT_SC_SPORADIC_SERVER, res);
+    setSystemConfigurationValue(verifiable_context, SUT_SC_SPORADIC_SERVER, res);
+}
+
+static bool init_process_scheduler_scenario(int argc, char** argv)
+{
+    /* Init test scenario data */
+    context = getContext();
+    verifiable_context =  createProcess();
+    init_sysconf_data(context);
+    init_sysconf_data(verifiable_context);
+    return true;
+}
+
+static void finish_process_scheduler_scenario(void)
+{
+    /**/
+    TEST_SCENARIO_VERDICT_VERBOSE(process_scheduler_scenario);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool sched_yield_scen(void)
+{
+    sched_yield_spec(context, requestErrorCode());
+    return true;
+}
+
+scenario
+bool sched_get_priority_min_max_scen(void)
+{
+    //These functions change priority_max and priority_min members in state of 
+    //verifiable process
+    sched_get_priority_min_max_spec(verifiable_context, SUT_SCHED_OTHER, requestErrorCode(), true);
+    sched_get_priority_min_max_spec(verifiable_context, SUT_SCHED_OTHER, requestErrorCode(), false);
+    sched_get_priority_min_max_spec(verifiable_context, SUT_SCHED_FIFO,  requestErrorCode(), true);
+    sched_get_priority_min_max_spec(verifiable_context, SUT_SCHED_FIFO,  requestErrorCode(), false);
+    sched_get_priority_min_max_spec(verifiable_context, SUT_SCHED_RR,    requestErrorCode(), true);
+    sched_get_priority_min_max_spec(verifiable_context, SUT_SCHED_RR,    requestErrorCode(), false);
+    return true;
+}
+
+scenario
+bool sched_rr_get_interval_scen(void)
+{
+    sched_rr_get_interval_spec(context, context.process, requestErrorCode());
+    return true;
+}
+
+scenario
+bool sched_setscheduler_getscheduler_setparam_getparam_scen(void)
+{
+    IntT i, j, k, res;
+    TimeSpecT tspec, repl_period, init_budget;
+    ProcessState* process_state = findProcessState_PidT(verifiable_context.process);
+    Integer* priority_MIN[4] = {NULL, NULL, NULL, NULL};
+    Integer* priority_MAX[4] = {NULL, NULL, NULL, NULL};
+    IntT repl_MIN = 1;
+    IntT repl_MAX = getSystemConfigurationValue(context, SUT_SS_REPL_MAX);
+    IntT former_policy;
+    tspec.sec = 4;
+    tspec.nsec = 2;
+
+    //get min and max priority for policies
+    priority_MIN[0] = get_Map(process_state->priority_min, create_Integer(SUT_SCHED_OTHER));
+    priority_MAX[0] = get_Map(process_state->priority_max, create_Integer(SUT_SCHED_OTHER));
+    priority_MIN[1] = get_Map(process_state->priority_min, create_Integer(SUT_SCHED_FIFO) );
+    priority_MAX[1] = get_Map(process_state->priority_max, create_Integer(SUT_SCHED_FIFO) );
+    priority_MIN[2] = get_Map(process_state->priority_min, create_Integer(SUT_SCHED_RR)   );
+    priority_MAX[2] = get_Map(process_state->priority_max, create_Integer(SUT_SCHED_RR)   );
+    if(isDefined_SporadicServer(context) == true)
+    {
+        priority_MIN[3] = get_Map(process_state->priority_min, create_Integer(SUT_SCHED_SPORADIC));
+        priority_MAX[3] = get_Map(process_state->priority_max, create_Integer(SUT_SCHED_SPORADIC));
+    }
+
+    if(isDefined_SporadicServer(context) == false)
+    {
+        repl_MAX = 1;
+    }
+
+    //scenario for functions setscheduler, getscheduler
+
+    //set root privileges
+    res = setuid_spec(context, 0, requestErrorCode());
+    res = setgid_spec(context, 0, requestErrorCode());
+        
+    for(j = repl_MIN; j < repl_MAX + 1; j++)
+    {
+        if((j == repl_MIN) || (j == repl_MAX) || (j == (repl_MAX - repl_MIN)/2))
+        {
+            for(i = *priority_MIN[0]; i < *priority_MAX[0] + 1; i++)
+            {
+                if((i == *priority_MIN[0]) || (i == *priority_MAX[0]) || (i == (*priority_MAX[0] - *priority_MIN[0])/2))
+                {
+                    sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_OTHER, &former_policy, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getscheduler_spec(context, verifiable_context.process, requestErrorCode());
+                }
+            }
+    
+            for(i = *priority_MIN[1]; i < *priority_MAX[1] + 1; i++)
+            {
+                if((i == *priority_MIN[1]) || (i == *priority_MAX[1]) || (i == (*priority_MAX[1] - *priority_MIN[1])/2))
+                {
+                    sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_FIFO, &former_policy, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getscheduler_spec(context, verifiable_context.process, requestErrorCode());
+                }
+            }
+    
+            for(i = *priority_MIN[2]; i < *priority_MAX[2] + 1; i++)
+                if((i == *priority_MIN[2]) || (i == *priority_MAX[2]) || (i == (*priority_MAX[2] - *priority_MIN[2])/2))
+                {
+                    sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_RR, &former_policy, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getscheduler_spec(context, verifiable_context.process, requestErrorCode());
+                }
+
+            if(isDefined_SporadicServer(context) == true)
+                for(i = *priority_MIN[3]; i < *priority_MAX[3] + 1; i++)
+                    if((i == *priority_MIN[3]) || (i == *priority_MAX[3]) || (i == (*priority_MAX[3] - *priority_MIN[3])/2))
+                    {
+                        for(k = *priority_MIN[3]; k < *priority_MAX[3] + 1; k++)
+                            if((k == *priority_MIN[3]) || (k == *priority_MAX[3]) || (k == (*priority_MAX[3] - *priority_MIN[3])/2))
+                            {
+                                sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(i, k, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                                sched_getscheduler_spec(context, verifiable_context.process, requestErrorCode());
+                            }
+                    }
+        }
+    }
+    
+    //set root privileges
+    res = setuid_spec(verifiable_context, 0, requestErrorCode());
+    res = setgid_spec(verifiable_context, 0, requestErrorCode());
+    
+    for(j = repl_MIN; j < repl_MAX + 1; j++)
+    {
+        if((j == repl_MIN) || (j == repl_MAX) || (j == (repl_MAX - repl_MIN)/2))
+        {
+            for(i = *priority_MIN[0]; i < *priority_MAX[0] + 1; i++)
+                if((i == *priority_MIN[0]) || (i == *priority_MAX[0]) || (i == (*priority_MAX[0] - *priority_MIN[0])/2))
+                {
+                    sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_OTHER, &former_policy, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getscheduler_spec(verifiable_context, 0, requestErrorCode());
+                }
+
+            for(i = *priority_MIN[1]; i < *priority_MAX[1] + 1; i++)
+                if((i == *priority_MIN[1]) || (i == *priority_MAX[1]) || (i == (*priority_MAX[1] - *priority_MIN[1])/2))
+                {
+                    sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_FIFO, &former_policy, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getscheduler_spec(verifiable_context, 0, requestErrorCode());
+                }
+
+            for(i = *priority_MIN[2]; i < *priority_MAX[2] + 1; i++)
+                if((i == *priority_MIN[2]) || (i == *priority_MAX[2]) || (i == (*priority_MAX[2] - *priority_MIN[2])/2))
+                {
+                    sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_RR, &former_policy, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getscheduler_spec(verifiable_context, 0, requestErrorCode());
+                }
+
+            if(isDefined_SporadicServer(context) == true)
+                for(i = *priority_MIN[3]; i < *priority_MAX[3] + 1; i++)
+                    if((i == *priority_MIN[3]) || (i == *priority_MAX[3]) || (i == (*priority_MAX[3] - *priority_MIN[3])/2))
+                    {
+                        for(k = *priority_MIN[3]; k < *priority_MAX[3] + 1; k++)
+                            if((k == *priority_MIN[3]) || (k == *priority_MAX[3]) || (k == (*priority_MAX[3] - *priority_MIN[3])/2))
+                            {
+                                sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(i, k, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                                sched_getscheduler_spec(verifiable_context, 0, requestErrorCode());
+                            }
+                    }
+        }
+    }
+    
+    //scenario for functions setparam, getparam
+    
+    //set root privileges
+    res = setuid_spec(context, 0, requestErrorCode());
+    res = setgid_spec(context, 0, requestErrorCode());
+
+    for(j = repl_MIN; j < repl_MAX + 1; j++)
+    {
+        if((j == repl_MIN) || (j == repl_MAX) || (j == (repl_MAX - repl_MIN)/2))
+        {
+            sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_OTHER, &former_policy, create_ShedParam(*priority_MAX[0], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+            for(i = *priority_MIN[0]; i < *priority_MAX[0] + 1; i++)
+                if((i == *priority_MIN[0]) || (i == *priority_MAX[0]) || (i == (*priority_MAX[0] - *priority_MIN[0])/2))
+                {
+                    sched_setparam_spec(context, verifiable_context.process, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getparam_spec(context, verifiable_context.process, requestErrorCode());
+                }
+    
+            sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_FIFO, &former_policy, create_ShedParam(*priority_MAX[1], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+            for(i = *priority_MIN[1]; i < *priority_MAX[1] + 1; i++)
+                if((i == *priority_MIN[1]) || (i == *priority_MAX[1]) || (i == (*priority_MAX[1] - *priority_MIN[1])/2))
+                {
+                    sched_setparam_spec(context, verifiable_context.process, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getparam_spec(context, verifiable_context.process, requestErrorCode());
+                }
+    
+            sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_RR, &former_policy, create_ShedParam(*priority_MAX[2], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+            for(i = *priority_MIN[2]; i < *priority_MAX[2] + 1; i++)
+                if((i == *priority_MIN[2]) || (i == *priority_MAX[2]) || (i == (*priority_MAX[2] - *priority_MIN[2])/2))
+                {
+                    sched_setparam_spec(context, verifiable_context.process, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getparam_spec(context, verifiable_context.process, requestErrorCode());
+                }
+
+            if(isDefined_SporadicServer(context) == true)
+            {
+                sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(*priority_MAX[3], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                for(i = *priority_MIN[3]; i < *priority_MAX[3] + 1; i++)
+                    if((i == *priority_MIN[3]) || (i == *priority_MAX[3]) || (i == (*priority_MAX[3] - *priority_MIN[3])/2))
+                    {
+                        for(k = *priority_MIN[3]; k < *priority_MAX[3] + 1; k++)
+                            if((k == *priority_MIN[3]) || (k == *priority_MAX[3]) || (k == (*priority_MAX[3] - *priority_MIN[3])/2))
+                            {
+                                sched_setparam_spec(context, verifiable_context.process, create_ShedParam(i, k, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                                sched_getparam_spec(context, verifiable_context.process, requestErrorCode());
+                            }
+                    }
+            }
+        }
+    }
+
+    //set root privileges
+    res = setuid_spec(verifiable_context, 0, requestErrorCode());
+    res = setgid_spec(verifiable_context, 0, requestErrorCode());
+    
+    for(j = repl_MIN; j < repl_MAX + 1; j++)
+    {
+        if((j == repl_MIN) || (j == repl_MAX) || (j == (repl_MAX - repl_MIN)/2))
+        {
+            sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_OTHER, &former_policy, create_ShedParam(*priority_MAX[0], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+            for(i = *priority_MIN[0]; i < *priority_MAX[0] + 1; i++)
+                if((i == *priority_MIN[0]) || (i == *priority_MAX[0]) || (i == (*priority_MAX[0] - *priority_MIN[0])/2))
+                {
+                    sched_setparam_spec(verifiable_context, verifiable_context.process, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getparam_spec(verifiable_context, 0, requestErrorCode());
+                }
+
+            sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_FIFO, &former_policy, create_ShedParam(*priority_MAX[1], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+            for(i = *priority_MIN[1]; i < *priority_MAX[1] + 1; i++)
+                if((i == *priority_MIN[1]) || (i == *priority_MAX[1]) || (i == (*priority_MAX[1] - *priority_MIN[1])/2))
+                {
+                    sched_setparam_spec(verifiable_context, verifiable_context.process, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getparam_spec(verifiable_context, 0, requestErrorCode());
+                }
+
+            sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_RR, &former_policy, create_ShedParam(*priority_MAX[2], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+            for(i = *priority_MIN[2]; i < *priority_MAX[2] + 1; i++)
+                if((i == *priority_MIN[2]) || (i == *priority_MAX[2]) || (i == (*priority_MAX[2] - *priority_MIN[2])/2))
+                {
+                    sched_setparam_spec(verifiable_context, verifiable_context.process, create_ShedParam(i, 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                    sched_getparam_spec(verifiable_context, 0, requestErrorCode());
+                }
+
+            if(isDefined_SporadicServer(context) == true)
+            {
+                sched_setscheduler_spec(verifiable_context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(*priority_MAX[3], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                for(i = *priority_MIN[3]; i < *priority_MAX[3] + 1; i++)
+                    if((i == *priority_MIN[3]) || (i == *priority_MAX[3]) || (i == (*priority_MAX[3] - *priority_MIN[3])/2))
+                    {
+                        for(k = *priority_MIN[3]; k < *priority_MAX[3] + 1; k++)
+                            if((k == *priority_MIN[3]) || (k == *priority_MAX[3]) || (k == (*priority_MAX[3] - *priority_MIN[3])/2))
+                            {
+                                sched_setparam_spec(verifiable_context, verifiable_context.process, create_ShedParam(i, k, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), j), requestErrorCode());
+                                sched_getparam_spec(verifiable_context, 0, requestErrorCode());
+                            }
+                    }
+            }
+        }
+    }
+
+    //bad input values
+    repl_period.sec = 2;
+    repl_period.nsec = 2;
+    init_budget.sec = 4;
+    init_budget.nsec = 2;
+
+    //set OTHER policy to verifiable process
+    sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_OTHER, &former_policy, create_ShedParam(*priority_MIN[0], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), repl_MIN), requestErrorCode());
+    //bad  policy
+    sched_setscheduler_spec(context, verifiable_context.process, 100, &former_policy, create_ShedParam(*priority_MIN[0], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), repl_MIN), requestErrorCode());
+    if(isDefined_SporadicServer(context) == true)
+    {
+        //bad repl_period and init_budget
+        sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(*priority_MIN[3], *priority_MIN[3], create_TimeSpecTObj(repl_period), create_TimeSpecTObj(init_budget), repl_MIN), requestErrorCode());
+        sched_setparam_spec(context, verifiable_context.process, create_ShedParam(*priority_MIN[0], 0, create_TimeSpecTObj(repl_period), create_TimeSpecTObj(init_budget), repl_MIN), requestErrorCode());
+        //bad max_repl
+        sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(*priority_MIN[3], *priority_MIN[3], create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), repl_MIN - 1), requestErrorCode());
+        sched_setparam_spec(context, verifiable_context.process, create_ShedParam(*priority_MIN[0], 0, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), repl_MIN - 1), requestErrorCode());
+        
+        //set SPORADIC policy to verifiable process
+        sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(*priority_MIN[3], *priority_MIN[3], create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), repl_MIN), requestErrorCode());
+    
+        //bad low_priority
+        sched_setscheduler_spec(context, verifiable_context.process, SUT_SCHED_SPORADIC, &former_policy, create_ShedParam(*priority_MIN[3], *priority_MIN[3] - 1, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), repl_MIN), requestErrorCode());
+        sched_setparam_spec(context, verifiable_context.process, create_ShedParam(*priority_MIN[3], *priority_MIN[3] - 1, create_TimeSpecTObj(tspec), create_TimeSpecTObj(tspec), repl_MIN), requestErrorCode());
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                     Test Scenario Definition                   **/
+/********************************************************************/
+
+scenario dfsm process_scheduler_scenario =
+{
+    .init = init_process_scheduler_scenario,
+    .finish = finish_process_scheduler_scenario,
+    .actions = {
+        sched_yield_scen,
+        sched_get_priority_min_max_scen,
+        sched_rr_get_interval_scen,
+        sched_setscheduler_getscheduler_setparam_getparam_scen,
+        NULL
+    }
+};
+
+
+
+#ifdef PROCESS_SCHEDULER_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/scheduler/scheduler_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initPThreadModel();
+    
+
+    initSystemSysconfSubsystem();
+    initProcessSchedulerSubsystem();
+    initReqFilters();
+}
+
+
+bool main_process_scheduler(int argc, char** argv)
+{
+    addTraceToFile("trace.xml");
+    process_scheduler_scenario(argc,argv);
+    return true;
+}
+
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    /* Set up tracer */
+    /*setTraceEncoding("windows-1251");
+     */
+
+    /* Run test scenario */
+    main_process_scheduler(argc,argv);
+
+    /*  unloadSUT(); */
+    return 0;
+}
+#endif

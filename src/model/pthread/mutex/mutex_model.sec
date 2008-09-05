@@ -1,0 +1,1748 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "pthread/mutex/mutex_config.h"
+#include "pthread/mutex/mutex_model.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "config/pthread_config.seh"
+#include "config/system_config.seh"
+#include "data/errno_model.seh"
+#include "atl/long.h"
+
+
+#pragma SEC subsystem mutex "pthread.mutex"
+
+/********************************************************************/
+/**                    Interface Functions                         **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+SYNOPSIS
+   
+    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+DESCRIPTION
+    
+    In cases where default mutex attributes are appropriate, the macro 
+    PTHREAD_MUTEX_INITIALIZER can be used to initialize mutexes 
+    that are statically allocated. The effect shall be equivalent 
+    to dynamic initialization by a call to pthread_mutex_init() with parameter
+    attr specified as NULL, except that no error checks are performed.
+
+*/
+specification
+void pthread_mutex_static_init_spec( CallContext context, VoidTPtr ptr )
+{
+    VERBOSE("pthread_mutex_static_init_spec: %p\n", context.thread);
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ptr is not NULL", !isNULL_VoidTPtr(ptr));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ptr is available in the context", isValidPointer(context,ptr));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ptr is enough", sizeWMemoryAvailable(ptr) >= sizeof_Type(context,"pthread_mutex_t"));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ptr is free", getObjectInMemory(ptr) == NULL);
+
+        return true;
+    }
+    
+    coverage C
+    {
+        return { Unique, "The only branch" };
+    }
+    post
+    {
+        Mutex* mutex = getMutex(ptr);
+
+        /*
+         * In cases where default mutex attributes are appropriate, the macro 
+         * PTHREAD_MUTEX_INITIALIZER can be used to initialize mutexes that are statically 
+         * allocated. The effect shall be equivalent to dynamic initialization by a call 
+         * to pthread_mutex_init() with parameter attr specified as NULL, except that no 
+         * error checks are performed.
+         */
+        REQ("?pthread_mutex_static_init.01", "mutex shall be initialized", mutex != NULL);
+        REQ("?pthread_mutex_static_init.01", "'type' shall be initialized with the default value",    
+            mutex->type == getDefaultMutexType());
+        REQ("?pthread_mutex_static_init.01", "'pshared' shall be initialized with the default value", 
+            mutex->pshared == getDefaultMutexPShared());
+
+        /*
+         * The default value of the type attribute is PTHREAD_MUTEX_DEFAULT.
+         */
+        REQ("?pthread_mutexattr.05", 
+            "The default value of the type attribute is PTHREAD_MUTEX_DEFAULT", 
+            mutex->type == SUT_PTHREAD_MUTEX_DEFAULT);
+
+        return true;
+    }
+}
+
+void onPThreadMutexStaticInit( VoidTPtr ptr )
+{
+    registerMutex( ptr, getDefaultMutexType(), getDefaultMutexPShared() );
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    pthread_mutex_init - initialize a mutex
+
+SYNOPSIS
+   
+    int pthread_mutex_init( pthread_mutex_t *restrict mutex,
+                            const pthread_mutexattr_t *restrict attr );
+
+DESCRIPTION
+    
+    The pthread_mutex_init() function shall initialize the mutex referenced
+    by mutex with attributes specified by attr. If attr is NULL, the default
+    mutex attributes are used; the effect shall be the same as passing 
+    the address of a default mutex attributes object. Upon successful 
+    initialization, the state of the mutex becomes initialized and unlocked.
+
+    Only mutex itself may be used for performing synchronization. The result
+    of referring to copies of mutex in calls to pthread_mutex_lock(),
+    pthread_mutex_trylock(), pthread_mutex_unlock(), 
+    and pthread_mutex_destroy() is undefined.
+
+    Attempting to initialize an already initialized mutex results in
+    undefined behavior.
+
+RETURN VALUE
+
+    If successful, the pthread_mutex_destroy() and pthread_mutex_init() 
+    functions shall return zero; otherwise, an error number shall be returned
+    to indicate the error.
+
+    The [EBUSY] and [EINVAL] error checks, if implemented, act as if they were
+    performed immediately at the beginning of processing for the function and 
+    shall cause an error return prior to modifying the state of the mutex
+    specified by mutex.
+
+ERRORS
+
+    The pthread_mutex_init() function shall fail if:
+
+    [EAGAIN] 
+        The system lacked the necessary resources (other than memory)
+        to initialize another mutex. 
+
+    [ENOMEM] 
+        Insufficient memory exists to initialize the mutex. 
+
+    [EPERM] 
+        The caller does not have the privilege to perform the operation. 
+
+    The pthread_mutex_init() function may fail if:
+
+    [EBUSY] 
+        The implementation has detected an attempt to reinitialize the object
+        referenced by mutex, a previously initialized, but not yet destroyed,
+        mutex.
+
+    [EINVAL] 
+        The value specified by attr is invalid. 
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+specification
+ErrorCode* pthread_mutex_init_spec( CallContext context, VoidTPtr mutex, PThreadMutexAttrTPtr attr )
+{
+    PThreadMutexAttrT* attributes = !isNULL_VoidTPtr(attr) ? getMutexAttributes(attr) : NULL;
+    Mutex* pre_mutex = clone(getMutex(mutex));
+
+    VERBOSE("pthread_mutex_init_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "mutex is not NULL", !isNULL_VoidTPtr(mutex));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by mutex is available in the context", isValidPointer(context,mutex));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by mutex is enough", sizeWMemoryAvailable(mutex) >= sizeof_Type(context,"pthread_mutex_t"));
+
+        if(! POSIX_PTHREAD_MUTEX_INIT_FAILS_WITH_EBUSY)
+        {
+            /*
+             * Attempting to initialize an already initialized mutex results in undefined 
+             * behavior.
+             */
+            REQ("app.pthread_mutex_init.04", "Memory pointed to by mutex is free", getObjectInMemory(mutex) == NULL);
+        }
+
+        /* [Behaviour is undefined if the value specified by attr is invalid] */
+        REQ("", "The value specified by attr is valid", isNULL_VoidTPtr(attr) || T(attributes != NULL));
+
+        return true;
+    }
+    
+    coverage C
+    {   
+        if (pre_mutex == NULL) 
+        {
+            if (isNULL_VoidTPtr(attr))
+                return { DefaultAttributes, "Default initialization" };
+            switch (attributes->type)
+            {
+                case SUT_PTHREAD_MUTEX_NORMAL :
+                    if (attributes->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { NormalShared, "PTHREAD_MUTEX_NORMAL, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { NormalPrivate, "PTHREAD_MUTEX_NORMAL, PTHREAD_PROCESS_PRIVATE" };
+                case SUT_PTHREAD_MUTEX_ERRORCHECK :
+                    if (attributes->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { InheritShared, "PTHREAD_MUTEX_ERRORCHECK, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { InheritPrivate, "PTHREAD_MUTEX_ERRORCHECK, PTHREAD_PROCESS_PRIVATE" };
+                case SUT_PTHREAD_MUTEX_RECURSIVE :
+                    if (attributes->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { ProtectShared, "PTHREAD_MUTEX_RECURSIVE, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { ProtectPrivate, "PTHREAD_MUTEX_RECURSIVE, PTHREAD_PROCESS_PRIVATE" };
+                case SUT_PTHREAD_MUTEX_DEFAULT :
+                    if (attributes->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { DefaultShared, "PTHREAD_MUTEX_DEFAULT, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { DefaultPrivate, "PTHREAD_MUTEX_DEFAULT, PTHREAD_PROCESS_PRIVATE" };
+            }
+        }
+        else
+        {
+            return { AlreadyInintialized, "Already inintialized mutex" };
+        }
+    }
+    
+    post
+    {
+        Mutex* post_mutex = getMutex( mutex );
+        /*
+         * The [EBUSY] and [EINVAL] error checks, if implemented, act as if they were 
+         * performed immediately at the beginning of processing for the function and shall 
+         * cause an error return prior to modifying the state of the mutex specified by 
+         * mutex.
+         */
+
+        /* [only EBUSY because EINVAL corresponds to no mutex situation] */
+        if ((*pthread_mutex_init_spec == SUT_EBUSY))
+        {
+            REQ("?pthread_mutex_init.06", "the state of the mutex specified by mutex shall not be modified", 
+                 equals(pre_mutex, post_mutex));
+        }
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_MUTEX_INIT, "pthread_mutex_init.05.02", 
+                    *pthread_mutex_init_spec != 0, *pthread_mutex_init_spec)
+
+            /*
+             * The pthread_mutex_init() function shall fail if:
+             *
+             * [EAGAIN] The system lacked the necessary resources (other than memory) to 
+             * initialize another mutex.
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_MUTEX_INIT, EAGAIN, "pthread_mutex_init.07.01", 
+                              "Hard to check system resources" )
+
+            /*
+             * The pthread_mutex_init() function shall fail if:
+             *
+             * [ENOMEM] Insufficient memory exists to initialize the mutex.
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_MUTEX_INIT, ENOMEM, "pthread_mutex_init.07.02", 
+                              "Hard to check insufficient memory" )
+
+            /*
+             * The pthread_mutex_init() function shall fail if:
+             *
+             * [EPERM] The caller does not have the privilege to perform the operation.
+             */
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_INIT, EPERM, "pthread_mutex_init.07.03", TODO_ERR(EPERM) )
+
+            /*
+             * The pthread_mutex_init() function may fail if:
+             *
+             * [EBUSY] The implementation has detected an attempt to reinitialize the object 
+             * referenced by mutex, a previously initialized, but not yet destroyed, mutex.
+             */
+            ERROR_MAY(POSIX_PTHREAD_MUTEX_INIT, EBUSY, "pthread_mutex_init.08.01", 
+                      pre_mutex != NULL)
+
+            /*
+             * The pthread_mutex_init() function may fail if:
+             *
+             * [EINVAL] The value specified by attr is invalid.
+             */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_MUTEX_INIT, EINVAL, "pthread_mutex_init.08.02", 
+                              "Valid and invalid values for mutex attr are not defined in the Standard")
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_MUTEX_INIT, EINTR, "pthread_mutex_init.09")
+
+        ERROR_END()
+
+
+        /*
+         * If successful, the pthread_mutex_destroy() and pthread_mutex_init() functions 
+         * shall return zero;
+         */
+        REQ("pthread_mutex_init.05.01", "the pthread_mutex_init() function shall return zero", *pthread_mutex_init_spec == 0);
+
+        if (isNULL_VoidTPtr(attr))
+        {
+            /*
+             * If attr is NULL, the default mutex attributes are used; the effect shall be the 
+             * same as passing the address of a default mutex attributes object.
+             */
+            REQ("?pthread_mutex_init.02", "'type' shall be initialized with the default value", post_mutex->type == getDefaultMutexType());
+            REQ("?pthread_mutex_init.02", "'pshared' shall be initialized with the default valuee", post_mutex->pshared == getDefaultMutexPShared());
+        }
+        else
+        {
+            /*
+             * The pthread_mutex_init() function shall initialize the mutex referenced by 
+             * mutex with attributes specified by attr.
+             */
+            REQ("?pthread_mutex_init.01", "'type' shall be initialized with the specified value", post_mutex->type == attributes->type);
+            REQ("?pthread_mutex_init.01", "'pshared' shall be initialized with the specified value", post_mutex->pshared == attributes->pshared);
+        }
+
+        /*
+         * Upon successful initialization, the state of the mutex becomes initialized and 
+         * unlocked.
+         */
+        REQ("?pthread_mutex_init.03", "state of the mutex shall be unlocked", !isLocked_Mutex(post_mutex));
+        REQ("?pthread_mutex_init.03", "wait list shall be empty", isEmpty_List(post_mutex->wait_list));
+
+        return true;
+    }
+}
+
+void onPThreadMutexInit( VoidTPtr mutex, PThreadMutexAttrTPtr attr, ErrorCode* pthread_mutex_init_spec )
+{
+    if (*pthread_mutex_init_spec == 0)
+    {
+        if (!isNULL_VoidTPtr(attr))
+        {
+            PThreadMutexAttrT* attributes = getMutexAttributes(attr);
+            registerMutex(mutex,attributes->type,attributes->pshared);
+        }
+        else
+        {
+            registerMutex(mutex,getDefaultMutexType(),getDefaultMutexPShared());
+        }
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    pthread_mutex_destroy - destroy a mutex
+
+SYNOPSIS
+   
+    int pthread_mutex_destroy(pthread_mutex_t *mutex);
+
+DESCRIPTION
+    
+    The pthread_mutex_destroy() function shall destroy the mutex object
+    referenced by mutex; the mutex object becomes, in effect, uninitialized.
+    An implementation may cause pthread_mutex_destroy() to set the object
+    referenced by mutex to an invalid value. A destroyed mutex object
+    can be reinitialized using pthread_mutex_init(); the results of otherwise
+    referencing the object after it has been destroyed are undefined.
+
+    It shall be safe to destroy an initialized mutex that is unlocked.
+    Attempting to destroy a locked mutex results in undefined behavior.
+
+RETURN VALUE
+
+    If successful, the pthread_mutex_destroy() and pthread_mutex_init()
+    functions shall return zero; otherwise, an error number shall be returned
+    to indicate the error.
+
+    The [EBUSY] and [EINVAL] error checks, if implemented, act as if they were
+    performed immediately at the beginning of processing for the function and
+    shall cause an error return prior to modifying the state of the mutex 
+    specified by mutex.
+
+ERRORS
+
+    The pthread_mutex_destroy() function may fail if:
+
+    [EBUSY] 
+        The implementation has detected an attempt to destroy the object 
+        referenced by mutex while it is locked or referenced
+        (for example, while being used in a pthread_cond_timedwait() 
+        or pthread_cond_wait()) by another thread.
+
+    [EINVAL] 
+        The value specified by mutex is invalid. 
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+specification
+ErrorCode* pthread_mutex_destroy_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    Mutex* pre_mutex = clone(getMutex(mutex));
+
+    VERBOSE("pthread_mutex_destroy_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context,mutex));
+
+        if(! POSIX_PTHREAD_MUTEX_DESTROY_FAILS_WITH_EINVAL)
+        {
+            /*
+             * the results of otherwise referencing the object after it has been destroyed are 
+             * undefined.
+             */
+            REQ("app.pthread_mutex_destroy.03", "The value specified by mutex is invalid", pre_mutex != NULL);
+        }
+
+        if (pre_mutex != NULL && ! POSIX_PTHREAD_MUTEX_DESTROY_FAILS_WITH_EBUSY)
+        {
+            /*
+             * Attempting to destroy a locked mutex results in undefined behavior.
+             */
+            REQ("app.pthread_mutex_destroy.05", "Attempting to destroy a locked mutex", !isLocked_Mutex(pre_mutex));
+        }
+
+        return true;
+    }
+    
+    coverage C
+    {
+        if (pre_mutex == NULL)
+        {
+            return { UninitializedMutex, "Uninitialized Mutex"};
+        }
+        else
+        {
+            switch (pre_mutex->type)
+            {
+                case SUT_PTHREAD_MUTEX_NORMAL :
+                    if (pre_mutex->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { NormalShared, "PTHREAD_MUTEX_NORMAL, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { NormalPrivate, "PTHREAD_MUTEX_NORMAL, PTHREAD_PROCESS_PRIVATE" };
+                case SUT_PTHREAD_MUTEX_ERRORCHECK :
+                    if (pre_mutex->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { InheritShared, "PTHREAD_MUTEX_ERRORCHECK, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { InheritPrivate, "PTHREAD_MUTEX_ERRORCHECK, PTHREAD_PROCESS_PRIVATE" };
+                case SUT_PTHREAD_MUTEX_RECURSIVE :
+                    if (pre_mutex->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { ProtectShared, "PTHREAD_MUTEX_RECURSIVE, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { ProtectPrivate, "PTHREAD_MUTEX_RECURSIVE, PTHREAD_PROCESS_PRIVATE" };
+                case SUT_PTHREAD_MUTEX_DEFAULT :
+                    if (pre_mutex->pshared == SUT_PTHREAD_PROCESS_SHARED)
+                        return { DefaultShared, "PTHREAD_MUTEX_DEFAULT, PTHREAD_PROCESS_SHARED" };
+                    else
+                        return { DefaultPrivate, "PTHREAD_MUTEX_DEFAULT, PTHREAD_PROCESS_PRIVATE" };
+            }
+        }
+    }
+    
+    post
+    {
+        Mutex* post_mutex = getMutex( mutex );
+
+        /*
+         * The [EBUSY] and [EINVAL] error checks, if implemented, act as if they were 
+         * performed immediately at the beginning of processing for the function and shall 
+         * cause an error return prior to modifying the state of the mutex specified by 
+         * mutex.
+         */
+        if ((*pthread_mutex_destroy_spec == SUT_EBUSY) || (*pthread_mutex_destroy_spec == SUT_EINVAL))
+            REQ("?pthread_mutex_destroy.07", "the state of the mutex specified by mutex shall not be modified", equals(pre_mutex, post_mutex));
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_MUTEX_DESTROY, "pthread_mutex_destroy.06.02", *pthread_mutex_destroy_spec != 0,  *pthread_mutex_destroy_spec)
+
+            if (pre_mutex != NULL)
+            {
+                /*
+                 * The pthread_mutex_destroy() function may fail if:
+                 *
+                 * [EBUSY] The implementation has detected an attempt to destroy the object 
+                 * referenced by mutex while it is locked or referenced (for example, while being 
+                 * used in a pthread_cond_timedwait() or pthread_cond_wait()) by another thread.
+                 */
+                ERROR_MAY(POSIX_PTHREAD_MUTEX_DESTROY, EBUSY, "pthread_mutex_destroy.08.01", isLocked_Mutex(pre_mutex))
+            }
+
+            /*
+             * The pthread_mutex_destroy() function may fail if:
+             *
+             * [EINVAL] The value specified by mutex is invalid.
+             */
+            ERROR_MAY(POSIX_PTHREAD_MUTEX_DESTROY, EINVAL, "pthread_mutex_destroy.08.02", pre_mutex == NULL)
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_MUTEX_DESTROY, EINTR, "pthread_mutex_destroy.09")
+
+        ERROR_END()
+
+
+        /*
+         * If successful, the pthread_mutex_destroy() and pthread_mutex_init() functions 
+         * shall return zero;
+         */
+        REQ("pthread_mutex_destroy.06.01", "pthread_mutex_destroy() shall return zero", *pthread_mutex_destroy_spec == 0);
+         
+        /*
+         * The pthread_mutex_destroy() function shall destroy the mutex object referenced 
+         * by mutex; the mutex object becomes, in effect, uninitialized.
+         */
+        /*
+         * It shall be safe to destroy an initialized mutex that is unlocked.
+         */
+        REQ("?pthread_mutex_destroy.01;pthread_mutex_destroy.04", "pthread_mutex_destroy() shall destroy the mutex", post_mutex == NULL);
+
+        return true;
+    }
+}
+
+void onPThreadMutexDestroy( PThreadMutexTPtr mutex, ErrorCode* pthread_mutex_destroy_spec )
+{
+    if (*pthread_mutex_destroy_spec == 0)
+    {
+        unregisterMutex(mutex);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1mu
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    pthread_mutex_lock - lock a mutex
+
+SYNOPSIS
+   
+    int pthread_mutex_lock(pthread_mutex_t *mutex);
+
+DESCRIPTION
+    
+    The mutex object referenced by mutex shall be locked by calling
+    pthread_mutex_lock(). If the mutex is already locked, the calling 
+    thread shall block until the mutex becomes available. This operation
+    shall return with the mutex object referenced by mutex in the locked
+    state with the calling thread as its owner.
+
+    If the mutex type is PTHREAD_MUTEX_NORMAL, deadlock detection shall
+    not be provided. Attempting to relock the mutex causes deadlock. 
+    If a thread attempts to unlock a mutex that it has not locked or
+    a mutex which is unlocked, undefined behavior results.
+
+    If the mutex type is PTHREAD_MUTEX_ERRORCHECK, then error checking
+    shall be provided. If a thread attempts to relock a mutex that
+    it has already locked, an error shall be returned. If a thread
+    attempts to unlock a mutex that it has not locked or a mutex
+    which is unlocked, an error shall be returned.
+
+    If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall
+    maintain the concept of a lock count. When a thread successfully
+    acquires a mutex for the first time, the lock count shall be set to one.
+    Every time a thread relocks this mutex, the lock count shall be
+    incremented by one. Each time the thread unlocks the mutex,
+    the lock count shall be decremented by one. When the lock count reaches zero,
+    the mutex shall become available for other threads to acquire.
+    If a thread attempts to unlock a mutex that it has not locked or a mutex
+    which is unlocked, an error shall be returned.
+
+    If the mutex type is PTHREAD_MUTEX_DEFAULT, attempting to recursively lock
+    the mutex results in undefined behavior. Attempting to unlock the mutex
+    if it was not locked by the calling thread results in undefined behavior.
+    Attempting to unlock the mutex if it is not locked results in undefined behavior.
+
+    If a signal is delivered to a thread waiting for a mutex, upon return from
+    the signal handler the thread shall resume waiting for the mutex as
+    if it was not interrupted.
+
+RETURN VALUE
+
+    If successful, the pthread_mutex_lock() and pthread_mutex_unlock() functions
+    shall return zero; otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_mutex_lock() function may fail if:
+
+    [EINVAL] 
+        The value specified by mutex does not refer to an initialized mutex object.
+
+    [EAGAIN] 
+        The mutex could not be acquired because the maximum number of recursive
+        locks for mutex has been exceeded. 
+
+    [EDEADLK]
+        A deadlock condition was detected or the current thread already owns the mutex.
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+specification typedef struct MutexLockCall MutexLockCall = {};
+
+MutexLockCall* create_MutexLockCall( CallContext context, PThreadMutexTPtr mutex )
+{
+    return create( &type_MutexLockCall, context, mutex );
+}
+
+specification
+void pthread_mutex_lock_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    Mutex* pre_mutex = clone(getMutex(mutex));
+
+    VERBOSE("pthread_mutex_lock_spec: %p\n", context.thread);
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context,mutex));
+
+        if (! POSIX_PTHREAD_MUTEX_LOCK_FAILS_WITH_EINVAL)
+        {
+            /* [The value specified by mutex is invalid. Behaviour is unspecified.] */
+            REQ("", "The value specified by mutex is invalid", pre_mutex != NULL);
+        }
+
+        /*
+         * If the mutex type is PTHREAD_MUTEX_DEFAULT,
+         *
+         * attempting to recursively lock the mutex results in undefined behavior.
+         */
+        if (pre_mutex != NULL && pre_mutex->type == SUT_PTHREAD_MUTEX_DEFAULT)
+        {
+            REQ("app.pthread_mutex_lock.07.01", "Attempting to recursively lock", !isOwner_Mutex( pre_mutex, context ));
+        }
+
+        return true;
+    }
+    
+    coverage C
+    {
+        if (pre_mutex == NULL)
+        {
+            return { UninitializedMutex, "Uninitialized Mutex"};
+        }
+        else
+        {
+            switch (pre_mutex->type)
+            {
+                case SUT_PTHREAD_MUTEX_NORMAL :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { NormalLock, "Lock, PTHREAD_MUTEX_NORMAL"};
+                    else if ( !isOwner_Mutex( pre_mutex, context) )
+                        return { NormalBlock, "Block, PTHREAD_MUTEX_NORMAL"};
+                    else
+                        return { NormalDeadlock, "Relock, PTHREAD_MUTEX_NORMAL"};
+                case SUT_PTHREAD_MUTEX_ERRORCHECK :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { ErrorCheckLock, "Lock, PTHREAD_MUTEX_ERRORCHECK"};
+                    else if ( !isOwner_Mutex( pre_mutex, context) )
+                        return { ErrorCheckBlock, "Block, PTHREAD_MUTEX_ERRORCHECK"};
+                    else
+                        return { ErrorCheckDeadlock, "Relock, PTHREAD_MUTEX_ERRORCHECK"};
+                case SUT_PTHREAD_MUTEX_RECURSIVE :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { RecursiveLock, "Lock, PTHREAD_MUTEX_RECURSIVE"};
+                    else if ( !isOwner_Mutex( pre_mutex, context) )
+                        return { RecursiveBlock, "Block, PTHREAD_MUTEX_RECURSIVE"};
+                    else
+                        return { RecursiveIncrement, "Increment, PTHREAD_MUTEX_RECURSIVE"};
+                case SUT_PTHREAD_MUTEX_DEFAULT :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { DefaultLock, "Lock, PTHREAD_MUTEX_DEFAULT"};
+                    else
+                        return { DefaultBlock, "Block, PTHREAD_MUTEX_DEFAULT"};
+            }
+        }
+    }
+    
+    post
+    {
+        /* [The thread has been blocked by call of the pthread_mutex_lock() function] */
+        REQ("", "Thread has been blocked", equals( getBlockedCall( context ), 
+                                                   create_MutexLockCall( context, mutex )
+                                              )
+           );
+
+        return true;
+    }
+}
+
+void onPThreadMutexLock( CallContext context, PThreadMutexTPtr mutex )
+{
+    Mutex* pre_mutex = getMutex(mutex);
+
+    VERBOSE("onPThreadMutexLock: %p\n", context.thread);
+    startBlockedCall( context, create_MutexLockCall( context, mutex ) );
+    if (pre_mutex != NULL)
+    {
+        insert_ThreadIdList( pre_mutex->wait_list, context );
+        if (!isLocked_Mutex(pre_mutex))
+        {
+            threadShouldBeRun(context);
+            return;
+        }
+        if (isOwner_Mutex( pre_mutex, context ))
+        {
+            if (pre_mutex->type != SUT_PTHREAD_MUTEX_NORMAL)
+            {
+                threadShouldBeRun(context);
+                return;
+            }
+        }
+    }
+}
+
+
+specification typedef struct MutexLockReturnType  MutexLockReturnType = {};
+
+MutexLockReturnType * create_MutexLockReturnType(
+  CallContext context,
+  ErrorCode*  returned_value
+)
+{
+    return create(&type_MutexLockReturnType,
+        context,
+        returned_value);
+}
+
+reaction
+MutexLockReturnType* pthread_mutex_lock_return(void)
+{
+    post
+    {
+        CallContext context = pthread_mutex_lock_return->context;
+        MutexLockCall* blocked_call = findBlockedCall( @getBlockedCalls(), context );
+        PThreadMutexTPtr mutex = blocked_call->mutex;
+        Mutex* pre_mutex = findMutex( @getAllMutexes(), mutex );
+        Mutex* post_mutex = getMutex(mutex);
+        TRACE_OBJECT(pre_mutex);
+        TRACE_OBJECT(post_mutex);
+
+        VERBOSE("pthread_mutex_lock_return: %p\n", context.thread);
+        
+        if (! POSIX_PTHREAD_MUTEX_LOCK_FAILS_WITH_EINVAL)
+        {
+            /* [Consistency of test suite] */
+            REQ("", "Mutex should exists", pre_mutex != NULL);
+        }
+        
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_MUTEX_LOCK, "pthread_mutex_lock.09.02", *pthread_mutex_lock_return->returned_value != 0, 
+                                                                          *pthread_mutex_lock_return->returned_value)
+
+            /*
+             * The pthread_mutex_lock() function shall fail if:
+             *
+             * [EINVAL] The mutex was created with the protocol attribute having the value 
+             * PTHREAD_PRIO_PROTECT and the calling thread's priority is higher than the mutex' 
+             * s current priority ceiling.
+             */
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_LOCK, EINVAL, "pthread_mutex_lock.10.01", TODO_ERR(EINVAL) )
+
+            /*
+             * The pthread_mutex_lock() function may fail if:
+             *
+             * [EINVAL] The value specified by mutex does not refer to an initialized mutex 
+             * object.
+             */
+            ERROR_MAY(POSIX_PTHREAD_MUTEX_LOCK, EINVAL, "pthread_mutex_lock.11.01", pre_mutex == NULL)
+
+            /*
+             * The pthread_mutex_lock() function may fail if:
+             *
+             * [EAGAIN] [XSI] The mutex could not be acquired because the maximum number of 
+             * recursive locks for mutex has been exceeded.
+             */
+            ERROR_MAY3(POSIX_PTHREAD_MUTEX_LOCK, EAGAIN, "pthread_mutex_lock.11.02",
+                       (T(pre_mutex != NULL)
+                     && T(pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+                     && T(isOwner_Mutex(pre_mutex, context))) ? Unknown_Bool3 : False_Bool3)
+
+            /*
+             * The pthread_mutex_lock() function may fail if:
+             *
+             * [EDEADLK] A deadlock condition was detected or the current thread already 
+             * owns the mutex.
+             */
+            /*
+             * If the mutex type is PTHREAD_MUTEX_ERRORCHECK, then error checking shall be 
+             * provided.
+             *
+             * If a thread attempts to relock a mutex that it has already locked, an error 
+             * shall be returned.
+             */
+            /* [ MAY is replaced by SHALL because the error detection is required by pthread_mutex_lock.05.01]*/
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_LOCK, EDEADLK, "pthread_mutex_lock.05.01;pthread_mutex_lock.11.03", 
+                                                           T(pre_mutex != NULL)
+                                                        && T(pre_mutex->type == SUT_PTHREAD_MUTEX_ERRORCHECK)
+                                                        && T(isOwner_Mutex( pre_mutex, context )))
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_MUTEX_LOCK, EINTR, "pthread_mutex_lock.12")
+
+        ERROR_END()
+
+
+        /*
+         * If successful, the pthread_mutex_lock() and pthread_mutex_unlock() functions 
+         * shall return zero;
+         */
+        REQ("pthread_mutex_lock.09.01", "the pthread_mutex_lock() function shall return zero", *pthread_mutex_lock_return->returned_value == 0);
+
+        /*
+         * The mutex object referenced by mutex shall be locked by calling 
+         * pthread_mutex_lock().
+         */
+        /*
+         * This operation shall return with the mutex object referenced by mutex in the 
+         * locked state with the calling thread as its owner.
+         */
+        REQ("?pthread_mutex_lock.01;pthread_mutex_lock.03", "The mutex should be locked by the current thread", isOwner_Mutex( post_mutex, context ));
+
+        if (pre_mutex->type == SUT_PTHREAD_MUTEX_NORMAL && isOwner_Mutex(pre_mutex, context))
+        {
+            /*
+             * If the mutex type is PTHREAD_MUTEX_NORMAL, deadlock detection shall not be 
+             * provided.
+             *
+             * Attempting to relock the mutex causes deadlock.
+             */
+            REQ("pthread_mutex_lock.04.01", "Attempting to relock the mutex causes deadlock", false);
+        }
+
+        if ((pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE) && isOwner_Mutex( pre_mutex, context ) )
+        {
+            /*
+             * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+             * concept of a lock count
+             *
+             * Every time a thread relocks this mutex, the lock count shall be incremented by 
+             * one.
+             */
+            REQ("?pthread_mutex_lock.06.02", "Lock count shall be incremented by one", post_mutex->lock_count == pre_mutex->lock_count + 1);
+        }
+        else
+        {
+            /*
+             * If the mutex is already locked, the calling thread shall block until the mutex 
+             * becomes available.
+             */
+            REQ("?pthread_mutex_lock.02", "The mutex should be unlocked", !isLocked_Mutex(pre_mutex));
+
+            if (pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE) 
+            {
+                 /*
+                 * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+                 * concept of a lock count
+                 *
+                 * When a thread successfully acquires a mutex for the first time, the lock count 
+                 * shall be set to one.
+                 */
+                REQ("?pthread_mutex_lock.06.01", "Lock count shall be set to one", post_mutex->lock_count == 1);
+            }
+
+            /*
+             * If there are threads blocked on the mutex object referenced by mutex when 
+             * pthread_mutex_unlock() is called, resulting in the mutex becoming available, 
+             * the scheduling policy shall determine which thread shall acquire the mutex.
+             */
+            REQ("?pthread_mutex_unlock.06", "The scheduling policy shall determine which thread shall acquire the mutex",
+                isHighestPriorityThread(@getAllThreads(), pre_mutex->wait_list, context)
+               );
+        
+        }
+
+        /* [ Implicit requirement ] */
+        REQ("", "The thread should be removed from wait list", 
+            isRemoved_ThreadIdList( pre_mutex->wait_list, context, post_mutex->wait_list )
+           );
+        
+        /*
+         * If a signal is delivered to a thread waiting for a mutex, upon return from the 
+         * signal handler the thread shall resume waiting for the mutex as if it was not 
+         * interrupted.
+         */
+        REQ("pthread_mutex_lock.08", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onPThreadMutexLockReturn( CallContext context, ErrorCode* pthread_mutex_lock_spec )
+{
+    MutexLockCall* blocked_call = finishBlockedCall( context );
+    PThreadMutexTPtr mutex = blocked_call->mutex;
+    Mutex* pre_mutex = getMutex(mutex);
+
+    VERBOSE("onPThreadMutexLockReturn: %p\n", context.thread);
+
+    TRACE_OBJECT(pre_mutex);
+    if (pre_mutex != NULL)
+    {
+        /* Remove thread from wait list */
+        remove_ThreadIdList( pre_mutex->wait_list, context );
+        
+        if (*pthread_mutex_lock_spec == 0)
+        {
+            /* Set up a new owner */
+            pre_mutex->owner = context;
+
+            /* Process lock count */
+            if (pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+            {
+                pre_mutex->lock_count = pre_mutex->lock_count + 1;
+            }
+        }
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    pthread_mutex_trylock - lock a mutex
+
+SYNOPSIS
+   
+    int pthread_mutex_trylock(pthread_mutex_t *mutex);
+
+DESCRIPTION
+    
+    The pthread_mutex_trylock() function shall be equivalent
+    to pthread_mutex_lock(), except that if the mutex object
+    referenced by mutex is currently locked (by any thread,
+    including the current thread), the call shall return immediately.
+    If the mutex type is PTHREAD_MUTEX_RECURSIVE and the mutex is currently
+    owned by the calling thread, the mutex lock count shall be incremented
+    by one and the pthread_mutex_trylock() function shall immediately return success.
+
+RETURN VALUE
+
+    The pthread_mutex_trylock() function shall return zero if a lock on
+    the mutex object referenced by mutex is acquired. Otherwise,
+    an error number is returned to indicate the error.
+
+ERRORS
+
+    The pthread_mutex_trylock() function shall fail if:
+
+    [EBUSY] 
+        The mutex could not be acquired because it was already locked.
+
+    The pthread_mutex_trylock() function may fail if:
+
+    [EINVAL] 
+        The value specified by mutex does not refer to an initialized mutex object.
+
+    [EAGAIN] 
+        The mutex could not be acquired because the maximum number of recursive
+        locks for mutex has been exceeded. 
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+specification
+ErrorCode* pthread_mutex_trylock_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    Mutex* pre_mutex = clone(getMutex(mutex));
+
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context,mutex));
+
+        if (! POSIX_PTHREAD_MUTEX_TRYLOCK_FAILS_WITH_EINVAL)
+        {
+            /* [The value specified by mutex does not refer to an initialized mutex object. Behaviour is unspecified.] */
+            REQ("", "The value specified by mutex is invalid", pre_mutex != NULL);
+        }
+
+        return true;
+    }
+    
+    coverage C
+    {
+        if (pre_mutex == NULL)
+        {
+            return { UninitializedMutex, "Uninitialized Mutex"};
+        }
+        else
+        {
+            switch (pre_mutex->type)
+            {
+                case SUT_PTHREAD_MUTEX_NORMAL :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { NormalLock, "Lock, PTHREAD_MUTEX_NORMAL"};
+                    else if (!isOwner_Mutex(pre_mutex, context))
+                        return { NormalFail, "Fail, Other, PTHREAD_MUTEX_NORMAL"};
+                    else
+                        return { NormalOwnerFail, "Fail, Owner, PTHREAD_MUTEX_NORMAL"};
+                case SUT_PTHREAD_MUTEX_ERRORCHECK :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { ErrorCheckLock, "Lock, PTHREAD_MUTEX_ERRORCHECK"};
+                    else if (!isOwner_Mutex(pre_mutex, context))
+                        return { ErrorCheckFail, "Fail, Other, PTHREAD_MUTEX_ERRORCHECK"};
+                    else
+                        return { ErrorCheckOwnerFail, "Fail, Owner, PTHREAD_MUTEX_ERRORCHECK"};
+                case SUT_PTHREAD_MUTEX_RECURSIVE :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { RecursiveLock, "Lock, PTHREAD_MUTEX_RECURSIVE"};
+                    else if (!isOwner_Mutex(pre_mutex, context))
+                        return { RecursiveFail, "Fail, PTHREAD_MUTEX_RECURSIVE"};
+                    else
+                        return { RecursiveIncrement, "Increment, PTHREAD_MUTEX_RECURSIVE"};
+                case SUT_PTHREAD_MUTEX_DEFAULT :
+                    if (!isLocked_Mutex(pre_mutex))
+                        return { DefaultLock, "Lock, PTHREAD_MUTEX_DEFAULT"};
+                    else
+                        return { DefaultFail, "Fail, PTHREAD_MUTEX_DEFAULT"};
+            }
+        }
+    }
+    
+    post
+    {
+        Mutex* post_mutex = getMutex(mutex);
+        TRACE_OBJECT(pre_mutex);
+        TRACE_OBJECT(post_mutex);
+
+        /*
+         * Otherwise, an error number is returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_MUTEX_TRYLOCK, "pthread_mutex_trylock.05.02", 
+                    *pthread_mutex_trylock_spec != 0, *pthread_mutex_trylock_spec)
+            /*
+             * The pthread_mutex_lock(), pthread_mutex_trylock(), and pthread_mutex_unlock() 
+             * functions may fail if:
+             *
+             * [EINVAL] The value specified by mutex does not refer to an initialized mutex 
+             * object.
+             */
+            ERROR_MAY(POSIX_PTHREAD_MUTEX_TRYLOCK, EINVAL, "pthread_mutex_trylock.07.01", pre_mutex == NULL)
+
+            /*
+             * The pthread_mutex_trylock() function shall fail if:
+             *
+             * [EINVAL] The mutex was created with the protocol attribute having the value 
+             * PTHREAD_PRIO_PROTECT and the calling thread's priority is higher than the mutex' 
+             * s current priority ceiling.
+             */
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_TRYLOCK, EINVAL, "pthread_mutex_trylock.06.01", TODO_ERR(EINVAL) )
+
+            /*
+             * The pthread_mutex_trylock() function shall fail if:
+             *
+             * [EBUSY] The mutex could not be acquired because it was already locked.
+             */
+            /*
+             * If the mutex type is PTHREAD_MUTEX_ERRORCHECK, then error checking shall be 
+             * provided.
+             *
+             * If a thread attempts to relock a mutex that it has already locked, an error 
+             * shall be returned.
+             */
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_TRYLOCK, EBUSY, "pthread_mutex_trylock.02.01;pthread_mutex_trylock.06.02",              
+                        T(pre_mutex != NULL)
+                     && T(isLocked_Mutex(pre_mutex) || !isEmpty_List(pre_mutex->wait_list)) 
+                     && ( pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE => !isOwner_Mutex(pre_mutex, context))
+                )
+
+            /*
+             * The pthread_mutex_lock(), pthread_mutex_trylock(), and pthread_mutex_unlock() 
+             * functions may fail if:
+             *
+             * [EAGAIN] [XSI] The mutex could not be acquired because the maximum number of 
+             * recursive locks for mutex has been exceeded.
+             */
+            ERROR_MAY3(POSIX_PTHREAD_MUTEX_TRYLOCK, EAGAIN, "pthread_mutex_trylock.07.02", 
+                       (T(pre_mutex != NULL)
+                     && T(pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+                     && T(isOwner_Mutex(pre_mutex, context))) ? Unknown_Bool3 : False_Bool3
+                      )
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_MUTEX_TRYLOCK, EINTR, "pthread_mutex_trylock.08")
+
+        ERROR_END()
+
+       /*
+         * The pthread_mutex_trylock() function shall return zero if a lock on the mutex 
+         * object referenced by mutex is acquired.
+         */
+        REQ("pthread_mutex_trylock.05.01", 
+            "The pthread_mutex_trylock() function shall return zero", 
+            *pthread_mutex_trylock_spec == 0);
+
+        /*
+         * This operation shall return with the mutex object referenced by mutex in the 
+         * locked state with the calling thread as its owner.
+         */
+        REQ("?pthread_mutex_trylock.01", "The mutex should be locked by the current thread", isOwner_Mutex(post_mutex, context));
+
+        /* If mutex type is PTHREAD_MUTEX_RECURSIVE and thread relocks this mutex */
+        if ((pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE) && isOwner_Mutex(pre_mutex, context))
+        {
+            /*
+             * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+             * concept of a lock count
+             *
+             * Every time a thread relocks this mutex, the lock count shall be incremented by 
+             * one.
+             *
+             * If the mutex type is PTHREAD_MUTEX_RECURSIVE and the mutex is currently owned 
+             * by the calling thread, the mutex lock count shall be incremented by one and the 
+             * pthread_mutex_trylock() function shall immediately return success.
+             */
+            REQ("?pthread_mutex_trylock.03.02.01", "Lock count shall be incremented by one", 
+                post_mutex->lock_count == pre_mutex->lock_count + 1);
+        }
+        else
+        {
+            /*
+             * The pthread_mutex_trylock() function shall be equivalent to 
+             * pthread_mutex_lock(), except that if the mutex object referenced by mutex is 
+             * currently locked (by any thread, including the current thread), the call shall 
+             * return immediately.
+             */
+            REQ("?pthread_mutex_trylock.04", "The mutex should be locked by the current thread", isOwner_Mutex( post_mutex, context ));
+
+            if (pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE) 
+            {
+                /*
+                 * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+                 * concept of a lock count
+                 *
+                 * When a thread successfully acquires a mutex for the first time, the lock count 
+                 * shall be set to one.
+                 */
+                REQ("?pthread_mutex_trylock.03.01", "Lock count shall be set to one", post_mutex->lock_count == 1);
+            }
+        }
+        return true;
+    }
+}
+
+void onPThreadMutexTrylock( CallContext context, PThreadMutexTPtr mutex, ErrorCode* pthread_mutex_trylock_spec )
+{
+    if (*pthread_mutex_trylock_spec == 0)
+    {
+        Mutex* pre_mutex = getMutex(mutex);
+
+        if (pre_mutex != NULL)
+        {
+            /* Set up a new owner */
+            pre_mutex->owner = context;
+
+            /* Process lock count */
+            if (pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+            {
+                pre_mutex->lock_count = pre_mutex->lock_count + 1;
+            }
+        }
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    pthread_mutex_unlock - unlock a mutex
+
+SYNOPSIS
+   
+    int pthread_mutex_unlock(pthread_mutex_t *mutex);
+
+DESCRIPTION
+    
+    The pthread_mutex_unlock() function shall release the mutex object referenced by mutex.
+    The manner in which a mutex is released is dependent upon the mutex's type attribute.
+    If there are threads blocked on the mutex object referenced by mutex
+    when pthread_mutex_unlock() is called, resulting in the mutex becoming available,
+    the scheduling policy shall determine which thread shall acquire the mutex.
+
+    If the mutex type is PTHREAD_MUTEX_ERRORCHECK, then error checking
+    shall be provided. If a thread attempts to relock a mutex that
+    it has already locked, an error shall be returned. If a thread
+    attempts to unlock a mutex that it has not locked or a mutex
+    which is unlocked, an error shall be returned.
+
+    If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain
+    the concept of a lock count. When a thread successfully acquires a mutex
+    for the first time, the lock count shall be set to one. Every time a thread
+    relocks this mutex, the lock count shall be incremented by one. Each time 
+    the thread unlocks the mutex, the lock count shall be decremented by one.
+    When the lock count reaches zero, the mutex shall become available
+    for other threads to acquire. If a thread attempts to unlock a mutex
+    that it has not locked or a mutex which is unlocked, an error shall be returned.
+    
+    In the case of PTHREAD_MUTEX_RECURSIVE mutexes, the mutex shall become available
+    when the count reaches zero and the calling thread no longer has any locks on this mutex.
+
+RETURN VALUE
+
+    If successful, the pthread_mutex_lock() and pthread_mutex_unlock() functions
+    shall return zero; otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_mutex_unlock() function may fail if:
+
+    [EINVAL] 
+        The value specified by mutex does not refer to an initialized mutex object.
+
+    [EPERM] 
+        The current thread does not own the mutex. 
+
+    These functions shall not return an error code of [EINTR].
+
+*/
+
+specification typedef struct MutexUnlockCall MutexUnlockCall = {};
+
+
+MutexUnlockCall* create_MutexUnlockCall( CallContext context, PThreadMutexTPtr mutex, Mutex *pre_mutex )
+{
+    return create( &type_MutexUnlockCall, context, mutex, pre_mutex );
+}
+
+specification
+void pthread_mutex_unlock_spec( CallContext context, PThreadMutexTPtr mutex )
+{
+    Mutex* pre_mutex = clone(getMutex(mutex));
+
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ("", "Memory block is not available in the context", isValidPointer(context,mutex));
+
+        if (! POSIX_PTHREAD_MUTEX_UNLOCK_FAILS_WITH_EINVAL)
+        {
+            /* [The value specified by mutex is invalid. Behaviour is unspecified.] */
+            REQ("", "The value specified by mutex is invalid", pre_mutex != NULL);
+        }
+
+        if (pre_mutex != NULL && pre_mutex->type == SUT_PTHREAD_MUTEX_DEFAULT)
+        {     
+            /*
+             * If the mutex type is PTHREAD_MUTEX_DEFAULT,
+             *
+             * Attempting to unlock the mutex if it was not locked by the calling thread 
+             * results in undefined behavior.
+             */
+            REQ("app.pthread_mutex_unlock.04.01", "The current thread does not own the mutex", 
+                isOwner_Mutex(pre_mutex, context));
+
+            /*
+             * If the mutex type is PTHREAD_MUTEX_DEFAULT,
+             *
+             * Attempting to unlock the mutex if it is not locked results in undefined 
+             * behavior.
+             */
+            REQ("app.pthread_mutex_unlock.04.02", "mutex is not locked", isLocked_Mutex(pre_mutex));
+        }
+
+        if (pre_mutex != NULL && pre_mutex->type == SUT_PTHREAD_MUTEX_NORMAL)
+        {     
+            /*
+             * If the mutex type is PTHREAD_MUTEX_NORMAL, deadlock detection shall not be 
+             * provided.
+             *
+             * Attempting to unlock a mutex locked by a different thread results in undefined 
+             * behavior.
+             */
+            REQ("app.pthread_mutex_unlock.01.01", "The current thread does not own the mutex", 
+                isOwner_Mutex(pre_mutex, context));
+
+            /*
+             * If the mutex type is PTHREAD_MUTEX_NORMAL, deadlock detection shall not be 
+             * provided.
+             *
+             * Attempting to unlock an unlocked mutex results in undefined behavior.
+             */
+            REQ("app.pthread_mutex_unlock.01.02", "mutex is not locked", isLocked_Mutex(pre_mutex));
+
+        }
+
+        return true;
+    }
+    
+    coverage C
+    {
+        if (pre_mutex == NULL)
+        {
+            return { UninitializedMutex, "Uninitialized Mutex"};
+        }
+        else
+        {
+            switch (pre_mutex->type)
+            {
+                case SUT_PTHREAD_MUTEX_NORMAL :
+                    return { Normal, "PTHREAD_MUTEX_NORMAL"};
+                case SUT_PTHREAD_MUTEX_ERRORCHECK :
+                    if (isOwner_Mutex(pre_mutex, context))
+                        return { ErrorCheck, "PTHREAD_MUTEX_ERRORCHECK"};
+                    else
+                        return { ErrorCheckNotOwner, "PTHREAD_MUTEX_ERRORCHECK: The current thread does not own the mutex"};
+                case SUT_PTHREAD_MUTEX_RECURSIVE :
+                    if (pre_mutex->lock_count > 1)
+                        return { RecursiveDecrement, "PTHREAD_MUTEX_RECURSIVE, Decrement"};
+                    else
+                        return { RecursiveUnlock, "PTHREAD_MUTEX_RECURSIVE, Unlock"};
+                case SUT_PTHREAD_MUTEX_DEFAULT :
+                    return { Default, "PTHREAD_MUTEX_DEFAULT"};
+            }
+        }
+    }
+    
+    post
+    {
+        Mutex* post_mutex = getMutex(mutex);
+        TRACE_OBJECT(pre_mutex);
+        TRACE_OBJECT(post_mutex);
+
+        /* [The thread has been blocked by call of the pthread_mutex_unlock() function] */
+        REQ("", "Thread has been blocked", equals( getBlockedCall( context ),
+                                                   create_MutexUnlockCall( context, mutex, pre_mutex ) 
+                                                 )
+           );
+        
+        if (! POSIX_PTHREAD_MUTEX_UNLOCK_FAILS_WITH_EINVAL && isOwner_Mutex(pre_mutex, context))
+        {
+            /* [If mutex type is not PTHREAD_MUTEX_RECURSIVE or lock count reaches zero] */
+            if ((pre_mutex->type != SUT_PTHREAD_MUTEX_RECURSIVE) || (pre_mutex->lock_count == 1))
+            {
+                /*
+                 * The pthread_mutex_unlock() function shall release the mutex object referenced 
+                 * by mutex. [XSI]  The manner in which a mutex is released is dependent 
+                 * upon the mutex's type attribute.
+                 */
+                REQ("?pthread_mutex_unlock.05", "Mutex shall become avaiable", !isLocked_Mutex(post_mutex));
+
+                if(pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+                {
+                    /*
+                     * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+                     * concept of a lock count.
+                     *
+                     * When the lock count reaches zero, the mutex shall become available for other 
+                     * threads to acquire.
+                     *
+                     * [XSI] (In the case of PTHREAD_MUTEX_RECURSIVE mutexes, the mutex shall become 
+                     * available when the count reaches zero and the calling thread no longer has any 
+                     * locks on this mutex.)
+                     */
+                    REQ("?pthread_mutex_unlock.03.02.01", "Mutex shall become avaiable", !isLocked_Mutex(post_mutex));
+                }
+
+                /*
+                 * If there are threads blocked on the mutex object referenced by mutex when 
+                 * pthread_mutex_unlock() is called, resulting in the mutex becoming available, 
+                 * the scheduling policy shall determine which thread shall acquire the mutex.
+                 */
+                REQ("?pthread_mutex_unlock.06", "Thread determined by the scheduling policy shall become unblocked",
+                    !isEmpty_List(pre_mutex->wait_list) => 
+                    isThreadReadyToBeRun( getNextThread_SchedulingPolicy( @getAllThreads(), pre_mutex->wait_list) )
+                );
+
+
+            } 
+            else
+            {
+                /*
+                 * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+                 * concept of a lock count
+                 *
+                 * Each time the thread unlocks the mutex, the lock count shall be decremented by 
+                 * one.
+                 */
+                REQ("?pthread_mutex_unlock.03.01", "Lock count shall be decremented by one", 
+                    post_mutex->lock_count == pre_mutex->lock_count - 1
+                );
+
+            }
+        }
+
+
+        return true;
+        }
+    }
+
+void onPThreadMutexUnlock( CallContext context, PThreadMutexTPtr mutex )
+{
+    Mutex* pre_mutex = getMutex(mutex);
+
+    startBlockedCall( context, create_MutexUnlockCall( context, mutex, pre_mutex ) );
+    threadShouldBeRun( context );
+
+    if ((pre_mutex != NULL) && isOwner_Mutex(pre_mutex, context))
+    {
+        if (pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+        {
+            // The lock count is decremented by one
+            pre_mutex->lock_count = pre_mutex->lock_count - 1;
+        }
+        if ((pre_mutex->type != SUT_PTHREAD_MUTEX_RECURSIVE) || (pre_mutex->lock_count == 0))
+        {
+            // The mutex becoming available
+            pre_mutex->owner = WrongThreadId;
+            // Thread determined by the scheduling policy shall become unblocked
+            if (!isEmpty_List(pre_mutex->wait_list))
+            {
+                threadShouldBeRun( getNextThread_SchedulingPolicy( getThreads(context), pre_mutex->wait_list ) );
+            }
+        }
+    }
+}
+
+
+specification typedef struct MutexUnlockReturnType MutexUnlockReturnType = {};
+
+MutexUnlockReturnType * create_MutexUnlockReturnType(
+  CallContext context,
+  ErrorCode*  returned_value
+)
+{
+    return create(&type_MutexUnlockReturnType,
+        context, returned_value);
+}
+
+reaction MutexUnlockReturnType* pthread_mutex_unlock_return(void)
+{
+    post
+    {
+        CallContext context = pthread_mutex_unlock_return->context;
+        MutexUnlockCall* blocked_call = findBlockedCall( @getBlockedCalls(), context );
+        PThreadMutexTPtr mutex = blocked_call->mutex;
+        Mutex* pre_mutex = blocked_call->pre_mutex;
+        TRACE_OBJECT(pre_mutex);
+
+        if (! POSIX_PTHREAD_MUTEX_UNLOCK_FAILS_WITH_EINVAL)
+        {
+            /* [Consistency of test suite] */    
+            REQ("", "Mutex should exists", pre_mutex != NULL);
+        }
+
+        /*
+         * otherwise, an error number shall be returned to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_PTHREAD_MUTEX_UNLOCK, "pthread_mutex_unlock.07.02", 
+                    *pthread_mutex_unlock_return->returned_value != 0, 
+                    *pthread_mutex_unlock_return->returned_value)
+
+            /*
+             * The pthread_mutex_lock(), pthread_mutex_trylock(), and pthread_mutex_unlock() 
+             * functions may fail if:
+             */
+            /*
+             * The pthread_mutex_unlock() function may fail if:
+             *
+             * [EINVAL] The value specified by mutex does not refer to an initialized mutex 
+             * object.
+             */
+            ERROR_MAY(POSIX_PTHREAD_MUTEX_UNLOCK, EINVAL, "pthread_mutex_unlock.08.01", pre_mutex == NULL)
+
+            /*
+             * If the mutex type is PTHREAD_MUTEX_ERRORCHECK, then error checking shall be 
+             * provided.
+             */
+            /*
+             * A thread attempting to unlock an unlocked mutex shall return with an error.
+             */
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_UNLOCK, EPERM, "pthread_mutex_unlock.02.02", 
+                        T(pre_mutex != NULL)
+                     && T(pre_mutex->type == SUT_PTHREAD_MUTEX_ERRORCHECK)
+                     && !isLocked_Mutex(pre_mutex)
+                        )
+
+            /*
+             * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+             * concept of a lock count
+             */
+            /*
+             * A thread attempting to unlock an unlocked mutex shall return with an error.
+             */
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_UNLOCK, EPERM, "pthread_mutex_unlock.03.04", 
+                        T(pre_mutex != NULL)
+                     && T(pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+                     && !isLocked_Mutex(pre_mutex)
+                       )
+
+            /*
+             * The pthread_mutex_unlock() function may fail if:
+             *
+             * [EPERM] The current thread does not own the mutex.
+             */
+            /*
+             * If the mutex type is PTHREAD_MUTEX_ERRORCHECK, then error checking shall be 
+             * provided.
+             */
+            /*
+             * A thread attempting to unlock a mutex which another thread has locked shall 
+             * return with an error.
+             */
+
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_UNLOCK, EPERM, 
+                        "pthread_mutex_unlock.08.02;pthread_mutex_unlock.02.01", 
+                        T(pre_mutex != NULL)
+                     && T(pre_mutex->type == SUT_PTHREAD_MUTEX_ERRORCHECK)
+                     && T(!isOwner_Mutex(pre_mutex, context))
+                       )
+
+            /*
+             * The pthread_mutex_unlock() function may fail if:
+             *
+             * [EPERM] The current thread does not own the mutex.
+             */
+            /*
+             * If the mutex type is PTHREAD_MUTEX_RECURSIVE, then the mutex shall maintain the 
+             * concept of a lock count.
+             */
+            /*
+             * A thread attempting to unlock a mutex which another thread has locked shall 
+             * return with an error.
+             */
+            ERROR_SHALL(POSIX_PTHREAD_MUTEX_UNLOCK, EPERM, 
+                        "pthread_mutex_unlock.08.02;pthread_mutex_unlock.03.03", 
+                        T(pre_mutex != NULL)
+                     && T(pre_mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+                     && T(!isOwner_Mutex(pre_mutex, context))
+                       )
+
+            /*
+             * These functions shall not return an error code of [EINTR].
+             */
+            ERROR_NEVER(POSIX_PTHREAD_MUTEX_UNLOCK, EINTR, "pthread_mutex_unlock.09")
+
+        ERROR_END()
+
+        /*
+         * If successful, the pthread_mutex_lock() and pthread_mutex_unlock() functions 
+         * shall return zero;
+         */
+        REQ("pthread_mutex_unlock.07.01", "If successful, the pthread_mutex_unlock() function shall return zero", 
+            *pthread_mutex_unlock_return->returned_value == 0);
+
+        return true;
+    }
+}
+
+
+
+void onPThreadMutexUnlockReturn( CallContext context, ErrorCode* pthread_mutex_unlock_spec )
+{
+      finishBlockedCall( context );
+}
+
+/********************************************************************/
+/**                             Mutex Type                         **/
+/********************************************************************/
+specification typedef struct Mutex Mutex = {};
+
+Mutex* create_Mutex(PThreadMutexTPtr pmutex,MutexType type,PThreadPShared pshared)
+{
+    return create( &type_Mutex, pmutex, WrongThreadId, 0, create_List(&type_ThreadIdObj), type, pshared );
+}
+
+void registerMutex(PThreadMutexTPtr pmutex,MutexType type,PThreadPShared pshared)
+{
+    registerObjectInMemory(
+                            pmutex,
+                            sizeof_SUTType("pthread_mutex_t"),
+                            create_Mutex( pmutex, type, pshared )
+                          );
+}
+
+void unregisterMutex(PThreadMutexTPtr pmutex)
+{
+    unregisterObjectInMemory(pmutex);
+}
+
+
+/********************************************************************/
+/**                          Mutex Storage                         **/
+/********************************************************************/
+Mutex* getMutex(PThreadMutexTPtr pmutex)
+{
+    return getObjectInMemory(pmutex);
+}
+
+Mutex* findMutex(ObjectsInMemory* objects,PThreadMutexTPtr pmutex)
+{
+    return findObjectInMemory(objects,pmutex);
+}
+
+ObjectsInMemory* getAllMutexes(void)
+{
+    return getAllTypedObjectsInMemory(&type_Mutex);
+}
+
+int getNumberOfMutexes(CallContext context)
+{
+    return getNumberOfTypedObjectsInMemory(context,&type_Mutex);
+}
+
+
+/********************************************************************/
+/**                Auxiliary Functions for Mutexes                 **/
+/********************************************************************/
+bool isLocked_Mutex(Mutex* mutex)
+{
+    VERBOSE("isLocked_Mutex\n");
+    return !isWrong_ThreadId(mutex->owner);
+}
+
+bool isOwner_Mutex(Mutex* mutex,CallContext context)
+{
+    return equals_ThreadId( mutex->owner, context );
+}
+
+
+Mutex* isThreadBlockedByMutex(ObjectsInMemory* mutexes,ThreadId threadid)
+{
+    Object* blocket_call;
+    Mutex* mutex;
+    int i,size;
+
+    size = size_Map(mutexes);
+    if (size > 0)
+    {
+        ThreadIdObj* key = create_ThreadIdObj(threadid);
+        for( i = 0; i < size; i++ )
+        {
+            mutex = get_Map(mutexes,key_Map(mutexes,i));
+            if (indexOf_List(mutex->wait_list,key) >= 0)
+                return mutex;
+        }
+    }
+    return NULL;
+}
+
+bool isDeadlockToLockMutex(ThreadId threadid,PThreadMutexTPtr pmutex)
+{
+    Mutex* mutex = getMutex( pmutex );
+
+    for(;;)
+    {
+        if (!isLocked_Mutex(mutex))
+            return false;
+        mutex = isThreadBlockedByMutex(getTypedObjectsInMemory(threadid,&type_Mutex),mutex->owner);
+        if (mutex == NULL)
+            return false;
+        if (isOwner_Mutex(mutex,threadid))
+            return true;
+    }
+}

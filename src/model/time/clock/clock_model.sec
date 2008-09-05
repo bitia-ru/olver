@@ -1,0 +1,1802 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "config/interpretation.seh"
+#include "time/clock/clock_config.h"
+#include "process/fenv/fenv_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/meta/user_model.seh"
+#include "fs/meta/access_model.seh"
+#include "config/system_config.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "time/clock/clock_model.seh"
+
+#pragma SEC subsystem clock "time.clock"
+
+/*
+   The group of functions 'time.clock' consists of:
+       clock_getcpuclockid
+       clock_getres
+       clock_gettime
+       clock_nanosleep
+       clock_settime
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    clock_getcpuclockid - access a process CPU-time clock (ADVANCED REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int clock_getcpuclockid(pid_t pid, clockid_t *clock_id);
+
+DESCRIPTION
+
+    The clock_getcpuclockid() function shall return the clock ID of the CPU-time
+    clock of the process specified by pid. If the process described by pid
+    exists and the calling process has permission, the clock ID of this clock
+    shall be returned in clock_id.
+
+    If pid is zero, the clock_getcpuclockid() function shall return the clock ID
+    of the CPU-time clock of the process making the call, in clock_id.
+
+    The conditions under which one process has permission to obtain the CPU-time
+    clock ID of other processes are implementation-defined.
+
+RETURN VALUE
+
+    Upon successful completion, clock_getcpuclockid() shall return zero;
+    otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The clock_getcpuclockid() function shall fail if:
+
+    [EPERM]
+        The requesting process does not have permission to access the CPU-time
+        clock for the process.
+
+    The clock_getcpuclockid() function may fail if:
+
+    [ESRCH]
+        No process can be found corresponding to the process specified by pid.
+*/
+specification
+IntT clock_getcpuclockid_spec( CallContext context, ProcessId pid, ClockidTObj * clock_id )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /*
+         * If _POSIX_CPUTIME is defined, implementations shall support clock ID values
+         * obtained by invoking clock_getcpuclockid(), which represent the CPU-time clock
+         * of a given process.
+         */
+        REQ( "app.clock_getcpuclockid.01",
+             "implementations shall support clock ID values obtained by invoking clock_getcpuclockid()",
+             true
+           );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Pid
+    {
+        if ( pid.process == 0 )
+        {
+            return { PidIsZero, "pid is zero" };
+        }
+        else
+        {
+            return { PidIsNotZero, "pid is not zero" };
+        }
+    }
+    post
+    {
+        /*
+         * [Upon successful completion, clock_getcpuclockid() shall return zero]
+         * otherwise, an error number shall be returned to indicate the error
+         */
+        ERROR_BEGIN( POSIX_CLOCK_GETCPUCLOCKID,
+                     "clock_getcpuclockid.04.02", clock_getcpuclockid_spec != 0, clock_getcpuclockid_spec
+                   )
+            /*
+             * The clock_getcpuclockid() function shall fail if:
+             *
+             * [EPERM]
+             * The requesting process does not have permission to access the CPU-time clock
+             * for the process.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( POSIX_CLOCK_GETCPUCLOCKID, EPERM,
+                         "clock_getcpuclockid.05.01",
+                         C_Priority != C_Priority.PriorityIsReallyHigh && clock_getcpuclockid_spec == -1
+                       )
+#else
+            ERROR_SHALL( POSIX_CLOCK_GETCPUCLOCKID, EPERM,
+                         "clock_getcpuclockid.05.01",
+                         coverage( C_Priority ) != PriorityIsReallyHigh && clock_getcpuclockid_spec == -1
+                       )
+#endif // NewCTesK
+
+            /*
+             * The clock_getcpuclockid() function may fail if:
+             *
+             * [ESRCH]
+             * No process can be found corresponding to the process specified by pid.
+             */
+            ERROR_MAY(POSIX_CLOCK_GETCPUCLOCKID, ESRCH, "clock_getcpuclockid.06.01", TODO_ERR(ESRCH))
+        ERROR_END()
+
+#ifdef NewCTesK
+        if ( C_Pid == C_Pid.PidIsZero )
+#else
+        if ( coverage( C_Pid ) == PidIsZero )
+#endif // NewCTesK
+        {
+            ProcessState * processState = getProcessState_CallContext( context );
+            /*
+             * If pid is zero, the clock_getcpuclockid() function shall return the clock ID of
+             * the CPU-time clock of the process making the call, in clock_id.
+             */
+            REQ( "clock_getcpuclockid.02", "the clock ID of the CPU-time clock of the process making the call",
+                                           contains_Set( processState->meta.clockIds, clock_id )
+               );
+        }
+        else
+        {
+            ProcessState * processState = getProcessState( pid );
+            /*
+             * The clock_getcpuclockid() function shall return the clock ID of the CPU-time
+             * clock of the process specified by pid. If the process described by pid
+             * exists and the calling process has permission, the clock ID of this clock shall
+             * be returned in clock_id.
+             */
+            REQ( "clock_getcpuclockid.01", "the clock ID of the CPU-time clock of the process specified by pid",
+                                           processState != NULL => contains_Set( processState->meta.clockIds, clock_id )
+               );
+        }
+
+        /*
+         * The conditions under which one process has permission to obtain the CPU-time
+         * clock ID of other processes are implementation-defined.
+         */
+        REQ("clock_getcpuclockid.03", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, clock_getcpuclockid() shall return zero
+         */
+        REQ( "clock_getcpuclockid.04.01", "clock_getcpuclockid() shall return zero", clock_getcpuclockid_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    clock_getres, clock_gettime, clock_settime - clock and timer functions
+    (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int clock_getres(clockid_t clock_id, struct timespec *res);
+    int clock_gettime(clockid_t clock_id, struct timespec *tp);
+    int clock_settime(clockid_t clock_id, const struct timespec *tp);
+
+DESCRIPTION
+
+    The clock_getres() function shall return the resolution of any clock. Clock
+    resolutions are implementation-defined and cannot be set by a process. If
+    the argument res is not NULL, the resolution of the specified clock shall be
+    stored in the location pointed to by res. If res is NULL, the clock
+    resolution is not returned. If the time argument of clock_settime() is not a
+    multiple of res, then the value is truncated to a multiple of res.
+
+    The clock_gettime() function shall return the current value tp for the
+    specified clock, clock_id.
+
+    The clock_settime() function shall set the specified clock, clock_id, to the
+    value specified by tp. Time values that are between two consecutive
+    non-negative integer multiples of the resolution of the specified clock
+    shall be truncated down to the smaller multiple of the resolution.
+
+    A clock may be system-wide (that is, visible to all processes) or
+    per-process (measuring time that is meaningful only within a process). All
+    implementations shall support a clock_id of CLOCK_REALTIME as defined in
+    <time.h>. This clock represents the realtime clock for the system. For this
+    clock, the values returned by clock_gettime() and specified by
+    clock_settime() represent the amount of time (in seconds and nanoseconds)
+    since the Epoch. An implementation may also support additional clocks. The
+    interpretation of time values for these clocks is unspecified.
+
+    If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+    value of the clock shall be used to determine the time of expiration for
+    absolute time services based upon the CLOCK_REALTIME clock. This applies to
+    the time at which armed absolute timers expire. If the absolute time
+    requested at the invocation of such a time service is before the new value
+    of the clock, the time service shall expire immediately as if the clock had
+    reached the requested time normally.
+
+    Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have
+    no effect on threads that are blocked waiting for a relative time service
+    based upon this clock, including the nanosleep() function; nor on the
+    expiration of relative timers based upon this clock. Consequently, these
+    time services shall expire when the requested relative interval elapses,
+    independently of the new or old value of the clock.
+
+    If the Monotonic Clock option is supported, all implementations shall
+    support a clock_id of CLOCK_MONOTONIC defined in <time.h>. This clock
+    represents the monotonic clock for the system. For this clock, the value
+    returned by clock_gettime() represents the amount of time (in seconds and
+    nanoseconds) since an unspecified point in the past (for example, system
+    start-up time, or the Epoch). This point does not change after system
+    start-up time. The value of the CLOCK_MONOTONIC clock cannot be set via
+    clock_settime(). This function shall fail if it is invoked with a clock_id
+    argument of CLOCK_MONOTONIC.
+
+    The effect of setting a clock via clock_settime() on armed per-process
+    timers associated with a clock other than CLOCK_REALTIME is
+    implementation-defined.
+
+    If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+    value of the clock shall be used to determine the time at which the system
+    shall awaken a thread blocked on an absolute clock_nanosleep() call based
+    upon the CLOCK_REALTIME clock. If the absolute time requested at the
+    invocation of such a time service is before the new value of the clock, the
+    call shall return immediately as if the clock had reached the requested time
+    normally.
+
+    Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have
+    no effect on any thread that is blocked on a relative clock_nanosleep()
+    call. Consequently, the call shall return when the requested relative
+    interval elapses, independently of the new or old value of the clock.
+
+    The appropriate privilege to set a particular clock is
+    implementation-defined.
+
+    If _POSIX_CPUTIME is defined, implementations shall support clock ID values
+    obtained by invoking clock_getcpuclockid(), which represent the CPU-time
+    clock of a given process. Implementations shall also support the special
+    clockid_t value CLOCK_PROCESS_CPUTIME_ID, which represents the CPU-time
+    clock of the calling process when invoking one of the clock_*() or timer_*()
+    functions. For these clock IDs, the values returned by clock_gettime() and
+    specified by clock_settime() represent the amount of execution time of the
+    process associated with the clock. Changing the value of a CPU-time clock
+    via clock_settime() shall have no effect on the behavior of the sporadic
+    server scheduling policy (see Scheduling Policies ).
+
+    If _POSIX_THREAD_CPUTIME is defined, implementations shall support clock ID
+    values obtained by invoking pthread_getcpuclockid(), which represent the
+    CPU-time clock of a given thread. Implementations shall also support the
+    special clockid_t value CLOCK_THREAD_CPUTIME_ID, which represents the
+    CPU-time clock of the calling thread when invoking one of the clock_*() or
+    timer_*() functions. For these clock IDs, the values returned by
+    clock_gettime() and specified by clock_settime() shall represent the amount
+    of execution time of the thread associated with the clock. Changing the
+    value of a CPU-time clock via clock_settime() shall have no effect on the
+    behavior of the sporadic server scheduling policy (see Scheduling Policies).
+
+RETURN VALUE
+
+    A return value of 0 shall indicate that the call succeeded. A return value
+    of -1 shall indicate that an error occurred, and errno shall be set to
+    indicate the error.
+
+ERRORS
+
+    The clock_getres(), clock_gettime(), and clock_settime() functions shall
+    fail if:
+
+    [EINVAL]
+        The clock_id argument does not specify a known clock.
+
+    The clock_settime() function shall fail if:
+
+    [EINVAL]
+        The tp argument to clock_settime() is outside the range for the given
+        clock ID.
+    [EINVAL]
+        The tp argument specified a nanosecond value less than zero or greater
+        than or equal to 1000 million.
+    [EINVAL]
+        The value of the clock_id argument is CLOCK_MONOTONIC.
+
+The clock_settime() function may fail if:
+
+    [EPERM]
+        The requesting process does not have the appropriate privilege to set
+        the specified clock.
+*/
+specification
+IntT clock_getres_spec( CallContext context, ClockidTObj * clock_id, TimeSpecTObj * res, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /*
+         * All implementations shall support a clock_id of CLOCK_REALTIME as defined in &
+         * lt;time.h>. This clock represents the realtime clock for the system.
+         */
+        REQ( "app.clock_getres.01", "the realtime clock for the system", true );
+
+        /*
+         * If the Monotonic Clock option is supported, all implementations shall support a
+         * clock_id of CLOCK_MONOTONIC defined in <time.h>. This clock represents
+         * the monotonic clock for the system.
+         */
+        REQ("app.clock_getres.03", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_PROCESS_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * process when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_getres.04", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_THREAD_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * thread when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_getres.06", "", TODO_REQ());
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_ClockId
+    {
+        SystemState * systemState = getSystemState_CallContext( context );
+
+        if ( * clock_id == SUT_CLOCK_REALTIME )
+        {
+            return { ClockIdIsClockRealtime, "clock_id is CLOCK_REALTIME" };
+        }
+        else if ( containsKey_Map( systemState->clocks, clock_id ) )
+        {
+            return { ClockIdIsForKnownClock, "clock_id is for known clock" };
+        }
+        else
+        {
+            return { ClockIdIsUnknown, "clock_id is unknown" };
+        }
+    }
+    coverage C_Res
+    {
+        if ( res == NULL )
+        {
+            return { ResIsNull, "res is null" };
+        }
+        else
+        {
+            return { ResIsNotNull, "res is not null" };
+        }
+    }
+    post
+    {
+        /*
+         * A return value of -1 shall indicate that an error occurred, and errno shall be
+         * set to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_CLOCK_GETRES, "clock_getres.08.02", clock_getres_spec == -1, * errno )
+            /*
+             * The clock_getres(), clock_gettime(), and clock_settime() functions shall fail
+             * if:
+             *
+             * [EINVAL]
+             * The clock_id argument does not specify a known clock.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( POSIX_CLOCK_GETRES, EINVAL, "clock_getres.09.01", C_ClockId == C_ClockId.ClockIdIsUnknown &&
+                                                                           clock_getres_spec == -1
+                       )
+#else
+            ERROR_SHALL( POSIX_CLOCK_GETRES, EINVAL, "clock_getres.09.01", coverage( C_ClockId ) == ClockIdIsUnknown &&
+                                                                           clock_getres_spec == -1
+                       )
+#endif // NewCTesK
+        ERROR_END()
+
+        if ( res != NULL )
+        {
+            /*
+             * The clock_getres() function shall return the resolution of any clock.
+             *
+             * If the argument res is not NULL, the resolution of the specified clock shall be
+             * stored in the location pointed to by res.
+             */
+            SystemState * systemState = getSystemState_CallContext( context )   ;
+            ClockState  * clockState  = get_Map( systemState->clocks, clock_id );
+            REQ( "clock_getres.01.01", "the resolution of the specified clock shall be stored in the res",
+                                       equals( clockState->resolution, res )
+               );
+        }
+        else
+        {
+            /*
+             * If res is NULL, the clock resolution is not returned.
+             */
+            REQ( "clock_getres.01.02", "If res is NULL, the clock resolution is not returned", true );
+        }
+
+        /*
+         * A return value of 0 shall indicate that the call succeeded.
+         */
+        REQ( "clock_getres.08.01", "A return value of 0 shall indicate that the call succeeded", clock_getres_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    clock_getres, clock_gettime, clock_settime - clock and timer functions
+    (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int clock_getres(clockid_t clock_id, struct timespec *res);
+    int clock_gettime(clockid_t clock_id, struct timespec *tp);
+    int clock_settime(clockid_t clock_id, const struct timespec *tp);
+
+DESCRIPTION
+
+    The clock_getres() function shall return the resolution of any clock. Clock
+    resolutions are implementation-defined and cannot be set by a process. If
+    the argument res is not NULL, the resolution of the specified clock shall be
+    stored in the location pointed to by res. If res is NULL, the clock
+    resolution is not returned. If the time argument of clock_settime() is not a
+    multiple of res, then the value is truncated to a multiple of res.
+
+    The clock_gettime() function shall return the current value tp for the
+    specified clock, clock_id.
+
+    The clock_settime() function shall set the specified clock, clock_id, to the
+    value specified by tp. Time values that are between two consecutive
+    non-negative integer multiples of the resolution of the specified clock
+    shall be truncated down to the smaller multiple of the resolution.
+
+    A clock may be system-wide (that is, visible to all processes) or
+    per-process (measuring time that is meaningful only within a process). All
+    implementations shall support a clock_id of CLOCK_REALTIME as defined in
+    <time.h>. This clock represents the realtime clock for the system. For this
+    clock, the values returned by clock_gettime() and specified by
+    clock_settime() represent the amount of time (in seconds and nanoseconds)
+    since the Epoch. An implementation may also support additional clocks. The
+    interpretation of time values for these clocks is unspecified.
+
+    If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+    value of the clock shall be used to determine the time of expiration for
+    absolute time services based upon the CLOCK_REALTIME clock. This applies to
+    the time at which armed absolute timers expire. If the absolute time
+    requested at the invocation of such a time service is before the new value
+    of the clock, the time service shall expire immediately as if the clock had
+    reached the requested time normally.
+
+    Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have
+    no effect on threads that are blocked waiting for a relative time service
+    based upon this clock, including the nanosleep() function; nor on the
+    expiration of relative timers based upon this clock. Consequently, these
+    time services shall expire when the requested relative interval elapses,
+    independently of the new or old value of the clock.
+
+    If the Monotonic Clock option is supported, all implementations shall
+    support a clock_id of CLOCK_MONOTONIC defined in <time.h>. This clock
+    represents the monotonic clock for the system. For this clock, the value
+    returned by clock_gettime() represents the amount of time (in seconds and
+    nanoseconds) since an unspecified point in the past (for example, system
+    start-up time, or the Epoch). This point does not change after system
+    start-up time. The value of the CLOCK_MONOTONIC clock cannot be set via
+    clock_settime(). This function shall fail if it is invoked with a clock_id
+    argument of CLOCK_MONOTONIC.
+
+    The effect of setting a clock via clock_settime() on armed per-process
+    timers associated with a clock other than CLOCK_REALTIME is
+    implementation-defined.
+
+    If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+    value of the clock shall be used to determine the time at which the system
+    shall awaken a thread blocked on an absolute clock_nanosleep() call based
+    upon the CLOCK_REALTIME clock. If the absolute time requested at the
+    invocation of such a time service is before the new value of the clock, the
+    call shall return immediately as if the clock had reached the requested time
+    normally.
+
+    Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have
+    no effect on any thread that is blocked on a relative clock_nanosleep()
+    call. Consequently, the call shall return when the requested relative
+    interval elapses, independently of the new or old value of the clock.
+
+    The appropriate privilege to set a particular clock is
+    implementation-defined.
+
+    If _POSIX_CPUTIME is defined, implementations shall support clock ID values
+    obtained by invoking clock_getcpuclockid(), which represent the CPU-time
+    clock of a given process. Implementations shall also support the special
+    clockid_t value CLOCK_PROCESS_CPUTIME_ID, which represents the CPU-time
+    clock of the calling process when invoking one of the clock_*() or timer_*()
+    functions. For these clock IDs, the values returned by clock_gettime() and
+    specified by clock_settime() represent the amount of execution time of the
+    process associated with the clock. Changing the value of a CPU-time clock
+    via clock_settime() shall have no effect on the behavior of the sporadic
+    server scheduling policy (see Scheduling Policies ).
+
+    If _POSIX_THREAD_CPUTIME is defined, implementations shall support clock ID
+    values obtained by invoking pthread_getcpuclockid(), which represent the
+    CPU-time clock of a given thread. Implementations shall also support the
+    special clockid_t value CLOCK_THREAD_CPUTIME_ID, which represents the
+    CPU-time clock of the calling thread when invoking one of the clock_*() or
+    timer_*() functions. For these clock IDs, the values returned by
+    clock_gettime() and specified by clock_settime() shall represent the amount
+    of execution time of the thread associated with the clock. Changing the
+    value of a CPU-time clock via clock_settime() shall have no effect on the
+    behavior of the sporadic server scheduling policy (see Scheduling Policies).
+
+RETURN VALUE
+
+    A return value of 0 shall indicate that the call succeeded. A return value
+    of -1 shall indicate that an error occurred, and errno shall be set to
+    indicate the error.
+
+ERRORS
+
+    The clock_getres(), clock_gettime(), and clock_settime() functions shall
+    fail if:
+
+    [EINVAL]
+        The clock_id argument does not specify a known clock.
+
+    The clock_settime() function shall fail if:
+
+    [EINVAL]
+        The tp argument to clock_settime() is outside the range for the given
+        clock ID.
+    [EINVAL]
+        The tp argument specified a nanosecond value less than zero or greater
+        than or equal to 1000 million.
+    [EINVAL]
+        The value of the clock_id argument is CLOCK_MONOTONIC.
+
+The clock_settime() function may fail if:
+
+    [EPERM]
+        The requesting process does not have the appropriate privilege to set
+        the specified clock.
+*/
+specification
+IntT clock_gettime_spec( CallContext context, ClockidTObj * clock_id, TimeSpecTObj * tp, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /*
+         * All implementations shall support a clock_id of CLOCK_REALTIME as defined in &
+         * lt;time.h>. This clock represents the realtime clock for the system.
+         */
+        REQ( "app.clock_gettime.01", "the realtime clock for the system", true );
+
+        /*
+         * If the Monotonic Clock option is supported, all implementations shall support a
+         * clock_id of CLOCK_MONOTONIC defined in <time.h>. This clock represents
+         * the monotonic clock for the system.
+         */
+        REQ("app.clock_gettime.03", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_PROCESS_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * process when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_gettime.04", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_THREAD_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * thread when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_gettime.06", "", TODO_REQ());
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_ClockId
+    {
+        SystemState * systemState = getSystemState_CallContext( context );
+
+        if ( * clock_id == SUT_CLOCK_REALTIME )
+        {
+            return { ClockIdIsClockRealtime, "clock_id is CLOCK_REALTIME" };
+        }
+        else if ( containsKey_Map( systemState->clocks, clock_id ) )
+        {
+            return { ClockIdIsForKnownClock, "clock_id is for known clock" };
+        }
+        else
+        {
+            return { ClockIdIsUnknown, "clock_id is unknown" };
+        }
+    }
+    post
+    {
+        SystemState * systemState = getSystemState_CallContext( context )   ;
+        ClockState  * clockState  = get_Map( systemState->clocks, clock_id );
+
+        /*
+         * A return value of -1 shall indicate that an error occurred, and errno shall be
+         * set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_CLOCK_GETTIME, "clock_gettime.08.02", clock_gettime_spec == -1, * errno )
+            /*
+             * The clock_getres(), clock_gettime(), and clock_settime() functions shall fail
+             * if:
+             *
+             * [EINVAL]
+             * The clock_id argument does not specify a known clock.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( POSIX_CLOCK_GETTIME, EINVAL, "clock_gettime.09.01", C_ClockId == C_ClockId.ClockIdIsUnknown &&
+                                                                             clock_gettime_spec == -1
+                       )
+#else
+            ERROR_SHALL( POSIX_CLOCK_GETTIME, EINVAL, "clock_gettime.09.01", coverage( C_ClockId ) == ClockIdIsUnknown &&
+                                                                             clock_gettime_spec == -1
+                       )
+#endif // NewCTesK
+        ERROR_END()
+
+        /*
+         * The clock_gettime() function shall return the current value tp for the
+         * specified clock, clock_id.
+         */
+        REQ( "clock_gettime.01", "The function shall return the current value tp for the specified clock, clock_id",
+                                 equals( clockState->observedValues->nanosecPrecision, tp )
+           );
+
+        /*
+         * For this clock, the values returned by clock_gettime() and specified by
+         * clock_settime() represent the amount of time (in seconds and nanoseconds)
+         * since the Epoch.
+         */
+        REQ("clock_gettime.02", "", TODO_REQ());
+
+        /*
+         * For this clock, the value returned by clock_gettime() represents the amount of
+         * time (in seconds and nanoseconds) since an unspecified point in the past (for
+         * example, system start-up time, or the Epoch).
+         */
+        REQ("clock_gettime.03", "", TODO_REQ());
+
+        /*
+         * This point does not change after system start-up time.
+         */
+        REQ("clock_gettime.04", "", TODO_REQ());
+
+        /*
+         * For these clock IDs, the values returned by clock_gettime() and specified by
+         * clock_settime() represent the amount of execution time of the process
+         * associated with the clock.
+         */
+        REQ("clock_gettime.05", "", TODO_REQ());
+
+        /*
+         * For these clock IDs, the values returned by clock_gettime() and specified by
+         * clock_settime() shall represent the amount of execution time of the thread
+         * associated with the clock.
+         */
+        REQ("clock_gettime.06", "", TODO_REQ());
+
+        /*
+         * A return value of 0 shall indicate that the call succeeded.
+         */
+        REQ( "clock_gettime.08.01", "A return of 0 shall indicate that the call succeeded", clock_gettime_spec == 0 );
+
+        return true;
+    }
+}
+
+/** common for clock_nanosleep, nanosleep, sleep and usleep **/
+specification typedef struct SleepCall SleepCall = {};
+
+SleepCall * create_SleepCall( String * funcName, CallContext context, TimeInterval stimulTime,
+                              ClockidTObj * clock_id, IntT flags, TimeSpecTObj * rqtp, TimeSpecTObj * rmtp,
+                              UIntT nanoseconds
+                            )
+{
+    return create( & type_SleepCall, funcName, context, stimulTime, clock_id, flags, rqtp, rmtp, nanoseconds );
+}
+
+specification typedef struct SleepReturnType SleepReturnType = {};
+
+SleepReturnType * create_SleepReturnType(
+    String       * funcName      ,
+    CallContext    context       ,
+    IntT           returned_value,
+    TimeSpecTObj * rmtp          ,
+    ErrorCode    * error_code
+)
+{
+    return create(&type_SleepReturnType,
+        funcName,
+        context,
+        returned_value,
+        rmtp,
+        error_code);
+}
+
+reaction SleepReturnType * sleep_return( void )
+{
+    post
+    {
+        String       * funcName   = sleep_return->funcName      ;
+        CallContext    context    = sleep_return->context       ;
+        IntT           sleep_spec = sleep_return->returned_value;
+        TimeSpecTObj * rmtp       = sleep_return->rmtp          ;
+        ErrorCode    * errno      = sleep_return->error_code    ;
+
+        SleepCall * blocked_call = showCommand( @getBlockedCalls(), context, "sleep" );
+        String       * name        = blocked_call->funcName   ;
+        TimeInterval   stimulTime  = blocked_call->stimulTime ;
+        ClockidTObj  * clock_id    = blocked_call->clock_id   ;
+        IntT           flags       = blocked_call->flags      ;
+        TimeSpecTObj * rqtp        = blocked_call->rqtp       ;
+        TimeSpecTObj * pre_rmtp    = blocked_call->rmtp       ;
+        UIntT          nanoseconds = blocked_call->nanoseconds;
+
+        SystemState * systemState = getSystemState_CallContext( context );
+        ProcessState * processState = getProcessState_CallContext( context );
+        TimeUnit sleepTime = diffTimeMarks( stimulTime.minMark, timestamp.maxMark );
+
+        IntT errorCode;
+        bool checkResult12, checkResult34;
+
+        /* [Consistency of test suite] */
+        REQ( "", "equals( funcName, name )", equals( funcName, name ) );
+
+        if      ( equals( create_String( "clock_nanosleep" ), name ) ) { errorCode = sleep_spec; }
+        else if ( equals( create_String( "nanosleep"       ), name ) ) { errorCode = * errno   ; }
+        else if ( equals( create_String( "sleep"           ), name ) ) { errorCode = sleep_spec; }
+        else if ( equals( create_String( "usleep"          ), name ) ) { errorCode = * errno   ; }
+
+        /*
+         * If the clock_nanosleep() function returns because it has been interrupted by a
+         * signal, it shall return the corresponding error value.
+         *
+         * If clock_nanosleep() fails, it shall return the corresponding error value.
+         *
+         * If the nanosleep() function returns because it has been interrupted by a
+         * signal, it shall return a value of -1 and set errno to indicate the
+         * interruption.
+         *
+         * If nanosleep() fails, it shall return a value of -1 and set errno to indicate
+         * the error.
+         *
+         * If sleep() returns due to delivery of a signal, the return value shall be the "
+         * unslept" amount (the requested time minus the time actually slept) in seconds.
+         *
+         * [Upon successful completion, usleep() shall return 0]
+         * otherwise, it shall return -1 and set errno to indicate the error
+         */
+        ERROR_BEGIN( POSIX_CLOCK_NANOSLEEP,
+                     "clock_nanosleep.10.02;nanosleep.10.02;sleep.10.02;usleep.10.02", sleep_spec != 0, errorCode
+                   )
+            if ( equals( create_String( "clock_nanosleep" ), name ) )
+            {
+                extraCodes = HAS_EXTRA_ERROR_CODES( POSIX_CLOCK_NANOSLEEP );
+            }
+            else if ( equals( create_String( "nanosleep" ), name ) )
+            {
+                extraCodes = HAS_EXTRA_ERROR_CODES( POSIX_NANOSLEEP );
+            }
+            else if ( equals( create_String( "usleep" ), name ) )
+            {
+                extraCodes = HAS_EXTRA_ERROR_CODES( POSIX_USLEEP );
+            }
+
+            /*
+             * The clock_nanosleep() function shall fail if:
+             *
+             * [EINTR]
+             * The clock_nanosleep() function was interrupted by a signal.
+             *
+             * The nanosleep() function shall fail if:
+             *
+             * [EINTR]
+             * The nanosleep() function was interrupted by a signal.
+             */
+            error_shall4( name, POSIX_CLOCK_NANOSLEEP, EINTR, "clock_nanosleep.12.01", TODO_ERR( EINTR ) )
+            error_shall4( name, POSIX_NANOSLEEP      , EINTR, "nanosleep.12.01"      , TODO_ERR( EINTR ) )
+
+            /*
+             * The clock_nanosleep() function shall fail if:
+             *
+             * [EINVAL]
+             * The rqtp argument specified a nanosecond value less than zero or greater than
+             * or equal to 1000 million; or the TIMER_ABSTIME flag was specified in flags and
+             * the rqtp argument is outside the range for the clock specified by clock_id; or
+             * the clock_id argument does not specify a known clock, or specifies the CPU-time
+             * clock of the calling thread.
+             *
+             * The clock_nanosleep() function shall fail if the clock_id argument refers to
+             * the CPU-time clock of the calling thread.
+             *
+             * The nanosleep() function shall fail if:
+             *
+             * [EINVAL]
+             * The rqtp argument specified a nanosecond value less than zero or greater than
+             * or equal to 1000 million.
+             *
+             * The usleep() function may fail if:
+             *
+             * [EINVAL]
+             * The time interval specified one million or more microseconds.
+             *
+             * The useconds argument shall be less than one million.
+             */
+            checkResult12 = ( rqtp != NULL && ( rqtp->nsec < 0 || 1000000000 <= rqtp->nsec ) );
+            error_shall4( name, POSIX_CLOCK_NANOSLEEP, EINVAL,
+                          "clock_nanosleep.12.02",
+                          /* The rqtp argument specified a nanosecond value less than zero or greater
+                           * than or equal to 1000 million
+                           */
+                          checkResult12                                                             ||
+                          /* the TIMER_ABSTIME flag was specified in flags and the rqtp argument is
+                           * outside the range for the clock specified by clock_id
+                           */
+                          ( ( flags & SUT_TIMER_ABSTIME ) != 0 && sleep_spec != 0 )                 ||
+                          /* the clock_id argument does not specify a known clock */
+                          ( ! containsKey_Map( systemState->clocks, clock_id ) && sleep_spec != 0 ) ||
+                          /* the clock_id argument specifies the CPU-time clock of the calling thread */
+                          contains_Set( processState->meta.clockIds, clock_id )
+                        )
+            error_shall4( name, POSIX_NANOSLEEP, EINVAL, "nanosleep.12.02", checkResult12                 )
+            error_may4  ( name, POSIX_USLEEP   , EINVAL, "usleep.12.02"   , nanoseconds / 1000 >= 1000000 )
+
+            /*
+             * The clock_nanosleep() function shall fail if:
+             *
+             * [ENOTSUP]
+             * The clock_id argument specifies a clock for which clock_nanosleep() is not
+             * supported, such as a CPU-time clock.
+             */
+            error_shall4( name, POSIX_CLOCK_NANOSLEEP, ENOTSUP, "clock_nanosleep.12.03", TODO_ERR( ENOTSUP ) )
+
+            if ( sleep_spec != 0 )
+            {
+                if ( ! equals( create_String( "clock_nanosleep" ), name ) || ( flags & SUT_TIMER_ABSTIME ) == 0 )
+                {
+                    if ( pre_rmtp != NULL )
+                    {
+                        /*
+                         * For the relative clock_nanosleep() function, if the rmtp argument is non-NULL,
+                         * the timespec structure referenced by it shall be updated to contain the amount
+                         * of time remaining in the interval (the requested time minus the time actually
+                         * slept).
+                         *
+                         * If the rmtp argument is non-NULL, the timespec structure referenced by it is
+                         * updated to contain the amount of time remaining in the interval (the requested
+                         * time minus the time actually slept).
+                         */
+                        req4( name, "clock_nanosleep.11.01", "", TODO_REQ() );
+                        req4( name, "nanosleep.11.01"      , "", TODO_REQ() );
+                    }
+                    else
+                    {
+                        /*
+                         * If the rmtp argument is NULL, the remaining time is not returned.
+                         *
+                         * If the rmtp argument is NULL, the remaining time is not returned.
+                         */
+                        req4( name, "clock_nanosleep.11.02", "the remaining time is not returned", rmtp == NULL );
+                        req4( name, "nanosleep.11.02"      , "the remaining time is not returned", rmtp == NULL );
+                    }
+                }
+                else
+                {
+                    /*
+                     * The absolute clock_nanosleep() function has no effect on the structure
+                     * referenced by rmtp.
+                     */
+                    req4( name, "clock_nanosleep.11.03",
+                                "The absolute clock_nanosleep() function has no effect on rmtp",
+                                equals( pre_rmtp, rmtp )
+                        );
+                }
+            }
+        ERROR_END()
+
+        if ( ! equals( create_String( "clock_nanosleep" ), name ) || ( flags & SUT_TIMER_ABSTIME ) == 0 )
+        {
+            /*
+             * If the flag TIMER_ABSTIME is not set in the flags argument, the
+             * clock_nanosleep() function shall cause the current thread to be suspended from
+             * execution until either the time interval specified by the rqtp argument has
+             * elapsed, or a signal is delivered to the calling thread and its action is to
+             * invoke a signal-catching function, or the process is terminated.
+             *
+             * The nanosleep() function shall cause the current thread to be suspended from
+             * execution until either the time interval specified by the rqtp argument has
+             * elapsed or a signal is delivered to the calling thread, and its action is to
+             * invoke a signal-catching function or to terminate the process.
+             *
+             * The sleep() function shall cause the calling thread to be suspended from
+             * execution until either the number of realtime seconds specified by the
+             * argument seconds has elapsed or a signal is delivered to the calling thread and
+             * its action is to invoke a signal-catching function or to terminate the process.
+             *
+             * The usleep() function shall cause the calling thread to be suspended from
+             * execution until either the number of realtime microseconds specified by the
+             * argument useconds has elapsed or a signal is delivered to the calling thread
+             * and its action is to invoke a signal-catching function or to terminate the
+             * process.
+             *
+             * If the value of useconds is 0, then the call has no effect.
+             */
+            checkResult12 = ( rqtp != NULL && rqtp->sec * 1000000000 + rqtp->nsec <= sleepTime );
+            checkResult34 = (                 nanoseconds                         <= sleepTime );
+            req4( name, "clock_nanosleep.01", "the time interval specified by the rqtp has elapsed", checkResult12 );
+            req4( name, "nanosleep.01"      , "the time interval specified by the rqtp has elapsed", checkResult12 );
+            req4( name, "sleep.01"          , "the seconds of realtime seconds has elapsed"        , checkResult34 );
+            req4( name, "usleep.01"         , "the useconds of realtime microseconds has elapsed"  , checkResult34 );
+
+            /*
+             * The clock used to measure the time shall be the clock specified by clock_id.
+             */
+            req4( name, "clock_nanosleep.02",
+                        "The clock used to measure the time shall be the clock specified by clock_id",
+                        true
+               );
+
+            /*
+             * But, except for the case of being interrupted by a signal, the suspension time
+             * for the relative clock_nanosleep() function (that is, with the TIMER_ABSTIME
+             * flag not set) shall not be less than the time interval specified by rqtp, as
+             * measured by the corresponding clock.
+             *
+             * But, except for the case of being interrupted by a signal, the suspension time
+             * shall not be less than the time specified by rqtp, as measured by the system
+             * clock CLOCK_REALTIME.
+             */
+            checkResult12 = ( rqtp != NULL && rqtp->sec * 1000000000 + rqtp->nsec <= sleepTime );
+            req4( name, "clock_nanosleep.06", "the suspension time shall not be less than the rqtp", checkResult12 );
+            req4( name, "nanosleep.06"      , "the suspension time shall not be less than the rqtp", checkResult12 );
+        }
+        else
+        {
+            /*
+             * If the flag TIMER_ABSTIME is set in the flags argument, the clock_nanosleep()
+             * function shall cause the current thread to be suspended from execution until
+             * either the time value of the clock specified by clock_id reaches the absolute
+             * time specified by the rqtp argument, or a signal is delivered to the calling
+             * thread and its action is to invoke a signal-catching function, or the process
+             * is terminated.
+             */
+            req4( name, "clock_nanosleep.03",
+                        "the time value of the clock specified by clock_id reaches the absolute time",
+                        rqtp->sec * 1000000000 + rqtp->nsec <= (long)timestamp.maxMark.timemark ||
+                        true                                                                       // signal
+                );
+
+            /*
+             * If, at the time of the call, the time value specified by rqtp is less than or
+             * equal to the time value of the specified clock, then clock_nanosleep() shall
+             * return immediately and the calling process shall not be suspended.
+             */
+            req4( name, "clock_nanosleep.04", "clock_nanosleep() shall return immediately", true );
+
+            /*
+             * The suspension for the absolute clock_nanosleep() function (that is, with the
+             * TIMER_ABSTIME flag set) shall be in effect at least until the value of the
+             * corresponding clock reaches the absolute time specified by rqtp, except for the
+             * case of being interrupted by a signal.
+             */
+            req4( name, "clock_nanosleep.07",
+                        "the value of the corresponding clock reaches the rqtp",
+                        rqtp->sec * 1000000000 + rqtp->nsec <= (long)timestamp.maxMark.timemark ||
+                        true                                                                       // signal
+                );
+        }
+
+        /*
+         * The suspension time caused by this function may be longer than requested
+         *
+         * because the argument value is rounded up to an integer multiple of the sleep
+         * resolution
+         *
+         * The suspension time may be longer than requested
+         *
+         * because the argument value is rounded up to an integer multiple of the sleep
+         * resolution
+         */
+        req4( name, "clock_nanosleep.05.01", "", TODO_REQ() );
+        req4( name, "nanosleep.05.01"      , "", TODO_REQ() );
+
+        /*
+         * The suspension time caused by this function may be longer than requested
+         *
+         * because of the scheduling of other activity by the system
+         *
+         * The suspension time may be longer than requested
+         *
+         * because of the scheduling of other activity by the system.
+         *
+         * The suspension time may be longer than requested due to the scheduling of
+         * other activity by the system.
+         *
+         * The suspension time may be longer than requested due to the scheduling of
+         * other activity by the system.
+         */
+        req4( name, "clock_nanosleep.05.02", "", TODO_REQ() );
+        req4( name, "nanosleep.05.02"      , "", TODO_REQ() );
+        req4( name, "sleep.05.02"          , "", TODO_REQ() );
+        req4( name, "usleep.05.02"         , "", TODO_REQ() );
+
+        /*
+         * The use of the clock_nanosleep() function shall have no effect on the action or
+         * blockage of any signal.
+         *
+         * The use of the nanosleep() function has no effect on the action or blockage of
+         * any signal.
+         */
+        req4( name, "clock_nanosleep.08", "", TODO_REQ() );
+        req4( name, "nanosleep.08"      , "", TODO_REQ() );
+
+        /*
+         * It is unspecified whether clock_id values of other CPU-time clocks are allowed.
+         */
+        req4( name, "clock_nanosleep.09", "", TODO_REQ() );
+
+        /*
+         * If the clock_nanosleep() function returns because the requested time has
+         * elapsed, its return value shall be zero.
+         *
+         * If the nanosleep() function returns because the requested time has elapsed, its
+         * return value shall be zero.
+         *
+         * If sleep() returns because the requested time has elapsed, the value returned
+         * shall be 0.
+         *
+         * Upon successful completion, usleep() shall return 0
+         */
+        req4( name, "clock_nanosleep.10.01", "return value shall be zero", sleep_spec == 0 );
+        req4( name, "nanosleep.10.01"      , "return value shall be zero", sleep_spec == 0 );
+        req4( name, "sleep.10.01"          , "return value shall be zero", sleep_spec == 0 );
+        req4( name, "usleep.10.01"         , "return value shall be zero", sleep_spec == 0 );
+
+        return true;
+    }
+}
+
+void onSleepReturn( CallContext context )
+{
+    // verbose( "onClockNanosleepReturn : context is [%d|%d|%d]\n", context.system, context.process, context.thread );
+    endCommand( context, "sleep" );
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    clock_nanosleep - high resolution sleep with specifiable clock (ADVANCED
+    REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int clock_nanosleep(clockid_t clock_id, int flags,
+           const struct timespec *rqtp, struct timespec *rmtp);
+
+DESCRIPTION
+
+    If the flag TIMER_ABSTIME is not set in the flags argument, the
+    clock_nanosleep() function shall cause the current thread to be suspended
+    from execution until either the time interval specified by the rqtp argument
+    has elapsed, or a signal is delivered to the calling thread and its action
+    is to invoke a signal-catching function, or the process is terminated. The
+    clock used to measure the time shall be the clock specified by clock_id.
+
+    If the flag TIMER_ABSTIME is set in the flags argument, the
+    clock_nanosleep() function shall cause the current thread to be suspended
+    from execution until either the time value of the clock specified by
+    clock_id reaches the absolute time specified by the rqtp argument, or a
+    signal is delivered to the calling thread and its action is to invoke a
+    signal-catching function, or the process is terminated. If, at the time of
+    the call, the time value specified by rqtp is less than or equal to the time
+    value of the specified clock, then clock_nanosleep() shall return
+    immediately and the calling process shall not be suspended.
+
+    The suspension time caused by this function may be longer than requested
+    because the argument value is rounded up to an integer multiple of the sleep
+    resolution, or because of the scheduling of other activity by the system.
+    But, except for the case of being interrupted by a signal, the suspension
+    time for the relative clock_nanosleep() function (that is, with the
+    TIMER_ABSTIME flag not set) shall not be less than the time interval
+    specified by rqtp, as measured by the corresponding clock. The suspension
+    for the absolute clock_nanosleep() function (that is, with the TIMER_ABSTIME
+    flag set) shall be in effect at least until the value of the corresponding
+    clock reaches the absolute time specified by rqtp, except for the case of
+    being interrupted by a signal.
+
+    The use of the clock_nanosleep() function shall have no effect on the action
+    or blockage of any signal.
+
+    The clock_nanosleep() function shall fail if the clock_id argument refers to
+    the CPU-time clock of the calling thread. It is unspecified whether clock_id
+    values of other CPU-time clocks are allowed.
+
+RETURN VALUE
+
+    If the clock_nanosleep() function returns because the requested time has
+    elapsed, its return value shall be zero.
+
+    If the clock_nanosleep() function returns because it has been interrupted by
+    a signal, it shall return the corresponding error value. For the relative
+    clock_nanosleep() function, if the rmtp argument is non-NULL, the timespec
+    structure referenced by it shall be updated to contain the amount of time
+    remaining in the interval (the requested time minus the time actually
+    slept). If the rmtp argument is NULL, the remaining time is not returned.
+    The absolute clock_nanosleep() function has no effect on the structure
+    referenced by rmtp.
+
+    If clock_nanosleep() fails, it shall return the corresponding error value.
+
+ERRORS
+
+    The clock_nanosleep() function shall fail if:
+
+    [EINTR]
+        The clock_nanosleep() function was interrupted by a signal.
+    [EINVAL]
+        The rqtp argument specified a nanosecond value less than zero or greater
+        than or equal to 1000 million; or the TIMER_ABSTIME flag was specified
+        in flags and the rqtp argument is outside the range for the clock
+        specified by clock_id; or the clock_id argument does not specify a known
+        clock, or specifies the CPU-time clock of the calling thread.
+    [ENOTSUP]
+        The clock_id argument specifies a clock for which clock_nanosleep() is
+        not supported, such as a CPU-time clock.
+*/
+specification
+void clock_nanosleep_spec
+         ( CallContext context, ClockidTObj * clock_id, IntT flags, TimeSpecTObj * rqtp, TimeSpecTObj * rmtp )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /*
+         * All implementations shall support a clock_id of CLOCK_REALTIME as defined in &
+         * lt;time.h>. This clock represents the realtime clock for the system.
+         */
+        REQ( "app.clock_nanosleep.01", "the realtime clock for the system", true );
+
+        /*
+         * If the Monotonic Clock option is supported, all implementations shall support a
+         * clock_id of CLOCK_MONOTONIC defined in <time.h>. This clock represents
+         * the monotonic clock for the system.
+         */
+        REQ("app.clock_nanosleep.03", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_PROCESS_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * process when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_nanosleep.04", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_THREAD_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * thread when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_nanosleep.06", "", TODO_REQ());
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_ClockId
+    {
+        SystemState * systemState = getSystemState_CallContext( context );
+
+        if ( * clock_id == SUT_CLOCK_REALTIME )
+        {
+            return { ClockIdIsClockRealtime, "clock_id is CLOCK_REALTIME" };
+        }
+        else if ( containsKey_Map( systemState->clocks, clock_id ) )
+        {
+            return { ClockIdIsForKnownClock, "clock_id is for known clock" };
+        }
+        else
+        {
+            return { ClockIdIsUnknown, "clock_id is unknown" };
+        }
+    }
+    coverage C_Flags
+    {
+        if ( ( flags & SUT_TIMER_ABSTIME ) == 0 )
+        {
+            return { TimerAbstimeIsNotSetInFlags, "TIMER_ABSTIME is not set in the flags" };
+        }
+        else
+        {
+            return { TimerAbstimeIsSetInFlags, "TIMER_ABSTIME is set in the flags" };
+        }
+    }
+    coverage C_Rqtp
+    {
+        if ( 0 <= rqtp->nsec && rqtp->nsec < 1000000000 )
+        {
+            return { RqtpNsecIsCorrect, "rqtp->nsec is correct" };
+        }
+        else
+        {
+            return { RqtpNsecIsOutOfBounds, "rqtp->nsec is out of bounds" };
+        }
+    }
+    coverage C_Rmtp
+    {
+        if ( rmtp == NULL )
+        {
+            return { RmtpIsNull, "rmtp is null" };
+        }
+        else
+        {
+            return { RmtpIsNotNull, "rmtp is not null" };
+        }
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onClockNanosleep( CallContext context,
+                       ClockidTObj * clock_id, IntT flags, TimeSpecTObj * rqtp, TimeSpecTObj * rmtp,
+                       TimeInterval stimulTime
+                     )
+{
+    // verbose( "onClockNanosleep : context    is [%d|%d|%d]\n", context.system, context.process, context.thread );
+    // verbose( "                    * clock_id is [%d]\n", * clock_id );
+    // verbose( "                    flags      is [%d]\n", flags );
+    // verbose( "                    * rqtp     is [%d|%d]\n", rqtp->sec, rqtp->nsec );
+    // if ( rmtp != NULL ) { verbose( "                    * rmtp     is [%d|%d]\n", rmtp->sec, rmtp->nsec ); }
+    startCommand( context, "sleep",
+                  create_SleepCall
+                      ( create_String( "clock_nanosleep" ), context, stimulTime, clock_id, flags, rqtp, rmtp, 0 )
+                );
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    clock_getres, clock_gettime, clock_settime - clock and timer functions
+    (REALTIME)
+
+SYNOPSIS
+
+    #include <time.h>
+    int clock_getres(clockid_t clock_id, struct timespec *res);
+    int clock_gettime(clockid_t clock_id, struct timespec *tp);
+    int clock_settime(clockid_t clock_id, const struct timespec *tp);
+
+DESCRIPTION
+
+    The clock_getres() function shall return the resolution of any clock. Clock
+    resolutions are implementation-defined and cannot be set by a process. If
+    the argument res is not NULL, the resolution of the specified clock shall be
+    stored in the location pointed to by res. If res is NULL, the clock
+    resolution is not returned. If the time argument of clock_settime() is not a
+    multiple of res, then the value is truncated to a multiple of res.
+
+    The clock_gettime() function shall return the current value tp for the
+    specified clock, clock_id.
+
+    The clock_settime() function shall set the specified clock, clock_id, to the
+    value specified by tp. Time values that are between two consecutive
+    non-negative integer multiples of the resolution of the specified clock
+    shall be truncated down to the smaller multiple of the resolution.
+
+    A clock may be system-wide (that is, visible to all processes) or
+    per-process (measuring time that is meaningful only within a process). All
+    implementations shall support a clock_id of CLOCK_REALTIME as defined in
+    <time.h>. This clock represents the realtime clock for the system. For this
+    clock, the values returned by clock_gettime() and specified by
+    clock_settime() represent the amount of time (in seconds and nanoseconds)
+    since the Epoch. An implementation may also support additional clocks. The
+    interpretation of time values for these clocks is unspecified.
+
+    If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+    value of the clock shall be used to determine the time of expiration for
+    absolute time services based upon the CLOCK_REALTIME clock. This applies to
+    the time at which armed absolute timers expire. If the absolute time
+    requested at the invocation of such a time service is before the new value
+    of the clock, the time service shall expire immediately as if the clock had
+    reached the requested time normally.
+
+    Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have
+    no effect on threads that are blocked waiting for a relative time service
+    based upon this clock, including the nanosleep() function; nor on the
+    expiration of relative timers based upon this clock. Consequently, these
+    time services shall expire when the requested relative interval elapses,
+    independently of the new or old value of the clock.
+
+    If the Monotonic Clock option is supported, all implementations shall
+    support a clock_id of CLOCK_MONOTONIC defined in <time.h>. This clock
+    represents the monotonic clock for the system. For this clock, the value
+    returned by clock_gettime() represents the amount of time (in seconds and
+    nanoseconds) since an unspecified point in the past (for example, system
+    start-up time, or the Epoch). This point does not change after system
+    start-up time. The value of the CLOCK_MONOTONIC clock cannot be set via
+    clock_settime(). This function shall fail if it is invoked with a clock_id
+    argument of CLOCK_MONOTONIC.
+
+    The effect of setting a clock via clock_settime() on armed per-process
+    timers associated with a clock other than CLOCK_REALTIME is
+    implementation-defined.
+
+    If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+    value of the clock shall be used to determine the time at which the system
+    shall awaken a thread blocked on an absolute clock_nanosleep() call based
+    upon the CLOCK_REALTIME clock. If the absolute time requested at the
+    invocation of such a time service is before the new value of the clock, the
+    call shall return immediately as if the clock had reached the requested time
+    normally.
+
+    Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have
+    no effect on any thread that is blocked on a relative clock_nanosleep()
+    call. Consequently, the call shall return when the requested relative
+    interval elapses, independently of the new or old value of the clock.
+
+    The appropriate privilege to set a particular clock is
+    implementation-defined.
+
+    If _POSIX_CPUTIME is defined, implementations shall support clock ID values
+    obtained by invoking clock_getcpuclockid(), which represent the CPU-time
+    clock of a given process. Implementations shall also support the special
+    clockid_t value CLOCK_PROCESS_CPUTIME_ID, which represents the CPU-time
+    clock of the calling process when invoking one of the clock_*() or timer_*()
+    functions. For these clock IDs, the values returned by clock_gettime() and
+    specified by clock_settime() represent the amount of execution time of the
+    process associated with the clock. Changing the value of a CPU-time clock
+    via clock_settime() shall have no effect on the behavior of the sporadic
+    server scheduling policy (see Scheduling Policies ).
+
+    If _POSIX_THREAD_CPUTIME is defined, implementations shall support clock ID
+    values obtained by invoking pthread_getcpuclockid(), which represent the
+    CPU-time clock of a given thread. Implementations shall also support the
+    special clockid_t value CLOCK_THREAD_CPUTIME_ID, which represents the
+    CPU-time clock of the calling thread when invoking one of the clock_*() or
+    timer_*() functions. For these clock IDs, the values returned by
+    clock_gettime() and specified by clock_settime() shall represent the amount
+    of execution time of the thread associated with the clock. Changing the
+    value of a CPU-time clock via clock_settime() shall have no effect on the
+    behavior of the sporadic server scheduling policy (see Scheduling Policies).
+
+RETURN VALUE
+
+    A return value of 0 shall indicate that the call succeeded. A return value
+    of -1 shall indicate that an error occurred, and errno shall be set to
+    indicate the error.
+
+ERRORS
+
+    The clock_getres(), clock_gettime(), and clock_settime() functions shall
+    fail if:
+
+    [EINVAL]
+        The clock_id argument does not specify a known clock.
+
+    The clock_settime() function shall fail if:
+
+    [EINVAL]
+        The tp argument to clock_settime() is outside the range for the given
+        clock ID.
+    [EINVAL]
+        The tp argument specified a nanosecond value less than zero or greater
+        than or equal to 1000 million.
+    [EINVAL]
+        The value of the clock_id argument is CLOCK_MONOTONIC.
+
+The clock_settime() function may fail if:
+
+    [EPERM]
+        The requesting process does not have the appropriate privilege to set
+        the specified clock.
+*/
+specification
+IntT clock_settime_spec( CallContext context, ClockidTObj * clock_id, TimeSpecTObj * tp, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /*
+         * All implementations shall support a clock_id of CLOCK_REALTIME as defined in &
+         * lt;time.h>. This clock represents the realtime clock for the system.
+         */
+        REQ( "app.clock_settime.01", "the realtime clock for the system", true );
+
+        /*
+         * For this clock, the values returned by clock_gettime() and specified by
+         * clock_settime() represent the amount of time (in seconds and nanoseconds)
+         * since the Epoch.
+         */
+        REQ("app.clock_settime.02", "", TODO_REQ());
+
+        /*
+         * If the Monotonic Clock option is supported, all implementations shall support a
+         * clock_id of CLOCK_MONOTONIC defined in <time.h>. This clock represents
+         * the monotonic clock for the system.
+         */
+        REQ("app.clock_settime.03", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_PROCESS_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * process when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_settime.04", "", TODO_REQ());
+
+        /*
+         * For these clock IDs, the values returned by clock_gettime() and specified by
+         * clock_settime() represent the amount of execution time of the process
+         * associated with the clock.
+         */
+        REQ("app.clock_settime.05", "", TODO_REQ());
+
+        /*
+         * Implementations shall also support the special clockid_t value
+         * CLOCK_THREAD_CPUTIME_ID, which represents the CPU-time clock of the calling
+         * thread when invoking one of the clock_*() or timer_*() functions.
+         */
+        REQ("app.clock_settime.06", "", TODO_REQ());
+
+        /*
+         * For these clock IDs, the values returned by clock_gettime() and specified by
+         * clock_settime() shall represent the amount of execution time of the thread
+         * associated with the clock.
+         */
+        REQ("app.clock_settime.07", "", TODO_REQ());
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_ClockId
+    {
+        SystemState * systemState = getSystemState_CallContext( context );
+
+        if ( * clock_id == SUT_CLOCK_REALTIME )
+        {
+            return { ClockIdIsClockRealtime, "clock_id is CLOCK_REALTIME" };
+        }
+        else if ( containsKey_Map( systemState->clocks, clock_id ) )
+        {
+            return { ClockIdIsForKnownClock, "clock_id is for known clock" };
+        }
+        else
+        {
+            return { ClockIdIsUnknown, "clock_id is unknown" };
+        }
+    }
+    coverage C_Tp
+    {
+        if ( 0 <= tp->nsec && tp->nsec < 1000000000 )
+        {
+            return { TpNsecIsCorrect, "tp->nsec is correct" };
+        }
+        else
+        {
+            return { TpNsecIsOutOfBounds, "tp->nsec is out of bounds" };
+        }
+    }
+    post
+    {
+        SystemState  * systemState = getSystemState_CallContext( context )   ;
+        ClockState   * clockState  = get_Map( systemState->clocks, clock_id );
+        TimeSpecTObj * tpTruncated;
+
+        /*
+         * A return value of -1 shall indicate that an error occurred, and errno shall be
+         * set to indicate the error.
+         */
+        ERROR_BEGIN( POSIX_CLOCK_SETTIME, "clock_settime.08.02", clock_settime_spec == -1, * errno )
+            /*
+             * The clock_getres(), clock_gettime(), and clock_settime() functions shall fail
+             * if:
+             *
+             * [EINVAL]
+             * The clock_id argument does not specify a known clock.
+             *
+             * The clock_settime() function shall fail if:
+             *
+             * [EINVAL]
+             * The tp argument to clock_settime() is outside the range for the given clock ID.
+             *
+             * [EINVAL]
+             * The tp argument specified a nanosecond value less than zero or greater than or
+             * equal to 1000 million.
+             *
+             * [EINVAL]
+             * The value of the clock_id argument is CLOCK_MONOTONIC.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( POSIX_CLOCK_SETTIME, EINVAL,
+                         "clock_settime.09.01;clock_settime.10.01;clock_settime.10.02;clock_settime.10.03",
+                         /*clock_settime.09.01*/
+                         ( C_ClockId == C_ClockId.ClockIdIsUnknown && clock_settime_spec == -1 ) ||
+                         /*clock_settime.10.02*/
+                         ( C_Tp == C_Tp.TpNsecIsOutOfBounds )
+                       )
+#else
+            ERROR_SHALL( POSIX_CLOCK_SETTIME, EINVAL,
+                         "clock_settime.09.01;clock_settime.10.01;clock_settime.10.02;clock_settime.10.03",
+                         /*clock_settime.09.01*/
+                         ( coverage( C_ClockId ) == ClockIdIsUnknown && clock_settime_spec == -1 ) ||
+                         /*clock_settime.10.02*/
+                         ( coverage( C_Tp ) == TpNsecIsOutOfBounds )
+                       )
+#endif // NewCTesK
+
+            /*
+             * The clock_settime() function may fail if:
+             *
+             * [EPERM]
+             * The requesting process does not have the appropriate privilege to set the
+             * specified clock.
+             */
+            ERROR_SHALL(POSIX_CLOCK_SETTIME, EPERM, "clock_settime.11.01", TODO_ERR(EPERM) )
+        ERROR_END()
+
+        /*
+         * The clock_settime() function shall set the specified clock, clock_id, to the
+         * value specified by tp.
+         */
+        tpTruncated = getTpTruncated( tp, clockState->resolution );
+        REQ( "clock_settime.01", "The function shall set the specified clock, clock_id, to the value specified by tp",
+                                 equals( clockState->observedValues->nanosecPrecision, tpTruncated )
+           );
+
+        if ( ! equals( tp, tpTruncated ) )
+        {
+            /*
+             * Time values that are between two consecutive non-negative integer multiples
+             * of the resolution of the specified clock shall be truncated down to the
+             * smaller multiple of the resolution.
+             *
+             * If the time argument of clock_settime() is not a multiple of res, then the
+             * value is truncated to a multiple of res.
+             */
+            REQ( "clock_settime.02", "value is truncated to a multiple of res", true );
+        }
+
+        /*
+         * If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+         * value of the clock shall be used to determine the time of expiration for
+         * absolute time services based upon the CLOCK_REALTIME clock. This applies to
+         * the time at which armed absolute timers expire.
+         *
+         * If the value of the CLOCK_REALTIME clock is set via clock_settime(), the new
+         * value of the clock shall be used to determine the time at which the system
+         * shall awaken a thread blocked on an absolute clock_nanosleep() call based upon
+         * the CLOCK_REALTIME clock.
+         */
+        REQ("clock_settime.03", "", TODO_REQ());
+
+        /*
+         * If the absolute time requested at the invocation of such a time service is
+         * before the new value of the clock, the time service shall expire immediately
+         * as if the clock had reached the requested time normally.
+         *
+         * If the absolute time requested at the invocation of such a time service is
+         * before the new value of the clock, the call shall return immediately as if the
+         * clock had reached the requested time normally
+         */
+        REQ("clock_settime.04", "", TODO_REQ());
+
+        /*
+         * Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have no
+         * effect on threads that are blocked waiting for a relative time service based
+         * upon this clock, including the nanosleep() function; nor on the expiration of
+         * relative timers based upon this clock. Consequently, these time services
+         * shall expire when the requested relative interval elapses, independently of
+         * the new or old value of the clock.
+         *
+         * Setting the value of the CLOCK_REALTIME clock via clock_settime() shall have no
+         * effect on any thread that is blocked on a relative clock_nanosleep() call.
+         * Consequently, the call shall return when the requested relative interval
+         * elapses, independently of the new or old value of the clock.
+         */
+        REQ("clock_settime.05", "", TODO_REQ());
+
+        /*
+         * The effect of setting a clock via clock_settime() on armed per-process timers
+         * associated with a clock other than CLOCK_REALTIME is implementation-defined.
+         */
+        REQ("clock_settime.06", "", TODO_REQ());
+
+        /*
+         * The appropriate privilege to set a particular clock is implementation-defined.
+         */
+        REQ("clock_settime.07", "", TODO_REQ());
+
+        /*
+         * A return value of 0 shall indicate that the call succeeded.
+         */
+        REQ( "clock_settime.08.01", "A return of 0 shall indicate that the call succeeded", clock_settime_spec == 0 );
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+TimeSpecTObj * getTpTruncated( TimeSpecTObj * tp, TimeSpecTObj * res ) {
+    TimeSpecTObj * result = clone( tp );
+    if ( res != NULL ) {
+        result->nsec = result->nsec / res->nsec * res->nsec;
+    }
+    return result;
+}

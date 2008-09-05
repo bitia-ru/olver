@@ -1,0 +1,454 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/sem/sem_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+static void pthread_sem_wait_return_processor(ThreadId threadId, TSStream* stream, TSMetaData* meta)
+{
+    ErrorCode* code = create_ErrorCode(0);
+    ErrorCode* errno_value =  create_ErrorCode(0);
+    
+    //verbose("pthread_sem_wait_return_processor\n");
+
+    *code = readInt_TSStream(stream);
+    *errno_value = readInt_TSStream(stream);
+
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_sem_wait_return,
+        create_SemaphoreLockReturnType(threadId, code, errno_value),
+        meta->timestamp
+        );
+}
+
+static void pthread_sem_post_return_processor(ThreadId threadId, TSStream* stream, TSMetaData* meta)
+{
+    ErrorCode* code = create_ErrorCode(0);
+    ErrorCode* errno_value =  create_ErrorCode(0);
+
+    //verbose("pthread_sem_post_return_processor\n");
+
+    *code = readInt_TSStream(stream);
+    *errno_value = readInt_TSStream(stream);
+
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_sem_post_return,
+        create_SemaphoreLockReturnType(threadId, code, errno_value),
+        meta->timestamp
+        );
+}
+
+static void pthread_sem_timedwait_return_processor(ThreadId threadId, TSStream* stream, TSMetaData* meta)
+{
+    ErrorCode* code = create_ErrorCode(0);
+    ErrorCode* errno_value =  create_ErrorCode(0);
+
+    *code = readInt_TSStream(stream);
+    *errno_value = readInt_TSStream(stream);
+
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        sem_timedwait_return,
+        create_SemaphoreLockReturnType(threadId, code, errno_value),
+        meta->timestamp
+        );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initPthreadSemSubsystem(void)
+{
+        // Set up mediators
+        set_mediator_sem_close_spec(sem_close_media);
+        set_mediator_sem_destroy_spec(sem_destroy_media);
+        set_mediator_sem_getvalue_spec(sem_getvalue_media);
+        set_mediator_sem_init_spec(sem_init_media);
+        set_mediator_sem_open_spec(sem_open_media);
+        
+        set_mediator_sem_timedwait_spec(sem_timedwait_media);
+        set_mediator_sem_timedwait_return(sem_timedwait_return_media);
+
+        set_mediator_sem_trywait_spec(sem_trywait_media);
+        set_mediator_sem_unlink_spec(sem_unlink_media);
+        
+        set_mediator_sem_wait_spec(sem_wait_media);
+        set_mediator_pthread_sem_wait_return(pthread_sem_wait_return_media);
+
+        set_mediator_sem_post_spec(sem_post_media);
+        set_mediator_pthread_sem_post_return(pthread_sem_post_return_media);
+
+        // Set up dr processors
+        registerDRProcessor("pthread_sem_wait_return", pthread_sem_wait_return_processor);
+        registerDRProcessor("pthread_sem_timedwait_return", pthread_sem_timedwait_return_processor);
+        registerDRProcessor("pthread_sem_post_return", pthread_sem_post_return_processor);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** sem_close_spec **/
+mediator sem_close_media for specification
+IntT sem_close_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "sem_close:$(ptr)", 
+                              create_VoidTPtrObj(semaphore)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res; 
+    }
+    state
+    {
+        onPThreadSemClose(context, semaphore, sem_close_spec);
+    }
+}
+
+
+/** sem_destroy_spec **/
+mediator sem_destroy_media for specification
+IntT sem_destroy_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "sem_destroy:$(ptr)",
+                                    create_VoidTPtrObj(semaphore)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        return res;
+    }
+    state
+    {
+        onPThreadSemDestroy(context, semaphore, sem_destroy_spec);
+    }
+}
+
+
+/** sem_getvalue_spec **/
+mediator sem_getvalue_media for specification
+IntT sem_getvalue_spec( CallContext context, PThreadSemaphoreTPtr semaphore, IntT* sval, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "sem_getvalue:$(ptr)",
+                                    create_VoidTPtrObj(semaphore)
+                        );
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *sval = readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        return res;
+    }
+    state
+    {
+        /* This function can't change the semaphore state */
+        return;
+    }
+}
+
+
+/** sem_init_spec **/
+
+mediator sem_init_media for specification
+IntT sem_init_spec( CallContext context, PThreadSemaphoreTPtr semaphore, IntT pshared, UIntT value, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "sem_init:$(ptr)$(int)$(uint)",
+                                    create_VoidTPtrObj(semaphore),
+                                    create_IntTObj(pshared),
+                                    create_IntTObj(value)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+    
+        destroy_TSCommand(&command);
+    
+        return res;
+    }
+    state
+    {
+         onPThreadSemInit(context, semaphore, pshared, value, sem_init_spec);
+    }
+}
+
+
+/** sem_open_spec **/
+mediator sem_open_media for specification
+PThreadSemaphoreTPtr sem_open_spec( CallContext context, StringTPtr name,  OpenFlags oflag, FilePermissions* mode, UIntT value, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        PThreadSemaphoreTPtr res;
+        
+        //verbose("sem_open_media \n");
+        format_TSCommand( &command, "sem_open:$(ptr)$(openflags)$(perms)$(uint)",
+                                    create_VoidTPtrObj(name),
+                                    create_OpenFlagsObj(oflag),
+                                    mode,
+                                    create_UIntTObj(value)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        destroy_TSCommand(&command);
+        return res; 
+    }
+    state
+    {
+        //verbose("sem_open_media \n");
+        onPThreadSemOpen(context, value, name, oflag, sem_open_spec);
+    }
+}
+
+
+/** sem_post_spec **/
+mediator sem_post_media for specification
+IntT sem_post_spec( CallContext context, PThreadSemaphoreTPtr semaphore)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res =0;
+
+        //verbose("sem_post_media\n");
+    
+        format_TSCommand( &command, "sem_post:$(ptr)", 
+                              create_VoidTPtrObj(semaphore)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+    
+        destroy_TSCommand(&command);
+    
+        return res;
+    }
+    state
+    {
+        onPThreadSemPost(context, semaphore);
+    }
+}
+
+mediator pthread_sem_post_return_media for reaction 
+SemaphoreLockReturnType* pthread_sem_post_return(void)
+{
+    state
+    {
+        //verbose("pthread_sem_post_return_media\n");
+        onPThreadSemPostReturn(pthread_sem_post_return->context, pthread_sem_post_return->returned_value);
+    }
+}
+
+/** sem_timedwait_spec **/
+mediator sem_timedwait_media for specification
+void sem_timedwait_spec(CallContext context, PThreadSemaphoreTPtr semaphore, TimeUnit delta)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "sem_timedwait:$(ptr)$(timeunit)",
+                         create_VoidTPtrObj(semaphore),
+                         create_TimeUnitObj( delta)
+                        );
+
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onSemTimedWait( context, semaphore, timestamp, delta);
+    }
+}
+
+mediator sem_timedwait_return_media for reaction 
+SemaphoreLockReturnType* sem_timedwait_return(void)
+{
+    state
+    {
+        onSemTimedWaitReturn(sem_timedwait_return->context, sem_timedwait_return->returned_value);
+    }
+}
+
+/** sem_trywait_spec **/
+mediator sem_trywait_media for specification
+IntT sem_trywait_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "sem_trywait:$(ptr)",
+                              create_VoidTPtrObj(semaphore)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onPThreadSemTryWait(context, semaphore, sem_trywait_spec);
+    }
+}
+
+
+/** sem_unlink_spec **/
+mediator sem_unlink_media for specification
+IntT sem_unlink_spec( CallContext context, StringTPtr sem_name, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "sem_unlink:$(ptr)",
+                            create_VoidTPtrObj(sem_name)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onPThreadSemUnlink(context, sem_name, sem_unlink_spec);
+    }
+}
+
+/** sem_wait_spec **/
+mediator sem_wait_media for specification
+IntT sem_wait_spec( CallContext context, PThreadSemaphoreTPtr semaphore)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res=0;
+    
+        format_TSCommand( &command, "sem_wait:$(ptr)", 
+                              create_VoidTPtrObj(semaphore)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+    
+        destroy_TSCommand(&command);
+    
+        return res;
+    }
+    state
+    {
+        onPThreadSemWait(context, semaphore, sem_wait_spec);
+    }
+}
+
+mediator pthread_sem_wait_return_media for reaction 
+SemaphoreLockReturnType* pthread_sem_wait_return(void)
+{
+    state
+    {
+        onPThreadSemWaitReturn(pthread_sem_wait_return->context, pthread_sem_wait_return->returned_value);
+    }
+}

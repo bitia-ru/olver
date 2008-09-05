@@ -1,0 +1,1121 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/string/tests/wstr_scenario.seh"
+#include "util/string/wstr_model.seh"
+#include "config/interpretation.seh"
+#include "util/string/wstr_config.h"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "data/wchar_model.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static int maxSize = 32800;
+
+static char* strings[] = {
+    "",
+    "x",
+    "xtjz",
+    "01234567890123456789012345678901234567890123456789",
+    "A string containing tabulation\t, newline\n, carriage return\r, and other\b special\a characters\v."
+};
+
+static char* searchStrings[] = {
+    "",
+    "x",
+    "t",
+    "90123456",
+    "xt",
+    "return\r"
+};
+
+#define numStrings (sizeof(strings)/sizeof(char*))
+#define numWStrings (2*sizeof(strings)/sizeof(char*))
+
+#define numSearchStrings (sizeof(searchStrings)/sizeof(char*))
+#define numSearchWStrings (2*sizeof(searchStrings)/sizeof(char*))
+
+static WCharT* wstrings[numWStrings];
+static WCharT* searchWStrings[numSearchWStrings];
+
+static int sizes[] = {
+  0, 1, 10, 32768, 32769
+};
+
+#define numSizes (sizeof(sizes)/sizeof(int))
+
+/*
+ * wcscspn, wcsspn
+ */
+static char* s_array_cspn[] = {
+    "",
+    "string",
+    "aaaaaaa",
+    "b",
+    "aaabaaa",
+    "cdefbgh",
+    "bgh",
+    "qwerty",
+    "tyraaba"
+};
+
+#define num_strings_cspn (sizeof(s_array_cspn)/sizeof(char*))
+#define num_wstrings_cspn (2*sizeof(s_array_cspn)/sizeof(char*))
+
+static WCharT* ws_array_cspn[num_wstrings_cspn];
+
+/*
+ * wcscmp
+ */
+#define CMP_SEQUENCE_LENGTH 4
+#define WCMP_SEQUENCE_LENGTH (2*CMP_SEQUENCE_LENGTH)
+
+static char* s1_array_cmp[CMP_SEQUENCE_LENGTH] = {"1234567890", "1999999999", "1234511111", "5123456789"};
+static char* s2_array_cmp[CMP_SEQUENCE_LENGTH] = {"1234567890", "1966666666", "1234567889", "6459832133"};
+
+static WCharT* ws1_array_cmp[WCMP_SEQUENCE_LENGTH];
+static WCharT* ws2_array_cmp[WCMP_SEQUENCE_LENGTH];
+
+static SizeT offset_cmp[CMP_SEQUENCE_LENGTH] = {0, 1, 2, 3};
+
+/*
+ * wcsncmp
+ */
+static IntT wcsncmp_N[] = {0,1,5,10,100};
+#define num_wcsncmp_N (sizeof(wcsncmp_N)/sizeof(IntT))
+
+
+/*
+ * wcschr, wcsrchr, index , rindex
+ */
+
+static char* search_wcschrStrings[] = 
+{
+    "qwed8765*&^$%^^\xff\xf0",
+    "",
+    "\n\r\t\\23\\\\"
+    "Q",
+    "Moscow \n New York \n London"
+};
+
+#define num_search_wcschrStrings (sizeof(search_wcschrStrings)/sizeof(char*))
+#define num_search_wcschrWStrings (2*sizeof(search_wcschrStrings)/sizeof(char*))
+
+static WCharT* search_wcschrWStrings[num_search_wcschrWStrings];
+
+static WCharT search_wchars[] = {'q', '7', '&',' ', 'L' ,0xff, 0xf0, 0xffff, 0x123456, 0};
+#define num_search_wchars (sizeof(search_wchars)/sizeof(WCharT))
+
+/*
+ * wcspbrk
+ */
+static char* s_array_pbrk[] = {
+    "",
+    "string",
+    "aaaaaaa",
+    "b",
+    "aaabaaa",
+    "cdefbgh",
+    "bgh",
+    "qwerty",
+    "tyraaba"
+};
+
+#define num_strings_pbrk (sizeof(s_array_cspn)/sizeof(char*))
+#define num_wstrings_pbrk (2*sizeof(s_array_cspn)/sizeof(char*))
+
+static WCharT* ws_array_pbrk[num_wstrings_pbrk];
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+WStringTPtr src, dst;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+/*
+ * Linux Standard Base Specific Assertion
+ *
+ * Assertion: NUL_WCharT is zero
+ *   Always true within 
+ *     Linux Standard Base Core Specification 3.1
+ *     Copyright (c) 2004, 2005 Free Standards Group
+ *
+ *     See section 'Data Definitions for libc'.
+ */
+
+/*
+ * Creates the wide-character string from a usual string on the Instrumental Machine
+ * by combining several usual characters into single wide characters.
+ */
+static WCharT* construct_wcstring(char* str)
+{
+    char* tmp;
+    size_t len = strlen(str);
+    size_t wlen = ((len + sizeof_WCharT - 1) / sizeof_WCharT) * sizeof_WCharT;
+
+    size_t i, j;
+
+    /* Allocate memory for the wide string. */
+    tmp = malloc(wlen + sizeof_WCharT);
+
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+    {
+        /* Little Endian, needs conversion. */
+        for (i = 0; i < wlen + sizeof_WCharT; i += sizeof_WCharT)
+        {
+            for (j = 0; j < sizeof_WCharT; j++)
+            {
+                if (i + j < len)
+                    tmp[i + sizeof_WCharT - j - 1] = str[i + j];
+                else
+                    tmp[i + sizeof_WCharT - j - 1] = '\0';
+            }
+        }
+    }
+    else if(__BYTE_ORDER == __BIG_ENDIAN)
+    {
+        /* Big Endian, no conversion needed. */
+        for (i = 0; i < len; i++)
+            tmp[i] = str[i];
+        for (i = len; i < wlen + sizeof_WCharT; i++)
+            tmp[i] = '\0';
+    }
+    else
+    {
+        traceUserInfo("Requirements failed: __BYTE_ORDER is undefined or has incorrect value");
+    }
+
+    return (WCharT*)tmp;
+}
+
+/*
+ * Creates the wide-character string from a usual string on the Instrumental Machine
+ * by adding zero bytes before every single character.
+ */
+static WCharT* convert_to_wcstring(char* str)
+{
+    char* tmp;
+    size_t len = strlen(str) + 1;
+    size_t wlen = len * sizeof_WCharT;
+
+    size_t i, j;
+
+    /* Allocate memory for the wide string. */
+    tmp = malloc(wlen+5);
+
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+    {
+        /* Little Endian, add zeroes after chars. */
+        for (i = 0; i < len; i++)
+        {
+            tmp[i * sizeof_WCharT] = str[i];
+            for (j = 1; j < sizeof_WCharT; j++)
+            {
+                tmp[i * sizeof_WCharT + j] = '\0';
+            }
+        }
+    }
+    else if(__BYTE_ORDER == __BIG_ENDIAN)
+    {
+        /* Big Endian, add zeroes before chars. */
+        for (i = 0; i < len; i++)
+        {
+            for (j = 0; j < sizeof_WCharT - 1; j++)
+            {
+                tmp[i * sizeof_WCharT + j] = '\0';
+            }
+            tmp[i * sizeof_WCharT + sizeof_WCharT - 1] = str[i];
+        }
+    }
+    else
+    {
+        traceUserInfo("Requirements failed: __BYTE_ORDER is undefined or has incorrect value");
+    }
+
+    return (WCharT*)tmp;
+}
+
+static bool init_wstr_scenario(int argc, char** argv)
+{
+    int i;
+
+    // Init test scenario data
+    context = getContext();
+
+    src = allocateMemoryBlock(context, maxSize * sizeof_WCharT);
+    if (isNULL_VoidTPtr(src))
+        return false;
+
+    dst = allocateMemoryBlock(context, maxSize * sizeof_WCharT);
+    if (isNULL_VoidTPtr(dst))
+    {
+        deallocateMemoryBlock(context, src);
+        return false;
+    }
+
+    // Create wstrings from the usual strings
+    for (i=0; i<numStrings; i++)
+    {
+        wstrings[i] = construct_wcstring(strings[i]);
+        wstrings[i + numStrings] = convert_to_wcstring(strings[i]);
+    }
+
+    for (i=0; i<numSearchStrings; i++)
+    {
+        searchWStrings[i] = construct_wcstring(searchStrings[i]);
+        searchWStrings[i + numSearchStrings] = convert_to_wcstring(searchStrings[i]);
+    }
+
+    for (i=0; i<num_strings_cspn; i++)
+    {
+        ws_array_cspn[i] = construct_wcstring(s_array_cspn[i]);
+        ws_array_cspn[i + num_strings_cspn] = convert_to_wcstring(s_array_cspn[i]);
+    }
+
+    for (i=0; i<CMP_SEQUENCE_LENGTH; i++)
+    {
+        ws1_array_cmp[i] = construct_wcstring(s1_array_cmp[i]);
+        ws1_array_cmp[i + CMP_SEQUENCE_LENGTH] = convert_to_wcstring(s1_array_cmp[i]);
+    }
+
+    for (i=0; i<CMP_SEQUENCE_LENGTH; i++)
+    {
+        ws2_array_cmp[i] = construct_wcstring(s2_array_cmp[i]);
+        ws2_array_cmp[i + CMP_SEQUENCE_LENGTH] = convert_to_wcstring(s2_array_cmp[i]);
+    }
+
+    for (i=0; i<num_search_wcschrStrings; i++)
+    {
+        search_wcschrWStrings[i] = construct_wcstring(search_wcschrStrings[i]);
+        search_wcschrWStrings[i + num_search_wcschrStrings] = convert_to_wcstring(search_wcschrStrings[i]);
+    }
+
+    for (i=0; i<num_strings_pbrk; i++)
+    {
+        ws_array_pbrk[i] = construct_wcstring(s_array_pbrk[i]);
+        ws_array_pbrk[i + num_strings_pbrk] = convert_to_wcstring(s_array_pbrk[i]);
+    }
+
+    return true;
+}
+
+static void finish_wstr_scenario(void)
+{
+    int i;
+
+    deallocateMemoryBlock(context, src);
+    deallocateMemoryBlock(context, dst);
+
+    for (i=0; i<numWStrings; i++)
+        free(wstrings[i]);
+
+    for (i=0; i<numSearchWStrings; i++)
+        free(searchWStrings[i]);
+
+    for (i=0; i<num_wstrings_cspn; i++)
+        free(ws_array_cspn[i]);
+
+    for (i=0; i<WCMP_SEQUENCE_LENGTH; i++)
+        free(ws1_array_cmp[i]);
+
+    for (i=0; i<WCMP_SEQUENCE_LENGTH; i++)
+        free(ws2_array_cmp[i]);
+
+    for (i=0; i<num_search_wcschrWStrings; i++)
+        free(search_wcschrWStrings[i]);
+
+    for (i=0; i<num_wstrings_pbrk; i++)
+        free(ws_array_pbrk[i]);
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+scenario
+bool wcscpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+        wcscpy_spec(context, dst, src);
+    }
+    return true;
+}
+
+scenario
+bool wcsncpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int size = 0; size < numSizes; size++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+            wcsncpy_spec(context, dst, src, sizes[size]);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcscat_scen()
+{
+    iterate(int str_index1 = 0; str_index1 < numWStrings; str_index1++;)
+    {
+        iterate(int str_index2 = 0; str_index2 < numWStrings; str_index2++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(wstrings[str_index1]));
+            writeWString_VoidTPtr(dst, create_WString(wstrings[str_index2]));
+            wcscat_spec(context, dst, src);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsncat_scen()
+{
+    iterate(int str_index1 = 0; str_index1 < numWStrings; str_index1++;)
+    {
+        iterate(int str_index2 = 0; str_index2 < numWStrings; str_index2++;)
+        {
+            iterate(int size = 0; size < numSizes; size++;)
+            {
+                writeWString_VoidTPtr(src, create_WString(wstrings[str_index1]));
+                writeWString_VoidTPtr(dst, create_WString(wstrings[str_index2]));
+                wcsncat_spec(context, dst, src, sizes[size]);
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcswcs_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int sstr_index = 0; sstr_index < numSearchWStrings; sstr_index++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+            writeWString_VoidTPtr(dst, create_WString(searchWStrings[sstr_index]));
+            wcswcs_spec(context, src, dst);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsspn_scen()
+{
+    iterate(int i = 0; i < num_wstrings_cspn; i++;)
+    {
+        iterate(int j = 0; j < num_wstrings_cspn; j++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(ws_array_cspn[i]));
+            writeWString_VoidTPtr(dst, create_WString(ws_array_cspn[j]));
+            wcsspn_spec(context, src, dst);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcscspn_scen()
+{
+    iterate(int i = 0; i < num_wstrings_cspn;i++;)
+    {
+        iterate(int j = 0; j < num_wstrings_cspn; j++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(ws_array_cspn[i]));
+            writeWString_VoidTPtr(dst, create_WString(ws_array_cspn[j]));
+            wcscspn_spec(context, src, dst);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsdup_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+        wcsdup_spec(context, src, errno_model);
+    }
+    return true;
+}
+
+scenario
+bool wcscmp_scen()
+{
+    iterate(int i = 0; i < WCMP_SEQUENCE_LENGTH; i++;)
+    {
+        iterate(int j = 0; j < CMP_SEQUENCE_LENGTH; j++;)
+        {
+            iterate(int k = 0; k < CMP_SEQUENCE_LENGTH; k++;)
+            {
+                writeWString_VoidTPtr(src, create_WString(ws1_array_cmp[i] + offset_cmp[j]));
+                writeWString_VoidTPtr(dst, create_WString(ws2_array_cmp[i] + offset_cmp[k]));
+                wcscmp_spec(context, src, dst);
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcschr_scen()
+{
+    iterate(int ii=0; ii<num_search_wcschrWStrings; ii++;)
+    {
+        iterate(int i = 0; i < num_search_wchars; i++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(search_wcschrWStrings[ii]));
+            wcschr_spec(context, src, search_wchars[i]);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcslen_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+        wcslen_spec(getContext(), src);
+    }
+    return true;
+}
+
+scenario
+bool wcsncmp_scen()
+{
+    iterate(int i = 0; i < WCMP_SEQUENCE_LENGTH;i++;)
+    {
+        iterate(int j = 0; j < CMP_SEQUENCE_LENGTH; j++;)
+        {
+            iterate(int k = 0; k < CMP_SEQUENCE_LENGTH; k++;)
+            {
+                iterate(int l = 0; l < num_wcsncmp_N; l++;)
+                {
+                    writeWString_VoidTPtr(src, create_WString(ws1_array_cmp[i] + offset_cmp[j]));
+                    writeWString_VoidTPtr(dst, create_WString(ws2_array_cmp[i] + offset_cmp[k]));
+                    wcsncmp_spec(context, src, dst, wcsncmp_N[l]);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcspbrk_scen()
+{
+    iterate(int i = 0; i < num_wstrings_pbrk; i++;)
+    {
+        iterate(int j = 0; j < num_wstrings_pbrk; j++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(ws_array_pbrk[i]));
+            writeWString_VoidTPtr(dst, create_WString(ws_array_pbrk[j]));
+            wcspbrk_spec(context, src, dst);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcpcpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+        wcpcpy_spec(context, dst, src);
+    }
+    return true;
+}
+
+scenario
+bool wcpncpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int size = 0; size < numSizes; size++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+            wcpncpy_spec(context, dst, src, sizes[size]);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsnlen_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        int length, delta;
+        WString* test_String = create_WString(wstrings[str_index]);
+        writeWString_VoidTPtr(src, test_String );
+        wcsnlen_spec(context, src, 1000);
+
+        length = length_WString(test_String);
+        delta = ((length/5)>1)? length/5:1;
+        iterate(unsigned n_var=0;n_var<length+2*delta;n_var+=delta;)
+        {
+            wcsnlen_spec(context, src, n_var);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsrchr_scen()
+{
+    iterate(int ii=0;ii<num_search_wcschrWStrings;ii++;)
+    {
+        writeWString_VoidTPtr(src, create_WString(search_wcschrWStrings[ii]));
+        iterate(int i = 0; i < num_search_wchars; i++;)
+        {
+            wcsrchr_spec(context, src, search_wchars[i]);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsstr_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int sstr_index = 0; sstr_index < numSearchWStrings; sstr_index++;)
+        {
+            writeWString_VoidTPtr(src, create_WString(wstrings[str_index]));
+            writeWString_VoidTPtr(dst, create_WString(searchWStrings[sstr_index]));
+            wcsstr_spec(context, src, dst);
+        }
+    }
+    return true;
+}
+
+#else
+
+scenario
+bool wcscpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+        {
+            iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+            {
+                VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+                wcscpy_spec(context, dst_tmp, src_tmp);
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsncpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int size = 0; size < numSizes; size++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+                    wcsncpy_spec(context, dst_tmp, src_tmp, sizes[size]);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool wcscat_scen()
+{
+    iterate(int str_index1 = 0; str_index1 < numWStrings; str_index1++;)
+    {
+        iterate(int str_index2 = 0; str_index2 < numWStrings; str_index2++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index1]));
+                    writeWString_VoidTPtr(dst_tmp, create_WString(wstrings[str_index2]));
+                    wcscat_spec(context, dst_tmp, src_tmp);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsncat_scen()
+{
+    iterate(int str_index1 = 0; str_index1 < numWStrings; str_index1++;)
+    {
+        iterate(int str_index2 = 0; str_index2 < numWStrings; str_index2++;)
+        {
+            iterate(int size = 0; size < numSizes; size++;)
+            {
+                iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+                {
+                    iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                    {
+                        VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                        VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                        writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index1]));
+                        writeWString_VoidTPtr(dst_tmp, create_WString(wstrings[str_index2]));
+                        wcsncat_spec(context, dst_tmp, src_tmp, sizes[size]);
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcswcs_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int sstr_index = 0; sstr_index < numSearchWStrings; sstr_index++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+                    writeWString_VoidTPtr(dst_tmp, create_WString(searchWStrings[sstr_index]));
+                    wcswcs_spec(context, src_tmp, dst_tmp);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsspn_scen()
+{
+    iterate(int i = 0; i < num_wstrings_cspn; i++;)
+    {
+        iterate(int j = 0; j < num_wstrings_cspn; j++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(ws_array_cspn[i]));
+                    writeWString_VoidTPtr(dst_tmp, create_WString(ws_array_cspn[j]));
+                    wcsspn_spec(context, src_tmp, dst_tmp);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcscspn_scen()
+{
+    iterate(int i = 0; i < num_wstrings_cspn;i++;)
+    {
+        iterate(int j = 0; j < num_wstrings_cspn; j++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(ws_array_cspn[i]));
+                    writeWString_VoidTPtr(dst_tmp, create_WString(ws_array_cspn[j]));
+                    wcscspn_spec(context, src_tmp, dst_tmp);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsdup_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+        {
+            VoidTPtr src_tmp = add_VoidTPtr(src, offset1);
+            writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+            wcsdup_spec(context, src_tmp, errno_model);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcscmp_scen()
+{
+    iterate(int i = 0; i < WCMP_SEQUENCE_LENGTH; i++;)
+    {
+        iterate(int j = 0; j < CMP_SEQUENCE_LENGTH; j++;)
+        {
+            iterate(int k = 0; k < CMP_SEQUENCE_LENGTH; k++;)
+            {
+                iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+                {
+                    iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                    {
+                        VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                        VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                        writeWString_VoidTPtr(src_tmp, create_WString(ws1_array_cmp[i] + offset_cmp[j]));
+                        writeWString_VoidTPtr(dst_tmp, create_WString(ws2_array_cmp[i] + offset_cmp[k]));
+                        wcscmp_spec(context, src_tmp, dst_tmp);
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcschr_scen()
+{
+    iterate(int ii=0; ii<num_search_wcschrWStrings; ii++;)
+    {
+        iterate(int i = 0; i < num_search_wchars; i++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                VoidTPtr src_tmp = add_VoidTPtr(src, offset1);
+                writeWString_VoidTPtr(src_tmp, create_WString(search_wcschrWStrings[ii]));
+                wcschr_spec(context, src_tmp, search_wchars[i]);
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcslen_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+        {
+            VoidTPtr src_tmp = add_VoidTPtr(src, offset1);
+            writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+            wcslen_spec(getContext(), src_tmp);
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsncmp_scen()
+{
+    iterate(int i = 0; i < WCMP_SEQUENCE_LENGTH;i++;)
+    {
+        iterate(int j = 0; j < CMP_SEQUENCE_LENGTH; j++;)
+        {
+            iterate(int k = 0; k < CMP_SEQUENCE_LENGTH; k++;)
+            {
+                iterate(int l = 0; l < num_wcsncmp_N; l++;)
+                {
+                    iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+                    {
+                        iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                        {
+                            VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                            VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                            writeWString_VoidTPtr(src_tmp, create_WString(ws1_array_cmp[i] + offset_cmp[j]));
+                            writeWString_VoidTPtr(dst_tmp, create_WString(ws2_array_cmp[i] + offset_cmp[k]));
+                            wcsncmp_spec(context, src_tmp, dst_tmp, wcsncmp_N[l]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcspbrk_scen()
+{
+    iterate(int i = 0; i < num_wstrings_pbrk; i++;)
+    {
+        iterate(int j = 0; j < num_wstrings_pbrk; j++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(ws_array_pbrk[i]));
+                    writeWString_VoidTPtr(dst_tmp, create_WString(ws_array_pbrk[j]));
+                    wcspbrk_spec(context, src_tmp, dst_tmp);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcpcpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+        {
+            iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+            {
+                VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+                wcpcpy_spec(context, dst_tmp, src_tmp);
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcpncpy_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int size = 0; size < numSizes; size++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+                    wcpncpy_spec(context, dst_tmp, src_tmp, sizes[size]);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsnlen_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+        {
+            int length, delta;
+            VoidTPtr src_tmp = add_VoidTPtr(src, offset1);
+            WString* test_String = create_WString(wstrings[str_index]);
+            writeWString_VoidTPtr(src_tmp, test_String );
+            wcsnlen_spec(context, src_tmp, 1000);
+
+            length = length_WString(test_String);
+            delta = ((length/5)>1)? length/5:1;
+            iterate(unsigned n_var=0;n_var<length+2*delta;n_var+=delta;)
+            {
+                wcsnlen_spec(context, src_tmp, n_var);
+            }
+       }
+    }
+    return true;
+}
+
+scenario
+bool wcsrchr_scen()
+{
+    iterate(int ii=0;ii<num_search_wcschrWStrings;ii++;)
+    {
+        iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+        {
+            VoidTPtr src_tmp = add_VoidTPtr(src, offset1);
+            writeWString_VoidTPtr(src_tmp, create_WString(search_wcschrWStrings[ii]));
+            iterate(int i = 0; i < num_search_wchars; i++;)
+            {
+                wcsrchr_spec(context, src_tmp, search_wchars[i]);
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool wcsstr_scen()
+{
+    iterate(int str_index = 0; str_index < numWStrings; str_index++;)
+    {
+        iterate(int sstr_index = 0; sstr_index < numSearchWStrings; sstr_index++;)
+        {
+            iterate(unsigned offset1 = 0; offset1 < sizeof_Type(context, "int"); offset1++;)
+            {
+                iterate(unsigned offset2 = 0; offset2 < sizeof_Type(context, "int"); offset2++;)
+                {
+                    VoidTPtr dst_tmp = add_VoidTPtr(dst, offset1);
+                    VoidTPtr src_tmp = add_VoidTPtr(src, offset2);
+                    writeWString_VoidTPtr(src_tmp, create_WString(wstrings[str_index]));
+                    writeWString_VoidTPtr(dst_tmp, create_WString(searchWStrings[sstr_index]));
+                    wcsstr_spec(context, src_tmp, dst_tmp);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+#endif
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm wstr_scenario =
+{
+    .init = init_wstr_scenario,
+    .finish = finish_wstr_scenario,
+    .actions = {
+        wcscpy_scen,
+        wcsncpy_scen,
+        wcscat_scen,
+        wcsncat_scen,
+        wcswcs_scen,
+        wcsspn_scen,
+        wcsdup_scen,
+        wcscmp_scen,
+        wcschr_scen,
+        wcslen_scen,
+        wcsncmp_scen,
+        wcscspn_scen,
+        wcspbrk_scen,
+        wcpcpy_scen,
+        wcpncpy_scen,
+        wcsnlen_scen,
+        wcsrchr_scen,
+        wcsstr_scen,
+        NULL
+    }
+};
+
+#ifdef UTIL_STRING_WSTR_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/string/wstr_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initUtilStringWStrSubsystem();
+}
+
+
+bool main_util_string_wstr(int argc, char** argv)
+{
+    addTraceToFile("trace.xml");
+
+    wstr_scenario(argc,argv);
+    return true;
+}
+
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    main_util_string_wstr(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+#endif

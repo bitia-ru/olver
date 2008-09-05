@@ -1,0 +1,237 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "pthread/rwlock/rwlock_model.seh"
+#include "pthread/rwlock/tests/rwlock_scenario.seh"
+#include <atl/integer.h>
+#include <atl/multiset.h>
+
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+#define THREAD_NUM 2
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static VoidTPtr rwlock;
+static VoidTPtr rwlock_area;
+static CallContext context_array[THREAD_NUM];
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+Integer* get_InitializeThreadsStateDL(void)
+{
+    return create_Integer(0);
+}
+
+bool init_deadlock_scenario(int argc, char** argv)
+{
+    int i;
+
+    context = getContext();
+    context_array[0] = context;
+
+    /* create threads */
+    for(i=1;i<THREAD_NUM;i++)
+    {
+        context_array[i] = createThread();
+        if(isWrong_ThreadId(context_array[i]))
+            return false;
+    }
+
+    rwlock_area = allocateMemoryBlock(context, 1024);
+    if (isNULL_VoidTPtr(rwlock_area))
+        return false;
+    rwlock = NULL_VoidTPtr;
+
+    setWTimeMSec(SERIALIZATION_TIME);
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+
+    return true;
+}
+
+void finish_deadlock_scenario(void)
+{
+    deallocateMemoryBlock(context, rwlock_area);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool deadlock_init_scen()
+{
+    if (isNULL_VoidTPtr(rwlock))
+    {
+        pthread_rwlock_init_spec(context_array[0], rwlock_area, NULL_VoidTPtr);
+        rwlock = rwlock_area;
+    }
+    return true;
+}
+
+scenario
+bool deadlock_destroy_scen() 
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        if(isDestroyPossible(rwlock))
+        {
+            pthread_rwlock_destroy_spec(context_array[0], rwlock);
+            rwlock = NULL_VoidTPtr;
+        }
+    }
+    return true;
+}
+
+scenario
+bool dl_rdlock_scen()
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        pthread_rwlock_rdlock_spec(context_array[0], rwlock);
+    }
+    return true;
+}
+
+scenario
+bool dl_wrlock_scen()
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        pthread_rwlock_wrlock_spec(context_array[0], rwlock);
+    }
+    return true;
+}
+
+scenario
+bool dl_timedrdlock_scen()
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        pthread_rwlock_timedrdlock_spec(context_array[0], rwlock, MILLIARD);
+    }
+    return true;
+}
+
+scenario
+bool dl_timedwrlock_scen()
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        pthread_rwlock_timedwrlock_spec(context_array[0], rwlock, MILLIARD);
+    }
+    return true;
+}
+
+scenario
+bool dl_unlock_scen()
+{
+    if (!isNULL_VoidTPtr(rwlock))
+    {
+        pthread_rwlock_unlock_spec(context_array[0], rwlock);
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+Map* saveDeadlockModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreDeadlockModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+bool isDeadlockModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm rwlock_deadlock_scenario =
+{
+    .init = init_deadlock_scenario,
+    .finish = finish_deadlock_scenario,
+    .getState = (PtrGetState)get_InitializeThreadsStateDL,
+    .saveModelState = (PtrSaveModelState)saveDeadlockModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreDeadlockModelState,
+    .isStationaryState = (PtrIsStationaryState)isDeadlockModelStateStationary,
+    .actions = {
+            deadlock_init_scen,
+
+#if POSIX_PTHREAD_RWLOCK_RDLOCK_FAILS_WITH_EDEADLK
+            // Writer tries to read
+            dl_wrlock_scen,         //1
+            dl_rdlock_scen,         //1 DL
+            dl_unlock_scen,         //1
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDRDLOCK_FAILS_WITH_EDEADLK
+            dl_wrlock_scen,         //1
+            dl_timedrdlock_scen,    //1 DL
+            dl_unlock_scen,         //1
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EDEADLK_ON_READLOCK
+            // The only reader tries to write
+            dl_rdlock_scen,         //1
+            dl_wrlock_scen,         //1 DL
+            dl_unlock_scen,         //1
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EDEADLK_ON_READLOCK
+            dl_rdlock_scen,         //1
+            dl_timedwrlock_scen,    //1 DL
+            dl_unlock_scen,         //1
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_WRLOCK_FAILS_WITH_EDEADLK_ON_WRITELOCK
+            // Writer tries to write
+            dl_wrlock_scen,         //1
+            dl_wrlock_scen,         //1 DL
+            dl_unlock_scen,         //1
+#endif
+
+#if POSIX_PTHREAD_RWLOCK_TIMEDWRLOCK_FAILS_WITH_EDEADLK_ON_WRITELOCK
+            dl_wrlock_scen,         //1
+            dl_timedwrlock_scen,    //1 DL
+            dl_unlock_scen,         //1
+#endif
+
+            deadlock_destroy_scen,
+            NULL
+    }
+};

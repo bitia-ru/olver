@@ -1,0 +1,3512 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "ncurses/ncurses/ncurses_config.h"
+#include "ncurses/ncurses/ncurses_data.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+#include "common/common_model.seh"
+#include "system/system/system_model.seh"
+
+#include "ncurses/bkgd/bkgd_media.seh"
+#include "ncurses/border/border_media.seh"
+#include "ncurses/char/add_media.seh"
+#include "ncurses/char/input_media.seh"
+#include "ncurses/char/insert_media.seh"
+#include "ncurses/chgat/chgat_media.seh"
+#include "ncurses/chstr/add_media.seh"
+#include "ncurses/chstr/input_media.seh"
+#include "ncurses/clear/clear_media.seh"
+#include "ncurses/color/color_media.seh"
+#include "ncurses/input/char_media.seh"
+#include "ncurses/input/input_media.seh"
+#include "ncurses/input/string_media.seh"
+#include "ncurses/input/timeout_media.seh"
+#include "ncurses/line/line_media.seh"
+#include "ncurses/misc/misc_media.seh"
+#include "ncurses/mode/mode_media.seh"
+#include "ncurses/move/move_media.seh"
+#include "ncurses/screen/screen_media.seh"
+#include "ncurses/slk/slk_media.seh"
+#include "ncurses/string/add_media.seh"
+#include "ncurses/string/input_media.seh"
+#include "ncurses/string/insert_media.seh"
+#include "ncurses/string/printf_media.seh"
+#include "ncurses/string/scanf_media.seh"
+#include "ncurses/terminal/control_media.seh"
+#include "ncurses/terminal/termcap_media.seh"
+#include "ncurses/terminal/terminal_media.seh"
+#include "ncurses/terminal/terminfo_media.seh"
+#include "ncurses/window/attr_media.seh"
+#include "ncurses/window/pad_media.seh"
+#include "ncurses/window/refresh_media.seh"
+#include "ncurses/window/scroll_media.seh"
+#include "ncurses/window/window_media.seh"
+
+#include "config/interpretation.seh"
+
+static ChTypeTArray* stdScreenContent;
+static ChTypeTArray* doupdate_screen;
+static NCursesWindow* tmpWnd;
+static IntT refresh_forbidden;
+static IntT endwin_no_refresh;
+
+specification typedef struct NCursesTerminfo NCursesTerminfo = {};
+
+specification typedef struct  NcursesAttrT NcursesAttrTObj = {};
+
+bool equals_NCursesAttrT(NcursesAttrT attr1, NcursesAttrT attr2)
+{   
+    return (attr1.altcharset == attr2.altcharset)
+        && (attr1.blink == attr2.blink)
+        && (attr1.bold == attr2.bold)
+        && (attr1.colorPair == attr2.colorPair)
+        && (attr1.dim == attr2.dim)
+        && (attr1.horizontal == attr2.horizontal)
+        && (attr1.invis == attr2.invis)
+        && (attr1.left == attr2.left)
+        && (attr1.low == attr2.low)
+        && (attr1.protect == attr2.protect)
+        && (attr1.right == attr2.right)
+        && (attr1.reverse == attr2.reverse)
+        && (attr1.standout == attr2.standout)
+        && (attr1.top == attr2.top)
+        && (attr1.underline == attr2.underline)
+        && (attr1.vertical == attr2.vertical);
+}
+
+NcursesAttrT create_emptyNcursesAttrT()
+{
+    NcursesAttrT attr1;
+
+    attr1.altcharset = false;
+    attr1.blink = false;
+    attr1.bold = false;
+    attr1.colorPair = 0;
+    attr1.dim = false;
+    attr1.horizontal = false;
+    attr1.invis = false;
+    attr1.left = false;
+    attr1.low = false;
+    attr1.protect = false;
+    attr1.right = false;
+    attr1.reverse = false;
+    attr1.standout = false;
+    attr1.top = false;
+    attr1.underline = false;
+    attr1.vertical = false;
+
+    return attr1;
+}
+
+NcursesAttrTObj* create_NcursesAttrTObj(NcursesAttrT attr)
+{
+    return create(&type_NcursesAttrTObj, 
+        attr.altcharset,  // Alternate character set
+        attr.blink,       // Blinking
+        attr.bold,        // Extra bright or bold
+        attr.dim,         // Half bright
+        attr.horizontal,  // Horizontal highlight
+        attr.invis,       // Invisible
+        attr.left,        // Left highlight
+        attr.low,         // Low highlight
+        attr.protect,     // Protected
+        attr.reverse,     // Reverse video
+        attr.right,       // Right highlight
+        attr.standout,    // Best highlighting mode of the terminal
+        attr.top,         // Top highlight
+        attr.underline,   // Underlining
+        attr.vertical,    // Vertical highlight
+        attr.colorPair
+    );
+    
+}
+
+NcursesAttrT create_AttrFromRestrictedNcursesAttrT(NcursesRestrictedAttrT attr)
+{
+    NcursesAttrT res;
+    res.altcharset = false;  // Alternate character set
+    res.blink = attr.blink;       // Blinking
+    res.bold = attr.bold;        // Extra bright or bold
+    res.dim = attr.dim;         // Half bright
+    res.horizontal = false;  // Horizontal highlight
+    res.invis = false;       // Invisible
+    res.left = false;        // Left highlight
+    res.low = false;         // Low highlight
+    res.protect = false;     // Protected
+    res.reverse = attr.reverse;     // Reverse video
+    res.right = false;       // Right highlight
+    res.standout = attr.standout;    // Best highlighting mode of the terminal
+    res.top = false;         // Top highlight
+    res.underline = attr.underline;   // Underlining
+    res.vertical = false;     // Vertical highlight
+
+    res.colorPair=0;
+    
+    return res;
+}
+
+NCursesScreen *getNCursesStdScreen(CallContext context)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    if(term)
+        return term->screen;
+    else
+        return NULL;
+}
+
+
+NcursesAttrTObj* create_RestrictedNcursesAttrTObj(NcursesRestrictedAttrT attr)
+{
+    return create(&type_NcursesAttrTObj, 
+        false,  // Alternate character set
+        attr.blink,       // Blinking
+        attr.bold,        // Extra bright or bold
+        attr.dim,         // Half bright
+        false,  // Horizontal highlight
+        false,       // Invisible
+        false,        // Left highlight
+        false,         // Low highlight
+        false,     // Protected
+        attr.reverse,     // Reverse video
+        false,       // Right highlight
+        attr.standout,    // Best highlighting mode of the terminal
+        false,         // Top highlight
+        attr.underline,   // Underlining
+        false,     // Vertical highlight
+        0
+        );
+}
+
+static String* to_string_NCursesPosition(struct NCursesPosition* npos)
+{
+    return format_String( "{ x=%ld, y=%ld }", (long)npos->x, (long)npos->y ); 
+}
+
+specification typedef struct NCursesPosition NCursesPosition = {
+    .to_string = (ToString)to_string_NCursesPosition
+};
+
+NCursesPosition* create_NCursesPosition(IntT x,IntT y)
+{
+    return create(&type_NCursesPosition, x, y);
+}
+
+bool equals_NCursesPosition(NCursesPosition* pos1, NCursesPosition* pos2)
+{
+    return ( pos1->x == pos2->x )&&(pos1->y == pos2->y);
+}
+
+NcursesAttrT create_EmptyNCursesAttrs()
+{
+    NcursesAttrT attr;
+
+    attr.altcharset=false;
+    attr.blink=false;
+    attr.bold=false;
+    attr.dim=false;
+    attr.horizontal=false;
+    attr.invis=false;
+    attr.left=false;
+    attr.low=false;
+    attr.protect=false;
+    attr.reverse=false;
+    attr.right=false;
+    attr.standout=false;
+    attr.top=false;
+    attr.underline=false;
+    attr.vertical=false;
+
+    attr.colorPair=0;
+
+    return attr;
+}
+
+specification typedef struct NCursesTerminal NCursesTerminal = {};
+
+NCursesTerminal* create_NCursesTerminal(CallContext context, TerminalTPtr cur_term)
+{
+    return create(&type_NCursesTerminal, cur_term, NULL, NULL, NULL, NULL, 
+                        -1,-1,-1,-1,-1,-1,-1, 0, 1, MODE_CBREAK, -1, 0,
+                        create_NCursesTerminfo(), create_CString("unknown"), create_defaultSlkStruct(context) );
+}
+
+NCursesWindow* create_NCursesWindow(WindowTPtr win,  IntT nlines, IntT ncols,
+                                    IntT begin_y, IntT begin_x, WindowTPtr par)
+{
+    NCursesWindow* res;
+    ChTypeTArray* charr=create_ChTypeTArray(nlines*ncols);
+    CByteArray* need_refresh = create_CByteArray(malloc(nlines*ncols),
+                    nlines*ncols);
+    IntT i=-1;
+
+    while(++i<need_refresh->length)
+        setByteAt_CByteArray(need_refresh, i, 3);
+
+    res = create(
+        &type_NCursesWindow,
+        win,                                // address
+        (IntT)false,                        // refresh
+        create_NCursesPosition(0, 0),       // cursorPos
+        nlines,                             // nlines
+        ncols,                              // ncols
+        begin_y,                            // begy
+        begin_x,                            // begx
+        0,                                  // parx
+        0,                                  // pary
+        0,                                  // keypad
+        -1,                                 // flags
+        create_EmptyNCursesAttrs(),         // attrs
+        create_emptyChTypeT(),              // bkgd
+        false,                              // notimeout
+        false,                              // clear
+        false,                              // leaveok
+        false,                              // scroll
+        false,                              // sync
+        false,                              // idlok
+        true,                               // idcok
+        false,                              // immed
+        -1,                                 // delay
+        -1,                                 // regtop
+        nlines - 1,                         // regbottom
+        par,                                // parent
+        create_emptyPdat(),                 // pad
+        charr,                              // wnd_image
+        need_refresh                        // refresh marks
+    );
+
+   return res;
+}
+
+
+NCursesScreen *getScreen(ScreenTPtr* screen)
+{
+    return getObjectInMemory(*screen);
+}
+
+NCursesWindow *getWindow(WindowTPtr* window)
+{
+    return getObjectInMemory(*window);
+}
+
+NCursesTerminal *getTerminal(TerminalTPtr* window)
+{
+    return getObjectInMemory(*window);
+}
+
+void registerNCursesWindow( WindowTPtr ptr, NCursesWindow* data )
+{
+    registerObjectInMemory(ptr, 0, data);
+    
+    addWindow_ProcessId(create_ProcessId(ptr.system, ptr.process), data);
+}
+
+NCursesWindow *getNCursesStdWindow(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    return getObjectInMemory(ps->stdscr_wnd);
+}
+
+WindowTPtr getPtrNCursesStdWindow(CallContext context)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    return ps->stdscr_wnd;
+}
+
+WindowTPtr* getLPtrNCursesStdWindow(CallContext context)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    return &ps->stdscr_wnd;
+}
+
+IntT getTermNLines(CallContext context)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    return ps->TermNLines;
+}
+
+void setTermNLines(CallContext context, IntT val)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    ps->TermNLines = val;
+}
+
+void setTermNCols(CallContext context, IntT val)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    ps->TermNCols = val;
+}
+
+IntT getTermNCols(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    return ps->TermNCols;
+}
+
+void unregisterNCursesWindow( WindowTPtr ptr )
+{
+    removeWindow_ProcessId(create_ProcessId(ptr.system, ptr.process), getWindow(&ptr));
+       
+    unregisterObjectInMemory(ptr);
+}
+
+void registerNCursesScreen( ScreenTPtr ptr, Object* data )
+{
+    registerObjectInMemory(ptr, 0, data);
+}
+void unregisterNCursesScreen( ScreenTPtr ptr )
+{
+    unregisterObjectInMemory(ptr);
+}
+
+NCursesTerminal *getNCursesStdTerminal(CallContext context)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    return getObjectInMemory(ps->cur_term);
+}
+
+void registerNCursesTerminal( TerminalTPtr ptr, Object* data )
+{
+    registerObjectInMemory(ptr, 0, data);
+}
+void unregisterNCursesTerminal( TerminalTPtr ptr )
+{
+    unregisterObjectInMemory(ptr);
+}
+
+NCursesTerminal* getNCursesTerminal( TerminalTPtr ptr )
+{
+    return getObjectInMemory(ptr);
+}
+
+
+NCursesWindow* create_defaultNCursesWindow(CallContext context, WindowTPtr address, IntT lines, IntT cols)
+{
+    ChTypeTArray* charr;
+    NCursesWindow* res;
+    IntT begin_x, begin_y;
+    List * riplist;
+    
+    begin_x = begin_y = 0;
+
+    /*[ ripoffline ]*/
+    /*
+     * Removal occurs during the subsequent call to initscr() or newterm().
+     */
+
+    riplist = getRipLines(context);
+    if(riplist)
+    {
+        int i;
+        for(i=0;i<size_List(riplist);i++)
+        {
+            RipLineT * ripline;
+            WindowState * win_state;
+            NCursesWindow * nwin;
+            int ncols, nlines;
+
+            ripline = (RipLineT*)get_List(riplist, i);
+
+            if(ripline->line > 0)
+            {               
+                /*
+                 * If line is positive, one line is removed from the beginning of stdscr;
+                 */
+                begin_y++;              
+            }
+            else if(ripline->line < 0)
+            {
+                /*
+                 * if line is negative, one line is removed from the end.
+                 */
+
+                /* [begin_y does not change] */
+            }
+
+            /*
+             * The ripoffline() function reserves a screen line for use by the application.
+             */
+            lines--;
+        }
+    }   
+
+    charr=create_ChTypeTArray(lines*cols);
+    res=create_NCursesWindow(address,  lines, cols, begin_x, begin_y, NULL_VoidTPtr);
+
+    registerNCursesWindow( address, res);
+    updateNCursesWindowMayNULL(context, &address);
+
+    return res;
+}
+
+void changeCursorPos(NCursesWindow* curWnd, NCursesPosition* cursorPos,
+                        IntT offset)
+{
+    IntT abs_pos = cursorPos->y * curWnd->ncols + cursorPos->x;
+    CallContext context = getSystemContext(curWnd->address.system,
+                                                    curWnd->address.process);
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    abs_pos += offset;
+
+    if(abs_pos < 0)
+        abs_pos = 0;
+
+    if(abs_pos >= curWnd->ncols * curWnd->nlines && !curWnd->scroll)
+    {
+        abs_pos = curWnd->ncols * (curWnd->nlines-1);
+    }
+
+    cursorPos->x = abs_pos % curWnd->ncols;
+    cursorPos->y = abs_pos / curWnd->ncols;
+}
+
+//specification typedef struct ChTypeTArray ChTypeTArray = {};
+specification typedef struct NCursesWindow NCursesWindow = {};
+specification typedef struct NCursesScreen NCursesScreen = {};
+
+//Incomplete: need to add mapped area support & improve subwin support
+void setElement_NCursesWindow(NCursesWindow* curWnd,
+                               NCursesPosition* pos,
+                               ChTypeT ch)
+{
+    if(curWnd->wnd_image != NULL)
+    {
+        NCursesPosition* p = clone(pos);
+        
+        setRefresh_NCursesWindow(curWnd, p, 3);
+
+        if(curWnd->ncols * p->y + p->x < curWnd->wnd_image->size)
+            (curWnd->wnd_image->arr)[curWnd->ncols * p->y + p->x] = //ch;
+                combineChTypeTWithAttrs(curWnd->attrs, ch);
+    }
+    else
+    {
+        NCursesWindow* parent = getWindow(&curWnd->parent);
+        NCursesPosition* parent_pos =
+           // create_NCursesPosition( pos->x + curWnd->begx - parent->begx,
+           //                         pos->y + curWnd->begy - parent->begx);
+            create_NCursesPosition( pos->x + curWnd->parx,
+                                    pos->y + curWnd->pary);
+        setRefresh_NCursesWindow(curWnd, pos, 3);
+
+        setElement_NCursesWindow_Refresh(parent, parent_pos, ch, curWnd->sync);
+    }
+}
+void setElement_NCursesWindow_Refresh(NCursesWindow* curWnd,
+                               NCursesPosition* pos,
+                               ChTypeT ch, IntT refresh)
+{
+    if(curWnd->wnd_image != NULL)
+    {
+        NCursesPosition* p = clone(pos);
+        
+        if(refresh)
+            setRefresh_NCursesWindow(curWnd, p, 3);
+
+        if(curWnd->ncols * p->y + p->x < curWnd->wnd_image->size)
+            (curWnd->wnd_image->arr)[curWnd->ncols * p->y + p->x] = ch;
+                //combineChTypeTWithAttrs(curWnd->attrs, ch);
+    }
+    else
+    {
+        NCursesWindow* parent = getWindow(&curWnd->parent);
+        NCursesPosition* parent_pos =
+            //create_NCursesPosition( pos->x + curWnd->begx - parent->begx,
+            //                        pos->y + curWnd->begy - parent->begx);
+            create_NCursesPosition( pos->x + curWnd->parx,
+                                    pos->y + curWnd->pary);
+
+        if(refresh)
+            setRefresh_NCursesWindow(curWnd, pos, 3);
+        
+        setElement_NCursesWindow_Refresh(parent, parent_pos, ch, refresh);
+    }
+}
+
+ChTypeT getElement_NCursesWindow(NCursesWindow* curWnd,
+                               NCursesPosition* pos)
+{
+    if(curWnd->wnd_image != NULL)
+    {
+        NCursesPosition* p = clone(pos);
+
+        if(curWnd->ncols * p->y + p->x < curWnd->wnd_image->size)
+            return (curWnd->wnd_image->arr)[curWnd->ncols * p->y + p->x];
+    }
+    else
+    {
+        NCursesWindow* parent = getWindow(&curWnd->parent);
+        NCursesPosition* parent_pos =
+            //create_NCursesPosition(pos->x + curWnd->begx - parent->begx, pos->y + curWnd->begy - parent->begx);
+            create_NCursesPosition( pos->x + curWnd->parx,
+                        pos->y + curWnd->pary);
+
+        return getElement_NCursesWindow(parent, parent_pos);
+    }
+}
+
+void setElement_NCursesWindow_YX(NCursesWindow* curWnd,
+                               IntT y, IntT x,
+                               ChTypeT ch)
+{
+    setElement_NCursesWindow(curWnd, create_NCursesPosition(x, y), ch);
+}
+
+ChTypeT getElement_NCursesWindow_YX(NCursesWindow* curWnd,
+                               IntT y, IntT x)
+{
+    return getElement_NCursesWindow(curWnd, create_NCursesPosition(x, y));
+}
+
+
+void setElement_NCursesWindow_Offset(NCursesWindow* curWnd,
+                              IntT offsetFromBeginning,
+                              ChTypeT ch)
+{
+    NCursesPosition* pos = create_NCursesPosition(
+                                offsetFromBeginning % curWnd->ncols,
+                                offsetFromBeginning / curWnd->ncols);
+
+    setElement_NCursesWindow(curWnd, pos, ch);
+}
+
+ChTypeT getElement_NCursesWindow_Offset(NCursesWindow* curWnd,
+                                 IntT offsetFromBeginning)
+{
+    NCursesPosition* pos = create_NCursesPosition(
+                                offsetFromBeginning % curWnd->ncols,
+                                offsetFromBeginning / curWnd->ncols);
+
+    return getElement_NCursesWindow(curWnd, pos);
+}
+
+IntT isSpecChar(ChTypeT ch)
+{
+    IntT let = ch.letter;
+
+    return let == '\n' || let == '\t' || let == '\b' || let == '\r'/*to be continued...*/;
+}
+
+
+bool addSpecChar(NCursesWindow* curWnd, NCursesPosition* pos, ChTypeT ch, bool wrap, bool insertOperation)
+{
+    switch(ch.letter)
+    {
+    case '\n':
+        addNewline(curWnd, pos, ch, wrap, insertOperation); break;
+    case '\t':
+        addTab(curWnd, pos, ch, wrap, insertOperation); break;
+    case '\b':
+        addBackspace(curWnd, pos, ch, wrap); break;
+    case '\r':
+        addCarriageReturn(curWnd, pos, ch, wrap); break;
+    default:
+        break;
+    }
+
+    /*
+     * In functions that do not move the cursor based on the information
+     * placed in the window, these special characters would only be used
+     * within a string in order to affect the placement of subsequent
+     * characters; the cursor movement specified below does not persist
+     * in the visible cursor beyond the end of the operation.
+     */
+    IMPLEMENT_REQ("special.01");
+
+    /*
+     * In functions that do move the cursor, these special characters can be
+     * used to affect the placement of subsequent characters and to achieve
+     * movement of the visible cursor. 
+     */
+    IMPLEMENT_REQ("special.02");
+
+    return isSpecChar(ch);
+}
+
+void shiftWindow(NCursesWindow* curWnd, IntT pos, IntT offset, bool wrap)
+{
+    IntT i;
+
+    if(wrap)
+    {
+        for (i=curWnd->ncols*curWnd->nlines - 1; i >= pos+offset; i--)
+        {
+            setElement_NCursesWindow_Offset(curWnd, i, 
+                getElement_NCursesWindow_Offset(curWnd, i-offset));
+        }
+    }
+    else
+    {
+        for (i = (pos/curWnd->ncols+1)*curWnd->ncols-1; i >= pos+offset; i--)
+        {
+            setElement_NCursesWindow_Offset(curWnd, i, 
+                getElement_NCursesWindow_Offset(curWnd, i-offset));
+        }
+    }
+}
+
+
+void addNewline(NCursesWindow* curWnd, NCursesPosition* pos, ChTypeT ch, bool wrap, bool insertOperation)
+{
+    CallContext context = getSystemContext(curWnd->address.system,
+                                                    curWnd->address.process);
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    NCursesPosition* back_pos = clone(curWnd->cursorPos);
+    NCursesPosition* fl = NULL;
+
+    curWnd->cursorPos = clone(pos);
+
+    if (insertOperation)
+    {
+        shiftWindow(curWnd, curWnd->cursorPos->y*curWnd->ncols + curWnd->cursorPos->x, 
+                    curWnd->ncols - curWnd->cursorPos->x+1, wrap);
+    }
+
+    if(curWnd->scroll && curWnd->cursorPos->y == curWnd->nlines-1)
+    {
+        fl = clone(curWnd->cursorPos);
+        fl->x = curWnd->ncols-1;
+        fl->y = curWnd->nlines-2;
+    }
+
+    while(curWnd->cursorPos->x != curWnd->ncols-1)
+    {
+        /*
+         * <newline>
+         * 
+         * In an add operation, Curses adds the background character into
+         * successive columns until reaching the end of the line.
+         */
+        IMPLEMENT_REQ("special.05.01");
+
+        /*
+         * <newline>
+         * 
+         * In an insert operation, <newline> erases the remainder of the current 
+         * line with the background character, effectively a wclrtoeol(), and
+         * moves the cursor to the start of a new line. 
+         */
+        IMPLEMENT_REQ("special.05.04");
+        
+        if(/*curWnd->cursorPos->y != curWnd->nlines-1 ||*/ curWnd->scroll
+            || (term->input_mode & MODE_CBREAK))
+        {
+            setElement_NCursesWindow(curWnd, curWnd->cursorPos, curWnd->bkgd);
+        }
+
+        changeCursorPos(curWnd, curWnd->cursorPos, 1);
+    }
+    
+    if((term->input_mode & MODE_CBREAK || term->input_mode & MODE_RAW)
+        && curWnd->cursorPos->y == curWnd->nlines-1 && !curWnd->scroll)
+    {
+        curWnd->cursorPos = back_pos;
+
+        return;
+    }
+    /*
+     * <newline>
+     * 
+     * Any characters after the <newline> character are added, starting at the 
+     * start of the new line.
+     */
+    IMPLEMENT_REQ("special.05.03");
+
+    /*
+     * <newline>
+     * 
+     * Any characters after the <newline> character are inserted at the start
+     * of the new line.
+     */
+    IMPLEMENT_REQ("special.05.06");
+
+    if(curWnd->cursorPos->y == curWnd->nlines-1)
+    {
+        changeCursorPos(curWnd, curWnd->cursorPos, 1);
+
+        if(curWnd->scroll)
+        {
+            /*
+             * <newline>
+             * 
+             * Scrolling occurs as described in 
+             * 
+             * Truncation, Wrapping and Scrolling .
+             */
+            IMPLEMENT_REQ("special.05.02");
+
+            /*
+             * <newline>
+             * 
+             * When scrolling is enabled, advancing the cursor to a new line may cause 
+             * scrolling as described in 
+             * 
+             * Truncation, Wrapping and Scrolling .
+             */
+            IMPLEMENT_REQ("special.05.05");
+
+            scrollLineNcursesWindow(curWnd);
+
+            if(fl)
+            {
+                setElement_NCursesWindow(curWnd, fl, curWnd->bkgd);
+            }
+        }
+    }
+    else
+    {
+        setElement_NCursesWindow(curWnd, curWnd->cursorPos, curWnd->bkgd);
+        changeCursorPos(curWnd, curWnd->cursorPos, 1);
+    }
+}
+
+
+void addTab(NCursesWindow* curWnd, NCursesPosition* pos, ChTypeT ch, bool wrap, bool insertOperation)
+{
+    CallContext context = getSystemContext(curWnd->address.system,
+                                                    curWnd->address.process);
+    IntTObj* ob;
+
+    /*
+     * <tab>
+     * 
+     * By default, tab stops are in column 0, 8, 16, and so on.
+     */
+    IMPLEMENT_REQ("special.06.02");
+
+    ob = getItem_NCursesTerminfo(context, create_CString("it"));
+
+    curWnd->cursorPos = clone(pos);
+
+    if (insertOperation)
+    {
+        shiftWindow(curWnd, curWnd->cursorPos->y*curWnd->ncols + curWnd->cursorPos->x, 
+            (curWnd->cursorPos->x / *ob + 1)*(*ob) -  curWnd->cursorPos->x, wrap);
+    }
+
+
+    while(  curWnd->cursorPos->x != curWnd->ncols - 1
+            && (curWnd->cursorPos->x+1) % *ob)
+    {   
+        /*
+         * <tab>
+         * 
+         * Tab characters in text move subsequent characters to the next
+         * horizontal tab stop.
+         */
+        IMPLEMENT_REQ("special.06.01");
+
+        /*
+         * <tab>
+         * 
+         * In an insert or add operation, Curses inserts or adds, respectively,
+         * the background character into successive columns until reaching the
+         * next tab stop
+         */
+        IMPLEMENT_REQ("special.06.03");
+
+        setElement_NCursesWindow(curWnd, curWnd->cursorPos, curWnd->bkgd);
+        changeCursorPos(curWnd, curWnd->cursorPos, 1);        
+    } 
+
+    setElement_NCursesWindow(curWnd, curWnd->cursorPos, curWnd->bkgd);
+
+    if (curWnd->cursorPos->x == curWnd->ncols - 1 && !wrap)
+    {
+       // setElement_NCursesWindow(curWnd, curWnd->cursorPos, curWnd->bkgd);
+    }
+    else
+    {
+        changeCursorPos(curWnd, curWnd->cursorPos, 1);        
+    }
+       
+    if(curWnd->cursorPos->y == curWnd->nlines && curWnd->scroll)
+    {
+        if (wrap)
+        {
+            /*
+             * <tab>
+             * 
+             * If there are no more tab stops in the current line, wrapping and
+             * scrolling occur as described in 
+             * 
+             * Truncation, Wrapping and Scrolling . 
+             */
+            IMPLEMENT_REQ("special.06.04");
+
+            scrollLineNcursesWindow(curWnd);
+        }
+        else
+        {
+            curWnd->cursorPos = clone(pos);
+        }
+    }
+}
+
+
+void addBackspace(NCursesWindow* curWnd, NCursesPosition* pos, ChTypeT ch, bool wrap)
+{
+    /*
+     * <backspace>
+     * 
+     * Unless the cursor was already in column 0, <backspace> moves the cursor 
+     * one column toward the start of the current line and any characters after
+     * the <backspace> are added or inserted starting there. 
+     */
+    IMPLEMENT_REQ("special.03.01");
+
+    if(curWnd->cursorPos->x)
+        curWnd->cursorPos->x--;
+}
+void addCarriageReturn(NCursesWindow* curWnd, NCursesPosition* pos, ChTypeT ch, bool wrap)
+{
+    CallContext context = getSystemContext(curWnd->address.system,
+                                                    curWnd->address.process);
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    if(     !(term->input_mode & MODE_CBREAK)
+        //&&  !(term->input_mode & MODE_RAW)
+        )
+    {
+        addNewline(curWnd, pos, ch, wrap, false);
+        return;
+    }
+
+    /*
+     * <carriage return>
+     * 
+     * Unless the cursor was already in column 0, <carriage return> moves the 
+     * cursor to the start of the current line. Any characters after the < 
+     * carriage return> are added or inserted starting there. 
+     */
+    IMPLEMENT_REQ("special.04.01");
+
+    curWnd->cursorPos->x = 0;  
+}
+
+
+NcursesAttrT getAttrFromChType(ChTypeT ch)
+{
+    NcursesAttrT res;
+    res.altcharset = ch.altcharset;
+    res.blink = ch.blink;
+    res.bold = ch.bold;
+    res.dim = ch.dim;
+    res.horizontal = false;
+    res.invis = ch.invis;
+    res.left = false;
+    res.low = false;
+    res.protect = ch.protect;
+    res.reverse = ch.reverse;
+    res.right = false;
+    res.standout = ch.standout;
+    res.top = false;
+    res.underline = ch.underline;
+    res.vertical = false;
+    res.colorPair = ch.colorPair;
+    return res;
+}
+
+
+ChTypeT getWindowBkgd(NCursesWindow* wnd)
+{
+    return wnd->bkgd;
+}
+
+void setWindowBkgd(NCursesWindow* wnd, ChTypeT bkgd)
+{
+    wnd->bkgd = bkgd;
+}
+
+NcursesAttrT getWindowAttrs(NCursesWindow* wnd)
+{
+    return wnd->attrs;
+}
+
+void setWindowAttrs(NCursesWindow* wnd, NcursesAttrT attrs)
+{
+    wnd->attrs = attrs;
+}
+
+
+void chtype_formatter(TSStream *stream, ChTypeTObj* ch)
+{
+    VERIFY_TYPE(chtype_formatter, &type_ChTypeTObj, ch);
+    
+    writeTypeHeaderTSStream(stream, "chtype");
+    
+    writeInt_TSStream(stream, ch->altcharset);   // Alternate character set
+    writeInt_TSStream(stream, ch->blink);        // Blinking
+    writeInt_TSStream(stream, ch->bold);         // Extra bright or bold
+    writeInt_TSStream(stream, ch->dim);          // Half bright
+    writeInt_TSStream(stream, ch->invis);        // Invisible
+    writeInt_TSStream(stream, ch->protect);      // Protected
+    writeInt_TSStream(stream, ch->reverse);      // Reverse video
+    writeInt_TSStream(stream, ch->standout);     // Best highlighting mode of the terminal
+    writeInt_TSStream(stream, ch->underline);    // Underlining
+    
+    writeInt_TSStream(stream, ch->colorPair);
+    writeWChar_TSStream(stream, ch->letter);
+}
+
+ChTypeT readChTypeT_TSStream(TSStream* stream)
+{
+    ChTypeT res = create_emptyChTypeT();
+    
+    res.altcharset=readInt_TSStream(stream);
+    res.blink=readInt_TSStream(stream);
+    res.bold=readInt_TSStream(stream);
+    res.dim=readInt_TSStream(stream);
+    res.invis=readInt_TSStream(stream);
+    res.protect=readInt_TSStream(stream);
+    res.reverse=readInt_TSStream(stream);
+    res.standout=readInt_TSStream(stream);
+    res.underline=readInt_TSStream(stream);
+    
+    res.colorPair=readInt_TSStream(stream);
+    res.letter=readWChar_TSStream(stream);
+
+    return res;
+}
+
+
+NcursesAttrT readNcursesAttrs_TSStream(TSStream* stream)
+{
+    NcursesAttrT attrs;
+
+    attrs.altcharset = readInt_TSStream(stream);
+    attrs.blink = readInt_TSStream(stream);
+    attrs.bold = readInt_TSStream(stream);
+    attrs.dim = readInt_TSStream(stream);
+    attrs.horizontal = readInt_TSStream(stream);
+    attrs.invis = readInt_TSStream(stream);
+    attrs.left = readInt_TSStream(stream);
+    attrs.low = readInt_TSStream(stream);
+    attrs.protect = readInt_TSStream(stream);
+    attrs.reverse = readInt_TSStream(stream);
+    attrs.right = readInt_TSStream(stream);
+    attrs.standout = readInt_TSStream(stream);
+    attrs.top = readInt_TSStream(stream);
+    attrs.underline = readInt_TSStream(stream);
+    attrs.vertical = readInt_TSStream(stream);
+
+    attrs.colorPair = readInt_TSStream(stream);
+    return attrs;
+
+    
+}
+
+ChTypeT combineChTypeTWithAttrs(NcursesAttrT attrs, ChTypeT ch)
+{
+    ChTypeT res = ch;
+    
+    res.altcharset|=attrs.altcharset;
+    res.blink|=attrs.blink;
+    res.bold|=attrs.bold;
+    res.dim|=attrs.dim;
+    res.invis|=attrs.invis;
+    res.protect|=attrs.protect;
+    res.reverse|=attrs.reverse;
+    res.standout|=attrs.standout;
+    res.underline|=attrs.underline;
+    
+    return res;
+}
+
+ChTypeT TurnOff_ChTypeT(ChTypeT ch, ChTypeT attrs)
+{
+    ch.altcharset   &= !attrs.altcharset;
+    ch.blink        &= !attrs.blink;
+    ch.bold         &= !attrs.bold;
+    ch.dim          &= !attrs.dim;
+    ch.invis        &= !attrs.invis;
+    ch.protect      &= !attrs.protect;
+    ch.reverse      &= !attrs.reverse;
+    ch.standout     &= !attrs.standout;
+    ch.underline    &= !attrs.underline;
+    
+    return ch;
+}
+
+ChTypeT TurnOn_ChTypeT(ChTypeT ch, ChTypeT attrs)
+{
+    ch.altcharset   |= attrs.altcharset;
+    ch.blink        |= attrs.blink;
+    ch.bold         |= attrs.bold;
+    ch.dim          |= attrs.dim;
+    ch.invis        |= attrs.invis;
+    ch.protect      |= attrs.protect;
+    ch.reverse      |= attrs.reverse;
+    ch.standout     |= attrs.standout;
+    ch.underline    |= attrs.underline;
+    
+    return ch;
+}
+
+ChTypeT create_ChTypeTWithAttr(NcursesAttrT attrs, ChTypeT bkgd, CharT ch)
+{
+    ChTypeT res = combineChTypeTWithAttrs(attrs, bkgd);
+
+    res.colorPair = attrs.colorPair;
+    res.letter=ch;
+
+    return res;
+}
+
+
+
+bool processAddSpecialCharacter(NCursesWindow*  win, IntT x, IntT y, ChTypeT ch)
+{
+
+    return false;
+    
+}
+
+bool processInsertSpecialCharacter(NCursesWindow*  win, IntT x, IntT y, ChTypeT ch)
+{
+    return false;
+    
+}
+
+
+void scrollLineNcursesWindow(NCursesWindow* wnd)
+{
+    ChTypeT* arr = wnd->wnd_image->arr;
+    IntT size = wnd->wnd_image->size;
+    IntT lineLength=wnd->ncols;
+    IntT i=0;
+    
+    for (i=0;i<size-lineLength;i++)
+    {
+        setElement_NCursesWindow_Offset(wnd, i, getElement_NCursesWindow_Offset(wnd,  lineLength+i));
+    }
+    
+    while (i<size)
+    {
+        setElement_NCursesWindow_Offset(wnd, i, combineChTypeTWithAttrs(wnd->attrs, wnd->bkgd));
+        i++;
+    }
+
+    //May cause errors, need check
+    if(wnd->cursorPos->y)
+        wnd->cursorPos->y--;
+}
+
+//Getting absolute screen position from relative ( to win ) screen position pos
+NCursesPosition* getAbsoluteScreenPosition(NCursesWindow*   wnd,
+                                           NCursesPosition* pos)
+{
+    NCursesPosition* res = clone(pos);
+
+    res->y += wnd->begy;
+    res->x += wnd->begx;
+
+    return res;
+}
+
+//Getting relative ( to win ) screen position from absolute screen position pos
+NCursesPosition* getRelativeScreenPosition(NCursesWindow* win,
+                                           NCursesPosition* pos)
+{
+    NCursesPosition* left_upper, *right_lower;
+
+    left_upper = getAbsoluteScreenPosition(win,
+                        create_NCursesPosition(0, 0));
+
+    right_lower = getAbsoluteScreenPosition(win,
+                        create_NCursesPosition( win->ncols,
+                                                win->nlines));
+
+    if( left_upper->x <= pos->x && right_lower->x >= pos->x
+        &&
+        left_upper->y <= pos->y && right_lower->y >= pos->y)
+    {
+        return create_NCursesPosition(  pos->x - left_upper->x,
+                                        pos->y - left_upper->y);
+    }
+
+    //pos isn't contained within win
+    return NULL;
+}
+
+specification typedef struct Rect Rect = {};
+
+Rect* create_Rect( IntT left, IntT upper, IntT right, IntT lower)
+{
+    return create(&type_Rect, left, upper, right, lower);
+}
+
+//Rect coordinates are absolute
+Rect* getIntersectingRect(NCursesWindow* src, NCursesWindow* dst)
+{
+    NCursesPosition* src_lu, *src_rl, *dst_lu, *dst_rl;
+    Rect* rct = create_Rect(0, 0, 0, 0);
+
+    src_lu = getAbsoluteScreenPosition(src,
+                    create_NCursesPosition(0, 0));
+    dst_lu = getAbsoluteScreenPosition(dst,
+                    create_NCursesPosition(0, 0));
+    src_rl = getAbsoluteScreenPosition(src,
+                    create_NCursesPosition( src->ncols,
+                                            src->nlines));
+    dst_rl = getAbsoluteScreenPosition(dst,
+                    create_NCursesPosition( dst->ncols,
+                                            dst->nlines));
+    //No intersection
+    if(     src_lu->x >= dst_rl->x || src_rl->x < dst_lu->x
+        ||  src_lu->y >= dst_rl->y || src_rl->y < dst_lu->y)    
+            return NULL;
+
+    if(dst_lu->x <= src_lu->x && dst_rl->x > src_lu->x)
+    {
+        rct->left = src_lu->x;
+
+        if(dst_lu->x <= src_rl->x && dst_rl->x > src_rl->x)
+        {
+            rct->right = src_rl->x;
+        }
+        else
+        {
+            rct->right = dst_rl->x;        
+        }
+    }
+    else
+    {
+        rct->left = dst_lu->x;
+
+        if(src_lu->x <= dst_rl->x && src_rl->x > dst_rl->x)
+        {
+            rct->right = dst_rl->x;
+        }
+        else
+        {
+            rct->right = src_rl->x;        
+        }
+    }
+
+    if(dst_lu->y <= src_lu->y && dst_rl->y > src_lu->y)
+    {
+        rct->upper = src_lu->y;
+
+        if(dst_lu->y <= src_rl->y && dst_rl->y > src_rl->y)
+        {
+            rct->lower = src_rl->y;
+        }
+        else
+        {
+            rct->lower = dst_rl->y;
+        }
+    }
+    else
+    {
+        rct->upper = dst_lu->y;
+
+        if(src_lu->y <= dst_rl->y && src_rl->y > dst_rl->y)
+        {
+            rct->lower = dst_rl->y;
+        }
+        else
+        {
+            rct->lower = src_rl->y;
+        }
+    }
+
+    return rct;
+}
+
+TerminalTPtr get_cur_term( CallContext context)
+{
+    TSCommand command = create_TSCommand();
+    TerminalTPtr res;
+
+    format_TSCommand( &command, "get_cur_term" );
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        res = readPointer_TSStream(context, &command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+void registerStdTerminal(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+   
+    ps->cur_term = get_cur_term(context);
+    registerNCursesTerminal(ps->cur_term, create_NCursesTerminal(context,ps->cur_term));
+}
+
+specification typedef struct RGBColor RGBColor = {};
+
+RGBColor* create_RGBColor( ShortT red, ShortT green, ShortT blue)
+{
+    return create(&type_RGBColor, red, green, blue);
+}
+
+
+specification typedef struct ColorPair ColorPair = {};
+
+ColorPair* create_ColorPair( ShortT foreground, ShortT background)
+{
+    return create(&type_ColorPair, foreground, background);
+}
+
+IntT getCOLORS( CallContext context)
+{
+    TSCommand command = create_TSCommand();
+    IntT res;
+
+    format_TSCommand( &command, "getCOLORS" );
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+IntT getCOLOR_PAIRS( CallContext context)
+{
+    TSCommand command = create_TSCommand();
+    IntT res;
+
+    format_TSCommand( &command, "getCOLOR_PAIRS" );
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+void setVariables_StdTerminal(CallContext context)
+{
+    NCursesTerminal* term;
+    term = getNCursesStdTerminal(context);
+
+    term->COLORS = getCOLORS(context);
+    term->COLOR_PAIRS = getCOLOR_PAIRS(context);
+    term->inserted_character_buffer = create_List(&type_IntTObj);
+    term->initialized_colors = create_Map(  &type_ShortTObj, &type_RGBColor);
+    term->initialized_color_pairs = create_Map( &type_ShortTObj,
+                                                &type_ColorPair);
+}
+
+
+/********************************************************************/
+/**                    Formatters                                  **/
+/********************************************************************/
+
+void curses_attr_formatter(TSStream *stream, NcursesAttrTObj* attr)
+{
+    VERIFY_TYPE(curses_attr_formatter, &type_NcursesAttrTObj, attr);
+    
+    writeTypeHeaderTSStream(stream, "curses_attr");
+    
+    writeInt_TSStream(stream, attr->altcharset);  // Alternate character set
+    writeInt_TSStream(stream, attr->blink);       // Blinking
+    writeInt_TSStream(stream, attr->bold);        // Extra bright or bold
+    writeInt_TSStream(stream, attr->dim);         // Half bright
+    writeInt_TSStream(stream, attr->horizontal);  // Horizontal highlight
+    writeInt_TSStream(stream, attr->invis);       // Invisible
+    writeInt_TSStream(stream, attr->left);        // Left highlight
+    writeInt_TSStream(stream, attr->low);         // Low highlight
+    writeInt_TSStream(stream, attr->protect);     // Protected
+    writeInt_TSStream(stream, attr->reverse);     // Reverse video
+    writeInt_TSStream(stream, attr->right);       // Right highlight
+    writeInt_TSStream(stream, attr->standout);    // Best highlighting mode of the terminal
+    writeInt_TSStream(stream, attr->top);         // Top highlight
+    writeInt_TSStream(stream, attr->underline);   // Underlining
+    writeInt_TSStream(stream, attr->vertical);    // Vertical highlight
+    writeInt_TSStream(stream, attr->colorPair);    
+    
+}
+
+bool isMappedWindow(NCursesWindow* wnd)
+{
+    return wnd->parx != 0 || wnd->pary != 0;
+}
+
+IntT ungetch_char(CallContext context, IntT letter)
+{
+    TSCommand command = create_TSCommand();
+    IntT res;
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    if(size_List(term->inserted_character_buffer) + 1 > MAX_BUFFER_SIZE)
+        return SUT_ERR;
+    
+    format_TSCommand( &command, "ungetch_char:$(int)", 
+        create_IntTObj(letter));
+
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+
+    //Adding char to model buffer
+    if(res == SUT_OK)
+    {
+        append_List( term->inserted_character_buffer,
+                        create_IntTObj(letter));            
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+//ptr shall terminate with '\0'
+IntT ungetch_array(CallContext context, VoidTPtr ptr)
+{
+    TSCommand command = create_TSCommand();
+    IntT res;
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    CString* str = readCString_VoidTPtr(ptr);
+    IntT i;
+
+    if(length_CString(str) + size_List(term->inserted_character_buffer) + 1
+        > MAX_BUFFER_SIZE)
+        return SUT_ERR;
+    
+    format_TSCommand( &command, "ungetch_array:$(ptr)", 
+        create_VoidTPtrObj(ptr));
+
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    //Adding string to model buffer
+    if(res == SUT_OK)
+    {
+        append_List( term->inserted_character_buffer, create_IntTObj('\n'));            
+        for(i=length_CString(str)-1;i>=0;i--)
+            append_List( term->inserted_character_buffer,
+                create_IntTObj(charAt_CString(str, i)));            
+    }
+
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+void incrementCursorPos(NCursesWindow* curWnd, NCursesPosition* cursorPos)
+{
+    changeCursorPos(curWnd, cursorPos, 1);
+}
+
+void newlineCursorPos(NCursesWindow* curWnd, NCursesPosition* cursorPos)
+{
+    if(cursorPos->y == curWnd->nlines-1)
+        cursorPos->x = curWnd->ncols -1;
+    else
+    {
+        cursorPos->x = 0;
+        cursorPos->y++;
+    }
+}
+
+WindowState* window_state(CallContext context, WindowTPtr ptr)
+{
+    TSCommand command = create_TSCommand();
+    WindowState* res;
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    Ldat* tmp;
+    ChTypeTObj* chO;
+    Pdat* p;
+    
+    format_TSCommand( &command, "window_state:$(ptr)", 
+        create_VoidTPtrObj(ptr));
+
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        res = readWindowState_TSStream(context, &command.response, ptr);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+specification typedef struct Ldat Ldat = {};
+
+Ldat* create_Ldat(List* lst, UIntT firstchar, UIntT lastchar, UIntT oldindex)
+{
+    return create(&type_Ldat, lst, firstchar, lastchar, oldindex);
+}
+
+Ldat* readLdat_TSStream(CallContext context, TSStream* stream)
+{
+    Ldat* res = create_Ldat(create_List(&type_ChTypeTObj), 0, 0, 0);
+    IntT size;
+    ChTypeTObj* chO;
+    
+    size = readInt_TSStream(stream);
+
+    while(size--)
+    {
+        append_List(res->text, 
+                        create_ChTypeTObj(readChTypeT_TSStream(stream)));
+            
+        chO = get_List(res->text, size_List(res->text)-1);
+    }
+
+    res->firstchar = readUInt_TSStream(stream);
+    res->lastchar = readUInt_TSStream(stream);
+    res->oldindex = readUInt_TSStream(stream);
+    
+    return res;    
+}
+
+specification typedef struct Pdat Pdat = {};
+
+Pdat* create_Pdat( ShortT _pad_y, ShortT _pad_x, ShortT _pad_top,
+                  ShortT _pad_left, ShortT _pad_bottom, ShortT _pad_right)
+{
+    return create(&type_Pdat, _pad_y, _pad_x, _pad_top,
+                  _pad_left, _pad_bottom, _pad_right);
+}
+
+Pdat* create_emptyPdat()
+{
+    return create_Pdat(-1, -1, -1, -1, -1, -1);
+}
+
+Pdat* readPdat_TSStream(CallContext context, TSStream* stream)
+{
+    Pdat* res = create_Pdat(0, 0, 0, 0, 0, 0);
+
+    res->_pad_y = readShort_TSStream(stream);
+    res->_pad_x = readShort_TSStream(stream);
+    res->_pad_top = readShort_TSStream(stream);
+    res->_pad_left = readShort_TSStream(stream);
+    res->_pad_bottom = readShort_TSStream(stream);
+    res->_pad_right = readShort_TSStream(stream);
+    
+    return res;    
+}
+
+specification typedef struct WindowState WindowState = {};
+
+WindowState* create_WindowState(ShortT _cury,
+                                ShortT _curx,
+                                ShortT _maxy,
+                                ShortT _maxx,
+                                ShortT _begy,
+                                ShortT _begx,
+                                ShortT _flags,
+                                NcursesAttrT _attrs,
+                                ChTypeT _bkgd,
+                                IntT _notimeout,
+                                IntT _clear,
+                                IntT _leaveok,
+                                IntT _scroll,
+                                IntT _idlok,
+                                IntT _idcok,
+                                IntT _immed,
+                                IntT _sync,
+                                IntT _use_keypad,
+                                IntT _delay,
+                                List* _line,
+                                ShortT _regtop,
+                                ShortT _regbottom,
+                                IntT _parx,
+                                IntT _pary,
+                                WindowTPtr _parent,
+                                Pdat* _pad,
+                                ShortT _yoffset,
+                                WindowTPtr self)
+{
+    return create(&type_WindowState,
+                                _cury,
+                                _curx,
+                                _maxy,
+                                _maxx,
+                                _begy,
+                                _begx,
+                                _flags,
+                                _attrs,
+                                _bkgd,
+                                _notimeout,
+                                _clear,
+                                _leaveok,
+                                _scroll,
+                                _idlok,
+                                _idcok,
+                                _immed,
+                                _sync,
+                                _use_keypad,
+                                _delay,
+                                _line,
+                                _regtop,
+                                _regbottom,
+                                _parx,
+                                _pary,
+                                _parent,
+                                _pad,
+                                _yoffset,
+                                self);
+}
+
+WindowState* create_emptyWindowState()
+{    
+    return create_WindowState(
+                                (ShortT)-1, //ShortT _cury,
+                                (ShortT)-1, //ShortT _curx,
+                                (ShortT)-1, //ShortT _maxy,
+                                (ShortT)-1, //ShortT _maxx,
+                                (ShortT)-1, //ShortT _begy,
+                                (ShortT)-1, //ShortT _begx,
+                                (ShortT)-1, //ShortT _flags,
+                                create_EmptyNCursesAttrs(),//NcursesAttrT _attrs,
+                                create_emptyChTypeT(),//ChTypeT _bkgd,
+                                (IntT)-1, //IntT _notimeout,
+                                (IntT)-1, //IntT _clear,
+                                (IntT)-1, //IntT _leaveok,
+                                (IntT)-1, //IntT _scroll,
+                                (IntT)-1, //IntT _idlok,
+                                (IntT)-1, //IntT _idcok,
+                                (IntT)-1, //IntT _immed,
+                                (IntT)-1, //IntT _sync,
+                                (IntT)-1, //IntT _use_keypad,
+                                (IntT)-1, //IntT _delay,
+                                create_List(&type_Ldat),//List* _line,
+                                (ShortT)-1, //ShortT _regtop,
+                                (ShortT)-1, //ShortT _regbottom,
+                                (IntT)-1, //IntT _parx,
+                                (IntT)-1, //IntT _pary,
+                                NULL_VoidTPtr, //WindowTPtr _parent,
+                                NULL, //Pdat* _pad,
+                                (ShortT)-1,//ShortT _yoffset
+                                NULL_VoidTPtr //WindowTPtr self
+                                );
+}
+
+WindowState* readWindowState_TSStream(CallContext context, TSStream* stream,
+                                      WindowTPtr ptr)
+{
+    WindowState* win = create_emptyWindowState();
+    IntT i;
+    
+    win->_cury = readShort_TSStream(stream);
+    win->_curx = readShort_TSStream(stream);
+    win->_maxy = readShort_TSStream(stream);
+    win->_maxx = readShort_TSStream(stream);
+    win->_begy = readShort_TSStream(stream);
+    win->_begx = readShort_TSStream(stream);
+    win->_flags = readShort_TSStream(stream);
+
+    win->_attrs = readNcursesAttr_TSStream(stream);
+
+    win->_bkgd = readChTypeT_TSStream(stream);
+    win->_notimeout = readInt_TSStream(stream);
+    win->_clear = readInt_TSStream(stream);
+    win->_leaveok = readInt_TSStream(stream);
+    win->_scroll = readInt_TSStream(stream);
+    win->_idlok = readInt_TSStream(stream);
+    win->_idcok = readInt_TSStream(stream);
+    win->_immed = readInt_TSStream(stream);
+    win->_sync = readInt_TSStream(stream);
+    win->_use_keypad = readInt_TSStream(stream);
+    win->_delay = readInt_TSStream(stream);
+    
+
+    for(i = 0; i < win->_maxy+1; i++)
+        append_List(win->_line, readLdat_TSStream(context, stream));
+
+    win->_regtop = readShort_TSStream(stream);
+    win->_regbottom = readShort_TSStream(stream);
+
+    win->_parx = readInt_TSStream(stream);
+    win->_pary = readInt_TSStream(stream);
+
+    win->_parent = readPointer_TSStream(context, stream);
+
+    if(win->_parent.address == 0)
+    {
+        win->_parent = NULL_VoidTPtr;
+    }
+
+    win->_pad = readPdat_TSStream(context, stream);
+
+    win->_yoffset = readShort_TSStream(stream);
+
+    win->self = ptr;
+
+    return win;    
+}
+
+NcursesAttrT readNcursesAttr_TSStream(TSStream* stream)
+{
+    NcursesAttrT attr;
+
+    attr.altcharset=readInt_TSStream(stream);
+    attr.blink=readInt_TSStream(stream);
+    attr.bold=readInt_TSStream(stream);
+    attr.dim=readInt_TSStream(stream);
+    attr.horizontal=readInt_TSStream(stream);
+    attr.invis=readInt_TSStream(stream);
+    attr.left=readInt_TSStream(stream);
+    attr.low=readInt_TSStream(stream);
+    attr.protect=readInt_TSStream(stream);
+    attr.reverse=readInt_TSStream(stream);
+    attr.right=readInt_TSStream(stream);
+    attr.standout=readInt_TSStream(stream);
+    attr.top=readInt_TSStream(stream);
+    attr.underline=readInt_TSStream(stream);
+    attr.vertical=readInt_TSStream(stream);
+
+    attr.colorPair = readInt_TSStream(stream);
+    
+    return attr;
+}
+void updateNCursesWindow_WindowState( NCursesWindow* wnd, WindowState* ws)
+{
+    List* lines;
+    Ldat* tmp;
+    IntT i, j, ref;
+    ChTypeTObj* chO;
+    NCursesWindow* tmpWnd = popNCursesWindow();
+    NCursesPosition* pos = create_NCursesPosition(0, 0);
+
+    wnd->address = ws->self;
+    wnd->nlines = ws->_maxy+1;
+    wnd->ncols = ws->_maxx+1;
+    wnd->begy = ws->_begy;
+    wnd->begx = ws->_begx;
+    wnd->parent = ws->_parent;
+    wnd->pad = ws->_pad;
+    
+    wnd->notimeout = ws->_notimeout;
+    wnd->delay = ws->_delay;
+
+    wnd->clear = ws->_clear;
+    wnd->leaveok = ws->_leaveok;
+    wnd->idlok = ws->_idlok;
+    wnd->idcok = ws->_idcok;
+    wnd->immed = ws->_immed;
+    wnd->regtop = ws->_regtop;
+    wnd->regbottom = ws->_regbottom;
+
+    wnd->parx = ws->_parx;
+    wnd->pary = ws->_pary;
+
+    wnd->flags = ws->_flags;
+
+    wnd->attrs = ws->_attrs;
+    wnd->bkgd = ws->_bkgd;
+    wnd->cursorPos = create_NCursesPosition(ws->_curx, ws->_cury);
+
+    wnd->keypad = ws->_use_keypad;
+    wnd->scroll = ws->_scroll;
+    wnd->sync = ws->_sync;
+    
+    lines = ws->_line;
+
+    //May need improvement: use oldindex...
+    for(i=0;i<wnd->nlines;i++)
+    {
+        pos->y = i;
+        tmp = (Ldat*)get_List(lines, i);
+        for(j=0;j<wnd->ncols;j++)
+        {
+            chO = (ChTypeTObj*)get_List(tmp->text, j);
+            pos->x = j;
+
+            if(tmpWnd)
+            {
+                setRefresh_NCursesWindow(wnd, pos,
+                    getRefresh_NCursesWindow(tmpWnd, pos));
+                if(wnd->sync)
+                    wsyncup_NCursesWindow_Element(wnd, pos);
+            }
+            setElement_NCursesWindow_Refresh(wnd, pos, *chO, 0);
+        }
+    }
+}
+
+NCursesWindow* createNCursesWindow_WindowState(WindowState* ws)
+{
+    NCursesWindow* wnd = create_NCursesWindow(  ws->self, ws->_maxy+1,
+                                                ws->_maxx+1, ws->_begy,
+                                                ws->_begx, ws->_parent);
+    updateNCursesWindow_WindowState(wnd, ws);
+
+    return wnd;
+}
+
+void updateNCursesWindow(CallContext context, WindowTPtr ptr)
+{
+    WindowState* ws = window_state(context, ptr);
+    NCursesWindow* wnd = getWindow(&ptr);
+    updateNCursesWindow_WindowState(wnd, ws);        
+}
+
+
+void updateNCursesWindowMayNULL(CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curNcursesWindow=getWindowMayNULL(context, win);
+
+    updateNCursesWindow(context, curNcursesWindow->address);
+}
+
+
+NCursesWindow* getWindowMayNULL(CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curWnd;
+    
+    if (win!=NULL)
+    {
+        curWnd=getWindow(win);
+    }
+    else
+    {
+        curWnd=getNCursesStdWindow(context);
+    }
+    
+    return curWnd;
+}
+
+
+NCursesPosition* getWindowPositionMayNULL(NCursesWindow* curWnd, NCursesPosition* position)
+{
+    NCursesPosition* curPos;
+    if (position!=NULL)
+    {
+        curPos=position;
+    }
+    else
+    {
+        curPos=clone(curWnd->cursorPos);
+    }
+    
+    return curPos;
+}
+
+//Temporary function
+void DUMP_List_Ldat(List* lst)
+{
+    IntT i, j, sz;
+    Ldat* ld;
+    ChTypeTObj* chO;
+
+    ld = (Ldat*)get_List(lst, 0);
+    sz = size_List(ld->text);
+
+    DUMP("\t ");
+    for(i=0;i<sz+1;i++)
+        DUMP("%d", i%10);
+    DUMP("\n");
+
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");    
+    
+    for(i=0;i<size_List(lst);i++)
+    {
+        DUMP("%d\t#", i);
+        ld = (Ldat*)get_List(lst, i);
+        for(j=0;j<sz;j++)
+        {
+            chO = get_List(ld->text, j);
+            DUMP("%c", chO->letter);
+        }
+        DUMP("#\n");
+    }
+    
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");     
+}
+
+void DUMP_wnd(NCursesWindow* wnd)
+{
+    IntT i, j, sz;
+    Ldat* ld;
+    ChTypeT ch;
+
+    sz = wnd->ncols;
+
+    DUMP("\t ");
+    for(i=0;i<sz+1;i++)
+        DUMP("%d", i%10);
+    DUMP("\n");
+
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");    
+    
+    for(i=0;i<wnd->nlines;i++)
+    {
+        DUMP("%d\t#", i);
+        for(j=0;j<sz;j++)
+        {
+            ch = getElement_NCursesWindow_YX(wnd, i, j);
+            DUMP("%c", ch.letter);
+        }
+        DUMP("#\n");
+    }
+    
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");
+}
+void DUMP_refreshed_wnd(NCursesWindow* wnd)
+{
+    IntT i, j, sz;
+    Ldat* ld;
+    ChTypeT ch;
+    NCursesPosition* pos = create_NCursesPosition(0, 0);
+
+    sz = wnd->ncols;
+
+    DUMP("\t ");
+    for(i=0;i<sz+1;i++)
+        DUMP("%d", i%10);
+    DUMP("\n");
+
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");    
+    
+    for(i=0;i<wnd->nlines;i++)
+    {
+        pos->y = i;
+        DUMP("%d\t#", i);
+        for(j=0;j<sz;j++)
+        {
+            pos->x = j;
+            DUMP("%d", getRefresh_NCursesWindow(wnd, pos));
+        }
+        DUMP("#\n");
+    }
+    
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");
+}
+void DUMP_image(ChTypeTArray* chA, IntT ncols, IntT nlines)
+{
+    IntT i, j, sz;
+    Ldat* ld;
+    ChTypeT ch;
+
+    sz = ncols;
+
+    DUMP("\t ");
+    for(i=0;i<sz+1;i++)
+        DUMP("%d", i%10);
+    DUMP("\n");
+
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");    
+    
+    for(i=0;i<nlines;i++)
+    {
+        DUMP("%d\t#", i);
+        for(j=0;j<sz;j++)
+        {
+            ch = chA->arr[i * ncols + j];
+            DUMP("%c", ch.letter);
+        }
+        DUMP("#\n");
+    }
+    
+    DUMP("\t");
+    for(i=0;i<sz+2;i++)
+        DUMP("#");
+    DUMP("\n");     
+}
+
+void DUMP_RealScreen(CallContext context)
+{
+    CByteArray* scrDump;
+    ChTypeTArray* arr;
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+
+    scrDump = ncursesScreenDump(context);
+    arr = create_ChTypeTArray_ScreenDump(scrDump, stdWnd->ncols, stdWnd->nlines);
+    DUMP("\nReal screen:\n");
+    DUMP_image(arr, stdWnd->ncols, stdWnd->nlines);    
+}
+void DUMP_ModelScreen(CallContext context)
+{
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+
+    DUMP("\nModel screen:\n");
+    DUMP_image(get_stdScreenContent(), stdWnd->ncols, stdWnd->nlines);
+}
+void DUMP_screens(CallContext context)
+{
+    DUMP_RealScreen(context);
+    DUMP_ModelScreen(context);
+}
+void onNCursesUniversal( CallContext context, WindowTPtr* win, IntT _spec)
+{
+    if (_spec==SUT_EOK)
+    {
+        NCursesWindow* curWnd = getWindowMayNULL(context, win);
+        WindowState* ws = window_state(context, curWnd->address);
+
+        if(ws!=NULL)
+        {
+            updateNCursesWindow_WindowState(curWnd, ws);
+        }
+    }    
+}
+/************************************************************************/
+/*                  NCursesWindow checking functions                    */
+/************************************************************************/
+NCursesWindow* createNCursesWindow_Local(NCursesWindow* wnd)
+{
+    NCursesWindow* ret = clone(wnd);
+    
+    if(!ret) return NULL;
+
+    if(ret->wnd_image == NULL)
+    {
+        ChTypeTArray* arr = create_ChTypeTArray(ret->nlines * ret->ncols);
+        IntT i, j;
+
+        for(i=0;i<ret->nlines;i++)
+            for(j=0;j<ret->ncols;j++)
+                arr->arr[i * ret->ncols + j] =
+                                        getElement_NCursesWindow_YX(ret, i, j);
+
+        ret->wnd_image = arr;
+    }
+
+    return ret;
+}
+bool equals_NCursesAttrs(NcursesAttrT first, NcursesAttrT second)
+{
+    bool res = true;
+    
+    res = res && (first.altcharset ? second.altcharset : !second.altcharset);
+    res = res && (first.blink ? second.blink : !second.blink);
+    res = res && (first.bold ? second.bold : !second.bold);
+    res = res && (first.dim ? second.dim : !second.dim);
+    res = res && (first.horizontal ? second.horizontal : !second.horizontal);
+    res = res && (first.invis ? second.invis : !second.invis);
+    res = res && (first.left ? second.left : !second.left);
+    res = res && (first.low ? second.low : !second.low);
+    res = res && (first.protect ? second.protect : !second.protect);
+    res = res && (first.reverse ? second.reverse : !second.reverse);
+    res = res && (first.right ? second.right : !second.right);
+    res = res && (first.standout ? second.standout : !second.standout);
+    res = res && (first.top ? second.top : !second.top);
+    res = res && (first.underline ? second.underline : !second.underline);
+    res = res && (first.vertical ? second.vertical : !second.vertical);
+    res = res && (first.colorPair == second.colorPair);
+
+    return res;
+}
+
+
+bool equals_NCursesAttrsWithoutColor(NcursesAttrT first, NcursesAttrT second)
+{
+    bool res = true;
+    
+    res = res && (first.altcharset ? second.altcharset : !second.altcharset);
+    res = res && (first.blink ? second.blink : !second.blink);
+    res = res && (first.bold ? second.bold : !second.bold);
+    res = res && (first.dim ? second.dim : !second.dim);
+    res = res && (first.horizontal ? second.horizontal : !second.horizontal);
+    res = res && (first.invis ? second.invis : !second.invis);
+    res = res && (first.left ? second.left : !second.left);
+    res = res && (first.low ? second.low : !second.low);
+    res = res && (first.protect ? second.protect : !second.protect);
+    res = res && (first.reverse ? second.reverse : !second.reverse);
+    res = res && (first.right ? second.right : !second.right);
+    res = res && (first.standout ? second.standout : !second.standout);
+    res = res && (first.top ? second.top : !second.top);
+    res = res && (first.underline ? second.underline : !second.underline);
+    res = res && (first.vertical ? second.vertical : !second.vertical);
+    
+    return res;
+}
+
+
+bool check_NCursesWindows(NCursesWindow* model, NCursesWindow* local,
+                          IntT flags, IntT numFails)
+{
+    bool res = true;
+
+    if((flags & CH_ADDR) && !equals_VoidTPtr(model->address, local->address))
+    {
+        traceFormattedUserInfo("NCursesError: model.address == $(obj), local.address == $(obj)",
+            create_VoidTPtrObj(model->address), create_VoidTPtrObj(local->address));
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_CURSOR) && !equals(model->cursorPos, local->cursorPos))
+    {
+        traceFormattedUserInfo("NCursesError: model.cursorPos == $(obj), local.cursorPos == $(obj)",
+            model->cursorPos, local->cursorPos);
+
+       /* DUMP_screens(
+            getSystemContext(model->address.system, model->address.process)
+            );
+        getch();getch();*/
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_PAD) && !equals(model->pad, local->pad))
+    {
+        traceFormattedUserInfo("NCursesError: model.pad == $(obj), local.pad == $(obj)",
+            model->pad, local->pad);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_NLINES) && model->nlines != local->nlines)
+    {
+        traceFormattedUserInfo("NCursesError: model.nlines == %d, local.nlines == %d",
+            model->nlines, local->nlines);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_NCOLS) && model->ncols != local->ncols)
+    {
+        traceFormattedUserInfo("NCursesError: model.ncols == %d, local.ncols == %d",
+            model->ncols, local->ncols);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_BEGX) && model->begx != local->begx)
+    {
+        traceFormattedUserInfo("NCursesError: model.begx == %d, local.begx == %d",
+            model->begx, local->begx);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_BEGY) && model->begy != local->begy)
+    {
+        traceFormattedUserInfo("NCursesError: model.begy == %d, local.begy == %d",
+            model->begy, local->begy);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_PARX) && model->parx != local->parx)
+    {
+        traceFormattedUserInfo("NCursesError: model.parx == %d, local.parx == %d",
+            model->parx, local->parx);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_PARY) && model->pary != local->pary)
+    {
+        traceFormattedUserInfo("NCursesError: model.pary == %d, local.pary == %d",
+            model->pary, local->pary);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_KEYPAD) && !(model->keypad ? local->keypad :!local->keypad))
+    {
+        traceFormattedUserInfo("NCursesError: model.keypad == %d, local.keypad == %d",
+            model->keypad, local->keypad);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_ATTRS) && !equals_NCursesAttrs(model->attrs, local->attrs))
+    {
+        traceFormattedUserInfo("NCursesError: model.attrs == $(obj), local.attrs == $(obj)",
+            create_NcursesAttrTObj(model->attrs),
+            create_NcursesAttrTObj(local->attrs));
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_BKGD) && !equals_ChTypeT(model->bkgd, local->bkgd))
+    {
+        traceFormattedUserInfo("NCursesError: model.bkgd == $(obj), local.bkgd == $(obj)",
+            create_ChTypeTObj(model->bkgd),
+            create_ChTypeTObj(local->bkgd));
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_PARENT) && !equals_VoidTPtr(model->parent, local->parent))
+    {
+        traceFormattedUserInfo("NCursesError: model.parent == $(obj), local.parent == $(obj)",
+            create_VoidTPtrObj(model->parent), create_VoidTPtrObj(local->parent));
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_SCROLL) && !(model->scroll ? local->scroll :!local->scroll))
+    {
+        traceFormattedUserInfo("NCursesError: model.scroll == %d, local.scroll == %d",
+            model->scroll, local->scroll);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_TIMEOUT) && !(model->notimeout ? local->notimeout : !local->notimeout))
+    {
+        traceFormattedUserInfo("NCursesError: model.notimeout == %d, local.notimeout == %d",
+            model->notimeout, local->notimeout);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if((flags & CH_SYNC) && !(model->sync ? local->sync : !local->sync))
+    {
+        traceFormattedUserInfo("NCursesError: model.sync == %d, local.sync == %d",
+            model->sync, local->sync);
+
+        if(--numFails)
+            res = false;
+        else
+            return res;
+    }
+    if(flags & CH_DATA)
+    {
+        IntT i, j, min_c , min_l;
+        ChTypeT a, b;
+
+        //Code added, cause model.nlines may differ from local.nlines,
+        //if numFails is big enough
+        min_l = model->nlines < local->nlines ? model->nlines : local->nlines;
+        min_c = model->ncols < local->ncols ? model->ncols : local->ncols;
+
+        for(i=0;i<min_l;i++)
+            for(j=0;j<min_c;j++)
+            {
+                a = getElement_NCursesWindow_YX(model, i, j);
+                b = local->wnd_image->arr[i * min_c + j];
+                if(!equals_ChTypeT(a, b)&& a.letter!=-1 && b.letter!=-1)
+                {
+                    traceFormattedUserInfo(
+                    "NCursesError: data check failed for element [%d][%d]: ",
+                    i, j);
+
+                    traceFormattedUserInfo("$(obj) != $(obj)",
+                                create_ChTypeTObj(a), create_ChTypeTObj(b));
+
+                    if(--numFails)
+                        res = false;
+                    else
+                    {
+                        //DUMP_wnd(model);
+                        //DUMP_wnd(local);
+
+                        return res;
+                    }
+                }
+            }
+    }
+
+    if (!res)
+    {
+        //DUMP_wnd(model);
+        //DUMP_wnd(local);
+    }
+    return res;
+}
+bool check_NCursesWindow(CallContext context, WindowTPtr* win,
+                         IntT flags, IntT numFails)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_WindowState(
+                    window_state(context, curWnd->address));
+
+    local = createNCursesWindow_Local(local);
+
+    return check_NCursesWindows(curWnd, local, flags, numFails);
+}
+
+
+WindowTPtr getPtrNCursesWindowMayNULL(CallContext context, WindowTPtr* win)
+{
+    WindowTPtr curWnd;
+
+    if (win==NULL)
+    {
+        curWnd =getPtrNCursesStdWindow(context);
+    }
+    else
+    {
+        curWnd=*win;
+    }
+
+    return curWnd;
+}
+
+/************************************************************************/
+/*                                                                      */
+/************************************************************************/
+void updateElement_NCursesWindow(NCursesWindow* curWnd,
+                               NCursesPosition* pos,
+                               ChTypeT ch)
+{
+    if(curWnd->wnd_image != NULL)
+    {
+        if(curWnd->ncols * pos->y + pos->x < curWnd->wnd_image->size)
+        {
+            (curWnd->wnd_image->arr)[curWnd->ncols * pos->y + pos->x] =  ch;
+        }
+    }
+    else
+    {
+        NCursesWindow* parent = getWindow(&curWnd->parent);
+        NCursesPosition* parent_pos =
+            create_NCursesPosition(pos->x + curWnd->begx - parent->begx,
+                                pos->y + curWnd->begy - parent->begx);
+        
+        updateElement_NCursesWindow(parent, parent_pos, ch);
+    }
+}
+void updateElement_NCursesWindow_YX(NCursesWindow* curWnd,
+                               IntT y, IntT x,
+                               ChTypeT ch)
+{
+    updateElement_NCursesWindow(curWnd,create_NCursesPosition(x, y),ch);
+}
+
+Object * getNCursesState()
+{
+    return systems;
+}
+
+void setNCursesState(Object* obj)
+{
+    systems = obj;
+}
+
+void addWindow_ProcessId(ProcessId processId, NCursesWindow* wnd)
+{
+    ProcessState* ps=getProcessState(processId);
+
+    List* lst = ps->window_list;
+
+    if(lst == NULL)
+    {
+        lst = create_List(&type_NCursesWindow);
+        ps->window_list = lst;
+    }
+
+    append_List(lst, wnd);
+}
+
+void removeWindow_ProcessId(ProcessId processId, NCursesWindow* wnd)
+{
+    ProcessState* ps=getProcessState(processId);
+    List* lst = ps->window_list;
+    int i;
+    NCursesWindow * tmp;
+
+    if(lst != NULL)
+    {
+        for(i=0;i<size_List(lst);i++)
+        {
+            tmp = get_List(lst, i);
+            if(equals(tmp, wnd))
+            {
+                remove_List(lst, i);
+                --i;
+            }
+        }
+    }
+}
+
+bool windowHasChildren(WindowTPtr win)
+{
+    ProcessState* ps=getProcessState(create_ProcessId(win.system, win.process));
+    List* lst = ps->window_list;
+    int i;
+    NCursesWindow* tmp;
+    
+    if (isNULL_VoidTPtr(win))
+    {
+        return false;
+    }
+    
+    if(lst!=NULL)
+    {        
+        for(i=0;i<size_List(lst);i++)
+        {
+            tmp = get_List(lst, i);
+            if(equals_VoidTPtr(tmp->parent, win))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void DUMP_ws(WindowState* ws)
+{
+    DUMP("cury == %d\t", (int)ws->_cury);
+    DUMP("curx == %d\t", (int)ws->_curx);
+    DUMP("maxy == %d\t", (int)ws->_maxy);
+    DUMP("maxx == %d\t", (int)ws->_maxx);
+    DUMP("begy == %d\t", (int)ws->_begy);
+    DUMP("begx == %d\t", (int)ws->_begx);
+    DUMP("flags == %d\t", (int)ws->_flags);
+
+    DUMP("notimeout == %d\t", (int)ws->_notimeout);
+    DUMP("clear == %d\t", (int)ws->_clear);
+    DUMP("leaveok == %d\t", (int)ws->_leaveok);
+    DUMP("scroll == %d\t", (int)ws->_scroll);
+    DUMP("idlok == %d\t", (int)ws->_idlok);
+    DUMP("idcok == %d\t", (int)ws->_idcok);
+    DUMP("immed == %d\t", (int)ws->_immed);
+    DUMP("sync == %d\t", (int)ws->_sync);
+    DUMP("keypad == %d\t", (int)ws->_use_keypad);
+    DUMP("delay == %d\t", (int)ws->_delay);
+
+    DUMP("regtop == %d\t", (int)ws->_regtop);
+    DUMP("regbottom == %d\t", (int)ws->_regbottom);
+
+    DUMP("parx == %d\t", (int)ws->_parx);
+    DUMP("pary == %d\t", (int)ws->_pary);
+
+    DUMP("yoffset == %d\t", (int)ws->_yoffset);
+
+    DUMP("pad == $(obj)\t", ws->_pad);
+
+    DUMP("\n");
+}
+
+
+CallContext createDefaultProcessForNCurses()
+{
+    return createProcessForNCurses(NCURSES_DEFX, NCURSES_DEFY);
+}
+
+CallContext createProcessForNCurses(IntT xSize, IntT ySize)
+{
+    return createProcessWithTerminal(NCURSES_TERMINAL, xSize, ySize);
+}
+
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+
+ThreadId acceptTestAgent(bool blocking);
+
+CallContext createProcessWithTerminal(CharT* termname, IntT xSize, IntT ySize)
+{
+    bool verdict;
+    TestAgentDesc* agent;
+    TSCommand command = create_TSCommand();
+    ThreadId res = WrongThreadId;
+    ProcessState * ps;
+    
+    format_TSCommand( &command, "create_ncurses_process:$(str)$(int)$(int)",
+        create_CString(termname),
+        create_IntTObj(xSize),
+        create_IntTObj(ySize)
+        ); 
+    agent = get_Map( taMap, key_Map( taMap, 0 ) );
+    verdict = executeCommandInContext( agent->threadid, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+    
+    if (verdict)
+    {
+        bool mode = setDeferredReactionsMode(false);
+        res = acceptTestAgent(true);
+        setDeferredReactionsMode(mode);
+
+        ps = getProcessState_CallContext(getCallContext_ThreadId(res));
+        
+        ps->TermNCols = xSize;
+        ps->TermNLines = ySize;
+
+        ps->riplines = create_List(&type_RipLineT);
+    }
+    
+    destroy_TSCommand(&command);
+    return getCallContext_ThreadId(res);
+}
+
+void terminateNCursesProcess(CallContext context)
+{
+    terminateProcess(context);
+}
+
+CByteArray     *ncursesScreenDump(CallContext context)
+{
+    CByteArray *res = NULL;
+    String* code;
+    bool verdict;
+    TSCommand command = create_TSCommand();
+    
+    
+    format_TSCommand( &command, "dump_screen_contents" ); 
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        res = readCByteArray_TSStream(&command.response);
+        code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+    
+    
+    destroy_TSCommand(&command);
+    return res;
+    
+}
+
+CByteArray *ncursesReadTerminfo(CallContext context)
+{
+    CByteArray *res = NULL;
+    String* code;
+    bool verdict;
+    TSCommand command = create_TSCommand();
+    
+    
+    format_TSCommand( &command, "read_terminfo" ); 
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        res = readCByteArray_TSStream(&command.response);
+        code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+    
+    
+    destroy_TSCommand(&command);
+    return res;
+    
+}
+
+void ncursesInputString(CallContext context, CByteArray *charArray)
+{
+    String* code;
+    bool verdict;
+    TSCommand command = create_TSCommand();
+    
+    format_TSCommand( &command, "input_string:$(ba)", charArray ); 
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+        else
+        {
+            IntT i;
+            NCursesTerminal* term = getNCursesStdTerminal(context);
+            List* lst = term->inserted_character_buffer;
+
+            for(i=0;i<charArray->length;i++)
+                add_List(lst, 0, create_IntTObj(byteAt_CByteArray(charArray, i)));
+        }
+    }
+    
+    
+    destroy_TSCommand(&command);
+}
+/************************************************************************/
+/*                          Terminfo                                    */
+/************************************************************************/
+CString* readTerminfo(CallContext context, CString* path)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    return readTerminfo_Terminfo(context, term->terminfo, path);
+}
+
+CString* readTerminfo_Terminfo(CallContext context, NCursesTerminfo* terminfo, CString* path)
+{
+    TSCommand command = create_TSCommand();
+    CString* str, *ent, *name, *val;
+    IntT more=1, ind, ind2, type = 'u', type_pre, tmp;
+    
+    format_TSCommand( &command, "readTerminfo:$(str)", path);
+
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        str = readCString_TSStream(&command.response);
+        more = readInt_TSStream(&command.response);
+
+        str = readCString_TSStream(&command.response);
+        more = readInt_TSStream(&command.response);
+        
+        while(more)
+        {
+            ind = -1;
+            while(ind+2 < length_CString(str))
+            {
+                ent = getEnt(str, &ind);
+                ind2 = -1;
+                name = getPart(ent, &ind2, &type);
+                if(charAt_CString(ent, ind2)!=',')
+                {
+                    type_pre = type;
+                    val = getPart(ent, &ind2, &type);
+                    if(type_pre == 'n')
+                    {
+                        addItem_NCursesTerminfo_Terminfo(context, terminfo, name,
+                                    create_IntTObj(makeInt(val)), 'n');
+                    }
+                    else
+                    {
+                        addItem_NCursesTerminfo_Terminfo(context, terminfo, name, val, 's');
+                    }
+                }
+                else
+                {
+                    tmp = 1;
+
+                    if(charAt_CString(name, length_CString(name)-1) == '@')
+                    {
+                        name = substring_CString(name, 0, length_CString(name)-1);
+                        tmp = 0;
+                    }
+
+                    addItem_NCursesTerminfo_Terminfo(context, terminfo, name,
+                                                create_IntTObj(tmp), 'b');
+                }
+            }           
+            
+            str = readCString_TSStream(&command.response);
+            more = readInt_TSStream(&command.response);
+        }
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return str;
+}
+
+CString* getEnt(CString* arr, IntT* i)
+{
+    IntT j = *i+1;
+
+    while(++*i<length_CString(arr) && charAt_CString(arr, *i)!=',');
+    
+    return substring_CString(arr, j, *i+1);
+}
+
+CString* getPart(CString* arr, IntT* i, IntT* type)
+{
+    IntT j;
+
+    while (charAt_CString(arr, ++*i) <= 32);
+
+    j = *i;
+
+    while (charAt_CString(arr, ++*i)!='=' && charAt_CString(arr, *i)!='#'
+            && (charAt_CString(arr, *i)!=','
+                    || *i>=0 && charAt_CString(arr, *i)=='\\'));
+    
+    if (charAt_CString(arr, *i) == ',')
+        *type = 'b';
+    else if (charAt_CString(arr, *i) == '=')
+        *type = 's';
+    else
+        *type = 'n';
+
+    return substring_CString(arr, j, *i);
+}
+
+IntT makeInt(CString* arr)
+{
+    IntT res = 0, i=-1;
+    CharT ch;
+
+    if( length_CString(arr)>1 && charAt_CString(arr, 0) == '0'
+        && (charAt_CString(arr, 1) == 'x' ||charAt_CString(arr, 1) == 'X'))
+    {
+        //Hex
+        i=1;
+        while(++i<length_CString(arr))
+        {
+            ch = charAt_CString(arr, i);
+            res = res * 16 + (ch<='9' ? ch - '0' : ch<='F' ?
+                                                ch - 'A' + 10 : ch - 'a' + 10);
+        }
+    }
+    else
+    if(charAt_CString(arr, 0) == '0' && length_CString(arr)!=1)
+    {
+        //Oct
+        i=0;
+        while(++i<length_CString(arr))
+        {
+            ch = charAt_CString(arr, i);
+            res = res * 8 + ch - '0';
+        }
+    }
+    else
+    {
+        //Dec
+        while(++i<length_CString(arr))
+        {
+            ch = charAt_CString(arr, i);
+            res = res * 10 + ch - '0';
+        }
+    }
+
+    return res;
+}
+
+NCursesTerminfo* create_NCursesTerminfo()
+{
+    return create(&type_NCursesTerminfo,
+                        create_Map(&type_CString, &type_IntTObj), 
+                        create_Map(&type_CString, &type_CString), 
+                        create_Map(&type_CString, &type_IntTObj));
+}
+
+void addItem_NCursesTerminfo(CallContext context, CString* key, Object* val,
+                                                IntT type)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    addItem_NCursesTerminfo_Terminfo(context, term->terminfo, key, val, type);
+}
+
+void addItem_NCursesTerminfo_Terminfo(CallContext context, NCursesTerminfo* terminfo, CString* key,
+                                      Object* val, IntT type)
+{
+    if (type == 's')
+    {
+        put_Map(terminfo->mp_str, key, (CString*) val);
+    }
+    else if (type == 'n')
+    {
+        put_Map(terminfo->mp_num, key, (IntTObj*) val);
+    }
+    else
+    {
+        put_Map(terminfo->mp_bool, key, (IntTObj*) val);
+    }
+}
+
+void delItem_NCursesTerminfo(CallContext context, CString* key, IntT type)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    delItem_NCursesTerminfo_Terminfo(context, term->terminfo, key, type);
+}
+
+void delItem_NCursesTerminfo_Terminfo(CallContext context, NCursesTerminfo* terminfo, CString* key, IntT type)
+{
+    if (type == 's')
+    {
+        remove_Map(terminfo->mp_str, key);
+    }
+    else if (type == 'n')
+    {
+        remove_Map(terminfo->mp_num, key);
+    }
+    else
+    {
+        remove_Map(terminfo->mp_bool, key);
+    }
+}
+
+Object* getItem_NCursesTerminfo(CallContext context, CString* key)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    return getItem_NCursesTerminfo_Terminfo(context, term->terminfo, key);
+}
+
+Object* getItem_NCursesTerminfo_Terminfo(CallContext context, NCursesTerminfo* terminfo, CString* key)
+{
+    Object* ret;
+    
+    ret = get_Map(terminfo->mp_bool, key);
+
+    if (ret != NULL)
+        return ret;
+
+    ret = get_Map(terminfo->mp_num, key);
+
+    if (ret != NULL)
+        return ret;
+
+    ret = get_Map(terminfo->mp_str, key);
+
+    return ret;
+}
+
+/************************************************************************/
+/*                          Screen                                      */
+/************************************************************************/
+IntT readStrStop(IntT letter)
+{
+    return letter == '\n' || letter == '\r';
+}
+
+ChTypeTArray* create_ChTypeTArray_ScreenDump(CByteArray* ba, UIntT ncols,
+                                             UIntT nlines)
+{
+    IntT i, cur=0, size = ncols * nlines;
+    ChTypeTArray* chA = create_ChTypeTArray(size);
+
+    for(i=0;i<size;i++)
+        chA->arr[i] = create_emptyChTypeT();
+    
+    //in the last line is written cursor position...
+    while(!lastLine_CByteArray(ba, cur))
+        readLine_ScreenDump(chA, ba, &cur, ncols);
+    
+    return chA;
+}
+
+void readLine_ScreenDump(ChTypeTArray* chA, CByteArray* ba, IntT* cur,
+                         IntT ncols)
+{
+    IntT x, y, bl, wd, bd, bk, iv, ul, fg, bg, cs, i;
+    ChTypeT ch = create_emptyChTypeT();
+
+    *cur+=4;
+    x = readInt_CByteArray(ba, cur);
+    *cur+=1;
+    y = readInt_CByteArray(ba, cur);
+    *cur+=5;
+    bl = readInt_CByteArray(ba, cur);
+    *cur+=5;
+    wd = readInt_CByteArray(ba, cur);    
+    *cur+=6;
+    bd = byteAt_CByteArray(ba, *cur) == 'd' ? 1 : 0;
+    *cur+=3;
+    bk = byteAt_CByteArray(ba, *cur) == 'k' ? 1 : 0;
+    *cur+=3;
+    iv = byteAt_CByteArray(ba, *cur) == 'v' ? 1 : 0;
+    *cur+=3;
+    ul = byteAt_CByteArray(ba, *cur) == 'l' ? 1 : 0;
+    *cur+=5;
+    fg = readInt_CByteArray(ba, cur);        
+    *cur+=5;
+    bg = readInt_CByteArray(ba, cur);      
+    *cur+=5;
+    cs = byteAt_CByteArray(ba, *cur);
+    *cur+=6;
+
+    ch.bold = bd;
+    ch.blink = bk;
+    ch.reverse = iv;
+    ch.underline = ul;
+    
+    for(i=0;i<bl;i++, (*cur)++)
+    {
+        ch.letter = byteAt_CByteArray(ba, *cur);
+        chA->arr[ncols * y + x + i] = ch;
+    }
+    (*cur)++;
+}
+IntT readInt_CByteArray(CByteArray* ba, IntT* cur)
+{
+    IntT res = 0, j = 0;
+
+    while(      (CharT)byteAt_CByteArray(ba, *cur)<'0'
+            ||  (CharT)byteAt_CByteArray(ba, *cur)>'9')
+    {
+        (*cur)++;
+    }
+
+    while(byteAt_CByteArray(ba, *cur)>='0' && byteAt_CByteArray(ba, *cur)<='9')
+        res = res * 10 + byteAt_CByteArray(ba, (*cur)++) - '0';
+
+    return res;
+}
+IntT lastLine_CByteArray(CByteArray* ba, IntT cur)
+{
+    while(cur++ < ba->length)
+        if(byteAt_CByteArray(ba, cur)=='\n')
+            return cur == ba->length-1;
+}
+void create_stdScreenContent(IntT ncols, IntT nlines)
+{
+    stdScreenContent = create_ChTypeTArray(ncols * nlines);
+    erase_ChTypeTArray(stdScreenContent);
+}
+void set_stdScreenContent(ChTypeTArray* arr)
+{
+    stdScreenContent = clone(arr);
+}
+void create_doupdate_screen(IntT ncols, IntT nlines)
+{
+    doupdate_screen = create_ChTypeTArray(ncols * nlines);
+    erase_ChTypeTArray(doupdate_screen);
+}
+ChTypeTArray* get_stdScreenContent()
+{
+    return stdScreenContent;
+}
+void update_stdScreenContent(CallContext context, NCursesWindow* curWnd,
+                             IntT y, IntT x)
+{
+    ChTypeTArray* arr = get_stdScreenContent();
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+    IntT scr_y = (y + curWnd->begy), scr_x = (x + curWnd->begx);
+
+    if(curWnd->flags & SUT__ISPAD)
+    {
+        //May need improvement: poorly tested
+        scr_y -= curWnd->pad->_pad_y;
+        scr_x -= curWnd->pad->_pad_x;
+    }
+
+    arr->arr[ scr_y * stdWnd->ncols + scr_x] = 
+        getElement_NCursesWindow_YX(curWnd, y, x);
+
+/*
+    DUMP("scr[y == %d, x == %d]\n", scr_y, scr_x);
+    DUMP("arr[y == %d, x == %d] ==", y, x);
+    DUMP("$(obj)\n", create_ChTypeTObj(getElement_NCursesWindow_YX(curWnd, y, x)));
+*/
+}
+
+ChTypeT getElement_stdScreenContent_YX(CallContext context, IntT y, IntT x)
+{
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+    return getElement_NCursesWindow_YX(stdWnd, y, x);
+}
+
+
+ChTypeTArray* get_doupdate_screen()
+{
+    return doupdate_screen;
+}
+void update_doupdate_screen(CallContext context, NCursesWindow* curWnd,
+                             IntT y, IntT x)
+{
+    ChTypeTArray* arr = get_doupdate_screen();
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+   
+    arr->arr[ (y + curWnd->begy) * stdWnd->ncols + curWnd->begx + x] = 
+        getElement_NCursesWindow_YX(curWnd, y, x);
+}
+void set_refresh_forbidden(IntT val)
+{
+    refresh_forbidden = val;
+}
+IntT get_refresh_forbidden()
+{
+    return refresh_forbidden;
+}
+void set_endwin_no_refresh(IntT val)
+{
+    endwin_no_refresh = val;
+}
+IntT get_endwin_no_refresh()
+{
+    return endwin_no_refresh;
+}
+void erase_ChTypeTArray(ChTypeTArray* chA)
+{
+    IntT i;
+    ChTypeT ch = create_emptyChTypeT();
+
+    for(i=0;i<chA->size;i++)
+        chA->arr[i] = ch;
+}
+void setRefresh_NCursesWindow(NCursesWindow* curWnd, NCursesPosition* pos,
+                              IntT val)
+{
+    setByteAt_CByteArray(curWnd->need_refresh, pos->y * curWnd->ncols + pos->x,
+                        (ByteT)val);
+}
+IntT getRefresh_NCursesWindow(NCursesWindow* curWnd, NCursesPosition* pos)
+{
+    return (IntT)byteAt_CByteArray(curWnd->need_refresh,
+                                pos->y * curWnd->ncols + pos->x);
+}
+void pushNCursesWindow(NCursesWindow* curWnd)
+{
+    tmpWnd = curWnd;
+}
+NCursesWindow* popNCursesWindow()
+{
+    NCursesWindow* x = tmpWnd;
+
+    tmpWnd = NULL;
+
+    return x;
+}
+void refresh_WindowTPtr(CallContext context, WindowTPtr* win, IntT refresh)
+{
+    if(refresh /*|| global refresh flag??*/)
+    {
+        NCursesWindow* curWnd = getWindowMayNULL(context, win);
+        IntT i, j;
+        NCursesPosition* pos;
+
+        set_endwin_no_refresh(0);
+        
+        assertion(  get_refresh_forbidden()==0,
+            "Refresh called between wnoutrefresh and doupdate: see bug 324");
+        /*
+         *  syncok.html:
+         *  Applications seldom call wsyncdown() because it is called by all
+         *  refresh operations.    
+         */
+        wsyncdown_NCursesWindow(curWnd);
+
+        if(curWnd->flags & SUT__ISPAD && refresh)
+        {
+            if(!equals(curWnd->pad, create_emptyPdat()))
+            {
+                pos = create_NCursesPosition(   curWnd->pad->_pad_x,
+                                                curWnd->pad->_pad_y);
+                for(i=curWnd->pad->_pad_top;i<=curWnd->pad->_pad_bottom;i++)            
+                {
+                    for(j=curWnd->pad->_pad_left;j<=curWnd->pad->_pad_right;
+                                                                        j++)
+                    {
+                        update_stdScreenContent(context,curWnd,pos->y,pos->x);
+                        pos->x++;
+                    }
+                    pos->x = curWnd->pad->_pad_x;
+                    pos->y++;
+                }
+            }
+            return;
+        }
+
+        for(i=0;i<curWnd->ncols;i++)
+            for(j=0;j<curWnd->nlines;j++)
+            {
+                pos = create_NCursesPosition(i, j);
+
+                if(getRefresh_NCursesWindow(curWnd, pos))
+                {
+                    update_stdScreenContent(context, curWnd, j, i);
+                    setRefresh_NCursesWindow(curWnd, pos, 0);
+                }
+            }    
+    }
+}
+void wsyncdown_NCursesWindow(NCursesWindow* win)
+{
+    NCursesWindow* par = win;
+
+    while(!par->wnd_image)
+    {
+        IntT i, j, k =  win->begx - par->begx;
+        NCursesPosition* pos_win = create_NCursesPosition(0, 0), *pos_par;
+        
+        par = getWindow(&par->parent);
+        pos_par = create_NCursesPosition(   win->begx - par->begx,
+                                            win->begy - par->begy);        
+
+        if(win->flags & SUT__ISPAD)
+        {
+            pos_par = create_NCursesPosition( par->begx, par->begy);
+            k = par->begx;
+        }
+
+        for(i=0;i<win->nlines;i++)
+        {
+            pos_win->y = i;
+            for(j=0;j<win->ncols;j++)
+            {
+                pos_win->x = j;
+                setRefresh_NCursesWindow(win, pos_win,
+                            getRefresh_NCursesWindow(par, pos_par)
+                        |   getRefresh_NCursesWindow(win, pos_win));
+
+                pos_par->x++;
+            }
+            pos_par->x = k;
+            pos_par->y++;
+        }
+    }
+}
+void wsyncup_NCursesWindow(NCursesWindow* win)
+{
+    NCursesWindow* par = win;
+
+    while(!par->wnd_image)
+    {
+        IntT i, j;
+        NCursesPosition* pos_win = create_NCursesPosition(0, 0), *pos_par;
+        IntT ref;
+        
+        par = getWindow(&par->parent);
+        pos_par = create_NCursesPosition(   win->begx - par->begx,
+                                            win->begy - par->begy);        
+        for(i=0;i<win->nlines;i++)
+        {
+            pos_win->y = i;
+            for(j=0;j<win->ncols;j++)
+            {
+                pos_win->x = j;
+                ref = getRefresh_NCursesWindow(win, pos_win);
+                if(ref)
+                {
+                    setRefresh_NCursesWindow(par, pos_par,
+                                getRefresh_NCursesWindow(par, pos_par) | ref);
+                }
+
+                pos_par->x++;
+            }
+            pos_par->x = win->begx - par->begx;
+            pos_par->y++;
+        }
+    }
+}
+void wsyncup_NCursesWindow_Element(NCursesWindow* win, NCursesPosition* pos)
+{
+    NCursesWindow* par = win;
+
+    while(!par->wnd_image)
+    {
+        NCursesPosition *pos_par;
+        IntT ref;
+        
+        par = getWindow(&par->parent);
+        pos_par = create_NCursesPosition(   win->begx - par->begx + pos->x,
+                                            win->begy - par->begy + pos->y);
+        ref = getRefresh_NCursesWindow(win, pos);
+        if(ref)
+        {
+            setRefresh_NCursesWindow(par, pos_par,
+                        getRefresh_NCursesWindow(par, pos_par) | ref);
+        }
+    }
+}
+void wcursyncup_NCursesWindow(NCursesWindow* win)
+{
+    NCursesWindow* par = win;
+
+    while(!par->wnd_image)
+    {
+        par = getWindow(&par->parent);
+        
+        par->cursorPos = create_NCursesPosition(
+            win->begx + win->cursorPos->x - par->begx,
+            win->begy + win->cursorPos->y - par->begy);
+    }
+}
+void wnoutrefresh_WindowTPtr(CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    IntT i, j, ref;
+    NCursesPosition* pos;
+
+    for(i=0;i<curWnd->ncols;i++)
+        for(j=0;j<curWnd->nlines;j++)
+        {
+            pos = create_NCursesPosition(i, j);
+            ref = getRefresh_NCursesWindow(curWnd, pos);
+
+            if(ref & 2)
+            {
+                set_refresh_forbidden(1);
+                update_doupdate_screen(context, curWnd, j, i);
+                setRefresh_NCursesWindow(curWnd, pos, ref ^ 2);
+            }
+        }    
+}
+void pnoutrefresh_NCursesWindow(CallContext context, NCursesWindow* curWnd)
+{
+    NCursesPosition* pos;
+    IntT i, j;
+
+    set_refresh_forbidden(1);
+    
+    if(curWnd->flags & SUT__ISPAD)
+    {
+        if(!equals(curWnd->pad, create_emptyPdat()))
+        {
+            pos = create_NCursesPosition(   curWnd->pad->_pad_x,
+                                            curWnd->pad->_pad_y);
+            for(i=curWnd->pad->_pad_top;i<=curWnd->pad->_pad_bottom;i++)            
+            {
+                for(j=curWnd->pad->_pad_left;j<=curWnd->pad->_pad_right;
+                                                                    j++)
+                {
+                    update_doupdate_screen(context,curWnd,pos->y,pos->x);
+                    pos->x++;
+                }
+                pos->x = curWnd->pad->_pad_x;
+                pos->y++;
+            }
+        }
+    }
+}
+IntT compareScreens(ChTypeTArray* arr0, ChTypeTArray* arr1)
+{
+    IntT i;
+
+    if(arr0->size != arr1->size)
+        return 0;
+
+    for(i=0;i<arr0->size;i++)
+    {
+        if(arr0->arr[i].letter != arr1->arr[i].letter)
+        {
+            return 0;
+        }
+
+        if(NCURSES_TERMINAL_STANDOUT_NOT_SUPPORTED)
+        {
+            if (arr0->arr[i].standout || arr1->arr[i].standout)
+            {
+                continue;
+            }
+        }
+
+        if((arr0->arr[i].bold == true)  != (arr1->arr[i].bold == true))
+        {
+            DUMP("bold: %d: (%d!=%d)\n",i, arr0->arr[i].bold, arr1->arr[i].bold);
+            return 0;
+        }
+        if((arr0->arr[i].blink == true)  != (arr1->arr[i].blink == true))
+        {
+            DUMP("blink: %d: (%d!=%d)\n",i, arr0->arr[i].blink, arr1->arr[i].blink);
+            return 0;
+        }
+        if((arr0->arr[i].reverse == true)  != (arr1->arr[i].reverse == true))
+        {
+            DUMP("reverse: %d: (%d!=%d)\n",i, arr0->arr[i].reverse, arr1->arr[i].reverse);
+            return 0;
+        }
+        if((arr0->arr[i].underline == true)  != (arr1->arr[i].underline==true))
+        {
+            DUMP("underline: %d: (%d!=%d)\n",i, arr0->arr[i].underline, arr1->arr[i].underline);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+IntT compareScreens_Context(CallContext context)
+{
+    CByteArray*    dump = ncursesScreenDump(context);
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+    ChTypeTArray*  arr0 = create_ChTypeTArray_ScreenDump(dump, stdWnd->ncols, stdWnd->nlines);
+
+    return compareScreens(arr0, get_stdScreenContent());    
+}
+
+LinearTimeMark delta(TimeInterval timestamp)
+{
+    return (timestamp.maxMark.timemark - timestamp.minMark.timemark);
+}
+
+IntT delta_gt_ms(TimeInterval timestamp, IntT ms)
+{
+    return delta(timestamp)/1000000 >= ms ? 1 : 0;
+}
+/************************************************************************/
+/*                         Global Init Function                         */
+/************************************************************************/
+
+void initNcurses(void)
+{
+    initSystemModel();
+    initNcursesBkgdSubsystem();
+    initNcursesBorderSubsystem();
+    initNcursesCharAddSubsystem();
+    initNcursesCharInputSubsystem();
+    initNcursesCharInsertSubsystem();
+    initNcursesChgatSubsystem();
+    initNcursesChstrAddSubsystem();
+    initNcursesChstrInputSubsystem();
+    initNcursesClearSubsystem();
+    initNcursesColorSubsystem();
+    initNcursesInputCharSubsystem();
+    initNcursesInputStringSubsystem();
+    initNcursesInputSubsystem();
+    initNcursesInputTimeoutSubsystem();
+    initNcursesLineSubsystem();
+    initNcursesMiscSubsystem();
+    initNcursesModeSubsystem();
+    initNcursesMoveSubsystem();
+    initNcursesScreenSubsystem();
+    initNcursesSlkSubsystem();
+    initNcursesStringAddSubsystem();
+    initNcursesStringInputSubsystem();
+    initNcursesStringInsertSubsystem();
+    initNcursesStringPrintfSubsystem();
+    initNcursesStringScanfSubsystem();
+    initNcursesTerminalControlSubsystem();
+    initNcursesTerminalSubsystem();
+    initNcursesTerminalTermcapSubsystem();
+    initNcursesTerminalTerminfoSubsystem();
+    initNcursesWindowAttrSubsystem();
+    initNcursesWindowPadSubsystem();
+    initNcursesWindowRefreshSubsystem();
+    initNcursesWindowScrollSubsystem();
+    initNcursesWindowSubsystem();
+}
+
+
+NCursesScreen* create_NCursesScreen(ScreenTPtr address,  CString* term, CString* inFile, CString* outFile)
+{
+    return create(&type_NCursesScreen, address, term, inFile, outFile);
+}
+
+/************************************************************************/
+/*                               RipoffLine                             */
+/************************************************************************/
+
+specification typedef struct RipLineT RipLineT = {};
+
+RipLineT * create_RipLineT(IntT line, RipCallbackFunc init, WindowTPtr win, IntT win_lines)
+{
+    return (RipLineT *)create(&type_RipLineT, line, init, win, win_lines );
+}
+
+List * getRipLines(CallContext context)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    
+    // Make lazy initialization here, for the case process is not created by
+    // any of our functions
+    // TODO: this code should be removed when all process creation things are
+    // performed through ncurses-aware functions
+    if(NULL == ps->riplines)
+        ps->riplines = create_List(&type_RipLineT);
+
+
+    return ps->riplines;
+}
+
+void addRipLine(CallContext context, RipLineT * ripline)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    append_List(ps->riplines, ripline);
+}
+
+RipLineT * findRipLine_byWinOrigin(List * riplist,WindowState * win_state, IntT Scr_nLines)
+{
+    int i;
+    IntT line_num;
+    int nLines = size_List(riplist);
+    RipLineT * result = NULL;
+
+    line_num = win_state->_begy + win_state->_yoffset;
+
+    if(line_num>=MAX_RIP_LINES)
+        line_num = line_num - Scr_nLines;
+ 
+    for(i=0;i<nLines;i++)
+    {
+        RipLineT * tmp = get_List(riplist, i);
+        if(tmp->line == line_num)
+        {
+            result = tmp;
+            break;
+        }
+    }
+    return result;
+}
+
+void advanceCursorOnePos(NCursesWindow* curWnd)
+{
+    if (curWnd->cursorPos->x+1 >= curWnd->ncols)
+    {
+        curWnd->cursorPos->y++;
+        curWnd->cursorPos->x=0;
+        if (curWnd->cursorPos->y >= curWnd->nlines)
+        {
+            if (curWnd->scroll)
+            {
+                scrollLineNcursesWindow(curWnd);
+                (curWnd->cursorPos->y)--;
+            }
+            else
+            {
+                curWnd->cursorPos->y=curWnd->nlines-1;
+                curWnd->cursorPos->x=curWnd->ncols-1;
+            }
+        }
+    }
+    else
+    {
+        curWnd->cursorPos->x++;
+    }
+    
+}
+
+
+
+void setNCursesStdTerminal(CallContext context,  TerminalTPtr term)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+
+    ps->cur_term = term;
+}
+
+
+void setNCursesStdWindow(CallContext context,  WindowTPtr win)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+
+    ps->stdscr_wnd = win;
+   
+}
+
+
+TerminalTPtr getNCursesCurrentTerminal(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+
+    return ps->cur_term;
+}
+
+
+
+WindowTPtr getNCursesCurrentWindow(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    
+    return ps->stdscr_wnd;
+}
+
+
+List* getNCursesInitedTerminals(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+
+    return ps->initedTerminals;
+}
+
+
+bool getTerminalFilterSet(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    
+    return ps->terminalFilterSet;
+}
+
+bool get_use_env(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    
+    return ps->use_env;
+}
+
+void set_use_env(CallContext context, IntT boolval)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    
+    ps->use_env = boolval;
+}
+
+
+void setTerminalFilterSet(CallContext context, bool val)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    
+    ps->terminalFilterSet= val;
+}
+
+SlkStructT create_defaultSlkStruct(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    SlkStructT res;
+    memset(&res, 0, sizeof(res));
+    if(ps == NULL)
+    {
+        setBadVerdict("create_defaultSlkStruct: ps is NULL");
+        return res;
+    }
+
+    res.fmt = ps->slk_format;    
+    res.attrs = create_emptyChTypeT();
+    res.invis = false;
+    return res;
+}
+
+void setSlkFormat(CallContext context, IntT fmt)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    
+    ps->slk_format = fmt;
+}
+
+IntT getSlkFormat(CallContext context)
+{
+    ProcessState* ps = getProcessState_CallContext(context);
+    
+    return ps->slk_format;
+}

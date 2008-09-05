@@ -1,0 +1,558 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/meta/meta_user_config.h"
+#include "process/meta/user_media.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "process/process/process_common.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initProcessMetaUserSubsystem(void)
+{
+   // Set up mediators
+   set_mediator_cuserid_spec   ( cuserid_media    );
+   set_mediator_getegid_spec   ( getegid_media    );
+   set_mediator_geteuid_spec   ( geteuid_media    );
+   set_mediator_getgid_spec    ( getgid_media     );
+   set_mediator_getgroups_spec ( getgroups_media  );
+   set_mediator_getuid_spec    ( getuid_media     );
+   set_mediator_initgroups_spec( initgroups_media );
+   set_mediator_setegid_spec   ( setegid_media    );
+   set_mediator_seteuid_spec   ( seteuid_media    );
+   set_mediator_setgid_spec    ( setgid_media     );
+   set_mediator_setgroups_spec ( setgroups_media  );
+   set_mediator_setregid_spec  ( setregid_media   );
+   set_mediator_setreuid_spec  ( setreuid_media   );
+   set_mediator_setuid_spec    ( setuid_media     );
+   // Set up formatters
+   registerTSFormatter( "uintlist", (TSFormatterFuncType)uint_list_formatter );
+   // Set up model
+   setupMakeSureProcessHasAppropriatePrivileges( makeSureProcessHasRootPrivileges );
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** cuserid_spec **/
+mediator cuserid_media for specification
+StringTPtr cuserid_spec( CallContext context, StringTPtr s )
+{
+   call
+   {
+      TSCommand command = create_TSCommand();
+      StringTPtr res = NULL_VoidTPtr;
+
+      format_TSCommand( &command, "cuserid:$(ptr)", create_VoidTPtrObj( s ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readPointer_TSStream(context, &command.response);
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+}
+
+/** getegid_spec **/
+mediator getegid_media for specification
+GidT getegid_spec( CallContext context )
+{
+   call
+   {
+      GidT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "getegid" );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readUInt_TSStream( &command.response );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+}
+
+/** geteuid_spec **/
+mediator geteuid_media for specification
+UidT geteuid_spec( CallContext context )
+{
+   call
+   {
+      UidT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "geteuid" );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readUInt_TSStream( &command.response );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+}
+
+/** getgid_spec **/
+mediator getgid_media for specification
+GidT getgid_spec( CallContext context )
+{
+   call
+   {
+      GidT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "getgid" );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readUInt_TSStream( &command.response );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+}
+
+/** getgroups_spec **/
+mediator getgroups_media for specification
+IntT getgroups_spec( CallContext context, IntT gidsetsize, List * grouplist /* & type_GidTObj */, ErrorCode * errno )
+   updates grouplist
+   writes  * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "getgroups:$(int)$(uintlist)", create_IntTObj( gidsetsize ), grouplist );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         readUintList_TSStream( &command.response, grouplist ); // GidTObj == UIntTObj
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      ProcessState * process_state = getProcessState_CallContext( context );
+      if ( process_state->meta.groups == NULL && gidsetsize != 0 && getgroups_spec != -1 )
+      {
+         int pos;
+         process_state->meta.groups = create_List( &type_GidTObj );
+         appendAll_List( process_state->meta.groups, subList_List( grouplist, 0, getgroups_spec ) );
+         if(GETGROUPS_RETURNS_THE_EFFECTIVE_GROUP_ID_IN_THE_GROUPLIST_ARRAY)
+         {
+            pos = lastIndexOf_List( process_state->meta.groups, create_GidTObj( process_state->meta.effective_groupid ) );
+            if ( pos == -1 ) {
+               setBadVerdict( "getgroups_media.state : no effective group id in grouplist" );
+            } else {
+               remove_List( process_state->meta.groups, pos );
+            }
+         }
+      }
+   }
+}
+
+/** getuid_spec **/
+mediator getuid_media for specification
+UidT getuid_spec( CallContext context )
+{
+   call
+   {
+      UidT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "getuid" );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readUInt_TSStream( &command.response );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+}
+
+/** initgroups_spec **/
+mediator initgroups_media for specification
+IntT initgroups_spec( CallContext context, CString * user, GidT group, ErrorCode * errno )
+   reads  user
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "initgroups:$(str)$(int)", user, create_GidTObj( group ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      if ( initgroups_spec == 0 ) {
+         // first call to getgroups
+         IntT size;
+         TSCommand command = create_TSCommand();
+         format_TSCommand( &command, "getgroups:$(int)$(uintlist)", create_IntTObj( 0 ), NULL );
+         executeCommandInContext( context, &command );
+         if ( ! isBadVerdict() ) {
+            if ( ( size = readInt_TSStream( &command.response ) ) == -1 ) {
+               setBadVerdict( "initgroups_media.state : receive -1 as result after first call to getgroups" );
+            } else if ( readUintList_TSStream( &command.response, NULL ) != -1 ) {
+               setBadVerdict( "initgroups_media.state : receive not NULL as grouplist after first call to getgroups" );
+            } else {
+               // second call to getgroups
+               List * list = create_List( &type_GidTObj ); // GidTObj == UIntTObj
+               int i;
+               for ( i = 1; i <= size; i++ ) { append_List( list, create_GidTObj( -1 ) ); }
+               destroy_TSCommand( &command );
+               command = create_TSCommand();
+               format_TSCommand( &command, "getgroups:$(int)$(uintlist)", create_IntTObj( size ), list );
+               executeCommandInContext( context, &command );
+               if ( ! isBadVerdict() ) {
+                  if ( ( size = readInt_TSStream( &command.response ) ) == -1 ) {
+                     setBadVerdict( "initgroups_media.state : receive -1 as result after second call to getgroups" );
+                  } else if ( readUintList_TSStream( &command.response, list ) == -1 ) {
+                     setBadVerdict( "initgroups_media.state : receive NULL as grouplist after second call to getgroups" );
+                  } else {
+                     ProcessState * process_state = getProcessState_CallContext( context );
+                     List ** groups = &process_state->meta.groups;
+                     if ( * groups == NULL ) { * groups = create_List( &type_GidTObj ); }
+                     copy( subList_List( list, 0, size ), * groups );
+                  }
+               }
+            } // if ( size = readInt_TSStream( &command.response ) ) == -1
+         } // if ! isBadVerdict()
+         destroy_TSCommand( &command );
+      } // if initgroups_spec == 0
+   }
+}
+
+/** setegid_spec **/
+mediator setegid_media for specification
+IntT setegid_spec( CallContext context, GidT gid, ErrorCode * errno )
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "setegid:$(int)", create_GidTObj( gid ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      if ( setegid_spec == 0 ) {
+         ProcessState * process_state = getProcessState_CallContext( context );
+         process_state->meta.effective_groupid = gid;
+      }
+   }
+}
+
+/** seteuid_spec **/
+mediator seteuid_media for specification
+IntT seteuid_spec( CallContext context, UidT uid, ErrorCode * errno )
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "seteuid:$(int)", create_UidTObj( uid ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      if ( seteuid_spec == 0 ) {
+         ProcessState * process_state = getProcessState_CallContext( context );
+         process_state->meta.effective_userid = uid;
+      }
+   }
+}
+
+/** setgid_spec **/
+mediator setgid_media for specification
+IntT setgid_spec( CallContext context, GidT gid, ErrorCode * errno )
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "setgid:$(int)", create_GidTObj( gid ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      GidT real_groupid;
+      TSCommand command;
+
+      ProcessState * process_state = getProcessState_CallContext( context );
+
+      if ( setgid_spec == 0 ) {
+         process_state->meta.effective_groupid = gid;
+
+         command = create_TSCommand();
+         format_TSCommand( &command, "getgid" );
+         executeCommandInContext( context, &command );
+         if ( ! isBadVerdict() ) { real_groupid = readUInt_TSStream( &command.response ); }
+         destroy_TSCommand( &command );
+
+         if ( processReallyHaveHighPriority( context )                           ||
+              ( process_state->meta.real_groupid != gid && real_groupid == gid )
+            ) {
+            process_state->meta.saved_setgroupid = gid;
+         }
+
+         process_state->meta.real_groupid = real_groupid;
+      }
+   }
+}
+
+/** setgroups_spec **/
+mediator setgroups_media for specification
+IntT setgroups_spec( CallContext context, SizeT size, List * list /* &type_GidTObj */, ErrorCode * errno )
+   reads  list
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "setgroups:$(size)$(uintlist)", create_SizeTObj( size ), list );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         readUintList_TSStream( &command.response, list ); // GidTObj == UIntTObj
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      if ( setgroups_spec == 0 ) {
+         ProcessState * process_state = getProcessState_CallContext( context );
+         if ( process_state->meta.groups == NULL ) { process_state->meta.groups = create_List( &type_GidTObj ); }
+         copy( list, process_state->meta.groups );
+      }
+   }
+}
+
+/** setregid_spec **/
+mediator setregid_media for specification
+IntT setregid_spec( CallContext context, GidT rgid, GidT egid, ErrorCode * errno )
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "setregid:$(int)$(int)", create_GidTObj( rgid ), create_GidTObj( egid ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      ProcessState * process_state = getProcessState_CallContext( context );
+      if ( setregid_spec == 0 ) {
+         if ( rgid != -1 ) { process_state->meta.real_groupid      = rgid; }
+         if ( egid != -1 ) { process_state->meta.effective_groupid = egid; }
+      }
+   }
+}
+
+/** setreuid_spec **/
+mediator setreuid_media for specification
+IntT setreuid_spec( CallContext context, UidT ruid, UidT euid, ErrorCode * errno )
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "setreuid:$(int)$(int)", create_UidTObj( ruid ), create_UidTObj( euid ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      ProcessState * process_state = getProcessState_CallContext( context );
+      if ( setreuid_spec == 0 ) {
+         if ( ruid != -1 ) { process_state->meta.real_userid      = ruid; }
+         if ( euid != -1 ) { process_state->meta.effective_userid = euid; }
+      }
+   }
+}
+
+/** setuid_spec **/
+mediator setuid_media for specification
+IntT setuid_spec( CallContext context, UidT uid, ErrorCode * errno )
+   writes * errno
+{
+   call
+   {
+      IntT res;
+
+      TSCommand command = create_TSCommand();
+
+      format_TSCommand( &command, "setuid:$(int)", create_UidTObj( uid ) );
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+         timestamp = command.meta.timestamp;
+         res = readInt_TSStream( &command.response );
+         copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+      }
+
+      destroy_TSCommand(&command);
+
+      return res;
+   }
+   state
+   {
+      UidT real_userid;
+      TSCommand command;
+
+      bool priorityWasReallHigh = processReallyHaveHighPriority( context );
+
+      ProcessState * process_state = getProcessState_CallContext( context );
+      if ( setuid_spec == 0 ) {
+         process_state->meta.effective_userid = uid;
+
+         command = create_TSCommand();
+         format_TSCommand( &command, "getuid" );
+         executeCommandInContext( context, &command );
+         if ( ! isBadVerdict() ) { real_userid = readUInt_TSStream( &command.response ); }
+         destroy_TSCommand( &command );
+
+         if ( priorityWasReallHigh || ( process_state->meta.real_userid != uid && real_userid == uid ) ) {
+            process_state->meta.saved_setuserid = uid;
+         }
+
+         process_state->meta.real_userid = real_userid;
+      }
+   }
+}

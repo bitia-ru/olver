@@ -1,0 +1,1835 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "io/file/file_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "util/compress/tests/compress_scenario.seh"
+#include "util/compress/compress_model.seh"
+#include "util/compress/compress_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static UInt32T htonl_ntohl[]={
+    1,
+    15,
+    32,
+    33,
+    255,
+    256,
+    257,
+    1000,
+    22222,
+    30000,
+    65535,
+    65536,
+    8000000,
+    16777215,
+    16777216,
+    100000000,
+    1000000000,
+    2000000000,
+    3333333333,
+    4294967295
+};
+static UInt16T htons_ntohs[]={
+    1,
+    15,
+    32,
+    33,
+    255,
+    256,
+    257,
+    1000,
+    22222,
+    30000,
+    65535
+};
+
+static int htonl_ntohl_size =   sizeof(htonl_ntohl) /   sizeof(UInt32T);
+static int htons_ntohs_size =   sizeof(htons_ntohs) /   sizeof(UInt16T);
+static const int maxSize=1024; 
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static VoidTPtr dest;
+static VoidTPtr dictionary;
+static VoidTPtr source;
+static VoidTPtr next_in;
+static VoidTPtr next_out;
+static VoidTPtr next_in2;
+static VoidTPtr next_out2;
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_compress_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    context = getContext();  
+    initPathSystemConfiguration();   
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    dest = allocateMemoryBlock(context, maxSize);
+    dictionary = allocateMemoryBlock(context, maxSize);
+    source = allocateMemoryBlock(context, maxSize); 
+
+    next_in = allocateMemoryBlock(context, maxSize);
+    next_out = allocateMemoryBlock(context, maxSize); 
+
+    next_in2 = allocateMemoryBlock(context, maxSize);
+    next_out2 = allocateMemoryBlock(context, maxSize); 
+    
+    return true;
+}
+static void finish_compress_scenario(void)
+{
+    CallContext rmContext = createProcess();
+    removeTestScenarioSandboxDir(rmContext);
+    TEST_SCENARIO_VERDICT_VERBOSE(compress_scenario);
+}
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool adler32_scen()
+{
+    CByteArray* buf=create_CByteArray((ByteT*)"qwertyuiopasdfghjklzxcvbnm", 30);
+    ULongT adler=128;
+    UIntT len=6;
+
+    adler32_spec(context, adler, buf, len);
+    adler32_spec(context, adler, NULL, len);
+
+    return true;
+}
+scenario
+bool compress_scen()
+{
+    CString* str=create_CString("qwertyuiopasdfghjklzxcvbnm");
+    ULongT destLen=33, sourceLen=26;
+    
+    writeCString_VoidTPtr(source, str);
+
+    compress_spec(context, &dest, &destLen, source, sourceLen);
+
+    return true;
+}
+scenario
+bool compress2_scen()
+{
+    CString* str=create_CString("qwertyuiopasdfghjklzxcvbnm");
+    ULongT destLen=50, sourceLen=26;
+    CByteArray* c2, *c;
+    
+    writeCString_VoidTPtr(source, str);
+
+    compress2_spec(context, &dest, &destLen, source, sourceLen, -1);
+
+    return true;
+}
+scenario
+bool compress_compress2_scen()
+{
+    CString* str=create_CString("qwertyuiopasdfghjklzxcvbnm");
+    ULongT destLen=50, sourceLen=26;
+    CByteArray* c2, *c;
+    
+    writeCString_VoidTPtr(source, str);
+
+    compress2_spec(context, &dest, &destLen, source, sourceLen, -1);
+    c2=readCByteArray_VoidTPtr(dest, destLen);
+    compress_spec(context, &dest, &destLen, source, sourceLen);
+    c=readCByteArray_VoidTPtr(dest, destLen);
+
+    
+    return equals(c, c2);
+}
+scenario
+bool compressBound_scen()
+{
+    CString* str=create_CString("qwertyuiopasdfghjklzxcvbnm");
+    ULongT destLen=50, sourceLen=26;
+    CByteArray* c2, *c;
+    IntT res1, res2;
+    
+    writeCString_VoidTPtr(source, str);
+    destLen=compressBound_spec(context, sourceLen);
+    res1=compress_spec(context, &dest, &destLen, source, sourceLen);
+    destLen=compressBound_spec(context, sourceLen);
+    res2=compress2_spec(context, &dest, &destLen, source, sourceLen, 0);
+
+    return res1!=SUT_Z_BUF_ERROR && res2!=SUT_Z_BUF_ERROR;
+}
+scenario
+bool compress_uncompress_scen()
+{
+    CString* str=create_CString("qwertyuiopasdfghjklzxcvbnm");
+    ULongT destLen=50, sourceLen=26;
+    CByteArray* c2, *c;
+    IntT ret1, ret2;
+    
+    writeCString_VoidTPtr(source, str);
+
+    ret1=compress_spec(context, &dest, &destLen, source, sourceLen);
+    sourceLen=25;
+    ret2=uncompress_spec(context, &source, &sourceLen, dest, destLen);
+    
+    if(ret2==SUT_Z_OK)
+    {
+        DUMP("Error: sourceLen wasn't enough, but uncompress returned Z_OK\n");
+        return false;
+    }
+    
+    writeCString_VoidTPtr(source, str);
+    sourceLen=26;
+    ret1=compress_spec(context, &dest, &destLen, source, sourceLen);
+    ret2=uncompress_spec(context, &source, &sourceLen, dest, destLen);
+
+    if(ret1==SUT_Z_OK && ret2==SUT_Z_OK)    
+    {
+        c=readCByteArray_VoidTPtr(source, 26);
+        return equals(c,
+                create_CByteArray((ByteT*)"qwertyuiopasdfghjklzxcvbnm", 26));
+    }
+    else
+    {
+        DUMP("ret1==%d, ret2==%d\n", ret1, ret2);
+    }
+    
+    return true;
+}
+scenario
+bool crc32_scen()
+{
+    CByteArray* buf=create_CByteArray(
+        (ByteT*)"The quick brown fox jumps over the lazy dog", 43);
+    ULongT crc=0;
+
+    writeCByteArray_VoidTPtr(source, buf);
+    crc = crc32_spec(context, crc, source, 43);
+    crc = crc32_spec(context, crc, NULL_VoidTPtr, 43);
+
+    return true;
+}
+scenario
+bool get_crc_table_scen()
+{
+    List* res=get_crc_table_spec(context);
+
+    return true;
+}
+scenario
+bool zError_scen()
+{
+    CString* tmp;
+    iterate(int i=-6;i<3;i++;)
+    {
+        tmp=zError_spec(context, i);
+        DUMP("str==$(obj),\terr==%d\n", tmp, i);
+    }
+
+    return true;
+}
+
+scenario
+bool zlibVersion_scen()
+{
+    CString* func=zlibVersion_spec(context);
+    CString* macro=get_ZLIB_VERSION_macro(context);
+
+    DUMP("zlibVersion==$(obj), ZLIB_VERSION==$(obj)\n", func, macro);
+
+    return true;
+}
+
+scenario
+bool deflateInit2__scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    
+    writeCString_VoidTPtr(next_in,
+        create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    ret = deflateInit2__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,
+                            SUT_Z_DEFLATED, 8,
+                            SUT_MAX_MEM_LEVEL, SUT_Z_DEFAULT_STRATEGY, 
+                            version, zstream_size);
+    traceFormattedUserInfo("ret==%d\n", ret);
+    ret = deflateInit2__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,
+                            SUT_Z_DEFLATED, 8,
+                            SUT_MAX_MEM_LEVEL, SUT_Z_DEFAULT_STRATEGY, 
+                            create_CString("3.2.1"), zstream_size);
+    traceFormattedUserInfo("ret==%d\n", ret);
+
+    traceFormattedUserInfo("size==%d\n", zstream_size);
+
+
+    return true;
+}
+scenario
+bool deflateInit__scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm, *strm2;
+    IntT zstream_size2=get_z_stream_size(context), ret2;
+    CString* version2=zlibVersion_spec(context);
+    
+    writeCString_VoidTPtr(next_in,
+        create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    writeCString_VoidTPtr(next_in2,
+        create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`"));
+
+    strm2=create_ZStream(next_in2, 45, 0, 
+                        next_out2, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            create_CString("3.2.1"), zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret2 = deflateInit2__spec(context, strm2, SUT_Z_DEFAULT_COMPRESSION,
+                            SUT_Z_DEFLATED, SUT_MAX_WBITS, SUT_DEF_MEM_LEVEL,
+                            SUT_Z_DEFAULT_STRATEGY,
+                            version, zstream_size);
+    DUMP("ret2==%d\n", ret2);
+
+    DUMP("POST2:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm2->next_in.address, strm2->next_out.address, strm2->avail_in,
+        strm2->avail_out, strm2->total_in, strm2->total_out);
+
+    DUMP("ZStreams equals == %d\n", equals_ZStream(strm, strm2) ? 1 : 0);
+
+    return true;
+}
+scenario
+bool deflate_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    adler_buf=readCByteArray_VoidTPtr(next_in, 45);
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_PARTIAL_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    return true;
+}
+scenario
+bool deflateBound_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateBound_spec(context, strm, 45);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm->avail_out = ret;
+
+    ret = deflate_spec(context, strm, SUT_Z_FINISH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    return ret==SUT_Z_STREAM_END;
+}
+scenario
+bool deflateCopy_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* source, *dest=create_emptyZStream();
+   
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    source=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        source->next_in.address, source->next_out.address, source->avail_in,
+        source->avail_out, source->total_in, source->total_out);
+
+    ret = deflateInit__spec(context, source, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        source->next_in.address, source->next_out.address, source->avail_in,
+        source->avail_out, source->total_in, source->total_out);
+
+    ret = deflateCopy_spec(context, dest, source);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        dest->next_in.address, dest->next_out.address, dest->avail_in,
+        dest->avail_out, dest->total_in, dest->total_out);
+
+    DUMP("data_type==%s\n", dest->data_type == 0 ?
+        "Z_BINARY" : dest->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = deflateCopy_spec(context, 0, source);
+    ret = deflateCopy_spec(context, dest, 0);
+    ret = deflateCopy_spec(context, 0, 0);
+
+
+    return true;
+}
+scenario
+bool deflateEnd_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    adler_buf=readCByteArray_VoidTPtr(next_in, 45);
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_PARTIAL_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = deflateEnd_spec(context, strm);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = deflateEnd_spec(context, NULL);
+    DUMP("ret==%d\n", ret);
+
+    return true;
+}
+scenario
+bool deflateParams_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    adler_buf=readCByteArray_VoidTPtr(next_in, 45);
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_PARTIAL_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = deflateParams_spec(context, strm,
+        SUT_Z_DEFAULT_COMPRESSION, SUT_Z_DEFAULT_STRATEGY
+        );
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    return true;
+}
+scenario
+bool deflateReset_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    adler_buf=readCByteArray_VoidTPtr(next_in, 45);
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_PARTIAL_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = deflateReset_spec(context, strm);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = deflateReset_spec(context, NULL);
+    DUMP("ret==%d\n", ret);
+
+    return true;
+}
+scenario
+bool deflateSetDictionary_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+        
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    writeCString_VoidTPtr(dictionary,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    adler_buf=readCByteArray_VoidTPtr(next_in, 45);
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateSetDictionary_spec(context, strm, dictionary, 45);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = deflateSetDictionary_spec(context, 0, dictionary, 45);
+
+    DUMP("ret==%d\n", ret);
+
+    return true;
+}
+scenario
+bool inflate_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                        next_in, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = inflateInit__spec(context, strm, version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = inflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+    
+    return true;
+}
+scenario
+bool inflateInit2__scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    
+    writeCString_VoidTPtr(next_in,
+        create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    ret = deflateInit2__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,
+                            SUT_Z_DEFLATED, 8,
+                            SUT_MAX_MEM_LEVEL, SUT_Z_DEFAULT_STRATEGY, 
+                            version, zstream_size);
+    
+    DUMP("adler==%u\n", strm->adler);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("AFTER_DEF_INIT2:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+
+    ret = deflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("adler==%u\n", strm->adler);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("AFTER_DEF:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                        next_in, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    ret = inflateInit2__spec(context, strm,  10,
+                            version, zstream_size);
+    DUMP("adler==%u\n", strm->adler);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("AFTER_INF_INIT2:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+
+    ret = inflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+    DUMP("adler==%u\n", strm->adler);
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("AFTER_INF_INIT2:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    return true;
+}
+scenario
+bool inflateInit__scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm, *strm2;
+    IntT zstream_size2=get_z_stream_size(context), ret2;
+    CString* version2=zlibVersion_spec(context);
+    IntT check;
+    
+    writeCString_VoidTPtr(next_in,
+        create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    writeCString_VoidTPtr(next_in2,
+        create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`"));
+
+    strm2=create_ZStream(next_in2, 45, 0, 
+                        next_out2, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+
+    ret2 = deflateInit2__spec(context, strm2, SUT_Z_DEFAULT_COMPRESSION,
+                            SUT_Z_DEFLATED, SUT_MAX_WBITS, SUT_DEF_MEM_LEVEL,
+                            SUT_Z_DEFAULT_STRATEGY,
+                            version, zstream_size);
+
+    DUMP("deflate rets==%d, %d\n", ret, ret2);
+    DUMP("deflate ZStreams equals==%d\n", equals_ZStream(strm, strm2) ? 1 : 0);
+
+    check =    equals_ZStream(strm, strm2) ? 1 : 0
+                    &&
+                    ret == ret2 ? 1 : 0
+                    ? 
+                    1 : 0;
+    
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                        next_in, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    strm2=create_ZStream(next_out2, strm2->total_out, 0, 
+                        next_in, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    ret = inflateInit2__spec(context, strm,  SUT_MAX_WBITS,
+                            version, zstream_size);
+    ret2 = inflateInit__spec(context, strm2, version, zstream_size);
+    
+    DUMP("inflate rets==%d, %d\n", ret, ret2);
+    DUMP("inflate ZStreams equals==%d\n", equals_ZStream(strm, strm2) ? 1 : 0);
+
+    check =    equals_ZStream(strm, strm2) ? 1 : 0
+               &&
+               ret == ret2 ? 1 : 0
+               ? 
+               check : 0;
+
+    return check;
+}
+scenario
+bool inflateEnd_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    VoidTPtr tmp;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    adler_buf=readCByteArray_VoidTPtr(next_in, 45);
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                    next_in, 200, 0, 
+                    NULL, NULL_VoidTPtr,
+                    NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                    1, 1, 0);
+
+    ret = inflateInit__spec(context, strm, version, zstream_size);
+
+    DUMP("ret==%d\n", ret);
+
+    DUMP("Inf: pre\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = inflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("Inf: post\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    tmp=strm->zfree;
+    strm->zfree=NULL_VoidTPtr;
+
+    ret = inflateEnd_spec(context, strm);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm->zfree=tmp;
+    
+    ret = inflateEnd_spec(context, strm);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = inflateEnd_spec(context, NULL);
+    DUMP("ret==%d\n", ret);
+    
+
+    return true;
+}
+scenario
+bool inflateReset_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+    CByteArray* adler_buf;
+    
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    adler_buf=readCByteArray_VoidTPtr(next_in, 45);
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_PARTIAL_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                    next_in, 200, 0, 
+                    NULL, NULL_VoidTPtr,
+                    NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                    1, 1, 0);
+
+    ret = inflateInit__spec(context, strm, version, zstream_size);
+
+    DUMP("ret==%d\n", ret);
+
+    DUMP("Inf: pre\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = inflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("Inf: post\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = inflateReset_spec(context, strm);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("POST_POST:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = inflateReset_spec(context, NULL);
+    DUMP("ret==%d\n", ret);
+
+    return true;
+}
+scenario
+bool inflateSetDictionary_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+        
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    writeCString_VoidTPtr(dictionary,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("DEF_IN: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateSetDictionary_spec(context, strm, dictionary, 45);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("Def_Set: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+    
+    ret = deflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("DEF: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                    next_in, 200, 0, 
+                    NULL, NULL_VoidTPtr,
+                    NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                    1, 1, 0);
+
+    ret = inflateInit__spec(context, strm, version, zstream_size);
+
+    DUMP("ret==%d\n", ret);
+
+    DUMP("Inf_init: pre\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = inflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("Inf: post\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = inflateSetDictionary_spec(context, strm, dictionary, 45);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("Inf_set: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    ret = inflateSetDictionary_spec(context, 0, dictionary, 45);
+
+    DUMP("Inf_set: first error run(strm==0)==%d\n", ret);
+
+    writeCString_VoidTPtr(dictionary,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+
+    ret = inflateSetDictionary_spec(context, strm, dictionary, 45);
+
+    DUMP("Inf_set: second error run(illegal dictionary)==%d\n", ret);
+
+    ret = inflate_spec(context, strm, SUT_Z_SYNC_FLUSH);
+
+    DUMP("Decoded at last: ret==%d\n", ret);
+    
+    DUMP("Inf: post2\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    return true;
+}
+scenario
+bool inflateSync_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+        
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    writeCString_VoidTPtr(dictionary,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("DEF_IN: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_FULL_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("DEF: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                    next_in, 200, 0, 
+                    NULL, NULL_VoidTPtr,
+                    NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                    1, 1, 0);
+
+    ret = inflateInit__spec(context, strm, version, zstream_size);
+
+    DUMP("ret==%d\n", ret);
+
+    DUMP("Inf_init: pre\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = inflateSync_spec(context, strm);
+
+    DUMP("ret==%d\n", ret);
+
+    DUMP("Inf_sync: pre\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);    
+
+    ret = inflateSync_spec(context, 0);
+
+    DUMP("Error call(stream==NULL): ret==%d\n", ret);
+
+    return true;
+}
+scenario
+bool inflateSyncPoint_scen()
+{
+    IntT zstream_size=get_z_stream_size(context), ret;
+    CString* version=zlibVersion_spec(context);
+    ZStream* strm;
+        
+    writeCString_VoidTPtr(next_in,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    writeCString_VoidTPtr(dictionary,
+        //create_CString("abcdefghijklmnopqrstuvwxyz.,;/[]=-0987654321`")
+          create_CString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+
+    strm=create_ZStream(next_in, 45, 0, 
+                        next_out, 200, 0, 
+                        NULL, NULL_VoidTPtr,
+                        NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                        1, 1, 0);
+
+    DUMP("PRE_PRE:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflateInit__spec(context, strm, SUT_Z_DEFAULT_COMPRESSION,                            
+                            version, zstream_size);
+    DUMP("ret==%d\n", ret);
+
+    DUMP("DEF_IN: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = deflate_spec(context, strm, SUT_Z_FULL_FLUSH);
+
+    DUMP("ret==%d\n", ret);
+    
+    DUMP("DEF: post:\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    DUMP("data_type==%s\n", strm->data_type == 0 ?
+        "Z_BINARY" : strm->data_type == 1 ? "Z_ASCII" : "Z_UNKNOWN");
+
+    strm=create_ZStream(next_out, strm->total_out, 0, 
+                    next_in, 200, 0, 
+                    NULL, NULL_VoidTPtr,
+                    NULL_VoidTPtr, NULL_VoidTPtr, NULL_VoidTPtr,
+                    1, 1, 0);
+
+    ret = inflateInit__spec(context, strm, version, zstream_size);
+
+    DUMP("ret==%d\n", ret);
+
+    DUMP("Inf_init: pre\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);
+
+    ret = inflateSyncPoint_spec(context, strm);
+
+    DUMP("InfSyncPoint: ret==%d\n", ret);
+
+    DUMP("InfSyncPoint: post\nnext_in==%d, next_out==%d, avail_in==%u, avail_out==%u,"
+        " total_in==%lu, total_out==%lu\n",
+        strm->next_in.address, strm->next_out.address, strm->avail_in,
+        strm->avail_out, strm->total_in, strm->total_out);    
+
+    ret = inflateSyncPoint_spec(context, 0);
+
+    DUMP("Error call(stream==NULL): ret==%d\n", ret);
+
+    return true;
+}
+scenario
+bool gzopen_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+
+    return true;
+}
+
+scenario
+bool gzclose_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT res;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    res = gzclose_spec(context, ret, requestErrorCode(), requestErrorCode());    
+
+    return true;
+}
+scenario
+bool gzdopen_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+
+    FileDescId fildes;
+    OpenFlags oflag = { ReadWrite, Blocking, false, false, false, false, true, false };
+    FilePermission* owner = create_FilePermission(false, false, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);
+    FilePermissions *perms = create_FilePermissions(owner, group, other, Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+
+    fildes = open_spec(context, path, oflag, perms, requestErrorCode(), false);
+
+    ret = gzdopen_spec(context, fildes, mode, requestErrorCode());    
+
+    return true;
+}
+scenario
+bool gzeof_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT ret2;
+
+    gzopen_spec(context, path, mode, requestErrorCode());
+    mode=create_CString("r6h");
+    ret = gzopen_spec(context, path, mode, requestErrorCode());
+    ret2= gzeof_spec(context, ret);
+    
+    return true;
+}
+scenario
+bool gzerror_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT errnum;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    gzerror_spec(context, ret, &errnum);
+
+    return true;
+}
+scenario
+bool gzflush_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT ret2;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    ret2 = gzflush_spec(context, ret, SUT_Z_SYNC_FLUSH, requestErrorCode(),
+            requestErrorCode());
+
+    DUMP("ret2==%d\n", ret2);
+
+    return true;
+}
+
+scenario
+bool gzprintf_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT res, len;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    len = gzprintf_spec(context, ret, create_CString("token"),
+            requestErrorCode(), requestErrorCode());
+    res = gzclose_spec(context, ret, requestErrorCode(), requestErrorCode());
+
+    return true;
+}
+
+scenario
+bool gzgetc_gzputc_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT res;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());  
+    
+    res = gzputc_spec(context, ret, 48);
+    res = gzputc_spec(context, ret, 49);
+    res = gzputc_spec(context, ret, 50);
+    res = gzputc_spec(context, ret, 128);
+    res = gzputc_spec(context, ret, 255);
+    res = gzputc_spec(context, ret, 300);
+    
+    res = gzclose_spec(context, ret, requestErrorCode(), requestErrorCode());
+
+    mode = create_CString("r6h");
+    ret = gzopen_spec(context, path, mode, requestErrorCode());
+
+    while((res = gzgetc_spec(context, ret, requestErrorCode()))!=-1)
+        DUMP("gzgetc == %d\n", res);
+
+    return gzeof_spec(context, ret);
+}
+scenario
+bool gzgets_gzputs_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT res, len;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    len = gzputs_spec(context, ret, create_CString("Yahoo!!!"),
+            requestErrorCode(), requestErrorCode());
+    res = gzclose_spec(context, ret, requestErrorCode(), requestErrorCode());
+
+    mode = create_CString("r6h");
+    ret = gzopen_spec(context, path, mode, requestErrorCode());
+
+    ret = gzgets_spec(context, ret, next_out, len+1, requestErrorCode());
+
+    DUMP("ret == $(obj)\n", readCString_VoidTPtr(ret));
+
+    return true;
+}
+scenario
+bool gzread_gzwrite_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT res, len;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    writeCString_VoidTPtr(next_in, create_CString("Yahoo!!!"));
+    len = gzwrite_spec(context, ret, next_in, 8, requestErrorCode(),
+            requestErrorCode());
+    res = gzclose_spec(context, ret, requestErrorCode(), requestErrorCode());
+
+    mode = create_CString("r6h");
+    ret = gzopen_spec(context, path, mode, requestErrorCode());
+
+    res = gzread_spec(context, ret, next_out, len+1, requestErrorCode(),
+            requestErrorCode());
+
+    DUMP("buf == $(obj)\n", readCString_VoidTPtr(next_out));
+    DUMP("res == %d\n", res);
+
+    return true;
+}
+scenario
+bool gzrewind_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT res, len;
+    OffT res2;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    writeCString_VoidTPtr(next_in, create_CString("Yahoo!!!"));
+    len = gzwrite_spec(context, ret, next_in, 8, requestErrorCode(),
+            requestErrorCode());
+    res = gzclose_spec(context, ret, requestErrorCode(), requestErrorCode());
+
+    mode = create_CString("r6h");
+    ret = gzopen_spec(context, path, mode, requestErrorCode());
+
+    res = gzread_spec(context, ret, next_out, len+1, requestErrorCode(),
+            requestErrorCode());
+
+    DUMP("Before gzrewind: buf == $(obj)\n", readCString_VoidTPtr(next_out));
+    DUMP("res == %d\n", res);
+
+    res = gzrewind_spec(context, ret, requestErrorCode());
+
+    res = gzread_spec(context, ret, next_out, len+1, requestErrorCode(),
+            requestErrorCode());
+
+    DUMP("After gzrewind: buf == $(obj)\n", readCString_VoidTPtr(next_out));
+    DUMP("res == %d\n", res);
+
+    res2 = gzseek_spec(context, ret, (OffT)0, (IntT)1, requestErrorCode());
+
+    DUMP("res2==%I64d\n", res2);
+
+    res = gzread_spec(context, ret, next_out, len+1, requestErrorCode(),
+            requestErrorCode());
+
+    DUMP("After gzseek: buf == $(obj)\n", readCString_VoidTPtr(next_out));
+    DUMP("res == %d\n", res);   
+
+    res2 = gztell_spec( context, ret, requestErrorCode());
+
+    DUMP("res2==%I64d\n", res2);
+
+    res = gzread_spec(context, ret, next_out, len+1, requestErrorCode(),
+            requestErrorCode());
+
+    DUMP("After gztell: buf == $(obj)\n", readCString_VoidTPtr(next_out));
+    DUMP("res == %d\n", res);   
+
+
+    return true;
+} 
+scenario
+bool gzsetparams_scen()
+{
+    CString* path = SANDBOX_FILE("file.gz");
+    CString* mode = create_CString("w6h");
+    VoidTPtr ret;
+    IntT res, len;
+
+    ret = gzopen_spec(context, path, mode, requestErrorCode());    
+    writeCString_VoidTPtr(next_in, create_CString("Yahoo!!!"));
+
+    res = gzsetparams_spec(context, ret, SUT_Z_DEFAULT_COMPRESSION,
+            SUT_Z_DEFAULT_STRATEGY);
+
+    DUMP("gzsetparam == %d\n", res);
+
+    len = gzwrite_spec(context, ret, next_in, 8, requestErrorCode(),
+            requestErrorCode());
+
+    res = gzclose_spec(context, ret, requestErrorCode(), requestErrorCode());
+
+    mode = create_CString("r6h");
+    ret = gzopen_spec(context, path, mode, requestErrorCode());
+
+    res = gzread_spec(context, ret, next_out, len+1, requestErrorCode(),
+            requestErrorCode());
+
+    DUMP("Before gzrewind: buf == $(obj)\n", readCString_VoidTPtr(next_out));
+    DUMP("res == %d\n", res);
+
+    return true;
+}
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm compress_scenario =
+{
+    .init = init_compress_scenario,
+    .finish = finish_compress_scenario,
+    .actions = { 
+                    adler32_scen,
+
+                    compress_scen,
+                    compress_uncompress_scen,
+                    compress2_scen,
+                    compress_compress2_scen,
+                    compressBound_scen,
+
+                    crc32_scen,
+                    get_crc_table_scen,
+
+                    zError_scen,
+
+                    zlibVersion_scen,
+
+                    deflateInit2__scen,
+                    deflateInit__scen,
+                    deflate_scen,
+                    deflateBound_scen,
+                    deflateCopy_scen,
+                    deflateEnd_scen,
+                    deflateParams_scen,
+                    deflateReset_scen,
+                    deflateSetDictionary_scen,
+
+                    inflate_scen,
+                    inflateInit2__scen,
+                    inflateInit__scen,
+                    inflateEnd_scen,
+                    inflateReset_scen,
+                    inflateSetDictionary_scen,
+                    inflateSync_scen,
+                    inflateSyncPoint_scen,
+
+//////////////////////////////////////////////////////////////////////////
+        
+                    gzopen_scen,
+                    gzclose_scen,
+                    gzdopen_scen,
+                    gzeof_scen,
+                    gzerror_scen,
+                    gzflush_scen,
+                    gzprintf_scen,
+                    gzgetc_gzputc_scen,
+                    gzgets_gzputs_scen,
+                    gzread_gzwrite_scen,
+                    gzrewind_scen,
+                    gzsetparams_scen,
+                    NULL 
+                }
+};
+
+
+bool main_util_compress(int argc, char** argv)
+{
+    compress_scenario(argc,argv);
+    return true;
+}
+
+#ifdef UTIL_COMPRESS_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/compress/compress_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+  //  initPThreadModel();
+
+    initUtilCompressSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    setTraceEncoding("windows-1251");
+
+    // Run test scenario
+    addTraceToFile("trace.xml");
+    main_util_compress(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+#endif

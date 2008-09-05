@@ -1,0 +1,110 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "fs/meta/tests/fs_meta_common_scenario.seh"
+
+CString* registerFileFileSystem_Ext2(CallContext context, FileSystem* fs,
+                                                                CString* path)
+{
+    CString* parent, *resolved;
+    CString* basename;
+    CString* slash=create_CString("/");
+    CString* tmp_dir=create_CString("/tmp");
+    FileStatus* fstat=create_emptyFileStatus();
+    CString* concated, *dest;
+    ReadlinkReturnType* readlink_ret;
+    File* search_result;
+    IntT ret;
+
+    VERBOSE("In update...\n");
+
+    parent=getParentDir_Path(path);
+
+    if(parent==NULL)
+        return NULL;
+
+    basename=getBaseName_Path(path);
+
+    if(basename==NULL)
+        return NULL;
+
+    if(!equals(parent, tmp_dir))
+    {
+        parent=registerFileFileSystem_Ext2(context, fs, parent);
+
+        if(parent==NULL)
+        {
+            resetTimeFlags_FileSystem(getFileSystem(context));
+            return NULL;
+        }
+    }
+
+    concated=concat_Path(parent, basename);
+
+    DUMP("Concated==$(obj)\n", concated);
+
+    ret=__lxstat_spec(context, 3, concated, fstat, requestErrorCode());
+
+    search_result=getFile_FileSystem(fs, concated);
+
+    if(search_result==NULL)
+        return NULL;
+
+    if(ret!=-1 && search_result->kind==SymbolicLinkFile && search_result->descriptor==NULL)
+    {
+        readlink_ret=readlink_spec(context, concated, 1000, requestErrorCode());
+
+        if(readlink_ret->retValue==-1)
+        {
+            resetTimeFlags_FileSystem(fs);
+            return NULL;
+        }
+
+        dest=create_CString((CharT*)readlink_ret->buffer->data);
+
+        if(dest==NULL)
+        {
+            resetTimeFlags_FileSystem(fs);
+            return NULL;
+        }
+
+        search_result->descriptor=clone(dest);
+
+        DUMP("SymLink registered for path==$(obj)\n", concated);
+
+        if(isAbsolute_Path(search_result->descriptor))
+            concated=clone(search_result->descriptor);
+        else
+        {
+            basename=clone(search_result->descriptor);
+            concated=concat_Path(parent, basename);
+        }
+
+        if(!equals(concated, tmp_dir))
+        {
+            concated=registerFileFileSystem_Ext2(context, fs, concated);
+
+            if(concated==NULL)
+            {
+                resetTimeFlags_FileSystem(fs);
+                return NULL;
+            }
+        }
+    }
+
+    return concated;
+}

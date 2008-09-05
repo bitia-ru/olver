@@ -1,0 +1,309 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "memory/heap/tests/heap_scenario.seh"
+#include "memory/heap/heap_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "process/process/process_model.seh"
+#include "atl/integer.h"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static int maxMemoryBlocks = 10;
+static int startMemoryBlocks;
+
+/*
+ * calloc 
+ */
+#define MAX_INT 4294967295ul
+
+// these arrays must have equal number of elements
+static SizeT calloc_par_elem[] = {0, 0, 1, MAX_INT,       0, 2, 64, 256, 65536,     1, 65537}; // number of elements
+static SizeT calloc_par_size[] = {0, 1, 0,       0, MAX_INT, 2, 64, 256,     1, 65536, 1}; // size of elements
+
+static int calloc_par_count = sizeof(calloc_par_elem)/sizeof(SizeT);
+
+/*
+ * malloc
+ */
+static SizeT malloc_par_size[] = {0, 1, 2, 16, 1024, 11111, 65536, 77777, 1048576, 8388608, -1};
+
+static int malloc_par_count = sizeof(malloc_par_size)/sizeof(SizeT);
+
+/*
+ * posix_memalign
+ */
+#define SIZEOF_SUT_VOID 4
+
+static SizeT posix_memalign_par_alignment[] = 
+{
+    SIZEOF_SUT_VOID * 0,
+    SIZEOF_SUT_VOID * 1,
+    SIZEOF_SUT_VOID * 4,
+    SIZEOF_SUT_VOID * 16,
+    SIZEOF_SUT_VOID * 65536,
+    SIZEOF_SUT_VOID * 1048576,
+    SIZEOF_SUT_VOID * 1 - 1,
+    SIZEOF_SUT_VOID * 1 + 1,
+    SIZEOF_SUT_VOID * 16 + 1,
+    SIZEOF_SUT_VOID * 65536 + 1
+};
+
+static SizeT posix_memalign_par_size[] = {0, 1024, -1};
+
+static int posix_memalign_par_alignment_count = sizeof(posix_memalign_par_alignment)/sizeof(SizeT);
+static int posix_memalign_par_size_count = sizeof(posix_memalign_par_size)/sizeof(SizeT);
+
+/*
+ * realloc 
+ */
+// these arrays must have equal number of elements
+static SizeT realloc_test_block_size  = 8192;
+static IntT  realloc_par_size_diff [] =  {0,      1024, -8192, -1024,  -16,    0,   16, 1024, 8192, 1048576, -1};
+static bool  realloc_par_mem_ptr   [] =  {false, false,  true,  true, true, true, true, true, true,    true, false};   
+
+static int realloc_par_count = sizeof(realloc_par_size_diff)/sizeof(IntT);
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_heap_scenario(int argc, char** argv)
+{
+    // Init test scenario data
+    context = getContext();
+    
+    startMemoryBlocks = getNumberOfHeapBlocks(context);
+
+    return true;
+}
+
+static void finish_heap_scenario(void)
+{
+}
+
+int getNumberOfMyBlocks(CallContext context)
+{
+    return getNumberOfHeapBlocks(context)-startMemoryBlocks;
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+Integer* getScenarioState()
+{
+    return create_Integer(getNumberOfMyBlocks(context));
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool calloc_scen()
+{
+    iterate(int i = 0; i < calloc_par_count; i++; getNumberOfMyBlocks(context) < maxMemoryBlocks)
+    {
+        //verbose("calloc(nelem = %I64u, elsize = %I64u)\n", calloc_par_elem[i], calloc_par_size[i]);
+        calloc_spec(context, calloc_par_elem[i], calloc_par_size[i],  requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool free_scen()
+{
+    MemoryBlock *memoryBlock = getLastMemoryBlock(context);
+    
+    if(getNumberOfMyBlocks(context) == 0) return true;
+
+    if(memoryBlock)
+    {
+        //verbose("free(ptr = %I64u)\n", memoryBlock->address.address);
+        free_spec(context, NULL_VoidTPtr);
+        free_spec(context, memoryBlock->address);
+    }
+
+    return true;
+}
+
+scenario
+bool malloc_scen()
+{
+    iterate(int i = 0; i < malloc_par_count; i++; getNumberOfMyBlocks(context) < maxMemoryBlocks)
+    {
+        //verbose("malloc(size = %I64u)\n", malloc_par_size[i]);
+        malloc_spec(context, malloc_par_size[i],  requestErrorCode());
+    }
+
+    return true;
+}
+
+scenario
+bool posix_memalign_scen()
+{
+    iterate(int i = 0; i < posix_memalign_par_alignment_count; i++;)
+    {
+        iterate(int j = 0; j < posix_memalign_par_size_count; j++; getNumberOfMyBlocks(context) < maxMemoryBlocks)
+        {
+            //verbose("posix_memalign(alignment = %I64u, size = %I64u)\n", posix_memalign_par_alignment[i], posix_memalign_par_size[j]);
+            posix_memalign_spec(context, posix_memalign_par_alignment[i], posix_memalign_par_size[j],  requestErrorCode());
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool realloc_scen()
+{
+    iterate(int i = 0; i < realloc_par_count; i++; getNumberOfMyBlocks(context) < maxMemoryBlocks)
+    {
+        if (realloc_par_mem_ptr[i] == true)
+        {
+            MemoryBlock *memoryBlock;
+
+            malloc_spec(context, realloc_test_block_size, requestErrorCode());
+                
+            memoryBlock = getLastMemoryBlock(context);
+
+            if (memoryBlock)
+            {
+                SizeT newSize;
+                IntT  temp;
+                    
+                temp = ((IntT)memoryBlock->size) + realloc_par_size_diff[i];
+                if (temp < 0) temp = 0;
+                newSize = temp;
+
+                //verbose("realloc(ptr = %I64u, size = %I64u)\n", memoryBlock->address.address, newSize);
+                realloc_spec(context, memoryBlock->address, newSize, requestErrorCode());
+            }
+        }
+        else
+        {
+            SizeT newSize;
+            IntT  temp;
+
+            temp = realloc_par_size_diff[i];
+            if (temp < 0) temp = 0;
+            newSize = temp;
+
+            //verbose("realloc(ptr = %I64u, size = %I64u)\n", NULL_VoidTPtr.address, newSize);
+            realloc_spec(context, NULL_VoidTPtr, newSize, requestErrorCode());                
+        }
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm heap_scenario =
+{
+    .init = init_heap_scenario,
+    .getState = (PtrGetState)getScenarioState,
+    .finish = finish_heap_scenario,
+    .actions = {
+        calloc_scen,
+        malloc_scen,
+        posix_memalign_scen,
+        realloc_scen,
+        free_scen,
+        NULL
+    }
+};
+
+
+#ifdef UTIL_MEMORY_HEAP_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "memory/heap/heap_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initMemoryHeapSubsystem();
+}
+
+
+scenario dfsm memory_scenario;
+
+bool main_memory_heap_str(int argc, char** argv)
+{
+    heap_scenario(argc,argv);
+    //memory_scenario(argc, argv);
+    return true;
+}
+
+
+int main(int argc, char** argv)
+{
+    // 
+    initTestSystem();
+    loadSUT();  
+
+    addTraceToFile("trace.xml");
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+ 
+    // Run test scenario
+    main_memory_heap_str(argc,argv);
+    
+    //  unloadSUT();  
+    return 0;
+}
+#endif

@@ -1,0 +1,1024 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "time/time/time_config.h"
+#include "time/time/time_model.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_common.seh"
+
+#pragma SEC subsystem time "time.time"
+
+/*
+   The group of functions 'time.time' consists of:
+       adjtime [1]
+       difftime [2]
+       ftime [2]
+       gettimeofday [1]
+       stime [1]
+       time [2]
+       tzset [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    adjtime -- correct the time to allow synchronization of the system clock
+
+SYNOPSIS
+
+    #include <time.h>
+    int adjtime(const struct timeval * delta, struct timeval * olddelta);
+
+DESCRIPTION
+
+    adjtime() makes small adjustments to the system time as returned by
+    gettimeofday()(2), advancing or retarding it by the time specified by the
+    timeval delta. If delta is negative, the clock is slowed down by
+    incrementing it more slowly than normal until the correction is complete. If
+    delta is positive, a larger increment than normal is used. The skew used to
+    perform the correction is generally a fraction of one percent. Thus, the
+    time is always a monotonically increasing function. A time correction from
+    an earlier call to adjtime() may not be finished when adjtime() is called
+    again. If olddelta is non-NULL, the structure pointed to will contain, upon
+    return, the number of microseconds still to be corrected from the earlier
+    call.
+
+    adjtime() may be used by time servers that synchronize the clocks of
+    computers in a local area network. Such time servers would slow down the
+    clocks of some machines and speed up the clocks of others to bring them to
+    the average network time.
+
+    Appropriate privilege is required to adjust the system time.
+
+RETURN VALUE
+
+    On success, 0 is returned. On error, -1 is returned and the global variable
+    errno is set appropriately.
+
+ERRORS
+
+    [EFAULT]
+        An argument points outside the process's allocated address space.
+
+    [EPERM]
+        The process does not have appropriate privilege.
+*/
+specification
+IntT adjtime_spec( CallContext context, TimeValTObj * delta, TimeValTObj * olddelta, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Delta
+    {
+        if ( 1000000 * delta->sec + delta->usec < 0 )
+        {
+            return { DeltaIsNegative, "delta is negative" };
+        }
+        else if ( 1000000 * delta->sec + delta->usec == 0 )
+        {
+            return { DeltaIsZero, "delta is zero" };
+        }
+        else
+        {
+            return { DeltaIsPositive, "delta is positive" };
+        }
+    }
+    coverage C_OldDelta
+    {
+        if ( olddelta == NULL )
+        {
+            return { OldDeltaIsNull, "olddelta is null" };
+        }
+        else
+        {
+            return { OldDeltaIsNotNull, "olddelta is not null" };
+        }
+    }
+    post
+    {
+        /*
+         * On error, -1 is returned and the global variable errno is set appropriately.
+         */
+        ERROR_BEGIN( LSB_ADJTIME, "adjtime.03.02", adjtime_spec == -1, * errno )
+            /*
+             * Errors
+             *
+             * [EFAULT]
+             * An argument points outside the process's allocated address space.
+             */
+            ERROR_SHALL( LSB_ADJTIME, EFAULT, "adjtime.04.01", delta == NULL || adjtime_spec == -1 )
+
+            /*
+             * Errors
+             *
+             * [EPERM]
+             * The process does not have appropriate privilege.
+             *
+             * Appropriate privilege is required to adjust the system time.
+             */
+#ifdef NewCTesK
+            ERROR_SHALL( LSB_ADJTIME, EPERM, "adjtime.04.02",
+                                             C_Priority == C_Priority.PriorityIsReallyLow                         ||
+                                             ( C_Priority == C_Priority.PriorityIsUnknown && adjtime_spec == -1 )
+                       )
+#else
+            ERROR_SHALL( LSB_ADJTIME, EPERM, "adjtime.04.02",
+                                             coverage( C_Priority ) == PriorityIsReallyLow                         ||
+                                             ( coverage( C_Priority ) == PriorityIsUnknown && adjtime_spec == -1 )
+                       )
+#endif // NewCTesK
+        ERROR_END()
+
+        /*
+         * adjtime() makes small adjustments to the system time as returned by
+         * gettimeofday()(2), advancing or retarding it by the time specified by the
+         * timeval delta.
+         *
+         * If delta is negative, the clock is slowed down by incrementing it more slowly
+         * than normal until the correction is complete.
+         */
+        REQ( "adjtime.01.01", "", TODO_REQ() );
+
+        /*
+         * adjtime() makes small adjustments to the system time as returned by
+         * gettimeofday()(2), advancing or retarding it by the time specified by the
+         * timeval delta.
+         *
+         * If delta is positive, a larger increment than normal is used.
+         */
+        REQ( "adjtime.01.02", "", TODO_REQ() );
+
+        /*
+         * A time correction from an earlier call to adjtime() may not be finished when
+         * adjtime() is called again. If olddelta is non-NULL, the structure pointed to
+         * will contain, upon return, the number of microseconds still to be corrected
+         * from the earlier call.
+         */
+        REQ( "adjtime.02", "", TODO_REQ() );
+
+        /*
+         * On success, 0 is returned.
+         */
+        REQ( "adjtime.03.01", "On success, 0 is returned", adjtime_spec == 0 );
+
+        /*
+         * Thus, the time is always a monotonically increasing function.
+         */
+        REQ( "time.time.01", "The time is a monotonically increasing function",
+                             checkTimeIncrease( context, @systems, systems )
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    difftime - compute the difference between two calendar time values
+
+SYNOPSIS
+
+    #include <time.h>
+    double difftime(time_t time1, time_t time0);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the ISO C
+    standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard.
+
+    The difftime() function shall compute the difference between two calendar
+    times (as returned by time()): time1- time0.
+
+RETURN VALUE
+
+    The difftime() function shall return the difference expressed in seconds as
+    a type double.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+DoubleT difftime_spec( CallContext context, TimeT time1, TimeT time0 )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Time01
+    {
+        if ( time0 < time1 )
+        {
+            return { Time01_Less, "time0 < time1" };
+        }
+        else if ( time0 == time1 )
+        {
+            return { Time01_Equal, "time0 == time1" };
+        }
+        else
+        {
+            return { Time01_Greater, "time0 > time1" };
+        }
+    }
+    post
+    {
+        /*
+         * The difftime() function shall compute the difference between two calendar times
+         * (as returned by time()): time1- time0.
+         *
+         * The difftime() function shall return the difference expressed in seconds as a
+         * type double.
+         */
+        REQ( "difftime.01", "The difftime() compute difference between two times", difftime_spec == time1 - time0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    ftime - get date and time (LEGACY)
+
+SYNOPSIS
+
+    #include <sys/timeb.h>
+    int ftime(struct timeb *tp);
+
+DESCRIPTION
+
+    The ftime() function shall set the time and millitm members of the timeb
+    structure pointed to by tp to contain the seconds and milliseconds portions,
+    respectively, of the current time in seconds since the Epoch. The contents
+    of the timezone and dstflag members of tp after a call to ftime() are
+    unspecified.
+
+    The system clock need not have millisecond granularity. Depending on any
+    granularity (particularly a granularity of one) renders code non-portable.
+
+RETURN VALUE
+
+    Upon successful completion, the ftime() function shall return 0; otherwise,
+    -1 shall be returned.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT ftime_spec( CallContext context, TimeBTObj * tp )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        if ( ftime_spec == -1 )
+        {
+            /*
+             * [Upon successful completion, the ftime() function shall return 0]
+             * otherwise, -1 shall be returned
+             */
+            REQ( "ftime.02.02", "otherwise, -1 shall be returned", ftime_spec == -1 );
+        }
+        else
+        {
+            /*
+             * The ftime() function shall set the time and millitm members of the timeb
+             * structure pointed to by tp to contain the seconds and milliseconds portions,
+             * respectively, of the current time in seconds since the Epoch.
+             */
+            REQ( "ftime.01", "", TODO_REQ() );
+
+            /*
+             * Upon successful completion, the ftime() function shall return 0
+             */
+            REQ( "ftime.02.01", "Upon successful completion, the ftime() function shall return 0", ftime_spec == 0 );
+        }
+
+        /*
+         * Thus, the time is always a monotonically increasing function.
+         */
+        REQ( "time.time.01", "The time is a monotonically increasing function",
+                             checkTimeIncrease( context, @systems, systems )
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    gettimeofday - get the date and time
+
+SYNOPSIS
+
+    #include <sys/time.h>
+    int gettimeofday(struct timeval *restrict tp, void *restrict tzp);
+
+DESCRIPTION
+
+    The gettimeofday() function shall obtain the current time, expressed as
+    seconds and microseconds since the Epoch, and store it in the timeval
+    structure pointed to by tp. The resolution of the system clock is
+    unspecified.
+
+    If tzp is not a null pointer, the behavior is unspecified.
+
+RETURN VALUE
+
+    The gettimeofday() function shall return 0 and no value shall be reserved to
+    indicate an error.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT gettimeofday_spec( CallContext context, TimeValTObj * tp, VoidTPtr tzp )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        /*
+         * If tzp is not a null pointer, the behavior is unspecified.
+         */
+        REQ( "app.gettimeofday.01", "If tzp is not a null pointer, the behavior is unspecified", isNULL_VoidTPtr( tzp ) );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        /*
+         * The gettimeofday() function shall obtain the current time, expressed as seconds
+         * and microseconds since the Epoch, and store it in the timeval structure
+         * pointed to by tp.
+         */
+        REQ( "gettimeofday.01", "", TODO_REQ() );
+
+        /*
+         * The gettimeofday() function shall return 0 and no value shall be reserved to
+         * indicate an error.
+         */
+        REQ( "gettimeofday.02", "The gettimeofday() function shall return 0", gettimeofday_spec == 0 );
+
+        /*
+         * Thus, the time is always a monotonically increasing function.
+         */
+        REQ( "time.time.01", "The time is a monotonically increasing function",
+                             checkTimeIncrease( context, @systems, systems )
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    stime -- set time
+
+SYNOPSIS
+
+    #define _SVID_SOURCE
+    #include <time.h>
+    int stime(const time_t * t);
+
+DESCRIPTION
+
+    If the process has appropriate privilege, the stime() function shall set the
+    system's idea of the time and date. Time, referenced by t, is measured in
+    seconds from the epoch (defined in ISO POSIX (2003) as 00:00:00 UTC January
+    1, 1970).
+
+RETURN VALUE
+
+    On success, stime() shall return 0. Otherwise, stime() shall return -1 and
+    errno shall be set to indicate the error.
+
+ERRORS
+
+    [EPERM]
+        The process does not have appropriate privilege.
+
+    [EINVAL]
+        t is a null pointer.
+*/
+specification
+IntT stime_spec( CallContext context, TimeTObj * t, ErrorCode * errno )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_T
+    {
+        if ( t == NULL )
+        {
+            return { TIsNull, "t is null" };
+        }
+        else
+        {
+            return { TIsNotNull, "t is not null" };
+        }
+    }
+    post
+    {
+        TimeSpecTObj * clockRealtimeValue = getClockRealtimeValue_CallContext( context );
+
+        /*
+         * [On success, stime() shall return 0.]
+         * Otherwise, stime() shall return -1 and errno shall be set to indicate the
+         * error.
+         */
+        ERROR_BEGIN( LSB_STIME, "stime.02.02", stime_spec == -1, * errno )
+            /*
+             * Errors
+             *
+             * [EPERM]
+             * The process does not have appropriate privilege.
+             */
+            ERROR_SHALL( LSB_STIME, EPERM, "stime.03.01",
+                                           C_Priority == C_Priority.PriorityIsReallyLow                       ||
+                                           ( C_Priority == C_Priority.PriorityIsUnknown && stime_spec == -1 )
+                       )
+
+            /*
+             * Errors
+             *
+             * [EINVAL]
+             * t is a null pointer.
+             */
+            ERROR_SHALL( LSB_STIME, EINVAL, "stime.03.02", C_T ==  C_T.TIsNull )
+        ERROR_END()
+
+        /*
+         * If the process has appropriate privilege, the stime() function shall set the
+         * system's idea of the time and date. Time, referenced by t, is measured in
+         * seconds from the epoch (defined in ISO POSIX (2003) as 00:00:00 UTC January
+         * 1, 1970).
+         */
+        REQ( "stime.01", "the stime() set the system's idea of the time and date", clockRealtimeValue->sec == * t );
+
+        /*
+         * On success, stime() shall return 0.
+         */
+        REQ( "stime.02.01", "On success, stime() shall return 0", stime_spec == 0 );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    time - get time
+
+SYNOPSIS
+
+    #include <time.h>
+    time_t time(time_t *tloc);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the ISO C
+    standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard.
+
+    The time() function shall return the value of time in seconds since the
+    Epoch.
+
+    The tloc argument points to an area where the return value is also stored.
+    If tloc is a null pointer, no value is stored.
+
+RETURN VALUE
+
+    Upon successful completion, time() shall return the value of time.
+    Otherwise, (time_t)-1 shall be returned.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+TimeT time_spec( CallContext context, TimeTObj * tloc )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    coverage C_Tloc
+    {
+        if ( tloc == NULL )
+        {
+            return { TlocIsNull, "tloc is null" };
+        }
+        else
+        {
+            return { TlocIsNotNull, "tloc is not null" };
+        }
+    }
+    post
+    {
+        if ( time_spec == -1 )
+        {
+            /*
+             * [Upon successful completion, time() shall return the value of time.]
+             * Otherwise, (time_t)-1 shall be returned.
+             */
+            REQ( "time.03.02", "-1 shall be returned", time_spec == -1 );
+        }
+        else
+        {
+            /*
+             * The time() function shall return the value of time [CX]  in seconds since
+             * the Epoch.
+             */
+            REQ("time.01", "", TODO_REQ());
+
+            if ( tloc != NULL )
+            {
+                /*
+                 * The tloc argument points to an area where the return value is also stored. If
+                 * tloc is a null pointer, no value is stored.
+                 */
+                REQ( "time.02", "The tloc argument points to an area where the return value is also stored",
+                                time_spec == * tloc
+                   );
+            }
+
+            /*
+             * Upon successful completion, time() shall return the value of time.
+             */
+            REQ( "time.03.01", "time() shall return the value of time", time_spec != -1 );
+        }
+
+        /*
+         * Thus, the time is always a monotonically increasing function.
+         */
+        REQ( "time.time.01", "The time is a monotonically increasing function",
+                             checkTimeIncrease( context, @systems, systems )
+           );
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    daylight, timezone, tzname, tzset - set timezone conversion information
+
+SYNOPSIS
+
+    #include <time.h>
+    extern int daylight;
+    extern long timezone;
+    extern char *tzname[2];
+    void tzset(void);
+
+DESCRIPTION
+
+    The tzset() function shall use the value of the environment variable TZ to
+    set time conversion information used by ctime() , localtime() , mktime() ,
+    and strftime(). If TZ is absent from the environment, implementation-defined
+    default timezone information shall be used.
+
+    The tzset() function shall set the external variable tzname as follows:
+
+    tzname[0] = "std";
+    tzname[1] = "dst";
+
+    where std and dst are as described in the Base Definitions volume of IEEE
+    Std 1003.1-2001, Chapter 8, Environment Variables.
+
+    The tzset() function also shall set the external variable daylight to 0 if
+    Daylight Savings Time conversions should never be applied for the timezone
+    in use; otherwise, non-zero. The external variable timezone shall be set to
+    the difference, in seconds, between Coordinated Universal Time (UTC) and
+    local standard time.
+
+RETURN VALUE
+
+    The tzset() function shall not return a value.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+void tzset_spec( CallContext context )
+{
+    pre
+    {
+        /* [Consistency of test suite] */
+        REQ( "", "Process state exists", getProcessState_CallContext( context ) != NULL );
+
+        return true;
+    }
+    coverage C_Priority
+    {
+        if ( processReallyHaveHighPriority( context ) )
+        {
+            return { PriorityIsReallyHigh, "Process with high priority" };
+        }
+        else if ( processReallyHaveLowPriority( context ) )
+        {
+            return { PriorityIsReallyLow, "Process with low priority" };
+        }
+        else
+        {
+            return { PriorityIsUnknown, "Process with unknown priority" };
+        }
+    }
+    post
+    {
+        /*
+         * The tzset() function shall use the value of the environment variable TZ to set
+         * time conversion information used by ctime() , localtime() , mktime() , and
+         * strftime().
+         *
+         * The tzset() function shall set the external variable tzname as follows:
+         * tzname[0] = "std"; tzname[1] = "dst";
+         * where std and dst are as described in the Base Definitions volume of IEEE
+         * Std 1003.1-2001, Chapter 8, Environment Variables.
+         */
+        REQ("tzset.01.01", "", TODO_REQ());
+
+        /*
+         * If TZ is absent from the environment, implementation-defined default timezone
+         * information shall be used.
+         *
+         * The tzset() function shall set the external variable tzname as follows:
+         * tzname[0] = "std"; tzname[1] = "dst";
+         * where std and dst are as described in the Base Definitions volume of IEEE
+         * Std 1003.1-2001, Chapter 8, Environment Variables.
+         */
+        REQ("tzset.02.01", "", TODO_REQ());
+
+        /*
+         * The tzset() function shall use the value of the environment variable TZ to set
+         * time conversion information used by ctime() , localtime() , mktime() , and
+         * strftime().
+         *
+         * The tzset() function also shall set the external variable daylight to 0 if
+         * Daylight Savings Time conversions should never be applied for the timezone in
+         * use; otherwise, non-zero.
+         */
+        REQ("tzset.01.02", "", TODO_REQ());
+
+        /*
+         * If TZ is absent from the environment, implementation-defined default timezone
+         * information shall be used.
+         *
+         * The tzset() function also shall set the external variable daylight to 0 if
+         * Daylight Savings Time conversions should never be applied for the timezone in
+         * use; otherwise, non-zero.
+         */
+        REQ("tzset.02.02", "", TODO_REQ());
+
+        /*
+         * The tzset() function shall use the value of the environment variable TZ to set
+         * time conversion information used by ctime() , localtime() , mktime() , and
+         * strftime().
+         *
+         * The external variable timezone shall be set to the difference, in seconds,
+         * between Coordinated Universal Time (UTC) and local standard time.
+         */
+        REQ("tzset.01.03", "", TODO_REQ());
+
+        /*
+         * If TZ is absent from the environment, implementation-defined default timezone
+         * information shall be used.
+         *
+         * The external variable timezone shall be set to the difference, in seconds,
+         * between Coordinated Universal Time (UTC) and local standard time.
+         */
+        REQ("tzset.02.03", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+void recordKnownTime( CallContext context, TimeT sec, LongT minNsec, LongT maxNsec ) {
+    SystemState * systemState = getSystemState_CallContext( context );
+    ClockState * clockState = get_Map( systemState->clocks, create_ClockidTObj( SUT_CLOCK_REALTIME ) );
+    ObservedValues * observedValues = clockState->observedValues;
+    TimeSpecT      timeWithSecPrecision   ,   timeWithMillisecPrecision   ,   timeWithNanosecPrecision   ;
+    TimeSpecTObj * timeWithSecPrecisionObj, * timeWithMillisecPrecisionObj, * timeWithNanosecPrecisionObj;
+    timeWithSecPrecision.sec      = sec;    timeWithSecPrecision.nsec      = minNsec - minNsec % 1000000000; // == 0
+    timeWithMillisecPrecision.sec = sec;    timeWithMillisecPrecision.nsec = minNsec - minNsec % 1000;
+    timeWithNanosecPrecision.sec  = sec;    timeWithNanosecPrecision.nsec  = minNsec;
+    timeWithSecPrecisionObj      = create_TimeSpecTObj( timeWithSecPrecision      );
+    timeWithMillisecPrecisionObj = create_TimeSpecTObj( timeWithMillisecPrecision );
+    timeWithNanosecPrecisionObj  = create_TimeSpecTObj( timeWithNanosecPrecision  );
+    if ( maxNsec - minNsec == 999999999 ) {
+        observedValues->secPrecision = timeWithSecPrecisionObj;
+        if ( observedValues->millisecPrecision == NULL ||
+             sec != observedValues->millisecPrecision->sec ||
+             observedValues->millisecPrecision->nsec < minNsec || maxNsec < observedValues->millisecPrecision->nsec
+           ) {
+            observedValues->millisecPrecision = timeWithSecPrecisionObj;
+        }
+        if ( observedValues->nanosecPrecision == NULL ||
+             sec != observedValues->nanosecPrecision->sec ||
+             observedValues->nanosecPrecision->nsec < minNsec || maxNsec < observedValues->nanosecPrecision->nsec
+           ) {
+            observedValues->nanosecPrecision = timeWithSecPrecisionObj;
+        }
+    } else if ( maxNsec - minNsec == 999 ) {
+        observedValues->secPrecision      = timeWithSecPrecisionObj     ;
+        observedValues->millisecPrecision = timeWithMillisecPrecisionObj;
+        if ( observedValues->nanosecPrecision == NULL ||
+             sec != observedValues->nanosecPrecision->sec ||
+             observedValues->nanosecPrecision->nsec < minNsec || maxNsec < observedValues->nanosecPrecision->nsec
+           ) {
+            observedValues->nanosecPrecision = timeWithMillisecPrecisionObj;
+        }
+    } else if ( maxNsec - minNsec == 0 ) {
+        observedValues->secPrecision      = timeWithSecPrecisionObj     ;
+        observedValues->millisecPrecision = timeWithMillisecPrecisionObj;
+        observedValues->nanosecPrecision  = timeWithNanosecPrecisionObj ;
+    } else {
+        assertion( false, "recordKnownTime : bad delta between %ld and %ld\n", minNsec, maxNsec );
+    }
+    clockState->observedValues = observedValues;
+    put_Map( systemState->clocks, create_ClockidTObj( SUT_CLOCK_REALTIME ), clockState );
+} // recordKnownTime
+
+static ObservedValues * getClockRealtimeObservedValues
+                            ( CallContext context, Map /* SystemId -m-> SystemState */ * systems ) {
+    SystemState * systemState = get_Map( systems, create_Long( context.system ) );
+    ClockState * clockState = get_Map( systemState->clocks, create_ClockidTObj( SUT_CLOCK_REALTIME ) );
+    return clockState->observedValues;
+}
+
+static bool observedValueGreateThan( TimeSpecTObj * thisObservedValue, TimeSpecTObj * x ) {
+    if ( thisObservedValue == NULL ) {
+        return false;
+    } else {
+        if ( x == NULL ) {
+            return true;
+        } else {
+            if ( thisObservedValue->sec > x->sec ) {
+                return true;
+            } else {
+                if ( x->sec > thisObservedValue->sec ) {
+                    return false;
+                } else {
+                    return thisObservedValue->nsec > x->nsec;
+                } // if x->sec > thisObservedValue->sec
+            } // if thisObservedValue->sec > x->sec
+        } // if x == NULL
+    } // if thisObservedValue == NULL
+} // observedValueGreateThan
+
+TimeSpecTObj * getClockRealtimeValue_CallContext( CallContext context ) {
+    ObservedValues * observedValues = getClockRealtimeObservedValues( context, systems );
+    if ( observedValueGreateThan( observedValues->secPrecision, observedValues->millisecPrecision ) &&
+         observedValueGreateThan( observedValues->secPrecision, observedValues->nanosecPrecision  )
+       ) {
+        return observedValues->secPrecision;
+    } else if ( observedValueGreateThan( observedValues->millisecPrecision, observedValues->nanosecPrecision ) ) {
+        return observedValues->millisecPrecision;
+    } else {
+        return observedValues->nanosecPrecision;
+    }
+    return ;
+}
+
+static printTimeSpecTObj( const char * prefix, TimeSpecTObj * x ) {
+    if ( x == NULL ) { verbose( "%s NULL\n"                   , prefix                  ); }
+                else { verbose( "%s sec is %ld, nsec is %ld\n", prefix, x->sec, x->nsec ); }
+}
+
+bool checkTimeIncrease( CallContext context, Map /* SystemId -m-> SystemState */ * preSystems,
+                                             Map /* SystemId -m-> SystemState */ * postSystems
+                      ) {
+    ObservedValues * preObservedValues  = getClockRealtimeObservedValues( context, preSystems  );
+    ObservedValues * postObservedValues = getClockRealtimeObservedValues( context, postSystems );
+    if ( 0 ) {
+        if ( observedValueGreateThan( preObservedValues->secPrecision, postObservedValues->secPrecision ) ) {
+            verbose( "\n" );
+            printTimeSpecTObj( "checkTimeIncrease : pre  secPrecision : ", preObservedValues->secPrecision  );
+            printTimeSpecTObj( "checkTimeIncrease : post secPrecision : ", postObservedValues->secPrecision );
+            assertion( false, "" );
+        }
+        if ( observedValueGreateThan( preObservedValues->millisecPrecision, postObservedValues->millisecPrecision ) ) {
+            verbose( "\n" );
+            printTimeSpecTObj( "checkTimeIncrease : pre  millisecPrecision : ", preObservedValues->millisecPrecision  );
+            printTimeSpecTObj( "checkTimeIncrease : post millisecPrecision : ", postObservedValues->millisecPrecision );
+            assertion( false, "" );
+        }
+        if ( observedValueGreateThan( preObservedValues->nanosecPrecision, postObservedValues->nanosecPrecision ) ) {
+            verbose( "\n" );
+            printTimeSpecTObj( "checkTimeIncrease : pre  nanosecPrecision : ", preObservedValues->nanosecPrecision  );
+            printTimeSpecTObj( "checkTimeIncrease : post nanosecPrecision : ", postObservedValues->nanosecPrecision );
+            assertion( false, "" );
+        }
+    } // if 0
+    return ! observedValueGreateThan( preObservedValues->secPrecision     , postObservedValues->secPrecision      ) &&
+           ! observedValueGreateThan( preObservedValues->millisecPrecision, postObservedValues->millisecPrecision ) &&
+           ! observedValueGreateThan( preObservedValues->nanosecPrecision , postObservedValues->nanosecPrecision  );
+} // checkTimeIncrease

@@ -1,0 +1,250 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/fs/fs_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                        Format Functions                        **/
+/********************************************************************/
+
+/* FilePermissions */
+void writeObject_TSStream( TSStream* stream, Object* value, const char *type )
+{
+    if (value == NULL)
+    {
+        writeTypeHeaderTSStream( stream, "null" );
+        return;
+    }
+    writeTypeHeaderTSStream(stream, type);
+    writeString_TSStream(stream, toString(value));
+}
+
+void permissions_formatter(TSStream* stream,FilePermissions* value)
+{
+  VERIFY_TYPE( permissions_formatter, &type_FilePermissions, value );
+
+  writeObject_TSStream( stream, value, "perms" );
+}
+
+/* FileKind */
+
+void FileKind_formatter(TSStream *stream, FileKindObj *kind)
+{
+    VERIFY_TYPE( FileKind_formatter, &type_FileKindObj, kind );
+    writeObject_TSStream( stream, kind, "filekind" );
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initFsFsSubsystem(void)
+{
+  // Set up mediators
+    set_mediator___xmknod_spec(__xmknod_media);
+    set_mediator_link_spec(link_media);
+    set_mediator_remove_spec(remove_media);
+    set_mediator_rename_spec(rename_media);
+    set_mediator_unlink_spec(unlink_media);
+  // Set up formatters
+    registerTSFormatter("perms",(TSFormatterFuncType)permissions_formatter);
+    registerTSFormatter("filekind",(TSFormatterFuncType)FileKind_formatter);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** __xmknod_spec **/
+
+mediator __xmknod_media for specification
+IntT __xmknod_spec( CallContext context, IntT ver, CString *path, FileKind kind, FilePermissions *perms,  DevT dev, ErrorCode *errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "__xmknod:$(int)$(str)$(filekind)$(perms)$(ullong)",
+            create_IntTObj(ver),
+            path, 
+            create_FileKindObj(kind), 
+            perms, 
+            create_ULLongTObj(dev) );
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state 
+    {
+        on__xmknod( context, ver, path, kind, perms, dev, __xmknod_spec, errno);
+    }
+}
+
+
+
+/** link_spec **/
+mediator link_media for specification
+IntT link_spec( CallContext context, CString *path1, CString *path2, ErrorCode *errno, CancelStatus status )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "link:$(str)$(str)", path1, path2 );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                res = readInt_TSStream(&command.response);
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state 
+    {
+        on_link( context, path1, path2, link_spec, errno);
+    }
+}
+
+
+
+/** remove_spec **/
+
+mediator remove_media for specification
+IntT remove_spec( CallContext context, CString *path, ErrorCode *errno, CancelStatus status )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "remove:$(str)", path );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                res = readInt_TSStream(&command.response);
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        on_remove( context, path, remove_spec, errno);
+    }
+}
+
+
+
+mediator rename_media for specification
+IntT rename_spec( CallContext context, CString *oldPath, CString *newPath, ErrorCode *errno, CancelStatus status )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "rename:$(str)$(str)", oldPath, newPath );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                   res = readInt_TSStream(&command.response);
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        on_rename(context, oldPath, newPath, rename_spec, errno);
+    }
+}
+
+
+/** unlink_spec **/
+mediator unlink_media for specification
+IntT unlink_spec( CallContext context, CString *path, ErrorCode *errno, CancelStatus status )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "unlink:$(str)", path );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                   res = readInt_TSStream(&command.response);
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        on_unlink( context, path, unlink_spec, errno);
+    }
+}
+
+
+
+

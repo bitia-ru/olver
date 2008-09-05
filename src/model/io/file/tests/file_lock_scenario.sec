@@ -1,0 +1,367 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "io/file/file_media.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+#include "fs/dir/dir_model.seh"
+
+#include "process/meta/fs_model.seh"
+
+#include "io/file/tests/file_scenario.seh"
+
+#define NUM_VARS 3
+
+static CallContext context;
+static CallContext contexts[NUM_VARS];
+static FileDescId fildesIds[NUM_VARS];
+static OffT lockStarts[NUM_VARS];
+static OffT lockLengths[NUM_VARS];
+static IntT curVar=0;
+static IntT curVarLockf=0;
+
+static bool isInit=false;
+
+static char *testDir="iofile2";
+
+
+static IntT lockfLocked=0;
+static bool lockfBlock=false;
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+
+specification typedef struct IoFileLockState
+{
+    IntT curVar;
+} IoFileLockState;
+
+
+specification typedef struct IoFileFlockState
+{
+    IntT locked;
+    bool block;
+} IoFileFlockState;
+
+specification typedef struct IoFileFlockState IoFileFlockState = {};
+
+IoFileLockState * create_IoFileLockState(
+    IntT curVar
+)
+{
+    return create(&type_IoFileLockState, curVar);
+}
+
+specification typedef struct IoFileLockState IoFileLockState = {};
+
+IoFileFlockState * create_IoFileFlockState(
+    IntT locked,
+    bool block
+)
+{
+    return create(&type_IoFileFlockState,
+        locked,
+        block);
+        
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+static Object* getIoFileLockState(void)
+{
+    return create_IoFileLockState( curVar);
+}
+
+
+static Object* getIoFileLockfState(void)
+{
+    return create_IoFileLockState( curVarLockf);
+}
+
+static Object* getIoFileFlockState(void)
+{
+    return create_IoFileFlockState( lockfLocked, lockfBlock);
+}
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_io_file_lock_scenario(int argc,char** argv)
+{
+    int i=0;
+    FileDescId  fildes;
+    FilePermission* owner = create_FilePermission(true, true, false);
+    FilePermission* group = create_FilePermission(true, true, false);
+    FilePermission* other = create_FilePermission(true, true, false);
+    FilePermissions *perms = create_FilePermissions(owner, group, other, 
+        Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+    VoidTPtr buf;
+    SizeT nsize=1000;
+    OpenFlags oflag = { ReadWrite, Blocking, true, false, false, false, false,
+        false };
+
+    context=getContext();
+    initPathSystemConfiguration();
+    
+    DISABLE_DEFERRED_REACTIONS;
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    setTSTimeModel(LinearTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME);
+
+    buf=allocateMemoryBlock(context, nsize);
+    
+    fildes=creat_spec(context, SANDBOX_FILE("filename8"), perms, 
+        requestErrorCode(), false);
+    write_spec(context, fildes,  buf, nsize, requestErrorCode());
+    close_spec(context,  fildes, requestErrorCode());
+    
+    for (i=0;i<NUM_VARS;i++)
+    {
+        contexts[i]=createProcess();
+
+        fildesIds[i]=open_spec(contexts[i], SANDBOX_FILE("filename8"), oflag, perms, 
+            requestErrorCode(), false);
+
+        lockStarts[i]=i*100;
+        lockLengths[i]=10;
+    }
+
+    ENABLE_DEFERRED_REACTIONS;
+
+    return true;
+}
+
+
+static void finish_io_file_lock_scenario(void)
+{
+    removeTestScenarioSandboxDir(context);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool io_file_unlock_scen()
+{
+    Flock* lock;
+
+    lock=create_Flock( SUT_F_UNLCK, SEEK_SET, lockStarts[NUM_VARS-1-curVar], lockLengths[NUM_VARS-1-curVar], 
+        contexts[curVar].process);
+    
+    fcntl_F_SETLKW_spec(contexts[NUM_VARS-1-curVar], fildesIds[NUM_VARS-1-curVar], lock, requestErrorCode());
+    curVar--;
+    if (curVar<0)
+    {
+        curVar=0;
+    }
+
+    return true;
+}
+
+
+scenario
+bool io_file_lock_scen()
+{
+    Flock* lock;
+    
+    lock=create_Flock( SUT_F_WRLCK, SEEK_SET, lockStarts[curVar], lockLengths[curVar], 
+        contexts[curVar].process);
+
+    fcntl_F_SETLKW_spec(contexts[curVar], fildesIds[curVar], lock, requestErrorCode());
+
+    curVar++;
+    if (curVar>=NUM_VARS)
+    {
+        curVar=NUM_VARS-1;
+    }
+
+    return true;
+}
+
+
+scenario
+bool io_file_unlockf_scen()
+{
+    lseek_spec(contexts[NUM_VARS-1-curVarLockf], fildesIds[NUM_VARS-1-curVarLockf], lockStarts[NUM_VARS-1-curVarLockf], SEEK_SET, requestErrorCode(), false);
+
+    lockf_F_UNLOCK_spec(contexts[NUM_VARS-1-curVarLockf], fildesIds[NUM_VARS-1-curVarLockf], lockLengths[NUM_VARS-1-curVarLockf], 
+        requestErrorCode(), false);
+
+    curVarLockf--;
+    if (curVarLockf<0)
+    {
+        curVarLockf=0;
+    }
+    
+    return true;
+}
+
+
+scenario
+bool io_file_lockf_scen()
+{
+    lseek_spec(contexts[curVarLockf], fildesIds[curVarLockf], lockStarts[curVarLockf], SEEK_SET, requestErrorCode(), false);
+
+    lockf_F_LOCK_spec(contexts[curVarLockf], fildesIds[curVarLockf], lockLengths[curVarLockf], 
+        requestErrorCode(), false);
+
+    curVarLockf++;
+    if (curVarLockf>=NUM_VARS)
+    {
+        curVarLockf=NUM_VARS-1;
+    }
+    
+    return true;
+}
+
+
+scenario
+bool io_file_unflock_scen()
+{
+
+    flock_spec(contexts[NUM_VARS-1-lockfLocked], fildesIds[NUM_VARS-1-lockfLocked], SUT_LOCK_SH, lockfBlock,  requestErrorCode());
+
+    lockfLocked--;
+    if (lockfLocked<0)
+    {
+        lockfLocked=0;
+    }
+    if (lockfBlock)
+    {
+        lockfBlock=false;
+    }
+    else
+    {
+        lockfBlock=true;
+    }
+   
+    return true;
+}
+
+
+scenario
+bool io_file_flock_scen()
+{
+    flock_spec(contexts[lockfLocked], fildesIds[lockfLocked], SUT_LOCK_SH, lockfBlock,  requestErrorCode());
+
+    lockfLocked++;
+    if (lockfLocked>=NUM_VARS)
+    {
+        lockfLocked=NUM_VARS-1;
+    }
+
+    if (lockfBlock)
+    {
+        lockfBlock=false;
+    }
+    else
+    {
+        lockfBlock=true;
+    }
+    
+    return true;
+}
+
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+Map* saveIoFileModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreIoFileModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+static bool isIoFileModelStateStationary(void)
+{
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm io_file_lock_scenario =
+{
+        .init = init_io_file_lock_scenario,
+        .finish = finish_io_file_lock_scenario,
+        .getState = getIoFileLockState,
+        .saveModelState = (PtrSaveModelState)saveIoFileModelState,
+        .restoreModelState = (PtrRestoreModelState)restoreIoFileModelState,
+        .isStationaryState=(PtrIsStationaryState)isIoFileModelStateStationary,
+        .actions = {
+            io_file_lock_scen,
+            io_file_unlock_scen,
+            NULL
+        }
+};
+
+
+scenario dfsm io_file_lockf_scenario =
+{
+    .init = init_io_file_lock_scenario,
+        .finish = finish_io_file_lock_scenario,
+        .getState = getIoFileLockfState,
+        .saveModelState = (PtrSaveModelState)saveIoFileModelState,
+        .restoreModelState = (PtrRestoreModelState)restoreIoFileModelState,
+        .isStationaryState=(PtrIsStationaryState)isIoFileModelStateStationary,
+        .actions = {
+            io_file_lockf_scen,
+            io_file_unlockf_scen,
+            NULL
+    }
+};
+
+
+
+
+scenario dfsm io_file_flock_scenario =
+{
+    .init = init_io_file_lock_scenario,
+        .finish = finish_io_file_lock_scenario,
+        .getState = getIoFileFlockState,
+        .saveModelState = (PtrSaveModelState)saveIoFileModelState,
+        .restoreModelState = (PtrRestoreModelState)restoreIoFileModelState,
+        .isStationaryState=(PtrIsStationaryState)isIoFileModelStateStationary,
+        .actions = {
+            io_file_flock_scen,
+            io_file_unflock_scen,
+            NULL
+    }
+};

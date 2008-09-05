@@ -1,0 +1,177 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "fs/tmpfile/tests/tmpfile_scenario.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/meta/fs_model.seh"
+#include "fs/fs/fs_model.seh"
+#include "process/meta/fs_media.seh"
+#include "fs/tmpfile/tmpfile_model.seh"
+#include "fs/tmpfile/tmpfile_media.seh"
+
+/********************************************************************/
+/**                  Test Static Data                              **/
+/********************************************************************/
+
+static CallContext context;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static void update_cwd( CallContext context, CString ** rootPath )
+{
+    SizeT size = 1024;
+    StringTPtr buf = allocateMemoryBlock( context, size );
+    ProcessState * pstate = getProcessState_CallContext( context );
+
+    getcwd_spec( context, buf, size, requestErrorCode() );
+    * rootPath = getPath_File( getFileSystem( context ), getFile_FileId( pstate->meta.workdir ) );
+    deallocateMemoryBlock( context, buf );
+}
+
+bool fileSystemInit_tmpfile_scenario( CallContext context,
+                                      CString ** rootPath, CString * rootPathTail, FilePermissions * rootDirPerm
+                                    ) {
+    if ( ! initPathSystemConfiguration() ) { return false; }
+    update_cwd( context, rootPath );
+    // create test root
+    * rootPath = concat_Path( * rootPath, rootPathTail );
+    if ( mkdir_spec( context, * rootPath, rootDirPerm, requestErrorCode() ) != 0 ) { return false; }
+    setUptodate_Directory( getFile_FileSystem( getFileSystem( context ), * rootPath ), true );
+    //* rootPath = concat_Path( * rootPath, create_CString( "/" ) );
+    return true;
+}
+
+static bool init_fs_tmpfile_scenario(int argc,char** argv)
+{
+    CString         * workDir = create_CString( "fs_tmpfile" );
+    FilePermissions * perm777 = create_FilePermissions_String( "rwxrwxrwx" );
+    context = getContext();
+    if ( ! fileSystemInit_tmpfile_scenario( context, & rootForTempl, workDir, perm777 ) ) { return false; }
+    if ( chdir_spec( context, rootForTempl, requestErrorCode() ) != 0 ) { return false; }
+
+    return true;
+}
+
+static void finish_fs_tmpfile_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE( fs_tmpfile_scenario );
+    recursive_remove( context, rootForTempl );
+}
+
+/********************************************************************/
+/**                  Test Actions                                  **/
+/********************************************************************/
+
+scenario
+bool fs_tmpfile_scen()
+{
+    mkstemp_spec( context, create_CString( "fileXXXXXX" ), false );
+    mkstemp_spec( context, create_CString( "fileXXXXXX" ), true  );
+
+    mktemp_spec( context, create_CString( "fXXXXXX" ) );
+
+    tempnam_spec( context, NULL, create_CString( "nfXXXXXX" ), requestErrorCode() );
+
+    tmpfile_spec( context, requestErrorCode(), false );
+    tmpfile_spec( context, requestErrorCode(), true  );
+
+    tmpnam_spec( context, 100 );
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm fs_tmpfile_scenario =
+{
+        .init = init_fs_tmpfile_scenario,
+        .finish = finish_fs_tmpfile_scenario,
+        .actions = {
+            fs_tmpfile_scen,
+            NULL
+    }
+};
+
+#ifdef TMPFILE_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "io/file/file_media.seh"
+#include "fs/dir/dir_media.seh"
+#include "process/process/process_media.seh"
+#include "system/sysconf/sysconf_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+
+    initSystemSysconfSubsystem();
+
+    initFsTmpfileSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile("trace.xml");
+
+    trace_all_requirements = true;
+    // Run test scenario
+    fs_tmpfile_scenario(argc,argv);
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

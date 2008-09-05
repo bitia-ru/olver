@@ -1,0 +1,204 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#ifndef FS_DIR_MODEL_SEH
+#define FS_DIR_MODEL_SEH
+
+#include "fs/fs/fs_model.seh"
+
+/********************************************************************/
+/** Defines                                                        **/
+/********************************************************************/
+#define DIREXIST_COVERAGE(fs, path)\
+    {\
+        Bool3 file_exists = doesFileExist_FileSystem(fs, path);\
+        if(False_Bool3==file_exists)\
+            return { DirNotExist, "directory doesn't exist" };\
+        else if(True_Bool3==file_exists)\
+        {\
+            File *dir = getFile_FileSystem(fs, path);\
+            if(dir->kind!=DirectoryFile)\
+                return {DirNotDirectory, "file isn't directory"};\
+            else if(False_Bool3!=isEmpty_Directory(fs, dir))\
+                return { DirEmpty, "directory is empty" };\
+            else\
+                return { DirNotEmpty, "directory is not empty" };\
+        }else return {DirUnknown, "unknown if directory exists"};\
+    }
+
+#define ERROR_COVERAGE3(err, pred)\
+        switch(pred)\
+        {\
+        case True_Bool3: return {Err_##err##_True, #err" error expected"};\
+        case False_Bool3: return {Err_##err##_False, #err" error unexpected"};\
+        default: return {Err_##err##_Unknown, #err" error possible"};\
+        }
+
+#define PATH_COVERAGE(fs, path)\
+    {\
+        if(isRoot_Path(path))\
+            return { PathRoot, "path is root" };\
+        else if(isEmpty_Path(path))\
+            return { PathEmpty, "path is empty" };\
+        else if(isAbsolute_Path(path))\
+            return { PathAbsolute, "path is absolute" };\
+        else return { PathRelative, "path is relative" };\
+    }
+
+#define DIRSTREAM_COVERAGE(fs, dir)\
+    {\
+        if(dir==NULL)\
+            return {DirStreamInvalid, "directory stream handle is invalid"};\
+        else if(True_Bool3==isDirectoryStreamEnd(fs,dir) && True_Bool3==isDirectoryStreamStart(fs,dir))\
+            return {DirStreamEmpty, "directory stream is empty"};\
+        else if(True_Bool3==isDirectoryStreamEnd(fs,dir))\
+            return {DirStreamEnd, "no more entries in the directory stream"};\
+        else if(True_Bool3==isDirectoryStreamStart(fs,dir))\
+            return {DirStreamStart,"directory stream positioned at the start"};\
+        else\
+            return {DirStreamMiddle, "directory stream positioned in the middle"};\
+    }
+
+/********************************************************************/
+/** DIR and DirEnt types                                           **/
+/********************************************************************/
+
+typedef VoidTPtr DIRTPtr;
+typedef VoidTPtr DirEntTPtr;
+
+specification typedef struct DirEntT 
+{
+    DirEntTPtr pdirent; // pointer to SUT dirent (may be NULL)
+
+    InoT ino;
+    CString *name;
+}DirEntT;
+
+DirEntT *create_DirEnt(DirEntTPtr pdirent, InoT ino, CString *name);
+
+specification typedef struct DIRT
+{
+    DIRTPtr pDIR;   
+    CString *dirpath;
+    List *sequence; // DirEntT list of already read entries
+    // the following maps values returned by telldir() to indexes(int) in sequence
+    Map *location_history; // LongTObj  -> Integer 
+    int index;  // index in sequence of names we are.
+}DIRT;
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** closedir_spec **/
+specification
+IntT closedir_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno, CancelStatus status );
+void onClosedir( CallContext context, DIRTPtr dirp, ErrorCode *errno);
+
+/** mkdir_spec **/
+specification
+IntT mkdir_spec( CallContext context, CString *path, FilePermissions *mode, ErrorCode *errno);
+void onMkdir( CallContext context, CString* path, FilePermissions *mode, IntT mkdir_spec, ErrorCode *errno);
+File *mkdir_new_FileSystem( FileSystem *file_system, ProcessId processId, CString* path, FilePermissions *mode );
+
+/** opendir_spec **/
+specification
+DIRTPtr opendir_spec( CallContext context, CString *dirname, ErrorCode *errno, CancelStatus status );
+void onOpendir( CallContext context, CString *dirname, DIRTPtr opendir_spec);
+
+/** readdir_spec **/
+specification
+DirEntT *readdir_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno, CancelStatus status );
+void onReaddir(CallContext context, DIRTPtr dirp, DirEntT *readdir_spec, ErrorCode *errno);
+bool readdir_DIR(FileSystem *fs, DIRT *dir, DirEntT *dirent);
+bool readdir_FileSystem(FileSystem *fs, CString *dirpath, DirEntT*dirent);
+
+/** readdir64_spec **/
+specification
+DirEntT *readdir64_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno);
+
+/** readdir_r_spec **/
+specification
+DirEntT *readdir_r_spec( CallContext context, DIRTPtr dirp, DirEntTPtr *entry, ErrorCode *errno, CancelStatus status );
+
+/** rewinddir_spec **/
+specification
+void rewinddir_spec( CallContext context, DIRTPtr dirp, CancelStatus status);
+void onRewinddir(CallContext context, DIRTPtr dirp);
+
+/** rmdir_spec **/
+specification
+IntT rmdir_spec( CallContext context, CString *path, ErrorCode *errno);
+void onRmdir( CallContext context, CString *path,  IntT rmdir_spec );
+bool rmdir_FileSystem( FileSystem *file_system, CString* path);
+
+/** seekdir_spec **/
+specification
+void seekdir_spec( CallContext context, DIRTPtr dirp, LongT loc, CancelStatus status);
+void onSeekdir(CallContext context, DIRTPtr dirp, LongT loc);
+void seekdir_DIR(DIRT *dir, LongT loc);
+
+/** telldir_spec **/
+specification
+LongT telldir_spec( CallContext context, DIRTPtr dirp);
+void onTelldir(CallContext context, DIRTPtr dirp, LongT telldir_spec);
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool equals_current_entry_DIR(DIRT *dir, DirEntT *dirent);
+bool equalsCurrentLocation_DIR(DIRT *dir, LongT telldir_spec);
+File *fileExistInDir_FileSystem(FileSystem *fs, File *directory, CString *filename);
+int getLocHistoryIndex(DIRT *dir, LongT loc);
+
+FilePermission* maskFilePermission(FilePermission* perm, FilePermission* mask);
+FilePermissions *getProcessModifiedFilePermissions(ProcessId processId, FilePermissions *perms);
+
+Bool3 isEACCES_dir_mkrm(CallContext context, FileSystem *fs, CString *path);
+Bool3 isEACCES_dir_open(CallContext context, FileSystem *fs, CString *path);
+Bool3 isEINVAL_dir(CallContext context, CString *path);
+Bool3 isENOTDIR_dir(CallContext context, FileSystem *fs, CString *path);
+Bool3 isEPERM_rmdir(CallContext context, FileSystem *fs, CString *path);
+Bool3 isENOTEMPTY_dir(CallContext context, FileSystem *fs, CString *path);
+Bool3 isENOENT_dir(CallContext context, FileSystem *fs, CString *path);
+Bool3 isEPERM_unlink(CallContext context, FileSystem *fs, CString *path);
+
+Bool3 isFileOwned(ProcessId processId, File *file);
+Bool3 isDirectoryStreamEnd(FileSystem *fs, DIRT *dir);
+Bool3 isDirectoryStreamStart(FileSystem *fs, DIRT *dir);
+
+bool containsName_DIR(DIRT *dir, CString *filename);
+bool containsLoc_DIR(DIRT *dir, LongT loc);
+
+void setUptodate_Directory(File *directory, bool uptodate);
+
+Bool3 isDirCountExceedOpenMax(void);
+
+/********************************************************************/
+/** DIR and DirEnt prototypes                                      **/
+/********************************************************************/
+
+DIRT* getDIR(DIRTPtr pDIR);
+CString *getPath_DIR(DIRT *dir);
+void unregisterDIR(CallContext context, DIRTPtr pDIR);
+void registerDIR(CallContext context, DIRTPtr pDIR, CString *dirpath);
+
+#endif
+

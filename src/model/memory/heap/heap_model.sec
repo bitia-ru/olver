@@ -1,0 +1,945 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#define NEWREQ
+
+#include "config/system_config.seh"
+#include "memory/heap/heap_config.h"
+#include "memory/heap/heap_model.seh"
+#include "process/process/process_model.seh"
+
+#pragma SEC subsystem heap "memory.heap"
+
+
+/* 
+   The group of functions 'memory.heap' consists of: 
+       calloc [1]
+       free [1]
+       malloc [1]
+       posix_memalign [1]
+       realloc [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    calloc - a memory allocator
+
+SYNOPSIS
+
+    #include <stdlib.h>
+
+    void *calloc(size_t nelem, size_t elsize);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The calloc() function shall allocate unused space for an array of nelem
+    elements each of whose size in bytes is elsize. The space shall be
+    initialized to all bits 0.
+
+    The order and contiguity of storage allocated by successive calls to
+    calloc() is unspecified. The pointer returned if the allocation succeeds
+    shall be suitably aligned so that it may be assigned to a pointer to any
+    type of object and then used to access such an object or an array of such
+    objects in the space allocated (until the space is explicitly freed or
+    reallocated). Each such allocation shall yield a pointer to an object
+    disjoint from any other object. The pointer returned shall point to the
+    start (lowest byte address) of the allocated space. If the space cannot be
+    allocated, a null pointer shall be returned. If the size of the space
+    requested is 0, the behavior is implementation-defined: the value returned
+    shall be either a null pointer or a unique pointer.
+
+RETURN VALUE
+
+    Upon successful completion with both nelem and elsize non-zero, calloc()
+    shall return a pointer to the allocated space. If either nelem or elsize
+    is 0, then either a null pointer or a unique pointer value that can be
+    successfully passed to free() shall be returned. Otherwise, it shall return
+    a null pointer and set errno to indicate the error.
+
+ERRORS
+
+    The calloc() function shall fail if:
+
+    [ENOMEM]
+        Insufficient memory is available.
+
+*/
+
+specification
+VoidTPtr calloc_spec(CallContext context, SizeT nelem, SizeT elsize, ErrorCode* errno)
+{
+    pre
+    {
+        /* [Malloc is allowed in current context.] */
+        REQ("app.brk.04;app.sbrk.04", "Malloc is allowed in current context.", isMallocAllowed(context));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (nelem == 0 && elsize == 0)
+        {
+            return { NZSZ, "Number of elements is zero and element size is zero." };
+        }
+        else if (nelem == 0)
+        {
+            return { NZ, "Number of elements is zero." };
+        }
+        else if (elsize == 0)
+        {
+            return { SZ, "Element size is zero." };
+        }
+        else if (testMulOverflow_SizeT(nelem, elsize))
+        {
+            return { Overflow, "Too much space requested: nelem * elsize > MAX(size_t)."};
+        }
+        else
+        {
+            return { General, "Number of elements and element size are greater than zero." };
+        }
+    }
+
+    post
+    {
+        ERROR_BEGIN(POSIX_CALLOC, "calloc.09", (*errno != 0) && isNULL_VoidTPtr(calloc_spec), *errno)
+
+            /*
+             * The calloc() function shall fail if:
+             *
+             * [ENOMEM] [CX] Insufficient memory is available.
+             */
+            ERROR_SHALL(POSIX_CALLOC, ENOMEM, "calloc.09.01", TODO_ERR(ENOMEM))
+
+        ERROR_END()
+
+        /*
+         * If the space cannot be allocated, a null pointer shall be returned.
+         *
+         * Otherwise, it shall return a null pointer [CX]  and set errno to indicate 
+         * the error.
+         */
+        REQ("calloc.06.01", "set errno and return null ptr", *errno == 0);
+
+        /*
+         * The space shall be initialized to all bits 0.
+         */
+        REQ("calloc.02", "space shall be init to 0", isZeroArray(calloc_spec, nelem*elsize));
+
+#ifdef NewCTesK
+        if(C == C.General)
+#else
+        if(coverage(C) == General)
+#endif
+        {
+            /*
+             * The pointer returned if the allocation succeeds shall be suitably aligned so 
+             * that it may be assigned to a pointer to any type of object and then used to 
+             * access such an object or an array of such objects in the space allocated (until 
+             * the space is explicitly freed or reallocated).
+             */
+            REQ("calloc.03", "the ptr returned shall be suitably aligned",
+                isPointerAligned(calloc_spec, alignment_AnyType));
+
+            /*
+             * Each such allocation shall yield a pointer to an object disjoint from any other 
+             * object.
+             */
+            REQ("calloc.04", "the pointer returned shall be disjoint from any other object",
+                isDisjointMemoryBlock(@getMemoryState(context), calloc_spec, nelem*elsize));
+
+            /*
+             * with both nelem and elsize non-zero, calloc() shall return a pointer to the 
+             * allocated space
+             */
+            REQ("calloc.08", "shall return a pointer to the alloc. space",
+                isHeapBlockPointer(calloc_spec));
+        }
+        else if(elsize*nelem == 0)
+        {
+            /*
+             * If the size of the space requested is 0, the behavior is implementation-defined: 
+             * the value returned shall be either a null pointer or a unique pointer.
+             *
+             * If either nelem or elsize is 0, then either a null pointer or a unique pointer 
+             * value that can be successfully passed to free() shall be returned.
+             */
+            REQ("calloc.07.01", "size == 0 => null or unique pointer",
+                isNULL_VoidTPtr(calloc_spec) || isHeapBlockPointer(calloc_spec));
+        }
+
+ 
+        
+        return true;
+    }
+}
+
+void onCalloc(CallContext context, SizeT nelem, SizeT elsize, VoidTPtr calloc_spec)
+{
+    onMalloc(context, nelem * elsize, calloc_spec);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    free - free allocated memory
+
+SYNOPSIS
+
+    #include <stdlib.h>
+
+    void free(void *ptr);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The free() function shall cause the space pointed to by ptr to be
+    deallocated; that is, made available for further allocation. If ptr is a
+    null pointer, no action shall occur. Otherwise, if the argument does not
+    match a pointer earlier returned by the calloc(), malloc(),
+    posix_memalign(), realloc(), or strdup() function, or if the space has been
+    deallocated by a call to free() or realloc(), the behavior is undefined.
+
+    Any use of a pointer that refers to freed space results in undefined
+    behavior.
+
+RETURN VALUE
+
+    The free() function shall not return a value.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+void free_spec(CallContext context, VoidTPtr ptr)
+{
+    pre
+    {
+        /* [Free is allowed in current context] */
+        REQ("", "Free is allowed in current context.", isFreeAllowed(context));
+
+        if(!isNULL_VoidTPtr(ptr))
+        {
+            /*
+             * If the argument does not match a pointer earlier returned by
+             * the calloc(), malloc(), posix_memalign(), realloc(), or strdup()
+             * function, or if the space has been deallocated by a call to
+             * free() or realloc(), the behavior is undefined
+             */
+            REQ("app.free.03", "ptr is a valid heap pointer", isHeapBlockPointer(ptr));
+        }
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (isNULL_VoidTPtr(ptr))
+        {
+            return { NP, "Free NULL pointer." };
+        }
+        else
+        {
+            return { VP, "Free a valid heap pointer." };
+        }
+    }
+
+    post
+    {
+        /*
+         * If ptr is a null pointer, no action shall occur. 
+         */
+        /*
+         * The free() function shall cause the space pointed to by ptr to be 
+         * deallocated; that is, made available for further allocation. 
+         */
+        REQ("free.01;free.02", "is implemented by the model", true);
+
+        return true;
+    }
+}
+
+void onFree(CallContext context, VoidTPtr ptr)
+{
+    if ( !isNULL_VoidTPtr(ptr) )
+    {
+        unregisterMemoryBlock( ptr );
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    malloc - a memory allocator
+
+SYNOPSIS
+
+    #include <stdlib.h>
+
+    void *malloc(size_t size);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The malloc() function shall allocate unused space for an object whose size
+    in bytes is specified by size and whose value is unspecified.
+
+    The order and contiguity of storage allocated by successive calls to
+    malloc() is unspecified. The pointer returned if the allocation succeeds
+    shall be suitably aligned so that it may be assigned to a pointer to any
+    type of object and then used to access such an object in the space
+    allocated (until the space is explicitly freed or reallocated). Each such
+    allocation shall yield a pointer to an object disjoint from any other
+    object. The pointer returned points to the start (lowest byte address) of
+    the allocated space. If the space cannot be allocated, a null pointer
+    shall be returned. If the size of the space requested is 0, the behavior
+    is implementation-defined: the value returned shall be either a null
+    pointer or a unique pointer.
+
+RETURN VALUE
+
+    Upon successful completion with size not equal to 0, malloc() shall return
+    a pointer to the allocated space. If size is 0, either a null pointer or a
+    unique pointer that can be successfully passed to free() shall be returned.
+    Otherwise, it shall return a null pointer and set errno to indicate the
+    error.
+
+ERRORS
+
+    The malloc() function shall fail if:
+
+    [ENOMEM]
+        Insufficient storage space is available.
+
+*/
+
+specification
+VoidTPtr malloc_spec(CallContext context, SizeT size, ErrorCode* errno)
+{
+    pre
+    {
+        /* [Malloc is allowed in current context] */
+        REQ("app.brk.04;app.sbrk.04", "Malloc is allowed in current context.", isMallocAllowed(context));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (size == 0)
+        {
+            return { SZ, "size of the space requested is 0." };
+        }
+        else
+        {
+            return { General, "size of the space requested is greater than zero." };
+        }
+    }
+
+    post
+    {
+        ERROR_BEGIN(POSIX_MALLOC, "malloc.08", *errno && isNULL_VoidTPtr(malloc_spec), *errno)
+            /*
+             * The malloc() function shall fail if:
+             * 
+             * [ENOMEM] [CX] Insufficient storage space is available. 
+             */
+            ERROR_SHALL(POSIX_MALLOC, ENOMEM, "malloc.08.01", TODO_ERR(ENOMEM))
+
+        ERROR_END()
+
+        /*
+         * If the space cannot be allocated, a null pointer shall be returned.
+         *
+         * Otherwise, it shall return a null pointer [CX] and set errno to indicate the 
+         * error.
+         */
+        REQ("malloc.05.01", "shall set the errno and return a null pointer",
+            *errno == 0);
+
+        if(size == 0)
+        {
+            /*
+             * If the size of the space requested is 0, the behavior is implementation-defined: 
+             * the value returned shall be either a null pointer or a unique pointer.
+             *
+             * If size is 0, either a null pointer or a unique pointer that can be 
+             * successfully passed to free() shall be returned.
+             */
+            REQ("malloc.06.01", "the pointer returned shall be disjoint",
+                isNULL_VoidTPtr(malloc_spec) || isHeapBlockPointer(malloc_spec));
+
+            return true;
+        }
+
+        /* 
+         * The pointer returned if the allocation succeeds shall be
+         * suitably aligned so that it may be assigned to a pointer to
+         * any type of object and then used to access such an object
+         * or an array of such objects in the space allocated (until
+         * the space is explicitly freed or reallocated).                 
+         */
+        REQ("malloc.02", "Pointer returned shall be suitably aligned.",
+            isPointerAligned(malloc_spec, alignment_AnyType));
+
+        /* 
+         * Each such allocation shall yield a pointer to an object
+         * disjoint from any other object.
+         */
+        REQ("malloc.03", "Object pointed shall be disjoint from any other object.", 
+            isDisjointMemoryBlock(@getMemoryState(context), malloc_spec, size));
+
+        /*
+         * Upon successful completion with size not equal to 0,
+         * malloc() shall return a pointer to the allocated space.
+         */
+        REQ("malloc.07", "shall return a pointer to the alloc. space", isHeapBlockPointer(malloc_spec));
+
+
+
+        return true;
+    }
+}
+
+void onMalloc(CallContext context, SizeT size, VoidTPtr malloc_spec)
+{
+    toStandardMemMode(context);
+
+    if(!isNULL_VoidTPtr(malloc_spec))
+    {
+        registerMemoryBlock(malloc_spec, size);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    posix_memalign - aligned memory allocation (ADVANCED REALTIME)
+
+SYNOPSIS
+
+    #include <stdlib.h>
+
+    int posix_memalign(void **memptr, size_t alignment, size_t size);
+
+DESCRIPTION
+
+    The posix_memalign() function shall allocate size bytes aligned on a
+    boundary specified by alignment, and shall return a pointer to the
+    allocated memory in memptr. The value of alignment shall be a multiple of
+    sizeof( void *), that is also a power of two. Upon successful completion,
+    the value pointed to by memptr shall be a multiple of alignment.
+
+    The free() function shall deallocate memory that has previously been
+    allocated by posix_memalign().
+
+RETURN VALUE
+
+    Upon successful completion, posix_memalign() shall return zero; otherwise,
+    an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The posix_memalign() function shall fail if:
+
+    [EINVAL]
+        The value of the alignment parameter is not a power of two multiple
+        of sizeof( void *).
+    [ENOMEM]
+        There is insufficient memory available with the requested alignment.
+
+*/
+
+
+/*
+   Signature of posix_memalign_spec differs from posix_memalign
+   prototype. Return value of posix_memalign is put into errno parameter of 
+   posix_memalign_spec. Also memptr parameter is not used in 
+   posix_memalign_spec. Instead a pointer to the allocated memory is returned 
+   by the specification function.
+*/
+specification
+VoidTPtr posix_memalign_spec(CallContext context, SizeT alignment, SizeT size, ErrorCode* errno)
+{
+    pre
+    {
+        /* [Malloc is allowed in current context] */
+        REQ("app.brk.04;app.sbrk.04", "Malloc is allowed in current context.", isMallocAllowed(context));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if(!isValidAlignment(alignment))
+        {
+            return { IA, "Invalid alignment." };
+        }
+        else if(size == 0)
+        {
+            return { SZ, "size of the space requested is 0." };
+        }
+        else
+        {
+            return { General, "size of the space requested is greater than zero." };
+        }
+    }
+
+    post
+    {
+        /*
+         * The value of alignment shall be a multiple of sizeof( void *), that is also a 
+         * power of two.
+         */
+        ERROR_BEGIN(POSIX_POSIX_MEMALIGN,
+            "posix_memalign.06;posix_memalign.02;posix_memalign.05", *errno, *errno)
+
+            /*
+             * The posix_memalign() function shall fail if:
+             *
+             * [EINVAL] The value of the alignment parameter is not a power of two multiple 
+             * of sizeof( void *).
+             */
+            ERROR_SHALL(POSIX_POSIX_MEMALIGN, EINVAL, "posix_memalign.06.01",
+                !isValidAlignment(alignment))
+
+            /*
+             * The posix_memalign() function shall fail if:
+             *
+             * [ENOMEM] There is insufficient memory available with the requested alignment.
+             */
+            ERROR_SHALL(POSIX_POSIX_MEMALIGN, ENOMEM, "posix_memalign.06.02", TODO_ERR(ENOMEM))
+
+        ERROR_END()
+
+        /*
+         * Upon successful completion, posix_memalign() shall return zero;
+         */
+        REQ("posix_memalign.04", "posix_memalign() shall return zero", *errno == 0);
+
+        /*
+         * Upon successful completion, the value pointed to by memptr shall be a multiple 
+         * of alignment.
+         */
+        REQ("posix_memalign.03", "memptr shall be a multiple of alignment",
+            isPointerAligned(posix_memalign_spec, alignment));
+
+
+
+        return true;
+    }
+}
+
+void onPosixMemalign(CallContext context, SizeT size, VoidTPtr posix_memalign_spec)
+{
+    onMalloc(context, size, posix_memalign_spec);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    realloc - memory reallocator
+
+SYNOPSIS
+
+    #include <stdlib.h>
+
+    void *realloc(void *ptr, size_t size);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The realloc() function shall change the size of the memory object pointed
+    to by ptr to the size specified by size. The contents of the object shall
+    remain unchanged up to the lesser of the new and old sizes. If the new size
+    of the memory object would require movement of the object, the space for
+    the previous instantiation of the object is freed. If the new size is
+    larger, the contents of the newly allocated portion of the object are
+    unspecified. If size is 0 and ptr is not a null pointer, the object pointed
+    to is freed. If the space cannot be allocated, the object shall remain
+    unchanged.
+
+    If ptr is a null pointer, realloc() shall be equivalent to malloc() for the
+    specified size.
+
+    If ptr does not match a pointer returned earlier by calloc(), malloc(),
+    or realloc() or if the space has previously been deallocated by a call to
+    free() or realloc(), the behavior is undefined.
+
+    The order and contiguity of storage allocated by successive calls to
+    realloc() is unspecified. The pointer returned if the allocation succeeds
+    shall be suitably aligned so that it may be assigned to a pointer to any
+    type of object and then used to access such an object in the space
+    allocated (until the space is explicitly freed or reallocated). Each such
+    allocation shall yield a pointer to an object disjoint from any other
+    object. The pointer returned shall point to the start (lowest byte address)
+    of the allocated space. If the space cannot be allocated, a null pointer
+    shall be returned.
+
+RETURN VALUE
+
+    Upon successful completion with a size not equal to 0, realloc() shall
+    return a pointer to the (possibly moved) allocated space. If size is 0,
+    either a null pointer or a unique pointer that can be successfully passed
+    to free() shall be returned. If there is not enough available memory,
+    realloc() shall return a null pointer and set errno to [ENOMEM].
+
+ERRORS
+
+    The realloc() function shall fail if:
+
+    [ENOMEM]
+        Insufficient memory is available.
+
+*/
+
+specification
+VoidTPtr realloc_spec(CallContext context, VoidTPtr ptr, SizeT size, ErrorCode* errno)
+{
+    SizeT MemSize = 0;
+    MemoryBlock* MemBlock = NULL;
+    CByteArray* Memory;
+
+    pre
+    {
+        /* [Malloc is allowed in current context] */
+        REQ("app.brk.04;app.sbrk.04", "Malloc is allowed in current context.",
+            isMallocAllowed(context));
+
+        /*
+         * If ptr does not match a pointer returned earlier by calloc(), malloc(), or 
+         * realloc() or if the space has previously been deallocated by a call to free() 
+         * or realloc(), the behavior is undefined.
+         */
+        REQ("app.realloc.08", "ptr is a valid heap pointer",
+            isHeapBlockPointer(ptr) || isNULL_VoidTPtr(ptr));
+
+        if(!isNULL_VoidTPtr(ptr))
+        {
+            /* [Get memory block size for ptr] */
+            MemBlock = getMemoryBlock(ptr);
+            MemSize = MemBlock->size;
+
+            Memory = readCByteArray_VoidTPtr(ptr, MemSize);
+        }
+
+        return true;
+    }
+
+    coverage Ptr
+    {
+        if(isNULL_VoidTPtr(ptr)) return { EMALLOC, "Equivalent to malloc(size)" };
+        else return { ERESIZE, "Resizing" };
+    }
+
+    coverage Size
+    {
+        if(size > MemSize)
+            return { LargerSize, "Allocate greater space." };
+        else if(size == MemSize)
+            return { EqualSize, "Do nothing" };
+        return { LessSize, "Allocate less space" };
+    }
+
+    post
+    {
+        if(*errno && isNULL_VoidTPtr(realloc_spec))
+            /*
+             * If the space cannot be allocated, the object shall remain unchanged.
+             */
+            REQ("realloc.06", "the object shall remain unchanged",
+                @isHeapBlockPointer(ptr) ?
+                      equals(@Memory, readCByteArray_VoidTPtr(ptr, MemSize))
+                    : isHeapBlockPointer(ptr) == 0);
+
+        ERROR_BEGIN(POSIX_REALLOC, "realloc.14",
+            *errno && isNULL_VoidTPtr(realloc_spec), *errno)
+            /*
+            * The realloc() function shall fail if:
+            * 
+            * [ENOMEM] [CX] Insufficient memory is available. 
+            */
+            ERROR_SHALL(POSIX_REALLOC, ENOMEM, "realloc.14.01", TODO_ERR(ENOMEM))
+
+        ERROR_END()
+
+        /*
+         * If the space cannot be allocated, a null pointer shall be returned.
+         *
+         * If there is not enough available memory, realloc() shall return a null pointer 
+         * [CX]  and set errno to [ENOMEM].
+         */
+        REQ("realloc.11.01", "memory error event", *errno == 0);
+
+        if(size == 0)
+        {
+            /*
+             * If size is 0, either a null pointer or a unique pointer that can be 
+             * successfully passed to free() shall be returned.
+             */
+            REQ("realloc.13", "if size is 0 pointer is null or unique",
+                isNULL_VoidTPtr(realloc_spec) || isHeapBlockPointer(realloc_spec));
+
+#ifdef NewCTesK
+            if(Ptr == Ptr.ERESIZE)
+#else
+            if(coverage(Ptr) == ERESIZE)
+#endif
+            {
+                /*
+                 * If size is 0 and ptr is not a null pointer, the object pointed to is freed.
+                 */
+                REQ("realloc.05", "sz == 0 && not null ptr => ptr is freed",
+                    !isHeapBlockPointer(ptr));
+            }
+        }
+        else
+        {
+#ifdef NewCTesK
+            if(Ptr == Ptr.ERESIZE)
+#else
+            if(coverage(Ptr) == ERESIZE)
+#endif
+            {
+#ifdef NewCTesK
+                SizeT szMin = Size == Size.LargerSize ? MemSize : size;
+#else
+                SizeT szMin = coverage(Size) == LargerSize ? MemSize : size;
+#endif
+                Memory = readCByteArray_VoidTPtr(realloc_spec, szMin);
+
+#ifdef NewCTesK
+                if(Size == Size.LargerSize)
+#else
+                if(coverage(Size) == LargerSize)
+#endif
+                {
+                    /*
+                     * If the new size of the memory object would require movement of the object, the 
+                     * space for the previous instantiation of the object is freed.
+                     */
+                    REQ("realloc.03", "new size > size => old mem is freed",
+                        !isHeapBlockPointer(ptr) || equals_VoidTPtr(ptr, realloc_spec));
+                }
+
+                /*
+                 * The contents of the object shall remain unchanged up to the lesser of the new 
+                 * and old sizes.
+                 */
+                REQ("realloc.02", "the contents shall remain unchanged up",
+                    compare_CByteArrays(@Memory, Memory, szMin));
+            }
+
+            /*
+             * The pointer returned if the allocation succeeds shall be suitably aligned so 
+             * that it may be assigned to a pointer to any type of object and then used to 
+             * access such an object in the space allocated (until the space is explicitly 
+             * freed or reallocated).
+             */
+            REQ("realloc.08", "the pointer returned shall be aligned",
+                isPointerAligned(realloc_spec, alignment_AnyType));
+
+            /*
+             * Each such allocation shall yield a pointer to an object disjoint from any other 
+             * object.
+             */
+            REQ("realloc.09", "the pointer returned shall be disjoint from any other object",
+                isDisjointMemoryBlockExceptFor(@getMemoryState(context), ptr, realloc_spec, size));
+
+            /*
+             * with a size not equal to 0, realloc() shall return a pointer to the (possibly 
+             * moved) allocated space.
+             */
+            REQ("realloc.12", "shall return a pointer", isHeapBlockPointer(realloc_spec));
+        }
+
+#ifdef NewCTesK
+        if(Ptr == Ptr.EMALLOC)
+#else
+        if(coverage(Ptr) == EMALLOC)
+#endif
+            /*
+             * If ptr is a null pointer, realloc() shall be equivalent to malloc() for the 
+             * specified size.
+             */
+            REQ("realloc.07", "is implemented by model", true);
+
+
+
+        return true;
+    }
+}
+
+void onRealloc(CallContext context, VoidTPtr ptr, SizeT size, VoidTPtr realloc_spec, ErrorCode* errno)
+{
+    if(*errno == SUT_EOK)
+    {
+        onFree(context, ptr);
+        onMalloc(context, size, realloc_spec);
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool isMallocAllowed(CallContext context)
+{
+    /*ProcessState* process = getProcessState_CallContext(context);
+
+    if (process == NULL)
+        return false;
+    return (process->memory_mode != BreakValueMMode);*/
+    return true;
+}
+
+bool isFreeAllowed( CallContext context )
+{
+    return isMallocAllowed(context);
+}
+
+bool isValidAlignment(SizeT alignment)
+{
+    if (alignment >= sizeof_VoidTPtr)
+    {
+        if (alignment % sizeof_VoidTPtr == 0)
+        {
+            alignment = alignment / sizeof_VoidTPtr;
+
+            // X == 2^N  if and only if  X & (X - 1) == 0
+            if ((alignment & (alignment - 1)) == 0)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool testMulOverflow_SizeT(SizeT m1, SizeT m2)
+{
+    SizeT result, mask, bytesCount;
+    int i;
+
+    // multiply
+    result = m1 * m2;
+
+    // create mask
+    bytesCount = sizeof_SUTType("size_t");
+    mask = 0;
+    for (i = 0; i < (bytesCount * 8); i++)
+    {
+        mask = (mask << 1) + 1;
+    }
+
+    // remove excess bits
+    result = result & mask;
+
+    // check
+    if (result / m1 == m2)
+    {
+        return false;
+    }
+    else
+    {
+        return true;
+    }
+}

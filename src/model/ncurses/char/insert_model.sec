@@ -1,0 +1,245 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/char/insert_model.seh"
+#include "ncurses/char/add_model.seh"
+#include "data/ncurses_model.seh"
+
+
+#pragma SEC subsystem char "ncurses.char"
+
+
+
+/*
+   The group of functions 'ncurses.char.insert' consists of:
+       insch [1]
+       mvinsch [1]
+       mvwinsch [1]
+       winsch [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    insch, mvinsch, mvwinsch, winsch - insert a single-byte character and
+        rendition into a window
+
+SYNOPSIS
+
+    #include <curses.h>
+    int insch(chtype ch);
+    int mvinsch(int y, int x, chtype ch);
+    int mvwinsch(WINDOW *win, int y, int x, chtype ch);
+    int winsch(WINDOW *win, chtype ch);
+
+DESCRIPTION
+
+    These functions insert the character and rendition from ch into the current
+    or specified window at the current or specified position.
+
+    These functions do not perform wrapping.These functions do not advance the
+    cursor position. These functions perform special-character processing, with
+    the exception that if a newline is inserted into the last line of a window
+    and scrolling is not enabled, the behavior is unspecified.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: mvwinsch, winsch, mvinsch, insch
+specification
+IntT insch_spec( CallContext context, ChTypeT ch, WindowTPtr* win, NCursesPosition* position)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesPosition* curPos = clone(getWindowPositionMayNULL(curWnd, position));
+    NCursesWindow* modifiedWindow;
+
+    if (win!=NULL){
+        if (position!=NULL){
+            FILTER("mvwinsch");
+        }
+        else{
+            FILTER("winsch");
+        }
+    }
+    else{
+        if (position!=NULL){
+            FILTER("mvinsch");
+        }
+        else{
+            FILTER("insch");
+        }
+    }
+
+    pre
+    {
+        modifiedWindow = insch_model(context, ch, win, position);
+
+        return true;
+    }
+    post
+    {
+        if (insch_spec!=SUT_EOK)
+        {
+
+            /*
+            * Otherwise, they return ERR.
+            */
+            REQ("insch.05.02;mvinsch.05.02;mvwinsch.05.02;winsch.05.02",
+                "Function shall return ERR", insch_spec==SUT_ERR);
+        }
+        else
+        {
+            /*
+            * Upon successful completion, these functions return OK.
+            */
+
+
+            REQ("?insch.05.01;mvinsch.05.01;mvwinsch.05.01;winsch.05.01",
+                "Function shall return OK", insch_spec==SUT_EOK);
+
+            /*
+            * These functions do not advance the cursor position.
+            */
+            REQ("insch.03;mvinsch.03;mvwinsch.03;winsch.03",
+                "These functions do not advance the cursor position",
+                equals(curWnd->cursorPos, curPos));
+            if(!check_NCursesWindows(curWnd, modifiedWindow, CH_ALL, -1))
+            {
+                DUMP_wnd(curWnd);
+                DUMP("\n");
+                DUMP_wnd(modifiedWindow);
+            }
+            /*
+            * [Compare model window with the real window]
+            */
+            REQ("", "Data in the window shall be valid", check_NCursesWindows(curWnd, modifiedWindow, CH_ALL, -1));
+
+        }
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+
+
+void insertChTypeInWindow(NCursesWindow* win, IntT x, IntT y, ChTypeT ch)
+{
+    ChTypeTArray *wnd_image=win->wnd_image;
+    IntT insPos = y*win->ncols+x;
+    IntT i=0;
+
+    /*
+    * These functions perform special-character processing, with the exception that
+    * if a newline is inserted into the last line of a window and scrolling is not
+    * enabled, the behavior is unspecified.
+    */
+    IMPLEMENT_REQ("insch.04;mvinsch.04;mvwinsch.04;winsch.04");
+
+    if (!addSpecChar(win, create_NCursesPosition(x, y), ch, false, true))
+    {
+        /*
+        * These functions do not perform wrapping.
+        */
+        IMPLEMENT_REQ("insch.02;mvinsch.02;mvwinsch.02;winsch.02");
+
+        for (i=(y+1)*win->ncols-1;i>insPos;i--)
+        {
+            setElement_NCursesWindow_Offset(win, i,
+                getElement_NCursesWindow_Offset(win, i-1));
+        }
+
+        setElement_NCursesWindow_Offset(win, i, ch);
+    }
+
+}
+
+
+NCursesWindow*  insch_model( CallContext context, ChTypeT ch, WindowTPtr* win, NCursesPosition* position)
+{
+    NCursesWindow* curWnd=createNCursesWindow_Local(getWindowMayNULL(context, win));
+    NCursesPosition* oldPos = clone(curWnd->cursorPos);
+
+    /*
+    * These functions insert the character and rendition from ch into the current or
+    * specified window at the current or specified position.
+    */
+    IMPLEMENT_REQ("insch.01;mvinsch.01;mvwinsch.01;winsch.01");
+
+    if (position!=NULL)
+    {
+        insertChTypeInWindow(curWnd, position->x, position->y, ch);
+        curWnd->cursorPos->x=position->x;
+        curWnd->cursorPos->y=position->y;
+    }
+    else
+    {
+        insertChTypeInWindow(curWnd, curWnd->cursorPos->x, curWnd->cursorPos->y, ch);
+        curWnd->cursorPos->x = oldPos->x;
+        curWnd->cursorPos->y = oldPos->y;
+    }
+
+    pushNCursesWindow(curWnd);
+
+    return curWnd;
+}
+
+
+void onInsch(CallContext context, ChTypeT ch, WindowTPtr* win, NCursesPosition* position, IntT insch_spec)
+{
+    if (insch_spec==SUT_EOK)
+    {
+        updateNCursesWindowMayNULL(context, win);
+        refresh_WindowTPtr(context, win, 0);
+    }
+}
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/

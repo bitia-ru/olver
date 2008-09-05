@@ -1,0 +1,154 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/symlink/symlink_media.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "fs/meta/meta_model.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initFsSymlinkSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_readlink_spec(readlink_media);
+    set_mediator_symlink_spec(symlink_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** readlink_spec **/
+mediator readlink_media for specification
+ReadlinkReturnType* readlink_spec(CallContext context, CString* path,  
+                                  SizeT bufsize, ErrorCode* errno)
+{
+  call
+  {
+    ReadlinkReturnType* res=NULL;
+    SSizeT    retValue;
+    CByteArray*  buffer;
+    bool bufChanged;
+    TSCommand command = create_TSCommand();
+    
+    format_TSCommand( &command, "readlink:$(str)$(size)",
+      path,
+      create_SizeTObj(bufsize));
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+      timestamp = command.meta.timestamp;
+      retValue = readSSize_TSStream( &command.response );
+      buffer = readCByteArray_TSStream(&command.response);
+      bufChanged = readInt_TSStream( &command.response );
+      *errno=readInt_TSStream(&command.response);
+      res=create_ReadlinkReturnType(retValue, buffer, bufChanged);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res; 
+  }
+  state
+  {
+        CString* parent, *basename;
+        Bool3 eloop;
+        FileSystem* fs=getFileSystem(context);
+
+        if (readlink_spec->retValue!=-1)
+        {
+            parent=getParentDir_Path(path);
+
+            parent=resolvePath_Ext(context, fs, parent, &eloop);
+            updateAtimePath(context, fs, parent);
+            updateCtimePath(context, fs, parent);
+        
+            basename=getBaseName_Path(path);
+            parent=concat_Path(parent, basename);
+            updateAtimePath(context, fs, parent);
+            updateCtimePath(context, fs, parent);
+            DUMP("Resolved==$(obj)\n", parent);
+        }
+  }
+}
+
+
+/** symlink_spec **/
+mediator symlink_media for specification
+IntT symlink_spec( CallContext context, CString* path1, CString* path2, 
+                  ErrorCode* errno, CancelStatus status)
+{
+    call
+    {
+      IntT res;
+      TSCommand command = create_TSCommand();
+      
+      format_TSCommand( &command, "symlink:$(str)$(str)",
+        path1,
+        path2);
+      executeCommandInContext( context, &command );
+      if (!isBadVerdict())
+      {
+        timestamp = command.meta.timestamp;
+        readCancelStatus_TSStream(&command.response,status);
+        if (!CANCELLED(status))
+        {
+            res = readInt_TSStream( &command.response );
+            *errno=readInt_TSStream(&command.response);
+        }
+      }
+      
+      destroy_TSCommand(&command);
+      
+      return res; 
+  }
+    state
+    {
+    CString* parent, *basename;
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+
+        ON_CANCELLATION_POINT(context,status);
+
+        if (symlink_spec!=-1)
+        {
+            parent=getParentDir_Path(path2);
+
+            parent=resolvePath_Ext(context, fs, parent, &eloop);
+            DUMP("Resolved==$(obj)\n", parent);
+
+            updateAtimePath(context, fs, parent);
+            updateCtimePath(context, fs, parent);
+            updateMtimePath(context, fs, parent);
+
+            basename=getBaseName_Path(path2);
+            parent=concat_Path(parent, basename); 
+            DUMP("Media:\nparent==$(obj)\npath1==$(obj)\n", parent, path1);
+
+            registerSymLink(fs, parent, path1);
+            DUMP("\n\n");
+        }
+    }
+}
+
+
+

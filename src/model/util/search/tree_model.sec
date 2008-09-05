@@ -1,0 +1,1270 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "util/search/tree_model.seh"
+
+#include "config/interpretation.seh"
+#include "util/search/tree_config.h"
+#include "memory/heap/heap_model.seh"
+
+#pragma SEC subsystem search "util.search"
+
+
+/*
+   The group of functions 'util.search.tree' consists of:
+       tdelete [1]
+       tfind [1]
+       tsearch [1]
+       twalk [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    tdelete, tfind, tsearch, twalk - manage a binary search tree
+
+SYNOPSIS
+
+    #include <search.h>
+
+    void *tdelete(const void *restrict key, void **restrict rootp,
+        int(*compar)(const void *, const void *));
+    void *tfind(const void *key, void *const *rootp,
+        int(*compar)(const void *, const void *));
+    void *tsearch(const void *key, void **rootp,
+        int (*compar)(const void *, const void *));
+    void twalk(const void *root,
+        void (*action)(const void *, VISIT, int));
+
+DESCRIPTION
+
+    The tdelete(), tfind(), tsearch(), and twalk() functions manipulate binary
+    search trees. Comparisons are made with a user-supplied routine, the
+    address of which is passed as the compar argument. This routine is called
+    with two arguments, which are the pointers to the elements being compared.
+    The application shall ensure that the user-supplied routine returns an
+    integer less than, equal to, or greater than 0, according to whether the
+    first argument is to be considered less than, equal to, or greater than the
+    second argument. The comparison function need not compare every byte, so
+    arbitrary data may be contained in the elements in addition to the values
+    being compared.
+
+    The tsearch() function shall build and access the tree. The key argument is
+    a pointer to an element to be accessed or stored. If there is a node in the
+    tree whose element is equal to the value pointed to by key, a pointer to
+    this found node shall be returned. Otherwise, the value pointed to by key
+    shall be inserted (that is, a new node is created and the value of key is
+    copied to this node), and a pointer to this node returned. Only pointers
+    are copied, so the application shall ensure that the calling routine stores
+    the data. The rootp argument points to a variable that points to the root
+    node of the tree. A null pointer value for the variable pointed to by rootp
+    denotes an empty tree; in this case, the variable shall be set to point to
+    the node which shall be at the root of the new tree.
+
+    Like tsearch(), tfind() shall search for a node in the tree, returning a
+    pointer to it if found. However, if it is not found, tfind() shall return
+    a null pointer. The arguments for tfind() are the same as for tsearch().
+
+    The tdelete() function shall delete a node from a binary search tree. The
+    arguments are the same as for tsearch(). The variable pointed to by rootp
+    shall be changed if the deleted node was the root of the tree. The
+    tdelete() function shall return a pointer to the parent of the deleted
+    node, or a null pointer if the node is not found.
+
+    The twalk() function shall traverse a binary search tree. The root argument
+    is a pointer to the root node of the tree to be traversed. (Any node in a
+    tree may be used as the root for a walk below that node.) The argument
+    action is the name of a routine to be invoked at each node. This routine
+    is, in turn, called with three arguments. The first argument shall be the
+    address of the node being visited. The structure pointed to by this
+    argument is unspecified and shall not be modified by the application, but
+    it shall be possible to cast a pointer-to-node into a
+    pointer-to-pointer-to-element to access the element stored in the node. The
+    second argument shall be a value from an enumeration data type:
+
+    typedef enum { preorder, postorder, endorder, leaf } VISIT;
+
+
+    (defined in <search.h>), depending on whether this is the first, second, or
+    third time that the node is visited (during a depth-first, left-to-right
+    traversal of the tree), or whether the node is a leaf. The third argument
+    shall be the level of the node in the tree, with the root being level 0.
+
+    If the calling function alters the pointer to the root, the result is
+    undefined.
+
+RETURN VALUE
+
+    If the node is found, both tsearch() and tfind() shall return a pointer to
+    it. If not, tfind() shall return a null pointer, and tsearch() shall return
+    a pointer to the inserted item.
+
+    A null pointer shall be returned by tsearch() if there is not enough space
+    available to create a new node.
+
+    A null pointer shall be returned by tdelete(), tfind(), and tsearch() if
+    rootp is a null pointer on entry.
+
+    The tdelete() function shall return a pointer to the parent of the deleted
+    node, or a null pointer if the node is not found.
+
+    The twalk() function shall not return a value.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+TreeNodeFunctionResult* tdelete_spec( CallContext context, VoidTPtr key,
+                                        SearchTreePtr rootp )
+{
+    bool          nodeExists;
+    SearchTreePtr parent=NULL_VoidTPtr;
+    bool delRoot;
+    SearchTreePtr oldValue=rootp;
+    SearchTree* stree = getSearchTree(rootp);
+    Tree*       tree=NULL;
+    SearchTreeNode* stn;
+    if(stree!=NULL)
+        tree=stree->tree;
+
+    pre
+    {
+        /* [Consistency with legacy memory management mode] */
+        REQ("", "Consistency with legacy memory management mode",
+            isFreeAllowed(context) );
+
+        /* [Implicit precondition] */
+        REQ("", "Pointer to root shall not be NULL", !isNULL_VoidTPtr(rootp));
+
+        /* [Implicit precondition] */
+        /* [Additional Note: stree!=NULL if and only if roopt points to the
+         *  root of some tree]
+         */
+
+        REQ("", "Tree exists", NULL!=stree );
+
+        nodeExists=isNodeExists(key, rootp);
+
+        if(nodeExists)
+        {
+            stn=getNodeByKey(stree, key);
+            delRoot=equals_VoidTPtr(stn->address, rootp);
+
+            if(tree!=NULL)
+            {
+                parent=getNodeParent(key, rootp, stree);
+            }
+        }
+
+        return true;
+    }
+    coverage C_EXISTS
+    {
+        if(tree!=NULL)
+        {
+            if(!nodeExists)
+                return { NodeNotExists, "Tree node to delete does not exist" };
+            else if(delRoot)
+                return { NodeExistsRoot,
+                "Tree node to delete exists and it is root" };
+            else /* if(!delRoot) */
+                return { NodeExistsNotRoot,
+                "Tree node to delete exists and it is not root" };
+        }
+        else /* tree==NULL */
+        {
+            return { TreeIsNULL, "Pointer to tree is NULL" };
+        }
+    }
+    coverage C_NUM_CHILDREN
+    {
+        if(tree!=NULL)
+        {
+            if(nodeExists)
+            {
+                if(getNumChildren(key, rootp, stree)==0)
+                    return { NoChildren,
+                        "Node to delete contains no children" };
+                else if(getNumChildren(key, rootp, stree)==1)
+                    return { OneChild, "Node to delete contains one child" };
+                else /* if(getNumChildren(key, rootp, tree)==2) */
+                    return { TwoChildren,
+                        "Node to delete contains two children" };
+            }
+            else
+            {
+                return { NoChildrenNoNode, "Node to delete does not exist and"
+                                    " thus contains no children" };
+            }
+        }
+        else
+        {
+            return { TreeChilIsNULL, "Pointer to tree is NULL thus can not"
+                                " determine number of children" };
+        }
+    }
+    post
+    {
+        bool deletingLastNode = false;
+        stree = getSearchTree(tdelete_spec->returned_proot);
+
+        /*
+        * A null pointer shall be returned by tdelete(), tfind(), and
+        * tsearch() if rootp is a null pointer on entry.
+        */
+        REQ("tdelete.15", "", TODO_REQ());
+
+
+#ifdef NewCTesK
+        if ( C_EXISTS == C_EXISTS.NodeExistsRoot && C_NUM_CHILDREN == C_NUM_CHILDREN.NoChildren )
+#else
+        if(     coverage(C_EXISTS) == NodeExistsRoot
+            &&  coverage(C_NUM_CHILDREN) == NoChildren )
+#endif // NewCTesK
+        {
+            deletingLastNode = true;
+        }
+
+        if(!nodeExists)
+        {
+            /*
+            * or a null pointer if the node is not found.
+            */
+            REQ("tdelete.16.02;tdelete.09.02",
+                "tdelete() function shall return NULL",
+                tdelete_spec->returned_value==NULL);
+
+            /* [Trace while traversing a binary search tree shall be valid] */
+            REQ("", "Trace while traversing a binary search tree shall be"
+                    " valid after tdelete()",
+                isValidTrace(tdelete_spec, tdelete_spec->returned_proot, key,
+                    false));
+        }
+        else
+        {
+            if(!deletingLastNode)
+            {
+
+                /* [Implicit postcondition] */
+                REQ("", "Tree exists", NULL!=stree );
+
+
+                if(!delRoot)
+                {
+                    if(tree!=NULL)
+                    {
+                        /*
+                        * The tdelete() function shall return a pointer to the
+                        * parent of the deleted node,
+                        */
+                        REQ("tdelete.16.01;tdelete.09.01", "tdelete() function"
+                            " shall return a pointer to the parent",
+                            equals(tdelete_spec->returned_value,
+                                    getNodeByAddress(stree, parent)));
+                    }
+                }
+                else
+                {
+                    /*
+                    * The variable pointed to by rootp shall be changed if the
+                    * deleted node was the root of the tree.
+                    */
+                    REQ("tdelete.08", "The value of rootp shall be different",
+                        !equals(
+                            getNodeByAddress(stree,
+                                        tdelete_spec->returned_proot),
+                            @getNodeByAddress(stree, rootp))
+                        );
+                }
+
+                /*
+                * The tdelete() function shall delete a node from a binary
+                * search tree.
+                */
+                REQ("tdelete.06", "No item shall be found after tdelete()",
+                    !isNodeExists(key, tdelete_spec->returned_proot));
+            } else {
+                /* [Standard does not explicitly define returned resulting
+                    rootp when deleting last node] */
+            }
+
+            if(POSIX_SEARCH_TREE_SEARCH_BEFORE_REBALANCE>0)
+            {
+                /* [Trace while traversing a binary search tree shall be
+                    valid] */
+                REQ("", "Trace while traversing a binary search tree shall"
+                    " be valid after tdelete()",
+                    isValidTrace(tdelete_spec,
+                        tdelete_spec->returned_proot, key, false));
+            }
+        }
+
+
+        return true;
+    }
+}
+
+
+specification
+TreeNodeFunctionResult* tfind_spec( CallContext context, VoidTPtr key,
+                                    SearchTreePtr rootp )
+{
+    bool        nodeExists, findRoot;
+    SearchTree* stree = getSearchTree(rootp);
+    Tree*       tree=NULL;
+    SearchTreePtr oldVal=rootp;
+
+    if(stree!=NULL)
+        tree=stree->tree;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Pointer to root shall not be NULL", !isNULL_VoidTPtr(rootp));
+
+        /* [Implicit precondition] */
+        /* [Additional Note: stree!=NULL if and only if roopt points to the
+         *  root of some tree]
+         */
+        REQ("", "Tree exists", NULL!=stree );
+
+        nodeExists=isNodeExists(key, rootp);
+        if(nodeExists)
+        {
+            if(tree!=NULL)
+            {
+                findRoot=isKeyTreeRoot(key, rootp, stree);
+            }
+        }
+
+        return true;
+    }
+    coverage C_EXISTS
+    {
+        if(!nodeExists)
+            return { NodeNotExists, "Tree node to find does not exist" };
+        else  if(tree!=NULL)
+        {
+            if(findRoot)
+                return { NodeExistsRoot, "Tree node to find exists and it is"
+                                        " root" };
+            else /* if(!findRoot) */
+                return { NodeExistsNotRoot, "Tree node to find exists and it"
+                            " is not root" };
+        }
+        else /* tree==NULL */
+        {
+            return { TreeIsNULL, "Pointer to tree is NULL" };
+        }
+    }
+    post
+    {
+        /*
+        * A null pointer shall be returned by tdelete(), tfind(), and
+        * tsearch() if rootp is a null pointer on entry.
+        */
+        REQ("tfind.15", "", TODO_REQ());
+
+        if(!nodeExists)
+        {
+            /*
+            * If not, tfind() shall return a null pointer,
+            */
+            /*
+            * However, if it is not found, tfind() shall return a null pointer.
+            */
+            REQ("tfind.13.02;tfind.06.02",
+                "tfind() function shall return NULL",
+                tfind_spec->returned_value==NULL);
+        }
+        else
+        {
+            if(tree!=NULL)
+            {
+                TreeNode* node=findTreeNode(key, rootp, stree);
+                REQ("", "tfind() shall not delete node", node!=NULL);
+                /*
+                * If the node is found, both tsearch() and tfind() shall
+                * return a pointer to it.
+                */
+                /*
+                * Like tsearch(), tfind() shall search for a node in the tree,
+                * returning a  pointer to it if found.
+                */
+                REQ("tfind.13.01;tfind.06.01",
+                    "tfind() function shall return a pointer to the node",
+                    equals( tfind_spec->returned_value,
+                            (SearchTreeNode*)node->tag)
+                    );
+            }
+        }
+
+        /* [Trace while traversing a binary search tree shall be valid] */
+        REQ("", "Trace while traversing a binary search tree shall be valid"
+                " after tfind()",
+            isValidTrace(tfind_spec, rootp, key, true));
+
+        /*
+        * If the calling function alters the pointer to the root, the
+        * result is undefined.
+        */
+        REQ("tfind.12", "Pointer to root shall be unchanged",
+            equals_VoidTPtr(tfind_spec->returned_proot, oldVal));
+
+
+        return true;
+    }
+}
+
+
+specification
+TreeNodeFunctionResult* tsearch_spec( CallContext context, VoidTPtr key,
+                                     SearchTreePtr rootp )
+{
+    bool          nodeExists, findRoot;
+    SearchTree* stree = getSearchTree(rootp);
+    Tree*       tree=NULL;
+    SearchTreePtr oldValue=rootp;
+
+    if(stree!=NULL)
+        tree=stree->tree;
+
+    pre
+    {
+
+        if( !isNULL_VoidTPtr(rootp) )
+        {
+            /* [Implicit precondition] */
+            /* [Additional Note: stree!=NULL if and only if roopt points to the
+             *  root of some tree]
+             */
+            REQ("", "Tree exists", NULL!=stree );
+        }
+
+        nodeExists=isNodeExists(key, rootp);
+        if(nodeExists)
+        {
+            if(tree!=NULL)
+            {
+                findRoot=isKeyTreeRoot(key, rootp, stree);
+            }
+        }
+        else
+        {
+            /* [Consistency with legacy memory management mode] */
+            REQ("app.brk.04;app.sbrk.04", "Consistency with legacy memory management mode",
+                    isMallocAllowed(context) );
+        }
+
+        if(tree!=NULL)
+        {
+            /* [Implicit precondition] */
+            REQ("", "Function parameter shall be root",
+                    isTreeRoot(rootp, tree));
+        }
+
+        return true;
+    }
+    coverage C_EXISTS
+    {
+        if(!nodeExists)
+            return { NodeNotExists, "Tree node to search does not exist" };
+        else  if(tree!=NULL)
+        {
+            if(findRoot)
+                return { NodeExistsRoot, "Tree node to search exists and it"
+                                        " is root" };
+            else /* if(!findRoot) */
+                return { NodeExistsNotRoot, "Tree node to search exists and"
+                                        " it is not root" };
+        }
+        else /* tree==NULL */
+        {
+            return { TreeIsNULL, "Pointer to tree is NULL" };
+        }
+    }
+    coverage C_NULL_ROOT
+    {
+        if(isNULL_VoidTPtr(rootp))
+            return { NullRoot, "Null root case" };
+        else
+            return { NotNullRoot, "Not null root case" };
+    }
+    post
+    {
+        stree = getSearchTree(tsearch_spec->returned_proot);
+
+        REQ("", "Tree exists", NULL!=stree );
+        tree=stree->tree;
+
+        /*
+        * A null pointer shall be returned by tsearch() if there is not
+        * enough space available to create a new node.
+        */
+        REQ("tsearch.14", "", TODO_REQ());
+
+        /*
+        * A null pointer shall be returned by tdelete(), tfind(), and
+        * tsearch() if rootp is a null pointer on entry.
+        */
+        REQ("tsearch.15", "", TODO_REQ());
+
+
+        if(!nodeExists)
+        {
+            if(tree!=NULL)
+            {
+                TreeNode* newNode;
+
+                newNode=findTreeNode(key, tsearch_spec->returned_proot, stree);
+                /*
+                * Otherwise, the value pointed to by key shall be inserted
+                * (that is, a new node is created and the value of key is
+                * copied to this node), and a pointer to this node returned.
+                */
+                /*
+                * and tsearch() shall return a pointer to the inserted item.
+                */
+                REQ("tsearch.08.02;tsearch.13.02", "tsearch() function shall"
+                    " return a pointer to the inserted item",
+                    newNode!=NULL && equals(tsearch_spec->returned_value,
+                    (SearchTreeNode*)newNode->tag));
+
+
+                if(isNULL_VoidTPtr(oldValue))
+                {
+                    /*
+                    * A null pointer value for the variable pointed to by
+                    * rootp denotes an empty tree; in this case, the variable
+                    * shall be set to point to the node which shall be at
+                    * the root of the new tree.
+                    */
+                    REQ("tsearch.11", "The variable shall be set to point to"
+                                        " the new root",
+                        equals(
+                            getNodeByAddress(stree,
+                                                tsearch_spec->returned_proot),
+                            (SearchTreeNode*)(newNode->tag))
+                        );
+                }
+            }
+
+            if(POSIX_SEARCH_TREE_SEARCH_BEFORE_REBALANCE>0)
+            {
+                /* [Trace while traversing a binary search tree shall be valid] */
+                REQ("", "Trace while traversing a binary search tree shall be"
+                            " valid after tsearch()",
+                    isValidTrace(tsearch_spec, tsearch_spec->returned_proot,
+                                key, false) );
+            }
+
+        }
+        else
+        {
+            if(tree!=NULL)
+            {
+                TreeNode* node;
+                node=findTreeNode(key, tsearch_spec->returned_proot, stree);
+
+                REQ("", "tsearch() shall not delete node", node!=NULL);
+
+                /*
+                * If there is a node in the tree whose element is equal to the
+                * value pointed to by key, a pointer to this found node shall
+                * be returned.
+                */
+                /*
+                * If the node is found, both tsearch() and tfind() shall
+                * return a pointer to it.
+                */
+                REQ("tsearch.08.01;tsearch.13.01", "tsearch() function shall"
+                    " return a pointer to the node",
+                    equals(tsearch_spec->returned_value, node->tag) );
+            }
+
+            /* [Trace while traversing a binary search tree shall be valid] */
+            REQ("", "Trace while traversing a binary search tree shall be"
+                    " valid after tsearch()",
+                isValidTrace(tsearch_spec, tsearch_spec->returned_proot, key,
+                            false) );
+
+        }
+
+
+
+        return true;
+    }
+}
+
+
+specification
+List* twalk_spec( CallContext context, SearchTreePtr rootp,
+                    SearchTreeNodePtr root )
+{
+    SearchTree* stree = getSearchTree(rootp);
+    Tree*       tree=NULL;
+    Tree*       clonedTree;
+    SearchTreePtr oldVal=rootp;
+    bool isroot;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Tree exists", NULL!=stree );
+        tree = stree->tree;
+
+        /* [Implicit precondition] */
+        REQ("", "Pointer to root shall not be NULL", !isNULL_VoidTPtr(root));
+
+        /*
+        * Any node in a tree may be used as the root for a walk below that node.
+        */
+        REQ("twalk.04", "Node shall be in the tree",isNodeInTree(rootp,stree));
+
+        if(tree!=NULL)
+        {
+            clonedTree=clone(tree);
+        }
+
+        isroot=equals_VoidTPtr(rootp, root);
+
+        return true;
+    }
+    coverage C
+    {
+        if(tree!=NULL)
+        {
+            if(isTreeRoot(root, tree))
+            {
+                return { ParameterRoot, "Parameter of the function is root" };
+            }
+            else /* if(!isTreeRoot(root, tree)) */
+            {
+                return { ParameterNotRoot, "Parameter of the function is not"
+                        " root" };
+            }
+        }
+        else /* if(tree==NULL) */
+        {
+            return { TreeNULL, "Tree parameter is NULL" };
+        }
+    }
+    post
+    {
+        stree = getSearchTree(rootp);
+
+        REQ("", "Tree shall exist", NULL!=stree );
+        tree = stree->tree;
+
+        /* [Implicit postcondition] */
+        REQ("", "SearchTree pointed by rootp is not NULL", stree!=NULL);
+
+        if(isroot)
+        {
+            /*[Pointer to tree shall not be NULL according to implementation]*/
+            REQ("", "Pointer to tree shall not be NULL", tree!=NULL);
+        }
+
+        if(isroot)
+        {
+            int ind;
+            Set *visitedNodes = create_Set(&type_SearchTreeNode);
+            for(ind=0;ind<size_List(twalk_spec);ind++)
+            {
+                TreeVisitCall* tmp=get_List(twalk_spec, ind);
+                add_Set(visitedNodes, tmp->node);
+            }
+
+            /* [Implicit postcondition: size of set of nodes should be equal to
+                the number of distinct nodes in the twalk trace] */
+            REQ("", "Same set of nodes", equals(stree->data, visitedNodes));
+        }
+
+        if( clonedTree != NULL)
+        {
+
+            /*
+            * The twalk() function shall traverse a binary search tree.
+            */
+            REQ("twalk.02", "Trace while traversing a binary search tree shall"
+                            " be valid",
+                isValidVisits(twalk_spec, stree, clonedTree, root)
+                );
+        }
+
+
+        /*
+        * If the calling function alters the pointer to the root, the result
+        * is undefined.
+        */
+        REQ("twalk.12", "Pointer to root shall be unchanged",
+                    equals_VoidTPtr(rootp, oldVal));
+
+       
+
+        return true;
+    }
+}
+
+
+/********************************************************************/
+/**                       Tree                                     **/
+/********************************************************************/
+
+int compare_SearchTreeNode(void* left, void* right)
+{
+    SearchTreeNode *lNode = (SearchTreeNode*)left;
+    SearchTreeNode *rNode = (SearchTreeNode*)right;
+    LLongT res =    (LLongT)((ULongT)lNode->data.address)
+                -   (LLongT)((ULongT)rNode->data.address);
+
+    return (res>0)?1:(res==0?0:-1);
+}
+
+specification typedef struct SearchTree SearchTree = {};
+
+specification typedef struct SearchTreeNode SearchTreeNode = {
+       .compare = compare_SearchTreeNode
+    };
+
+
+SearchTreeNode* create_SearchTreeNode(SearchTreeNodePtr address, VoidTPtr key)
+{
+    return create(&type_SearchTreeNode, address, key);
+}
+
+specification typedef struct TreeNodeCompareCall TreeNodeCompareCall = {};
+
+TreeNodeCompareCall* create_TreeNodeCompareCall(VoidTPtr node, VoidTPtr key)
+{
+    return create(&type_TreeNodeCompareCall, node, key);
+}
+
+specification typedef struct TreeNodeFunctionResult TreeNodeFunctionResult ={};
+
+specification typedef struct TreeVisitCall TreeVisitCall = {};
+
+TreeVisitCall* create_TreeVisitCall(SearchTreeNode *node, TreeVisitT visit,
+                                    IntT level)
+{
+    return create(&type_TreeVisitCall, node, visit, level);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+SearchTree* create_SearchTree(SearchTreePtr address)
+{
+    SearchTree  *searchTree = NULL;
+    Set         *emptySet = create_Set(&type_SearchTreeNode);
+    searchTree = create(&type_SearchTree, address, emptySet, NULL);
+    return searchTree;
+}
+
+SearchTree* getSearchTree(SearchTreePtr address)
+{
+    return (SearchTree*)getObjectInMemory(address);
+}
+
+TreeNodeFunctionResult *create_TreeNodeFunctionResult(
+    List* compare_calls, SearchTreeNode *returned_value,
+    SearchTreePtr returned_root)
+{
+    TreeNodeFunctionResult *res;
+    res = create(&type_TreeNodeFunctionResult, compare_calls,
+                    returned_value, returned_root);
+    return res;
+}
+
+
+TreeNode* search_Tree(TreeNode* curNode, SearchTreeNode* tag)
+{
+    TreeNode* curChild;
+    int i=0;
+    int numChil;
+    TreeNode* tptr;
+
+    if(curNode!=NULL)
+    {
+        SearchTreeNode* tagPtr=(SearchTreeNode*)curNode->tag;
+
+        if(equals(tagPtr, (SearchTreeNode*)tag))
+            return curNode;
+
+        numChil=numberOfChildren_TreeNode(curNode);
+
+        for(i=0;i<numChil;i++)
+        {
+            curChild=getChild_TreeNode(curNode, i);
+            tptr=search_Tree(curChild, tag);
+            if(tptr!=NULL)
+                return tptr;
+        }
+    }
+    return NULL;
+
+}
+
+
+bool addCallToList(TreeNode* curNode, TreeVisitT visit, List* lst, Tree* tree,
+                    IntT offset)
+{
+
+    TreeVisitCall* curCall=create_TreeVisitCall((SearchTreeNode*)curNode->tag,
+            visit, offset+level_TreeNode(curNode));
+    append_List(lst, curCall);
+    return true;
+}
+
+void buildTreeVisits(Tree* tree, TreeNode* curNode, List* lst, IntT offset)
+{
+    int numChil;
+    IntT i;
+    TreeNode* curChild1, *curChild2;
+    bool compRes;
+
+    if(curNode!=NULL)
+    {
+        numChil=numberOfChildren_TreeNode(curNode);
+
+        if(numChil==0)
+            addCallToList(curNode, SUT_leaf, lst, tree, offset);
+        else if(numChil==1)
+        {
+            curChild1=getChild_TreeNode(curNode, 0);
+
+            compRes=compare_SearchTreeNode(curNode->tag, curChild1->tag);
+
+            /*
+            * The second argument shall be a value from an enumeration data
+            * type: typedef enum { preorder, postorder, endorder, leaf } VISIT;
+            *
+            * depending on whether this is the first, second, or third time
+            * that the node is visited (during a depth-first, left-to-right
+            * traversal of the tree), or whether the node is a leaf.
+            */
+            IMPLEMENT_REQ("twalk.09.01");
+
+            if(compRes < 0)
+            {
+                addCallToList(curNode, SUT_preorder, lst, tree, offset);
+                addCallToList(curNode, SUT_postorder, lst, tree, offset);
+                buildTreeVisits(tree, curChild1, lst, offset);
+                addCallToList(curNode, SUT_endorder, lst, tree, offset);
+            }
+            else
+            {
+                addCallToList(curNode, SUT_preorder, lst, tree, offset);
+                buildTreeVisits(tree, curChild1, lst, offset);
+                addCallToList(curNode, SUT_postorder, lst, tree, offset);
+                addCallToList(curNode, SUT_endorder, lst, tree, offset);
+            }
+        }
+        else /* if(numChil==2) */
+        {
+            addCallToList(curNode, SUT_preorder, lst, tree, offset);
+            curChild1=getChild_TreeNode(curNode, 0);
+            curChild2=getChild_TreeNode(curNode, 1);
+            buildTreeVisits(tree, curChild1, lst, offset);
+            addCallToList(curNode, SUT_postorder, lst, tree, offset);
+            buildTreeVisits(tree, curChild2, lst, offset);
+            addCallToList(curNode, SUT_endorder, lst, tree, offset);
+        }
+    }
+}
+
+
+
+bool compareLists(List* builtList, List* visList)
+{
+    int s1=size_List(builtList);
+    int s2=size_List(visList);
+    int i;
+    if(s1!=s2)
+        return false;
+    for(i=0; i < s1; i++)
+    {
+        TreeVisitCall* c1=get_List(builtList, i);
+        TreeVisitCall* c2=get_List(visList, i);
+
+        if(!equals(c1->node, c2->node) || c1->visit!=c2->visit
+                    || c1->level!=c2->level)
+            return false;
+    }
+
+    return true;
+}
+
+
+bool isValidVisits(List* visList, SearchTree* stree,  Tree* clonedTree,
+                    SearchTreeNodePtr rootp)
+{
+    List*  builtList=create_List(&type_TreeVisitCall);
+    TreeNode* root=get_Tree(clonedTree, 0);
+    TreeNode* curNode=search_Tree(root, getNodeByAddress(stree, rootp));
+
+    if(     getPosixSearchTreeWalkLevelInterpretation()
+        ==  POSIX_SEARCH_TREE_WALK_LEVEL_LOCAL)
+        buildTreeVisits(clonedTree, curNode, builtList,
+                            -level_TreeNode(curNode));
+    else
+        buildTreeVisits(clonedTree, curNode, builtList, 0);
+
+    return compareLists(builtList, visList);
+}
+
+
+bool isTreeRoot(SearchTreePtr treeptr, Tree* tree)
+{
+    TreeNode* root=get_Tree(tree, 0);
+    SearchTreeNodePtr rootPtr;
+    SearchTreeNodePtr nodePtr;
+    if(root==NULL)
+        return false;
+    rootPtr=*(SearchTreeNodePtr*)root->tag;
+    nodePtr=treeptr;
+
+    if(equals_VoidTPtr(rootPtr, nodePtr))
+        return true;
+
+    return false;
+}
+
+
+bool isNodeExists( VoidTPtr key, SearchTreePtr rootp )
+{
+    SearchTree* stree ;
+    Set*        treeData;
+    if(isNULL_VoidTPtr(rootp))
+        return false;
+    stree = getSearchTree(rootp);
+    treeData=stree->data;
+    return contains_Set(treeData, create_SearchTreeNode(NULL_VoidTPtr, key));
+}
+
+
+bool isNodeInTree(SearchTreePtr rootp, SearchTree* stree)
+{
+    Set*        treeData;
+    List* treeNodes;
+    int index;
+    SearchTreeNode *stn = getNodeByAddress(stree, rootp);
+    treeData=stree->data;
+    treeNodes=toList_Set( treeData );
+
+    if(NULL==stn)
+    {
+        return false;
+    }
+
+    index=indexOf_List(treeNodes, stn);
+    if(index!=-1)
+    {
+        return true;
+    }
+    return false;
+}
+
+
+TreeNode* findTreeNode(VoidTPtr key, SearchTreePtr rootp, SearchTree* stree )
+{
+    Set*        treeData;
+    List* treeNodes;
+    int index;
+    if(isNULL_VoidTPtr(rootp))
+        return NULL;
+    treeData=stree->data;
+    treeNodes=toList_Set( treeData );
+    index=indexOf_List(treeNodes, create_SearchTreeNode(NULL_VoidTPtr, key));
+    if(index!=-1)
+    {
+        SearchTreeNode* node=get_List(treeNodes, index);
+        TreeNode* curNode=search_Tree(stree->tree->root, node);
+        return curNode;
+    }
+    return NULL;
+}
+
+
+SearchTreePtr getNodeParent( VoidTPtr key, SearchTreePtr rootp,
+                                SearchTree* stree )
+{
+   TreeNode* curNode=findTreeNode(key, rootp, stree);
+   if(curNode==NULL)
+       return NULL_VoidTPtr;
+   if(curNode->parent==NULL)
+        return NULL_VoidTPtr;
+    else
+        return *(SearchTreePtr*)curNode->parent->tag;
+}
+
+char* dumpTree(TreeNode* node, int level, char* dst)
+{
+    static char buff[65535];
+    char space[128];
+    int j;
+
+
+    if(level==0) dst = buff;
+    memset(space, ' ', sizeof(space));
+    space[level] = 0;
+    dst += sprintf(dst, "%s%d\n", space,
+                        (int)((SearchTreeNode*)node->tag)->data.address);
+
+    for(j=0;j<numberOfChildren_TreeNode(node);j++)
+    {
+        dst = dumpTree(getChild_TreeNode(node, j), level+1, dst);
+    }
+
+    if(level==0)
+    {
+        traceFormattedUserInfo("treeDump:\n%s", buff);
+        puts(dst);
+        return NULL;
+    }
+    else return dst;
+}
+
+bool isValidTrace(TreeNodeFunctionResult* result,  SearchTreePtr rootp,
+                    VoidTPtr key, bool isTFind)
+{
+
+   /*
+    * [ The trace is assumed valid whenever the following conditions are met:
+    * 1. If tree structure is unknown then compare(n, n-1) = compare(key, n-1),
+    *    where 'n' means a node visited at n'th step
+    * 2. If tree structure is known, just check each step of comparison with
+    *    our version of tree structure
+    * ]
+    */
+
+    SearchTreeNode* keyNode=create_SearchTreeNode(NULL_VoidTPtr, key);
+    List* lst=result->compare_calls;
+    int sz=size_List(lst);
+
+
+    SearchTree *stree = getSearchTree(rootp);
+    if(!stree||!stree->tree)
+    {
+        // Tree structure is unknown
+        int i;
+        bool compIp1I;
+        bool compKeyI;
+
+        for(i=0; i<sz-2; i++)
+        {
+            TreeNodeCompareCall *c1=get_List(lst, i+1);
+            TreeNodeCompareCall *c2=get_List(lst, i);
+
+            compIp1I=compare_SearchTreeNode(c1, c2)>0;
+            compKeyI=compare_SearchTreeNode(keyNode, c2)>0;
+
+            if(compIp1I!=compKeyI)
+            {
+                return false;
+            }
+        }
+    } else {
+        // The tree structure is known
+        Tree *tree = stree->tree;
+        TreeNode *currNode = tree->root;
+        int listInd = 0;
+        int sz=size_List(lst);
+
+        //Really useful for debugging
+        //dumpTree(currNode, 0, NULL);
+
+        do {
+            SearchTreeNode *cmpNode =
+                create_SearchTreeNode(NULL_VoidTPtr,
+                    ((TreeNodeCompareCall*)get_List(lst, listInd))->node);
+            int cmp = compare_SearchTreeNode(keyNode, currNode->tag);
+
+            if(compare_SearchTreeNode(cmpNode, currNode->tag)!=0)
+            {
+                // Compare call node is not the same as our tree node
+                setBadVerdict("Compare call node is not the same as our"
+                                " tree node");
+                return false;
+            }
+
+            listInd++;
+            if(cmp==0)
+            {
+                // This node equals to key.
+                if(isTFind)
+                {
+                    // Just check that the number of compare calls equals,
+                    // because tfind is not expected to do any additional calls
+                    return listInd==sz;
+                } else {
+                    // tsearch and tdelete may rebalance the tree, making
+                    // additional compare calls
+                    return listInd<=sz;
+                }
+
+            } else {
+                // Go to the right (left)
+                int noc = numberOfChildren_TreeNode(currNode);
+                if(noc==2)
+                {
+                    if(cmp>0)
+                        currNode = getChild_TreeNode(currNode, 1);
+                    else // cmp<0
+                        currNode = getChild_TreeNode(currNode, 0);
+
+                } else if(noc==1) {
+                    TreeNode *oldNode = currNode;
+                    currNode = getChild_TreeNode(currNode, 0);
+                    // There is only one child
+                    // Check that this child is right (left) too
+                    if( !(compare_SearchTreeNode(currNode->tag,
+                            oldNode->tag)==cmp) )
+                    {
+                        // There is no right child. So the traverse is finished.
+                        if(isTFind)
+                        {
+                            // Just check that the number of compare calls
+                            // equals, because tfind is not expected to do any
+                            //additional calls
+                            return listInd==sz;
+                        } else {
+                            // tsearch and tdelete may rebalance the tree,
+                            // making additional compare calls
+                            return listInd<=sz;
+                        }
+                    }
+                } else if(noc>2) {
+                    // Incorrect search path (number of children >2 or ==0)
+                    setBadVerdict("Incorrect search path (number of children"
+                                                                    " > 2)");
+                    return false;
+                } else {
+                    if(isTFind&&listInd<sz)
+                    {
+                        setBadVerdict("Incorrect search path (node has no"
+                                        " children)");
+                        return false;
+                    } else return true;
+                }
+            }
+
+        } while(listInd<sz);
+
+        return false;
+    }
+
+    return true;
+}
+
+int getNumChildren(VoidTPtr key, SearchTreePtr rootp, SearchTree* stree)
+{
+    TreeNode* curNode=findTreeNode(key, rootp, stree);
+    if(curNode==NULL)
+        return 0;
+    else
+        return numberOfChildren_TreeNode(curNode);
+}
+
+
+bool isKeyTreeRoot(VoidTPtr key, SearchTreePtr rootp, SearchTree* stree)
+{
+   TreeNode* curNode=findTreeNode(key, rootp, stree);
+   if(curNode==NULL)
+       return false;
+   return isTreeRoot(*(SearchTreePtr*)curNode->tag, stree->tree);
+}
+
+
+SearchTreeNode* getNodeByAddress(SearchTree *tree, SearchTreeNodePtr address)
+{
+    if(tree)
+    {
+        int i;
+        int setSize = size_Set(tree->data);
+        for(i=0;i<setSize;i++)
+        {
+            SearchTreeNode *node = (SearchTreeNode*)get_Set(tree->data, i);
+            if( equals_VoidTPtr( node->address, address ) )
+            {
+                return node;
+            }
+        }
+
+    }
+
+    return NULL;
+}
+
+SearchTreeNode* getNodeByKey(SearchTree *tree, VoidTPtr key)
+{
+    if(tree)
+    {
+        int i;
+        int setSize = size_Set(tree->data);
+        for(i=0;i<setSize;i++)
+        {
+            SearchTreeNode *node = (SearchTreeNode*)get_Set(tree->data, i);
+            if( equals_VoidTPtr( node->data, key ) )
+            {
+                return node;
+            }
+        }
+
+    }
+
+    return NULL;
+}
+
+int equals_SearchTreeNode(void* left, void* right)
+{
+    SearchTreeNode *lNode = (SearchTreeNode*)left;
+    SearchTreeNode *rNode = (SearchTreeNode*)right;
+
+    return equals_VoidTPtr(lNode->data, rNode->data)
+        && equals_VoidTPtr(lNode->address, rNode->address);
+}

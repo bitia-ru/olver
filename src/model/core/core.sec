@@ -1,0 +1,330 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+ 
+#include "common/common_model.seh"
+#include "data/errno_model.seh"
+#include "atl/integer.h"    
+#include "atl/long.h"
+#include "atl/void_ast.h"
+#include "atl/void_ast.h"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+ 
+// To be removed - temporary here
+void initPThreadModel(void)
+{
+}
+
+/********************************************************************/
+/**                          Blocked Calls                         **/
+/********************************************************************/
+
+/*
+ * startBlockedCall shall be called in a state block of a blocking specification function.
+ */
+void startBlockedCall( CallContext context, Object* params )
+{
+ThreadState* threadState = getThread(context);
+
+    // Check if the thread is already blocked
+    assertion(!threadState->is_blocked, "The thread is already blocked");
+
+    if (threadState == NULL)
+        return;
+    add_List( threadState->call_stack, 0, params );
+    threadState->is_blocked = true;
+}
+
+/*
+ * finishBlockedCall shall be called in a state block of a return reaction.
+ */
+Object* finishBlockedCall( CallContext context )
+{
+ProcessState* processState = getProcessState_CallContext(context);
+ThreadState* threadState = getThread(context);
+Object* res;
+
+    if ((processState == NULL) || (threadState == NULL))
+        return NULL;
+    remove_Set( processState->threads_to_be_run, create_ThreadIdObj( context ) );
+    if (threadState->is_blocked)
+     {
+        assertion( size_List(threadState->call_stack) > 0, "thread is blocked => stack is not empty" );
+        res = get_List( threadState->call_stack, 0 );
+        remove_List( threadState->call_stack, 0 );
+        threadState->is_blocked = false;
+     }
+    else
+     {
+        res = NULL;
+     }
+    return res;
+}
+
+/*
+ * interruptBlockedCall shall be called in a state block of an active callback reaction.
+ */
+void interruptBlockedCall( CallContext context )
+{
+ThreadState* threadState = getThread(context);
+
+    if (threadState == NULL)
+        return;
+    assertion( size_List(threadState->call_stack) > 0, "interruptBlockedCall: these is no blocked call" );
+    threadState->is_blocked = false;
+}
+
+/*
+ * resumeBlockedCall shall be called in a state block of a callback return.
+ */
+void resumeBlockedCall( CallContext context )
+{
+ThreadState* threadState = getThread(context);
+
+    if (threadState == NULL)
+        return;
+    assertion( size_List(threadState->call_stack) > 0, "resumeBlockedCall: these is no blocked call" );
+    threadState->is_blocked = true;
+}
+
+/*
+ * Returns the current blocked call of the thread 
+ * or NULL if the thread is not blocked.
+ */
+Object* getBlockedCall( CallContext context )
+{
+ThreadState* threadState = getThread(context);
+
+    if (threadState == NULL)
+        return NULL;
+    if (size_List(threadState->call_stack) == 0)
+        return NULL;
+    return get_List( threadState->call_stack, 0 );
+}
+
+/*
+ * Returns the blocked call of the thread in the state describing by blocked_calls
+ * or NULL if the thread is not blocked in that state.
+ */
+Object* findBlockedCall( Map* blocked_calls, CallContext context )
+{
+    return get_Map( blocked_calls, create_ThreadIdObj( context ) );
+}
+
+/*
+ * Returns all blocked calls in the current state.
+ */
+Map* getBlockedCalls(void)
+{
+int i,j,k,size1,size2,size3;
+Map* res;
+
+    res = create_Map( &type_ThreadIdObj, NULL );
+    size1 = size_Map(systems);
+    for( i = 0; i < size1; i++ )
+     {
+        SystemState* systemState = get_Map( systems, key_Map( systems, i ) );
+        size2 = size_Map(systemState->processes);
+        for( j = 0; j < size2; j++ )
+         {
+            ProcessState* processState = get_Map( systemState->processes, key_Map( systemState->processes, j ) );
+            size3 = size_Map(processState->threads);
+            for( k = 0; k < size3; k++ )
+             {
+                ThreadIdObj* threadId = key_Map( processState->threads, k );
+                ThreadState* threadState = get_Map( processState->threads, threadId );
+                if (threadState->is_blocked)
+                 {
+                    assertion( size_List(threadState->call_stack) > 0, "thread is blocked => stack is not empty" );
+                    put_Map( res, threadId, get_List(threadState->call_stack,0) );
+                 }
+             }
+         }
+     }
+    return res;
+}
+
+void threadShouldBeRun( ThreadId threadid )
+{
+ProcessState* processState = getProcessState_ThreadId(threadid);
+
+    if (processState == NULL)
+        return;
+    add_Set( processState->threads_to_be_run, create_ThreadIdObj(threadid) );
+}
+
+bool isThreadReadyToBeRun( ThreadId threadid )
+{
+ProcessState* processState = getProcessState_ThreadId(threadid);
+ThreadState* threadState = getThread(threadid);
+ThreadIdObj* threadId;
+
+    if ((processState == NULL) || (threadState == NULL))
+        return false;
+    return (size_List(threadState->call_stack) == 0)
+        || contains_Set( processState->threads_to_be_run, create_ThreadIdObj(threadid) );
+}
+
+int getNumberOfThreadsReadyToBeRun(void)
+{
+int i,j,size1,size2;
+int res;
+
+    res = 0;
+    size1 = size_Map(systems);
+    for( i = 0; i < size1; i++ )
+     {
+        SystemState* systemState = get_Map( systems, key_Map( systems, i ) );
+        size2 = size_Map(systemState->processes);
+        for( j = 0; j < size2; j++ )
+         {
+            ProcessState* processState = get_Map( systemState->processes, key_Map( systemState->processes, j ) );
+            res = res + size_Set(processState->threads_to_be_run);
+         }
+     }
+    return res;
+}
+
+void traceThreadsReadyToBeRun(void)
+{
+int i,j,size1,size2;
+String* res;
+
+    res = create_String("Thread ready to be run = ");
+    size1 = size_Map(systems);
+    for( i = 0; i < size1; i++ )
+     {
+        SystemState* systemState = get_Map( systems, key_Map( systems, i ) );
+        size2 = size_Map(systemState->processes);
+        for( j = 0; j < size2; j++ )
+         {
+            ProcessState* processState = get_Map( systemState->processes, key_Map( systemState->processes, j ) );
+            res = concat_String( res, toString(processState->threads_to_be_run) );
+            res = concat_String( res, create_String(" ") );
+         }
+     }
+    traceUserInfo(toCharArray_String(res));
+}
+
+void traceBlockedCalls(Map* blocked_calls)
+{
+String* res;
+char buff[64];
+int i,size;
+
+    size = size_Map(blocked_calls);
+    if (size == 0)
+     {
+        traceUserInfo("There is no blocked calls");
+        return;
+     }
+    res = create_String("Blocked calls = {");
+    for( i = 0; i < size; i++ )
+     {
+        ThreadIdObj* threadId = key_Map(blocked_calls,i);
+        sprintf( buff, "%s %ld", (i == 0) ? "" : ",", threadId->thread );
+        res = concat_String( res, create_String(buff) );
+     }
+    res = concat_String( res, create_String(" }") );
+    traceUserInfo(toCharArray_String(res));
+}
+
+/*
+ * Returns true iff the last blocked call in the context
+ * has been interrupted by a signal.
+ */
+bool isBlockedCallInterruptedBySignal( CallContext context )
+{
+    // TO DO: Add flag to thread???
+    return false;
+}
+
+/********************************************************************/
+/**                           Appropriate Privileges               **/
+/********************************************************************/
+
+AccessPrivileges common_AccessPrivileges = { false, false, false };
+
+#define SUT_UID_ROOT ((UidT)0)
+
+/*
+ This function determines, if the process defined by context has "appropriate
+ privileges" to access function, which reqires operation identified by 
+ AccessPrivileges (which currently defined as read/write/execute triple) on
+ file identified by fileId.
+*/
+Bool3 hasAppropriatePrivileges(CallContext context, AccessPrivileges accessKind, 
+                               FileId fileId)
+{
+    ProcessState *pstate = getProcessState_CallContext(context);
+    if(((UidT) -1)!= pstate->meta.effective_userid)
+    {
+        return pstate->meta.effective_userid == SUT_UID_ROOT ? True_Bool3:False_Bool3;
+    }
+    return Unknown_Bool3;
+}
+
+/********************************************************************/
+/**                          Memory Blocks                         **/
+/********************************************************************/
+
+List* getMemoryBlocks_VoidTPtr(VoidTPtr address)
+{
+    ProcessState* processState = getProcessState(create_ProcessId(address.system,address.process));
+    if (processState != NULL)
+    {
+        return processState->memory_blocks;
+    }
+    else
+    {
+        return NULL;
+    }
+}
+
+List* getMemoryBlocks_CallContext(CallContext context)
+{
+    ProcessState* processState = getProcessState_CallContext( context );
+    if (processState != NULL)
+    {
+        return processState->memory_blocks;
+    }
+    else
+    {
+        return NULL;
+    }
+}
+
+List* getAllMemoryBlocks()
+{
+    int i,j,size1,size2;
+    List* all_memory_blocks = create_List(&type_List);    
+    
+    size1 = size_Map(systems);
+    for( i = 0; i < size1; i++ )
+     {
+        SystemState* systemState = get_Map( systems, key_Map( systems, i ) );
+        size2 = size_Map(systemState->processes);
+        for( j = 0; j < size2; j++ )
+         {
+            ProcessState* processState = get_Map( systemState->processes, key_Map( systemState->processes, j ) );
+            append_List( all_memory_blocks, processState->memory_blocks );
+         }
+     }    
+    return all_memory_blocks;    
+}
+

@@ -1,0 +1,444 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/dir/dir_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "common/common_media.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initFsDirSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_closedir_spec(closedir_media);
+    set_mediator_mkdir_spec(mkdir_media);
+    set_mediator_opendir_spec(opendir_media);
+    set_mediator_readdir_spec(readdir_media);
+    set_mediator_readdir64_spec(readdir64_media);
+    set_mediator_readdir_r_spec(readdir_r_media);
+    set_mediator_rewinddir_spec(rewinddir_media);
+    set_mediator_rmdir_spec(rmdir_media);
+    set_mediator_seekdir_spec(seekdir_media);
+    set_mediator_telldir_spec(telldir_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** closedir_spec **/
+
+mediator closedir_media for specification
+IntT closedir_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno, CancelStatus status )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "closedir:$(ptr)",
+            create_VoidTPtrObj(dirp));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                res = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    
+    state
+    {
+        onClosedir( context, dirp, errno );
+    }
+}
+
+
+
+/** mkdir_spec **/
+mediator mkdir_media for specification
+IntT mkdir_spec( CallContext context, CString *path, FilePermissions *mode, ErrorCode *errno)
+{
+    
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+       format_TSCommand( &command, "mkdir:$(str)$(perms)",
+            path, 
+            mode);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onMkdir( context, path, mode, mkdir_spec, errno);
+    }
+
+}
+
+
+
+/** opendir_spec **/
+
+mediator opendir_media for specification
+DIRTPtr opendir_spec( CallContext context, CString *dirname, ErrorCode *errno, CancelStatus status )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        DIRTPtr res = NULL_VoidTPtr;
+
+        format_TSCommand( &command, "opendir:$(str)", dirname );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+                res = readPointer_TSStream(context, &command.response);
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onOpendir( context, dirname, opendir_spec);
+    }
+}
+
+
+
+/** readdir_spec **/
+mediator readdir_media for specification
+DirEntT *readdir_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno, CancelStatus status)
+{
+    call
+    {
+        DirEntT *dirent=NULL;
+        DirEntTPtr pdirent;
+
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "readdir:$(ptr)", create_VoidTPtrObj(dirp) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+
+                pdirent = readPointer_TSStream(context, &command.response);
+
+                if(!isNULL_VoidTPtr(pdirent))
+                {
+                    ULLongT ino = readULLong_TSStream(&command.response);
+                    CString *name = readCString_TSStream(&command.response);
+                    dirent = create_DirEnt(
+                        pdirent,   // pdirent
+                        ino,       
+                        name    
+                        ) ;
+                }
+                else
+                    dirent = create_DirEnt(
+                        NULL_VoidTPtr,
+                        0,
+                        create_CString("")
+                        );
+                *errno = readInt_TSStream(&command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return dirent;
+  }
+  state
+  {
+      onReaddir(context, dirp, readdir_spec, errno);
+  }
+}
+
+
+
+/** readdir64_spec **/
+mediator readdir64_media for specification
+DirEntT *readdir64_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno)
+{
+    call
+    {
+        DirEntT *dirent=NULL;
+        DirEntTPtr pdirent;
+
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "readdir64:$(ptr)", create_VoidTPtrObj(dirp) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            
+            timestamp = command.meta.timestamp;
+
+            pdirent = readPointer_TSStream(context, &command.response);
+
+            if(!isNULL_VoidTPtr(pdirent))
+            {
+                InoT ino = readULLong_TSStream(&command.response);
+                CString *name = readCString_TSStream(&command.response);
+                dirent = create_DirEnt(
+                    pdirent,   // pdirent
+                    ino,       
+                    name    
+                    ) ;
+            }
+            else
+                dirent = create_DirEnt(
+                    NULL_VoidTPtr,
+                    0,
+                    create_CString("")
+                    );
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return dirent;
+  }
+  state
+  {
+      onReaddir(context, dirp, readdir64_spec, errno);
+  }
+}
+
+
+
+/** readdir_r_spec **/
+
+mediator readdir_r_media for specification
+DirEntT *readdir_r_spec( CallContext context, DIRTPtr dirp,  DirEntTPtr *entry, ErrorCode *errno, CancelStatus status )
+{
+    call
+    {
+        DirEntT *dirent=NULL;
+        DirEntTPtr pdirent, pentry;
+
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "readdir_r:$(ptr)", create_VoidTPtrObj(dirp) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+
+                pdirent = readPointer_TSStream(context, &command.response);
+                *entry = readPointer_TSStream(context, &command.response);
+
+                if(!isNULL_VoidTPtr(pdirent))
+                {
+                    LongT ino = readLong_TSStream(&command.response);
+                    CString *name = readCString_TSStream(&command.response);
+                    dirent = create_DirEnt(
+                        pdirent,   // pdirent
+                        ino,       
+                        name    
+                        ) ;
+                }
+                else
+                    dirent = create_DirEnt(
+                        NULL_VoidTPtr,
+                        0,
+                        create_CString("")
+                        );
+                *errno = readInt_TSStream(&command.response);
+            }
+
+          }
+        
+        destroy_TSCommand(&command);
+        
+        return dirent;
+  }
+  state
+  {
+      onReaddir(context, dirp, readdir_r_spec, errno);
+  }
+}
+
+
+
+/** rewinddir_spec **/
+
+mediator rewinddir_media for specification
+void rewinddir_spec( CallContext context, DIRTPtr dirp, CancelStatus status)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "rewinddir:$(ptr)", create_VoidTPtrObj(dirp) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onRewinddir(context, dirp);
+    }
+}
+
+
+
+/** rmdir_spec **/
+
+mediator rmdir_media for specification
+IntT rmdir_spec( CallContext context, CString *path, ErrorCode *errno )
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "rmdir:$(str)",
+            path );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onRmdir( context, path, rmdir_spec );
+    }
+}
+
+
+
+/** seekdir_spec **/
+
+mediator seekdir_media for specification
+void seekdir_spec( CallContext context, DIRTPtr dirp, LongT loc, CancelStatus status)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "seekdir:$(ptr)$(long)", 
+            create_VoidTPtrObj(dirp),
+            create_LongTObj(loc));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readCancelStatus_TSStream(&command.response,status);
+            if (!CANCELLED(status))
+            {
+            }
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+    state
+    {
+        onSeekdir(context, dirp, loc);
+    }
+}
+
+
+
+/** telldir_spec **/
+mediator telldir_media for specification
+LongT telldir_spec( CallContext context, DIRTPtr dirp)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        LongT res;
+        format_TSCommand( &command, "telldir:$(ptr)",
+            create_VoidTPtrObj(dirp));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onTelldir(context, dirp, telldir_spec);
+    }
+}
+
+
+

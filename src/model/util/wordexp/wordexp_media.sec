@@ -1,0 +1,208 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "common/common_media.seh"
+#include "config/system_config.seh"
+#include "data/embed_model.seh"
+#include "util/wordexp/wordexp_media.seh"
+
+/********************************************************************/
+/**                          Formatters                            **/
+/********************************************************************/
+void writeWordExpFlagsObj_TSStream(TSStream *stream, WordExpFlagsObj *flags)
+{
+    assertion(stream != NULL, "writeWordExpFlagsObj_TSStream: stream is NULL");
+    assertion(flags  != NULL, "writeWordExpFlagsObj_TSStream: flags is NULL");
+
+    writeTypeHeaderTSStream(stream, "weflags");
+
+    writeChar_TSStream(stream, flags->append  ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->dooffs  ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->nocmd   ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->reuse   ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->showerr ? '\xFF' : '\x00');
+    writeChar_TSStream(stream, flags->undef   ? '\xFF' : '\x00');
+}
+
+static void weflags_formatter(TSStream *stream, WordExpFlagsObj *flags)
+{
+    VERIFY_TYPE(weflags_formatter, &type_WordExpFlagsObj, flags);
+
+    writeWordExpFlagsObj_TSStream(stream, flags);
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilWordexpSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_setwordexp_spec(setwordexp_media);
+    set_mediator_wordexp_spec(wordexp_media);
+    set_mediator_wordfree_spec(wordfree_media);
+
+    // Set up formatters
+    registerTSFormatter("weflags",(TSFormatterFuncType)weflags_formatter);
+}
+
+/********************************************************************/
+/**               Auxiliary Specification Functions                **/
+/********************************************************************/
+
+/** setwordexp_spec **/
+mediator setwordexp_media for specification
+void setwordexp_spec(CallContext context, WordExpTPtr pwordexp, WordExpT *wordexp)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "setwordexp:$(ptr)$(size)",
+            create_VoidTPtrObj(pwordexp),
+            create_SizeTObj(wordexp->offs));
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        WordExpT *post_wordexp = getWordExpT(pwordexp);
+        
+        if(post_wordexp != NULL)
+        {
+            post_wordexp->offs = wordexp->offs;
+        }
+    }
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** wordexp_spec **/
+mediator wordexp_media for specification
+WordExpErrorCode wordexp_spec(CallContext context, Word *words, WordExpTPtr pwordexp,
+                              WordExpFlags flags)
+{
+    call
+    {
+        WordExpErrorCode res = SUT_WRDE_UNKNOWN;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "wordexp:$(str)$(ptr)$(weflags)",
+            toString_Word(words),
+            create_VoidTPtrObj(pwordexp),
+            create_WordExpFlagsObj(flags));
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        if(wordexp_spec == SUT_WRDE_OK)
+        {
+            mapWordExpTStateUp(context, pwordexp);
+        }
+    }
+}
+
+/** wordfree_spec **/
+mediator wordfree_media for specification
+void wordfree_spec(CallContext context, WordExpTPtr pwordexp)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand(&command, "wordfree:$(ptr)", create_VoidTPtrObj(pwordexp));
+        executeCommandInContext(context, &command);
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        unregisterObjectInMemory(pwordexp);
+    }
+}
+
+/********************************************************************/
+/**                      Helper Functions                         **/
+/********************************************************************/
+WordExpT *getWordExpTState(CallContext context, WordExpTPtr pwordexp)
+{
+    SizeT i, wordc, offs;
+    Fields *wordv = create_Fields();
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "getwordexp:$(ptr)", create_VoidTPtrObj(pwordexp));
+    executeCommandInContext(context, &command);
+
+    wordc = readSize_TSStream(&command.response);
+    offs = readSize_TSStream(&command.response);
+
+    for(i = 0; i < wordc; i++)
+    {
+        CString* field = readCString_TSStream(&command.response);
+
+        if(i >= offs)
+        {
+            append_List(wordv, field);
+        }
+    }
+
+    return create_WordExpT(pwordexp, wordc, offs, wordv);
+}
+
+void mapWordExpTStateUp(CallContext context, WordExpTPtr address)
+{
+    if(isValidPointer(context, address))
+    {
+        WordExpT *pre_wordexp = getWordExpT(address);
+        WordExpT *post_wordexp = getWordExpTState(context, address);
+
+        post_wordexp->address = NULL_VoidTPtr;
+
+        if(pre_wordexp == NULL)
+        {
+            registerObjectInMemory(address, sizeof_Type(context, "wordexp_t"), post_wordexp);
+        }
+        else
+        {
+            copy(post_wordexp, pre_wordexp);
+        }
+    }
+}

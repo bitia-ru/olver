@@ -1,0 +1,3758 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "math/exp/exp_model.seh"
+#include "math/exp/exp_config.h"
+#include "math/math/math_config.h"
+#include "config/type_config.seh"
+
+
+#pragma SEC subsystem exp "math.exp"
+
+
+
+/*
+   The group of functions 'math.exp' consists of:
+       cbrt [2]
+       cbrtf [2]
+       cbrtl [2]
+       exp [2]
+       exp2 [2]
+       exp2f [2]
+       expf [2]
+       expl [2]
+       expm1 [2]
+       expm1f [2]
+       expm1l [2]
+       hypot [2]
+       hypotf [2]
+       hypotl [2]
+       log [2]
+       log10 [2]
+       log10f [2]
+       log10l [2]
+       log1p [2]
+       log1pf [2]
+       log1pl [2]
+       log2 [2]
+       log2f [2]
+       log2l [2]
+       logf [2]
+       logl [2]
+       pow [2]
+       pow10 [1]
+       pow10f [1]
+       pow10l [1]
+       powf [2]
+       powl [2]
+       sqrt [2]
+       sqrtf [2]
+       sqrtl [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    cbrt, cbrtf, cbrtl - cube root functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double cbrt(double x);
+
+    float cbrtf(float x);
+
+    long double cbrtl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the real cube root of their
+    argument x.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the cube root of x.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0 or ±Inf, x shall be returned.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: cbrtf, cbrt, cbrtl
+specification
+Unifloat* cbrt_spec(CallContext context, Unifloat* x)
+{
+    CharT * filter[] = {(CharT *)"cbrtf", (CharT *)"cbrt", (CharT *)"cbrtl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(isInfinity_Unifloat(x))
+            return {x_Inf, "x is Infinity"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = cbrt_model(x);
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("cbrt.03;cbrtf.03;cbrtl.03",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(cbrt_spec)
+                );
+        }
+
+        if(isZero_Unifloat(x) || isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±0 or ±Inf, x shall be returned.
+             */
+            REQ("cbrt.04;cbrtf.04;cbrtl.04",
+                "x is ±0 or ±Inf, x shall be returned",
+                compare_Unifloat(cbrt_spec, x) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the cube root of x.
+             */
+            REQ("cbrt.02;cbrtf.02;cbrtl.02",
+                "functions shall return the cube root of x",
+                compareWithPrecision_Unifloat(cbrt_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* cbrt_model(Unifloat* x)
+{
+    Unifloat *a, *inaccuracy, *res, *twothirds;
+    IntT exp;
+
+    if(isInfinity_Unifloat(x) || isNan_Unifloat(x) || isZero_Unifloat(x))
+        return x;
+
+    a = clone(x);
+    a->sign = 1;
+
+    if(x->exp % 3 == 0)
+    {
+        exp = (x->exp - 3) / 3;
+        a->exp = 3;
+    }
+    else
+    if(x->exp % 3 == 1 || x->exp % 3 == -2)
+    {
+        exp = (x->exp - 1) / 3;
+        a->exp = 1;
+    }
+    else
+    if(x->exp % 3 == 2 || x->exp % 3 == -1)
+    {
+        exp = (x->exp - 2) / 3;
+        a->exp = 2;
+    }
+
+    twothirds = div_Unifloat(convertInteger_Unifloat(2, x->type), convertInteger_Unifloat(3, x->type));
+    a = div_Unifloat(a, convertInteger_Unifloat(3, x->type));
+
+    /* initial approximation */
+     res = createOne_Unifloat(x->type);
+    res->exp++;
+    inaccuracy = createOne_Unifloat(x->type);
+
+    while(inaccuracy->sign == 1 && inaccuracy->exp >= res->exp - (int)PRECISION && isZero_Unifloat(inaccuracy) == 0)
+    {
+        copy(res, inaccuracy);
+        res = add_Unifloat(mul_Unifloat(twothirds, res), div_Unifloat(a, mul_Unifloat(res, res)));
+        inaccuracy = sub_Unifloat(inaccuracy,res);
+    }
+
+    res->exp += exp;
+    res->sign = x->sign;
+
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    exp, expf, expl - exponential function
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double exp(double x);
+
+    float expf(float x);
+
+    long double expl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the base- e exponential of x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the exponential value
+    of x.
+
+    If the correct value would cause overflow, a range error shall occur and exp(),
+    expf(), and expl() shall return the value of the macro HUGE_VAL, HUGE_VALF, and
+    HUGE_VALL, respectively.
+
+    If the correct value would cause underflow, and is not representable, a range
+    error may occur, and [MX] either 0.0 (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, 1 shall be returned.
+
+    If x is -Inf, +0 shall be returned.
+
+    If x is +Inf, x shall be returned.
+
+    If the correct value would cause underflow, and is representable, a range error
+    may occur and the correct value shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Range Error The result overflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+            shall be raised.
+
+    These functions may fail if:
+
+        Range Error The result underflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+//This specification refers to: expf, exp, expl
+specification
+Unifloat* exp_spec(CallContext context, Unifloat* x, Unifloat* standart, IntT rounding, IntT* dist, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"expf", (CharT *)"exp", (CharT *)"expl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+            return {x_neg_Inf, "x is negative Infinity"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = exp_model(x);
+        Unifloat* dif;
+
+        if(0)
+        {
+            if (!isNormal_Unifloat(exp_spec) || !isNormal_Unifloat(standart))
+            {
+                if(compare_Unifloat(exp_spec, standart) == 0)
+                    *dist = 0;
+                else
+                    *dist = 59;
+            }
+            else
+            {
+                dif = sub_Unifloat(standart, exp_spec);
+                if(isZero_Unifloat(dif))
+                    *dist = 0;
+                else
+                if(exp_spec->sign == -1)
+                {
+                    *dist = 58;
+                }
+                else
+                {
+                    if(dif->exp < -1021)
+                    {
+                        *dist = dif->exp + 1074;
+                    }
+                    else
+                    {
+                        if(isZero_Unifloat(standart))
+                        {
+                            *dist = 57;
+                        }
+                        else
+                        if(standart->exp != exp_spec->exp)
+                        {
+                            *dist = 53;
+                        }
+                        else
+                        {
+                            *dist = dif->exp - standart->exp + 53;
+                        }
+                    }
+                }
+            }
+
+            //if(*dist != 0)
+            {
+                FILE* f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "%d %2d ", rounding, *dist);
+                fclose(f);
+                printExp_Unifloat(x, 53);
+                printExp_Unifloat(exp_spec, 53);
+                printExp_Unifloat(standart, 53);
+                f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "\n");
+                fclose(f);
+            }
+
+            if(*dist < 0 || *dist > 60)
+            {
+                *dist = 60;
+            }
+
+        }
+
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall occur and exp(),
+             * expf(), and expl() shall return the value of the macro HUGE_VAL, HUGE_VALF, and
+             * HUGE_VALL, respectively.
+             */
+            REQ("exp.05;expf.05;expl.05",
+                "the correct value cause overflow",
+                isInfinity_Unifloat(exp_spec)
+                );
+        }
+
+        if(isUnderflow_Unifloat(model))
+        {
+            if(isRepresentable_Unifloat(model))
+            {
+                model = checkRange_Unifloat(model);
+                /*
+                 * If the correct value would cause underflow, and is representable, a range error
+                 * may occur and the correct value shall be returned.
+                 */
+                REQ("exp.11;expf.11;expl.11",
+                    "the correct value cause underflow and is representable",
+                    compare_Unifloat(exp_spec, model) == 0
+                    );
+            }
+            else
+            {
+#if ZERO_SUPPORTED == 1
+                /*
+                 * If the correct value would cause underflow, and is not representable, a range
+                 * error may occur, and [MX] either 0.0 (if supported), or an implementation-
+                 * defined value shall be returned.
+                 */
+
+                REQ("exp.06;expf.06;expl.06",
+                    "the correct value cause underflow and is not representable",
+                    isZero_Unifloat(exp_spec)
+                    );
+#endif
+            }
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Range Error The result overflows.
+         *
+         *
+         * These functions may fail if:
+         *
+         * Range Error The result underflows.
+         */
+        ERROR_BEGIN(POSIX_EXP,
+            "exp.12;expf.12;expl.12;"
+            "exp.13;expf.13;expl.13",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_EXP, ERANGE,
+                "exp.12.01.01;expf.12.01.01;expl.12.01.01",
+                isOverflow_Unifloat(model)
+                )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_EXP, ERANGE,
+                "exp.13.01.01;expf.13.01.01;expl.13.01.01",
+                isUnderflow_Unifloat(model)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("exp.07;expf.07;expl.07",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(exp_spec)
+                );
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, 1 shall be returned.
+             */
+            REQ("exp.08;expf.08;expl.08",
+                "x is ±0, 1 shall be returned",
+                compare_Unifloat(exp_spec, createOne_Unifloat(x->type)) == 0
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            if(x->sign == -1)
+            {
+                /*
+                 * If x is -Inf, +0 shall be returned.
+                 */
+                REQ("exp.09;expf.09;expl.09",
+                    "x is -Inf, +0 shall be returned",
+                    compare_Unifloat(exp_spec, createZero_Unifloat(x->type)) == 0
+                    );
+            }
+            else
+            {
+                /*
+                 * If x is +Inf, x shall be returned.
+                 */
+                REQ("exp.10;expf.10;expl.10",
+                    "x is +Inf, x shall be returned",
+                    compare_Unifloat(exp_spec, x) == 0
+                    );
+            }
+        }
+
+        if(isNormal_Unifloat(x) && !isOverflow_Unifloat(model) && !isUnderflow_Unifloat(model))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the exponential value
+             * of x.
+             */
+            REQ("exp.04;expf.04;expl.04",
+                "functions shall return the exponential value of x",
+                compareWithPrecision_Unifloat(exp_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* exp_model(Unifloat* x)
+{
+    return exp_Unifloat(x);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    exp2, exp2f, exp2l - exponential base 2 functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double exp2(double x);
+
+    float exp2f(float x);
+
+    long double exp2l(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the base-2 exponential of x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return 2x.
+
+    If the correct value would cause overflow, a range error shall occur and
+    exp2(), exp2f(), and exp2l() shall return the value of the macro HUGE_VAL,
+    HUGE_VALF, and HUGE_VALL, respectively.
+
+    If the correct value would cause underflow, and is not representable, a range
+    error may occur, and [MX] either 0.0 (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, 1 shall be returned.
+
+    If x is -Inf, +0 shall be returned.
+
+    If x is +Inf, x shall be returned.
+
+    If the correct value would cause underflow, and is representable, a range error
+    may occur and the correct value shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Range Error The result overflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+            shall be raised.
+
+    These functions may fail if:
+
+        Range Error The result underflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+//This specification refers to: exp2f, exp2, exp2l
+specification
+Unifloat* exp2_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"exp2f", (CharT *)"exp2", (CharT *)"exp2l"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+            return {x_neg_Inf, "x is negative Infinity"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = exp2_model(x);
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall occur and exp2(),
+             * exp2f(), and exp2l() shall return the value of the macro HUGE_VAL, HUGE_VALF, and
+             * HUGE_VALL, respectively.
+             */
+            REQ("exp2.05;exp2f.05;exp2l.05",
+                "the correct value cause overflow",
+                isInfinity_Unifloat(exp2_spec)
+                );
+        }
+
+        if(isUnderflow_Unifloat(model))
+        {
+            if(isRepresentable_Unifloat(model))
+            {
+                model = checkRange_Unifloat(model);
+                /*
+                 * If the correct value would cause underflow, and is representable, a range error
+                 * may occur and the correct value shall be returned.
+                 */
+                REQ("exp2.11;exp2f.11;exp2l.11",
+                    "the correct value cause underflow and is representable",
+                    compare_Unifloat(exp2_spec, model) == 0
+                    );
+            }
+            else
+            {
+#if ZERO_SUPPORTED == 1
+                /*
+                 * If the correct value would cause underflow, and is not representable, a range
+                 * error may occur, and [MX] either 0.0 (if supported), or an implementation-
+                 * defined value shall be returned.
+                 */
+
+                REQ("exp2.06;exp2f.06;exp2l.06",
+                    "the correct value cause underflow and is not representable",
+                    isZero_Unifloat(exp2_spec)
+                    );
+#endif
+            }
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Range Error The result overflows.
+         *
+         *
+         * These functions may fail if:
+         *
+         * Range Error The result underflows.
+         */
+        ERROR_BEGIN(POSIX_EXP2,
+            "exp2.12;exp2f.12;exp2l.12;"
+            "exp2.13;exp2f.13;exp2l.13",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_EXP2, ERANGE,
+                "exp2.12.01.01;exp2f.12.01.01;exp2l.12.01.01",
+                isOverflow_Unifloat(model)
+                )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_EXP2, ERANGE,
+                "exp2.13.01.01;exp2f.13.01.01;exp2l.13.01.01",
+                isUnderflow_Unifloat(model)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("exp2.07;exp2f.07;exp2l.07",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(exp2_spec)
+                );
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, 1 shall be returned.
+             */
+            REQ("exp2.08;exp2f.08;exp2l.08",
+                "x is ±0, 1 shall be returned",
+                compare_Unifloat(exp2_spec, createOne_Unifloat(x->type)) == 0
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            if(x->sign == -1)
+            {
+                /*
+                 * If x is -Inf, +0 shall be returned.
+                 */
+                REQ("exp2.09;exp2f.09;exp2l.09",
+                    "x is -Inf, +0 shall be returned",
+                    compare_Unifloat(exp2_spec, createZero_Unifloat(x->type)) == 0
+                    );
+            }
+            else
+            {
+                /*
+                 * If x is +Inf, x shall be returned.
+                 */
+                REQ("exp2.10;exp2f.10;exp2l.10",
+                    "x is +Inf, x shall be returned",
+                    compare_Unifloat(exp2_spec, x) == 0
+                    );
+            }
+        }
+
+        if(isNormal_Unifloat(x) && !isOverflow_Unifloat(model) && !isUnderflow_Unifloat(model))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return 2x
+             */
+            REQ("exp2.04;exp2f.04;exp2l.04",
+                "functions shall return 2x",
+                compareWithPrecision_Unifloat(exp2_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* exp2_model(Unifloat* x)
+{
+    return exp2_Unifloat(x);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    expm1, expm1f, expm1l - compute exponential functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double expm1(double x);
+
+    float expm1f(float x);
+
+    long double expm1l(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute ex-1.0.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return ex-1.0.
+
+    If the correct value would cause overflow, a range error shall occur and
+    expm1(), expm1f(), and expm1l() shall return the value of the macro HUGE_VAL,
+    HUGE_VALF, and HUGE_VALL, respectively.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, ±0 shall be returned.
+
+    If x is -Inf, -1 shall be returned.
+
+    If x is +Inf, x shall be returned.
+
+    If x is subnormal, a range error may occur and x should be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Range Error The result overflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+            shall be raised.
+
+    These functions may fail if:
+
+        Range Error [MX] The value of x is subnormal.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+//This specification refers to: expm1f, expm1, expm1l
+specification
+Unifloat* expm1_spec(CallContext context, Unifloat* x, Unifloat* standart, IntT rounding, IntT* dist, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"expm1f", (CharT *)"expm1", (CharT *)"expm1l"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+            return {x_neg_Inf, "x is negative Infinity"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = expm1_model(x);
+        Unifloat* dif;
+
+        if(0)
+        {
+            if(x->exp < -700)
+                standart = clone(x);
+
+            if (!isNormal_Unifloat(expm1_spec) || !isNormal_Unifloat(standart))
+            {
+                if(compare_Unifloat(expm1_spec, standart) == 0)
+                    *dist = 0;
+                else
+                    *dist = 59;
+            }
+            else
+            {
+                dif = sub_Unifloat(standart, expm1_spec);
+                if(isZero_Unifloat(dif))
+                    *dist = 0;
+                //else
+                //if(compare_Unifloat(expm1_spec, changeSign_Unifloat(createOne_Unifloat(UniDoubleT),-1)) == -1)
+                //{
+                //    *dist = 58;
+                //}
+                else
+                {
+                    if(dif->exp < -1021)
+                    {
+                        *dist = dif->exp + 1074;
+                    }
+                    else
+                    {
+                        if(isZero_Unifloat(standart))
+                        {
+                            *dist = 57;
+                        }
+                        else
+                        if(standart->exp != expm1_spec->exp)
+                        {
+                            *dist = 53;
+                        }
+                        else
+                        {
+                            *dist = dif->exp - standart->exp + 53;
+                        }
+                    }
+                }
+            }
+
+            //if(*dist != 0)
+            {
+                FILE* f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "%d %2d ", rounding, *dist);
+                fclose(f);
+                printExp_Unifloat(x, 53);
+                printExp_Unifloat(expm1_spec, 53);
+                printExp_Unifloat(standart, 53);
+                f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "\n");
+                fclose(f);
+            }
+
+            if(*dist < 0 || *dist > 60)
+            {
+                *dist = 60;
+            }
+
+        }
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall occur and
+             * expm1(), expm1f(), and expm1l() shall return the value of the macro HUGE_VAL,
+             * HUGE_VALF, and HUGE_VALL, respectively.
+             */
+            REQ("expm1.05;expm1f.05;expm1l.05",
+                "the correct value cause overflow",
+                isInfinity_Unifloat(expm1_spec)
+                );
+        }
+
+        if(isUnderflow_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * If x is subnormal, a range error may occur and x should be returned.
+             */
+            REQ("expm1.10;expm1f.10;expm1l.10",
+                "x is subnormal, x should be returned",
+                compare_Unifloat(expm1_spec, x) == 0
+                );
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Range Error The result overflows.
+         *
+         *
+         * These functions may fail if:
+         *
+         * Range Error The result underflows.
+         */
+        ERROR_BEGIN(POSIX_EXPM1,
+            "expm1.11;expm1f.11;expm1l.11;"
+            "expm1.12;expm1f.12;expm1l.12",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_EXPM1, ERANGE,
+                "expm1.11.01.01;expm1f.11.01.01;expm1l.11.01.01",
+                isOverflow_Unifloat(model)
+                )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The value of x is subnormal.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_EXPM1, ERANGE,
+                "expm1.12.01.01;expm1f.12.01.01;expm1l.12.01.01",
+                isUnderflow_Unifloat(model)
+                )
+
+        ERROR_END()
+
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("expm1.06;expm1f.06;expm1l.06",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(expm1_spec)
+                );
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, ±0 shall be returned.
+             */
+            REQ("expm1.07;expm1f.07;expm1l.07",
+                "x is ±0, ±0 shall be returned",
+                isZero_Unifloat(expm1_spec) && expm1_spec->sign == x->sign
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            if(x->sign == -1)
+            {
+                /*
+                 * If x is -Inf, -1 shall be returned.
+                 */
+                REQ("expm1.08;expm1f.08;expm1l.08",
+                    "x is -Inf, -1 shall be returned",
+                    compare_Unifloat(expm1_spec, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == 0
+                    );
+            }
+            else
+            {
+                /*
+                 * If x is +Inf, x shall be returned.
+                 */
+                REQ("expm1.09;expm1f.09;expm1l.09",
+                    "x is +Inf, x shall be returned",
+                    compare_Unifloat(expm1_spec, x) == 0
+                    );
+            }
+        }
+
+        if(isNormal_Unifloat(x) && !isZero_Unifloat(x)
+            && !isOverflow_Unifloat(model)
+            && !isUnderflow_Unifloat(model)
+            )
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions return ex-1.0.
+             */
+            REQ("expm1.04;expm1f.04;expm1l.04",
+                "functions return ex-1.0",
+                compareWithPrecision_Unifloat(expm1_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* expm1_model(Unifloat* x)
+{
+    return expm1_Unifloat(x);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    hypot, hypotf, hypotl - Euclidean distance function
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double hypot(double x, double y);
+
+    float hypotf(float x, float y);
+
+    long double hypotl(long double x, long double y);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the value of the square root of
+    x2+ y2 without undue overflow or underflow.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the length of the
+    hypotenuse of a right-angled triangle with sides of length x and y.
+
+    If the correct value would cause overflow, a range error shall occur and
+    hypot(), hypotf(), and hypotl() shall return the value of the macro HUGE_VAL,
+    HUGE_VALF, and HUGE_VALL, respectively.
+
+    [MX] If x or y is ±Inf, +Inf shall be returned (even if one of x or y is NaN).
+
+    If x or y is NaN, and the other is not ±Inf, a NaN shall be returned.
+
+    If both arguments are subnormal and the correct result is subnormal, a range
+    error may occur and the correct result is returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Range Error The result overflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+            shall be raised.
+
+    These functions may fail if:
+
+        Range Error [MX] The result underflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+//This specification refers to: hypotf, hypot, hypotl
+specification
+Unifloat* hypot_spec(CallContext context, Unifloat* x, Unifloat* y, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"hypotf", (CharT *)"hypot", (CharT *)"hypotl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x and y shall not be NULL", x != NULL && y != NULL);
+
+        /*[Implicit requirement]*/
+        REQ("", "x and y shall be the same type", x->type == y->type);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isInfinity_Unifloat(x) || isInfinity_Unifloat(y))
+            return {x_y_Inf, "x or y is Infinity"};
+        else
+        if(isNan_Unifloat(x) || isNan_Unifloat(y))
+            return {x_y_NaN, "x or y is NaN"};
+        else
+            return {x_Norm_y_Norm, "x is Normal, y is Normal"};
+    }
+    post
+    {
+        Unifloat* model = hypot_model(x, y);
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall occur and
+             * hypot(), hypotf(), and hypotl() shall return the value of the macro HUGE_VAL,
+             * HUGE_VALF, and HUGE_VALL, respectively.
+             */
+            REQ("hypot.05;hypotf.05;hypotl.05",
+                "correct value would cause overflow",
+                isInfinity_Unifloat(hypot_spec)
+                );
+        }
+
+        if(isUnderflow_Unifloat(x) && isUnderflow_Unifloat(y) && isUnderflow_Unifloat(model))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * If both arguments are subnormal and the correct result is subnormal, a range
+             * error may occur and the correct result is returned.
+             */
+            REQ("hypot.08;hypotf.08;hypotl.08",
+                "both arguments are subnormal and the correct result is subnormal",
+                compare_Unifloat(hypot_spec, model) == 0
+                );
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Range Error The result overflows.
+         *
+         *
+         * These functions may fail if:
+         *
+         * Range Error [MX] The result underflows.
+         */
+        ERROR_BEGIN(POSIX_HYPOT,
+            "hypot.09;hypotf.09;hypotl.09;"
+            "hypot.10;hypotf.10;hypotl.10",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_HYPOT, ERANGE,
+                "hypot.09.01.01;hypotf.09.01.01;hypotl.09.01.01",
+                isOverflow_Unifloat(model)
+                )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_HYPOT, ERANGE,
+                "hypot.10.01.01;hypotf.10.01.01;hypotl.10.01.01",
+                isUnderflow_Unifloat(model)
+                )
+
+        ERROR_END()
+
+        if(isInfinity_Unifloat(x) || isInfinity_Unifloat(y))
+        {
+            /*
+             * [MX] If x or y is ±Inf, +Inf shall be returned (even if one of x or y is NaN).
+             */
+            REQ("hypot.06;hypotf.06;hypotl.06",
+                "x or y is ±Inf, +Inf shall be returned",
+                isInfinity_Unifloat(hypot_spec) && hypot_spec->sign == 1
+                );
+        }
+
+        if((isNan_Unifloat(x) && !isInfinity_Unifloat(y))
+            || (isNan_Unifloat(y) && !isInfinity_Unifloat(x))
+            )
+        {
+            /*
+             * If x or y is NaN, and the other is not ±Inf, a NaN shall be returned.
+             */
+            REQ("hypot.07;hypotf.07;hypotl.07",
+                "x or y is NaN, and the other is not ±Inf, NaN shall be returned",
+                isNan_Unifloat(hypot_spec)
+                );
+        }
+
+        if(isNormal_Unifloat(x) && isNormal_Unifloat(y)
+            && !isOverflow_Unifloat(model)
+            && !isUnderflow_Unifloat(model)
+            )
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the length of the
+             * hypotenuse of a right-angled triangle with sides of length x and y.
+             */
+            REQ("hypot.04;hypotf.04;hypotl.04",
+                "functions shall return the length of the hypotenuse of a right-angled triangle with sides of length x and y",
+                compareWithPrecision_Unifloat(hypot_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* hypot_model(Unifloat* x, Unifloat* y)
+{
+    return sqrt_Unifloat(add_Unifloat(mul_Unifloat(x, x), mul_Unifloat(y, y)));
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    log, logf, logl - natural logarithm function
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double log(double x);
+
+    float logf(float x);
+
+    long double logl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the natural logarithm of their
+    argument x, loge(x).
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the natural logarithm
+    of x.
+
+    If x is ±0, a pole error shall occur and log(), logf(), and logl() shall return
+    -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+
+    For finite values of x that are less than 0, [MX] or if x is -Inf, a domain
+    error shall occur, and [MX] either a NaN (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is 1, +0 shall be returned.
+
+    If x is +Inf, x shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The finite value of x is negative, [MX] or x is -Inf.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If theinteger expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+
+        Pole Error The value of x is zero.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point
+            exception shall be raised.
+*/
+
+//This specification refers to: logf, log, logl
+specification
+Unifloat* log_spec(CallContext context, Unifloat* x, Unifloat* standart, IntT rounding, IntT* dist, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"logf", (CharT *)"log", (CharT *)"logl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(x->sign == -1)
+            return {x_less_Zero, "x less than Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+            return {x_One, "x is One"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = log_model(x);
+        Unifloat* dif;
+
+        if(0)
+        {
+            if (!isNormal_Unifloat(log_spec) || !isNormal_Unifloat(standart))
+            {
+                if(compare_Unifloat(log_spec, standart) == 0)
+                    *dist = 0;
+                else
+                    *dist = 59;
+            }
+            else
+            {
+                dif = sub_Unifloat(standart, log_spec);
+                if(isZero_Unifloat(dif))
+                    *dist = 0;
+                else
+                {
+                    if(dif->exp < -1021)
+                    {
+                        *dist = dif->exp + 1074;
+                    }
+                    else
+                    {
+                        if(isZero_Unifloat(standart))
+                        {
+                            *dist = 57;
+                        }
+                        else
+                        if(standart->exp != log_spec->exp)
+                        {
+                            *dist = 53;
+                        }
+                        else
+                        {
+                            *dist = dif->exp - standart->exp + 53;
+                        }
+                    }
+                }
+            }
+
+            //if(*dist != 0)
+            {
+                FILE* f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "%d %2d ", rounding, *dist);
+                fclose(f);
+                printExp_Unifloat(x, 53);
+                printExp_Unifloat(log_spec, 53);
+                printExp_Unifloat(standart, 53);
+                f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "\n");
+                fclose(f);
+            }
+
+            if(*dist < 0 || *dist > 60)
+            {
+                *dist = 60;
+            }
+
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, a pole error shall occur and log(), logf(), and logl() shall return
+             * -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+             */
+            REQ("log.05;logf.05;logl.05",
+                "x is ±0, functions shall return -HUGE_VAL",
+                isInfinity_Unifloat(log_spec) && log_spec->sign == -1
+                );
+        }
+
+        if(x->sign == -1 && !isNan_Unifloat(x) && !isZero_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite values of x that are less than 0, [MX] or if x is -Inf, a domain
+             * error shall occur, and [MX] either a NaN (if supported), or an implementation-
+             * defined value shall be returned.
+             */
+            REQ("log.06;logf.06;logl.06",
+                "x less than 0, NaN shall be returned",
+                isNan_Unifloat(log_spec)
+                );
+#endif
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The finite value of x is negative, [MX] or x is -Inf.
+         *
+         *
+         * These functions shall fail if:
+         *
+         * Pole Error The value of x is zero.
+         */
+        ERROR_BEGIN(POSIX_LOG,
+                "log.10;logf.10;logl.10",
+                 *errno,
+                 *errno
+                 )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The finite value of x is negative, [MX] or x is -Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_LOG, EDOM,
+                "log.10.01.01;logf.10.01.01;logl.10.01.01",
+                x->sign == -1 && !isNan_Unifloat(x) && !isZero_Unifloat(x)
+                )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error The value of x is zero.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_LOG, ERANGE,
+                "log.10.02.01;logf.10.02.01;logl.10.02.01",
+                isZero_Unifloat(x)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("log.07;logf.07;logl.07",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(log_spec)
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is +Inf, x shall be returned.
+             */
+            REQ("log.09;logf.09;logl.09",
+                "x is +Inf, x shall be returned",
+                isInfinity_Unifloat(log_spec) && log_spec->sign == 1
+                );
+        }
+
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+        {
+            /*
+             * If x is 1, +0 shall be returned.
+             */
+            REQ("log.08;logf.08;logl.08",
+                "x is 1, +0 shall be returned",
+                compare_Unifloat(log_spec, createZero_Unifloat(x->type)) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x) && !isZero_Unifloat(x) && x->sign == 1)
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the natural logarithm
+             * of x.
+             */
+            REQ("log.04;logf.04;logl.04",
+                "functions shall return the natural logarithm of x",
+                compareWithPrecision_Unifloat(log_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* log_model(Unifloat* x)
+{
+    return log_Unifloat(x);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    log10, log10f, log10l - base 10 logarithm function
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double log10(double x);
+
+    float log10f(float x);
+
+    long double log10l(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the base 10 logarithm of their
+    argument x, log10(x).
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the base 10 logarithm
+    of x.
+
+    If x is ±0, a pole error shall occur and log10(), log10f(), and log10l() shall
+    return -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+
+    For finite values of x that are less than 0, [MX] or if x is -Inf, a domain
+    error shall occur, and [MX] either a NaN (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is 1, +0 shall be returned.
+
+    If x is +Inf, +Inf shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The finite value of x is negative, [MX] or x is -Inf.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If the integer expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+
+        Pole Error The value of x is zero.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point
+            exception shall be raised.
+*/
+
+//This specification refers to: log10f, log10, log10l
+specification
+Unifloat* log10_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"log10f", (CharT *)"log10", (CharT *)"log10l"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(x->sign == -1)
+            return {x_less_Zero, "x less than Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+            return {x_One, "x is One"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = log10_model(x);
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, a pole error shall occur and log(), logf(), and logl() shall return
+             * -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+             */
+            REQ("log10.05;log10f.05;log10l.05",
+                "x is ±0, functions shall return -HUGE_VAL",
+                isInfinity_Unifloat(log10_spec) && log10_spec->sign == -1
+                );
+        }
+
+        if(x->sign == -1 && !isNan_Unifloat(x) && !isZero_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite values of x that are less than 0, [MX] or if x is -Inf, a domain
+             * error shall occur, and [MX] either a NaN (if supported), or an implementation-
+             * defined value shall be returned.
+             */
+            REQ("log10.06;log10f.06;log10l.06",
+                "x less than 0, NaN shall be returned",
+                isNan_Unifloat(log10_spec)
+                );
+#endif
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The finite value of x is negative, [MX] or x is -Inf.
+         *
+         *
+         * These functions shall fail if:
+         *
+         * Pole Error The value of x is zero.
+         */
+        ERROR_BEGIN(POSIX_LOG10,
+                "log10.10;log10f.10;log10l.10",
+                 *errno,
+                 *errno
+                 )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The finite value of x is negative, [MX] or x is -Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_LOG10, EDOM,
+                "log10.10.01.01;log10f.10.01.01;log10l.10.01.01",
+                x->sign == -1 && !isNan_Unifloat(x) && !isZero_Unifloat(x)
+                )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error The value of x is zero.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_LOG10, ERANGE,
+                "log10.10.02.01;log10f.10.02.01;log10l.10.02.01",
+                isZero_Unifloat(x)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("log10.07;log10f.07;log10l.07",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(log10_spec)
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is +Inf, x shall be returned.
+             */
+            REQ("log10.09;log10f.09;log10l.09",
+                "x is +Inf, x shall be returned",
+                isInfinity_Unifloat(log10_spec) && log10_spec->sign == 1
+                );
+        }
+
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+        {
+            /*
+             * If x is 1, +0 shall be returned.
+             */
+            REQ("log10.08;log10f.08;log10l.08",
+                "x is 1, +0 shall be returned",
+                compare_Unifloat(log10_spec, createZero_Unifloat(x->type)) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x) && x->sign == 1 && !isZero_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the base 10 logarithm
+             * of x.
+             */
+            REQ("log10.04;log10f.04;log10l.04",
+                "functions shall return the base 10 logarithm of x",
+                compareWithPrecision_Unifloat(log10_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* log10_model(Unifloat* x)
+{
+    return mul_Unifloat(log_Unifloat(x), Log10_e[x->type]);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    log1p, log1pf, log1pl - compute a natural logarithm
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double log1p(double x);
+
+    float log1pf(float x);
+
+    long double log1pl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute loge(1.0 + x).
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the natural logarithm
+    of 1.0 + x.
+
+    If x is -1, a pole error shall occur and log1p(), log1pf(), and log1pl() shall
+    return -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+
+    For finite values of x that are less than -1, [MX] or if x is -Inf, a domain
+    error shall occur, and [MX] either a NaN (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, or +Inf, x shall be returned.
+
+    If x is subnormal, a range error may occur and x should be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The finite value of x is less than -1, [MX] or x is -Inf.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If the integer expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+
+        Pole Error The value of x is -1.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point
+            exception shall be raised.
+
+    These functions may fail if:
+
+        Range Error [MX] The value of x is subnormal.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+//This specification refers to: log1pf, log1p, log1pl
+specification
+Unifloat* log1p_spec(CallContext context, Unifloat* x, Unifloat* standart, IntT rounding, IntT* dist, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"log1pf", (CharT *)"log1p", (CharT *)"log1pl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == -1)
+            return {x_less_One, "x less than neg One"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+        if(compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == 0)
+            return {x_neg_One, "x is neg One"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = log1p_model(x);
+        Unifloat* dif;
+
+        if(0)
+        {
+            if(x->exp < -700)
+                standart = clone(x);
+
+            if (!isNormal_Unifloat(log1p_spec) || !isNormal_Unifloat(standart))
+            {
+                if(compare_Unifloat(log1p_spec, standart) == 0)
+                    *dist = 0;
+                else
+                    *dist = 59;
+            }
+            else
+            {
+                dif = sub_Unifloat(standart, log1p_spec);
+                if(isZero_Unifloat(dif))
+                    *dist = 0;
+                else
+                {
+                    if(dif->exp < -1021)
+                    {
+                        *dist = dif->exp + 1074;
+                    }
+                    else
+                    {
+                        if(isZero_Unifloat(standart))
+                        {
+                            *dist = 57;
+                        }
+                        else
+                        if(standart->exp != log1p_spec->exp)
+                        {
+                            *dist = 53;
+                        }
+                        else
+                        {
+                            *dist = dif->exp - standart->exp + 53;
+                        }
+                    }
+                }
+            }
+
+            //if(*dist != 0)
+            {
+                FILE* f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "%d %2d ", rounding, *dist);
+                fclose(f);
+                printExp_Unifloat(x, 53);
+                printExp_Unifloat(log1p_spec, 53);
+                printExp_Unifloat(standart, 53);
+                f = fopen("src/model/math/exp/test","a+");
+                fprintf(f, "\n");
+                fclose(f);
+            }
+
+            if(*dist < 0 || *dist > 60)
+            {
+                *dist = 60;
+            }
+        }
+
+        if(compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == -1)
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite values of x that are less than -1, [MX] or if x is -Inf, a domain
+             * error shall occur, and [MX] either a NaN (if supported), or an implementation-
+             * defined value shall be returned.
+             */
+            REQ("log1p.06;log1pf.06;log1pl.06",
+                "x is less than -1, NaN shall be returned",
+                isNan_Unifloat(log1p_spec)
+                );
+#endif
+        }
+
+        if(compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == 0)
+        {
+            /*
+             * If x is -1, a pole error shall occur and log1p(), log1pf(), and log1pl() shall
+             * return -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+             */
+            REQ("log1p.05;log1pf.05;log1pl.05",
+                "x is -1, -HUGE_VAL shall be returned",
+                isInfinity_Unifloat(log1p_spec) && log1p_spec->sign == -1
+                );
+        }
+
+        if(isUnderflow_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * If x is subnormal, a range error may occur and x should be returned.
+             */
+            REQ("log1p.09;log1pf.09;log1pl.09",
+                "x is subnormal, x should be returned",
+                compare_Unifloat(log1p_spec, x) == 0
+                );
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The finite value of x is less than -1, [MX] or x is -Inf.
+         *
+         *
+         * These functions shall fail if:
+         *
+         * Pole Error The value of x is -1.
+         *
+         *
+         * These functions may fail if:
+         *
+         * Range Error [MX] The value of x is subnormal.
+         */
+        ERROR_BEGIN(POSIX_LOG1P,
+            "log1p.10;log1pf.10;log1pl.10",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The finite value of x is less than -1, [MX] or x is -Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_LOG1P, EDOM,
+                "log1p.10.01.01;log1pf.10.01.01;log1pl.10.01.01",
+                compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == -1
+                )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error The value of x is -1.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_LOG1P, ERANGE,
+                "log1p.10.02.01;log1pf.10.02.01;log1pl.10.02.01",
+                compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == 0
+                )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The value of x is subnormal.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_LOG1P, ERANGE,
+                "log1p.11.01.01;log1pf.11.01.01;log1pl.11.01.01",
+                isUnderflow_Unifloat(x)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("log1p.07;log1pf.07;log1pl.07",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(log1p_spec)
+                );
+        }
+
+        if(isZero_Unifloat(x) || (isInfinity_Unifloat(x) && x->sign == 1))
+        {
+            /*
+             * If x is ±0, or +Inf, x shall be returned.
+             */
+            REQ("log1p.08;log1pf.08;log1pl.08",
+                "x is ±0, or +Inf, x shall be returned",
+                compare_Unifloat(log1p_spec, x) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x)
+            && compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == 1
+            && !isUnderflow_Unifloat(x)
+            )
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * These functions shall compute loge(1.0 + x).
+             */
+            REQ("log1p.04;log1pf.04;log1pl.04",
+                "functions shall return the natural logarithm of 1.0 + x",
+                compareWithPrecision_Unifloat(log1p_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* log1p_model(Unifloat* x)
+{
+    return log1p_Unifloat(x);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    log2, log2f, log2l - compute base 2 logarithm functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double log2(double x);
+
+    float log2f(float x);
+
+    long double log2l(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the base 2 logarithm of their
+    argument x, log2(x).
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the base 2 logarithm
+    of x.
+
+    If x is ±0, a pole error shall occur and log2(), log2f(), and log2l() shall
+    return -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+
+    For finite values of x that are less than 0, [MX] or if x is -Inf, a domain
+    error shall occur, and [MX] either a NaN (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is 1, +0 shall be returned.
+
+    If x is +Inf, x shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The finite value of x is less than zero, [MX] or x is -Inf.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If the integer expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+
+        Pole Error The value of x is zero.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point
+            exception shall be raised.
+*/
+
+//This specification refers to: log2f, log2, log2l
+specification
+Unifloat* log2_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"log2f", (CharT *)"log2", (CharT *)"log2l"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(x->sign == -1)
+            return {x_less_Zero, "x less than Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+            return {x_One, "x is One"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = log2_model(x);
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, a pole error shall occur and log2(), log2f(), and log2l() shall
+             * return -HUGE_VAL, -HUGE_VALF, and -HUGE_VALL, respectively.
+             */
+            REQ("log2.05;log2f.05;log2l.05",
+                "x is ±0, functions shall return -HUGE_VAL",
+                isInfinity_Unifloat(log2_spec) && log2_spec->sign == -1
+                );
+        }
+
+        if(x->sign == -1 && !isNan_Unifloat(x) && !isZero_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite values of x that are less than 0, [MX] or if x is -Inf, a domain
+             * error shall occur, and [MX] either a NaN (if supported), or an implementation-
+             * defined value shall be returned.
+             */
+            REQ("log2.06;log2f.06;log2l.06",
+                "x less than 0, NaN shall be returned",
+                isNan_Unifloat(log2_spec)
+                );
+#endif
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The finite value of x is negative, [MX] or x is -Inf.
+         *
+         *
+         * These functions shall fail if:
+         *
+         * Pole Error The value of x is zero.
+         */
+        ERROR_BEGIN(POSIX_LOG2,
+                "log2.10;log2f.10;log2l.10",
+                 *errno,
+                 *errno
+                 )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The finite value of x is negative, [MX] or x is -Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_LOG2, EDOM,
+                "log2.10.01.01;log2f.10.01.01;log2l.10.01.01",
+                x->sign == -1 && !isNan_Unifloat(x) && !isZero_Unifloat(x)
+                )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error The value of x is zero.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_LOG2, ERANGE,
+                "log2.10.02.01;log2f.10.02.01;log2l.10.02.01",
+                isZero_Unifloat(x)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("log2.07;log2f.07;log2l.07",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(log2_spec)
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is +Inf, x shall be returned.
+             */
+            REQ("log2.09;log2f.09;log2l.09",
+                "x is +Inf, x shall be returned",
+                isInfinity_Unifloat(log2_spec) && log2_spec->sign == 1
+                );
+        }
+
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+        {
+            /*
+             * If x is 1, +0 shall be returned.
+             */
+            REQ("log2.08;log2f.08;log2l.08",
+                "x is 1, +0 shall be returned",
+                compare_Unifloat(log2_spec, createZero_Unifloat(x->type)) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x) && x->sign == 1 && !isZero_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the base 2 logarithm
+             * of x.
+             */
+            REQ("log2.04;log2f.04;log2l.04",
+                "functions shall return the base 2 logarithm of x",
+                compareWithPrecision_Unifloat(log2_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* log2_model(Unifloat* x)
+{
+    return mul_Unifloat(log_Unifloat(x), Log2_e[x->type]);
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    pow, powf, powl - power function
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double pow(double x, double y);
+
+    float powf(float x, float y);
+
+    long double powl(long double x, long double y);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the value of x raised to the
+    power y, xy. If x is negative, the application shall ensure that y is an
+    integer value.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the value of x raised
+    to the power y.
+
+    For finite values of x < 0, and finite non-integer values of y, a domain
+    error shall occur and [MX] either a NaN (if representable), or an
+    implementation-defined value shall be returned.
+
+    If the correct value would cause overflow, a range error shall occur and pow(),
+    powf(), and powl() shall return ±HUGE_VAL, ±HUGE_VALF, and ±HUGE_VALL,
+    respectively, with the same sign as the correct value of the function.
+
+    If the correct value would cause underflow, and is not representable, a range
+    error may occur, and [MX] either 0.0 (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x or y is a NaN, a NaN shall be returned (unless specified elsewhere in
+    this description).
+
+    For any value of y (including NaN), if x is +1, 1.0 shall be returned.
+
+    For any value of x (including NaN), if y is ±0, 1.0 shall be returned.
+
+    For any odd integer value of y > 0, if x is ±0, ±0 shall be returned.
+
+    For y > 0 and not an odd integer, if x is ±0, +0 shall be returned.
+
+    If x is -1, and y is ±Inf, 1.0 shall be returned.
+
+    For |x| < 1, if y is -Inf, +Inf shall be returned.
+
+    For |x| > 1, if y is -Inf, +0 shall be returned.
+
+    For |x| < 1, if y is +Inf, +0 shall be returned.
+
+    For |x| > 1, if y is +Inf, +Inf shall be returned.
+
+    For y an odd integer < 0, if x is -Inf, -0 shall be returned.
+
+    For y < 0 and not an odd integer, if x is -Inf, +0 shall be returned.
+
+    For y an odd integer > 0, if x is -Inf, -Inf shall be returned.
+
+    For y > 0 and not an odd integer, if x is -Inf, +Inf shall be returned.
+
+    For y < 0, if x is +Inf, +0 shall be returned.
+
+    For y > 0, if x is +Inf, +Inf shall be returned.
+
+    For y an odd integer < 0, if x is ±0, a pole error shall occur and ±
+    HUGE_VAL, ±HUGE_VALF, and ±HUGE_VALL shall be returned for pow(), powf(), and
+    powl(), respectively.
+
+    For y < 0 and not an odd integer, if x is ±0, a pole error shall occur and
+    HUGE_VAL, HUGE_VALF, and HUGE_VALL shall be returned for pow(), powf(), and
+    powl(), respectively.
+
+    If the correct value would cause underflow, and is representable, a range error
+    may occur and the correct value shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The value of x is negative and y is a finite non-integer.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If the integer expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+
+        Pole Error [MX] The value of x is zero and y is negative.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point
+            exception shall be raised.
+
+        Range Error The result overflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+            shall be raised.
+
+    These functions may fail if:
+
+        Range Error The result underflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+//This specification refers to: powf, pow, powl
+specification
+Unifloat* pow_spec(CallContext context, Unifloat* x, Unifloat* y, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"powf", (CharT *)"pow", (CharT *)"powl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x and y shall not be NULL", x != NULL && y != NULL);
+
+        /*[Implicit requirement]*/
+        REQ("", "x and y shall be the same type", x->type == y->type);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isInfinity_Unifloat(y))
+        {
+            if(y->sign == 1)
+            {
+                if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 0)
+                    return {x_eq_one_y_Inf, "x is One, y is Infinity"};
+                else
+                if(x->exp >= 1)
+                    return {x_more_one_y_Inf, "x is more than One, y is Infinity"};
+                else
+                    return {x_less_one_y_Inf, "x is less than One, y is Infinity"};
+            }
+            else
+            {
+                if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 0)
+                    return {x_eq_one_y_neg_Inf, "x is One, y is -Infinity"};
+                else
+                if(x->exp >= 1)
+                    return {x_more_one_y_neg_Inf, "x is more than One, y is -Infinity"};
+                else
+                    return {x_less_one_y_neg_Inf, "x is less than One, y is -Infinity"};
+            }
+        }
+        else
+        if(isNan_Unifloat(x) || isNan_Unifloat(y))
+        {
+            return {x_y_NaN, "x or y is NaN"};
+        }
+        if(isZero_Unifloat(y))
+        {
+            return {y_zero, "y is Zero"};
+        }
+        else
+        if(isInteger_Unifloat(y) && isOdd_Unifloat(y))
+        {
+            if(y->sign == 1)
+            {
+                if(isZero_Unifloat(x))
+                {
+                    return {x_zero_y_pos_odd_int, "x is Zero, y is pos odd Int"};
+                }
+                else
+                if(isInfinity_Unifloat(x))
+                {
+                    return {x_inf_y_pos_odd_int, "x is Infinity, y is pos odd Int"};
+                }
+                else
+                {
+                    return {x_norm_y_pos_odd_int, "x is Normal, y is pos odd Int"};
+                }
+            }
+            else
+            {
+                if(isZero_Unifloat(x))
+                {
+                    return {x_zero_y_neg_odd_int, "x is Zero, y is neg odd Int"};
+                }
+                else
+                if(isInfinity_Unifloat(x))
+                {
+                    return {x_inf_y_neg_odd_int, "x is Infinity, y is neg odd Int"};
+                }
+                else
+                {
+                    return {x_norm_y_neg_odd_int, "x is Normal, y is neg odd Int"};
+                }
+            }
+
+        }
+        else
+        {
+            if(y->sign == 1)
+            {
+                if(isZero_Unifloat(x))
+                {
+                    return {x_zero_y_pos_not_odd_int, "x is Zero, y is pos not odd Int"};
+                }
+                else
+                if(isInfinity_Unifloat(x))
+                {
+                    return {x_inf_y_pos_not_odd_int, "x is Infinity, y is pos not odd Int"};
+                }
+                else
+                {
+                    return {x_norm_y_pos_not_odd_int, "x is Normal, y is pos not odd Int"};
+                }
+            }
+            else
+            {
+                if(isZero_Unifloat(x))
+                {
+                    return {x_zero_y_neg_not_odd_int, "x is Zero, y is neg not odd Int"};
+                }
+                else
+                if(isInfinity_Unifloat(x))
+                {
+                    return {x_inf_y_neg_not_odd_int, "x is Infinity, y is neg not odd Int"};
+                }
+                else
+                {
+                    return {x_norm_y_neg_not_odd_int, "x is Normal, y is neg not odd Int"};
+                }
+            }
+        }
+    }
+    post
+    {
+        Unifloat* model = pow_model(x, y);
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall occur and pow(),
+             * powf(), and powl() shall return ±HUGE_VAL, ±HUGE_VALF, and ±HUGE_VALL,
+             * respectively, with the same sign as the correct value of the function.
+             */
+            REQ("pow.06;powf.06;powl.06",
+                "the correct value would cause overflow",
+                isInfinity_Unifloat(pow_spec) && pow_spec->sign == model->sign
+                );
+        }
+
+        if(isUnderflow_Unifloat(model))
+        {
+            if(isRepresentable_Unifloat(model))
+            {
+                model = checkRange_Unifloat(model);
+                /*
+                 * If the correct value would cause underflow, and is representable, a range error
+                 * may occur and the correct value shall be returned.
+                 */
+                REQ("pow.26;powf.26;powl.26",
+                    "the correct value would cause underflow, and is representable",
+                    compare_Unifloat(pow_spec, model) == 0
+                    );
+            }
+            else
+            {
+#if ZERO_SUPPORTED == 1
+                /*
+                 * If the correct value would cause underflow, and is not representable, a range
+                 * error may occur, and [MX] either 0.0 (if supported), or an implementation-
+                 * defined value shall be returned.
+                 */
+                REQ("pow.07;powf.07;powl.07",
+                    "the correct value would cause underflow, and is not representable",
+                    isZero_Unifloat(pow_spec)
+                    );
+#endif
+            }
+        }
+
+        if(isNormal_Unifloat(x) && x->sign == -1 && !isZero_Unifloat(x)
+            && isNormal_Unifloat(y) && !isInteger_Unifloat(y)
+            )
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite values of x < 0, and finite non-integer values of y, a domain
+             * error shall occur and [MX] either a NaN (if representable), or an
+             * implementation-defined value shall be returned.
+             */
+            REQ("pow.05;powf.05;powl.05",
+                "finite values of x < 0, and finite non-integer values of y, NaN shall be returned",
+                isNan_Unifloat(pow_spec)
+                );
+#endif
+        }
+
+        if(isNormal_Unifloat(y) && y->sign == -1 && !isZero_Unifloat(y) && isZero_Unifloat(x))
+        {
+            if(isInteger_Unifloat(y) && isOdd_Unifloat(y))
+            {
+                /*
+                 * For y an odd integer < 0, if x is ±0, a pole error shall occur and ±
+                 * HUGE_VAL, ±HUGE_VALF, and ±HUGE_VALL shall be returned for pow(), powf(), and
+                 * powl(), respectively.
+                 */
+                REQ("pow.24;powf.24;powl.24",
+                    "y an odd integer < 0, if x is ±0, ±HUGE_VAL shall be returned",
+                    isInfinity_Unifloat(pow_spec) && pow_spec->sign == x->sign
+                    );
+            }
+            else
+            {
+                /*
+                 * For y < 0 and not an odd integer, if x is ±0, a pole error shall occur and
+                 * HUGE_VAL, HUGE_VALF, and HUGE_VALL shall be returned for pow(), powf(), and
+                 * powl(), respectively.
+                 */
+                REQ("pow.25;powf.25;powl.25",
+                    "y < 0 and not an odd integer, if x is ±0, HUGE_VAL shall be returned",
+                    isInfinity_Unifloat(pow_spec) && pow_spec->sign == 1
+                    );
+            }
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The value of x is negative and y is a finite non-integer.
+         *
+         * Pole Error [MX] The value of x is zero and y is negative.
+         *
+         * Range Error The result overflows.
+         *
+         *
+         * These functions may fail if:
+         *
+         * Range Error The result underflows.
+         */
+        ERROR_BEGIN(POSIX_POW,
+            "pow.27;powf.27;powl.27;"
+            "pow.28;powf.28;powl.28",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The value of x is negative and y is a finite non-integer.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_POW, EDOM,
+                "pow.27.01.01;powf.27.01.01;powl.27.01.01",
+                x->sign == -1 && isNormal_Unifloat(x) && !isZero_Unifloat(x) && isNormal_Unifloat(y) && !isInteger_Unifloat(y)
+                )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error [MX] The value of x is zero and y is negative.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_POW, ERANGE,
+                "pow.27.02.01;pow.27.03.01;powf.27.02.01;powf.27.03.01;powl.27.02.01;powl.27.03.01",
+                /*pow.27.02.01;powf.27.02.01;powl.27.02.01*/
+                (y->sign == -1 && isNormal_Unifloat(y) && !isZero_Unifloat(y) && isZero_Unifloat(x))
+                /*pow.27.03.01;powf.27.03.01;powl.27.03.01*/
+                || isOverflow_Unifloat(model)
+                )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_POW, ERANGE,
+                "pow.28.01.01;powf.28.01.01;powl.28.01.01",
+                isUnderflow_Unifloat(model)
+                )
+
+        ERROR_END()
+
+
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+        {
+            /*
+             * For any value of y (including NaN), if x is +1, 1.0 shall be returned.
+             */
+            REQ("pow.09;powf.09;powl.09",
+                "any y, x is +1, 1.0 shall be returned",
+                compare_Unifloat(pow_spec, createOne_Unifloat(x->type)) == 0
+                );
+        }
+
+        if(isZero_Unifloat(y))
+        {
+            /*
+             * For any value of x (including NaN), if y is ±0, 1.0 shall be returned.
+             */
+            REQ("pow.10;powf.10;powl.10",
+                "any x, y is ±0, 1.0 shall be returned",
+                compare_Unifloat(pow_spec, createOne_Unifloat(x->type)) == 0
+                );
+        }
+
+        if((isNan_Unifloat(x) && !isZero_Unifloat(y))
+            || (isNan_Unifloat(y) && compare_Unifloat(x, createOne_Unifloat(x->type)) != 0))
+        {
+            /*
+             * [MX] If x or y is a NaN, a NaN shall be returned (unless specified elsewhere in
+             * this description).
+             */
+            REQ("pow.08;powf.08;powl.08",
+                "x or y is a NaN, a NaN shall be returned",
+                isNan_Unifloat(pow_spec)
+                );
+        }
+
+        if(isInfinity_Unifloat(y))
+        {
+            if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) != 0
+                && !isNan_Unifloat(x)
+                )
+            {
+                if(y->sign == 1)
+                {
+                    if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+                    {
+                        /*
+                         * For |x| > 1, if y is +Inf, +Inf shall be returned.
+                         */
+                        REQ("pow.17;powf.17;powl.17",
+                            "|x| > 1, y is +Inf, +Inf shall be returned",
+                            isInfinity_Unifloat(pow_spec) && pow_spec->sign == 1
+                            );
+                    }
+                    else
+                    {
+                        /*
+                         * For |x| < 1, if y is +Inf, +0 shall be returned.
+                         */
+                        REQ("pow.16;powf.16;powl.16",
+                            "|x| < 1, y is +Inf, +0 shall be returned",
+                            isZero_Unifloat(pow_spec) && pow_spec->sign == 1
+                            );
+                    }
+                }
+                else
+                {
+                    if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+                    {
+                        /*
+                         * For |x| > 1, if y is -Inf, +0 shall be returned.
+                         */
+                        REQ("pow.15;powf.15;powl.15",
+                            "|x| > 1, y is -Inf, +0 shall be returned",
+                            isZero_Unifloat(pow_spec) && pow_spec->sign == 1
+                            );
+                    }
+                    else
+                    {
+                        /*
+                         * For |x| < 1, if y is -Inf, +Inf shall be returned.
+                         */
+                        REQ("pow.14;powf.14;powl.14",
+                            "|x| < 1, y is -Inf, +Inf shall be returned",
+                            isInfinity_Unifloat(pow_spec) && pow_spec->sign == 1
+                            );
+                    }
+                }
+            }
+
+            if(compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(x->type), -1)) == 0)
+            {
+                /*
+                 * If x is -1, and y is ±Inf, 1.0 shall be returned.
+                 */
+                REQ("pow.13;powf.13;powl.13",
+                    "x is -1, y is ±Inf, 1.0 shall be returned",
+                    compare_Unifloat(pow_spec, createOne_Unifloat(x->type)) == 0
+                    );
+            }
+        }
+
+
+
+        if(isNormal_Unifloat(y) && !isZero_Unifloat(y) && y->sign == 1)
+        {
+            if(isInfinity_Unifloat(x) && x->sign == 1)
+            {
+                /*
+                 * For y > 0, if x is +Inf, +Inf shall be returned.
+                 */
+                REQ("pow.23;powf.23;powl.23",
+                    "y > 0, x is +Inf, +Inf shall be returned",
+                    isInfinity_Unifloat(pow_spec) && y->sign == 1
+                    );
+            }
+
+            if(isInteger_Unifloat(y) && isOdd_Unifloat(y))
+            {
+                if(isInfinity_Unifloat(x) && x->sign == -1)
+                {
+                    /*
+                     * For y an odd integer > 0, if x is -Inf, -Inf shall be returned.
+                     */
+                    REQ("pow.20;powf.20;powl.20",
+                        "y an odd integer > 0, if x is -Inf, -Inf shall be returned",
+                        isInfinity_Unifloat(pow_spec) && pow_spec->sign == -1
+                        );
+                }
+
+                if(isZero_Unifloat(x))
+                {
+                    /*
+                     * For any odd integer value of y > 0, if x is ±0, ±0 shall be returned.
+                     */
+                    REQ("pow.11;powf.11;powl.11",
+                        "any odd integer value of y > 0, x is ±0, ±0 shall be returned",
+                        isZero_Unifloat(pow_spec) && pow_spec->sign == x->sign
+                        );
+                }
+            }
+            else
+            {
+                if(isZero_Unifloat(x))
+                {
+                    /*
+                     * For y > 0 and not an odd integer, if x is ±0, +0 shall be returned.
+                     */
+                    REQ("pow.12;powf.12;powl.12",
+                        "y > 0 and not an odd integer, x is ±0, +0 shall be returned",
+                        isZero_Unifloat(pow_spec) && pow_spec->sign == 1
+                        );
+                }
+
+                if(isInfinity_Unifloat(x) && x->sign == -1)
+                {
+                    /*
+                     * For y > 0 and not an odd integer, if x is -Inf, +Inf shall be returned.
+                     */
+                    REQ("pow.21;powf.21;powl.21",
+                        "y > 0 and not an odd integer, x is -Inf, +Inf shall be returned",
+                        isInfinity_Unifloat(pow_spec) && pow_spec->sign == 1
+                        );
+                }
+            }
+        }
+
+        if(isNormal_Unifloat(y) && !isZero_Unifloat(y) && y->sign == -1)
+        {
+            if(isInfinity_Unifloat(x) && x->sign == 1)
+            {
+                /*
+                 * For y < 0, if x is +Inf, +0 shall be returned.
+                 */
+                REQ("pow.22;powf.22;powl.22",
+                    "y < 0, x is +Inf, +0 shall be returned",
+                    isZero_Unifloat(pow_spec) && pow_spec->sign == 1
+                    );
+            }
+
+            if(isInteger_Unifloat(y) && isOdd_Unifloat(y))
+            {
+                if(isInfinity_Unifloat(x) && x->sign == -1)
+                {
+                    /*
+                     * For y an odd integer < 0, if x is -Inf, -0 shall be returned.
+                     */
+                    REQ("pow.18;powf.18;powl.18",
+                        "y an odd integer < 0, x is -Inf, -0 shall be returned",
+                        isZero_Unifloat(pow_spec) && pow_spec->sign == -1
+                        );
+                }
+            }
+            else
+            {
+                if(isInfinity_Unifloat(x) && x->sign == -1)
+                {
+                    /*
+                     * For y < 0 and not an odd integer, if x is -Inf, +0 shall be returned.
+                     */
+                    REQ("pow.19;powf.19;powl.19",
+                        "y < 0 and not an odd integer, x is -Inf, +0 shall be returned",
+                        isZero_Unifloat(pow_spec) && pow_spec->sign == 1
+                        );
+                }
+            }
+        }
+
+        if(isNormal_Unifloat(x) && isNormal_Unifloat(y)
+            && !isOverflow_Unifloat(model) && !isUnderflow_Unifloat(model)
+            && !isZero_Unifloat(x) && !isZero_Unifloat(y)
+            )
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the value of x raised
+             * to the power y.
+             */
+            REQ("pow.04;powf.04;powl.04",
+                "functions shall return the value of x raised to the power y",
+                compareWithPrecision_Unifloat(pow_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* pow_model(Unifloat* x, Unifloat* y)
+{
+    Unifloat* res;
+    if(x->sign == -1)
+    {
+        if(isInteger_Unifloat(y))
+        {
+            res = exp_Unifloat(mul_Unifloat(log_Unifloat(abs_Unifloat(x)), y));
+
+            if(isOdd_Unifloat(y))
+                res->sign = x->sign;
+
+            return res;
+        }
+        else
+        {
+            return clone(nan_Unifloat(x->type));
+        }
+    }
+    else
+    {
+        res = exp_Unifloat(mul_Unifloat(log_Unifloat(abs_Unifloat(x)), y));
+        return res;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    pow10, pow10f, pow10l - exponential base 10 functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double pow10(double x);
+
+    float pow10f(float x);
+
+    long double pow10l(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the base-10 exponential of x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return 10x.
+
+    If the correct value would cause overflow, a range error shall occur and
+    pow10(), pow10f(), and pow10l() shall return the value of the macro HUGE_VAL,
+    HUGE_VALF, and HUGE_VALL, respectively.
+
+    If the correct value would cause underflow, and is not representable, a range
+    error may occur, and [MX] either 0.0 (if supported), or an implementation-
+    defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, 1 shall be returned.
+
+    If x is -Inf, +0 shall be returned.
+
+    If x is +Inf, x shall be returned.
+
+    If the correct value would cause underflow, and is representable, a range error
+    may occur and the correct value shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Range Error The result overflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+            shall be raised.
+
+    These functions may fail if:
+
+        Range Error The result underflows.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+//This specification refers to: pow10f, pow10, pow10l
+specification
+Unifloat* pow10_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"pow10f", (CharT *)"pow10", (CharT *)"pow10l"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+            return {x_neg_Inf, "x is negative Infinity"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = pow10_model(x);
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall occur and pow10(),
+             * pow10f(), and pow10l() shall return the value of the macro HUGE_VAL, HUGE_VALF, and
+             * HUGE_VALL, respectively.
+             */
+            REQ("pow10.exp2.05;pow10f.exp2f.05;pow10l.exp2l.05",
+                "the correct value cause overflow",
+                isInfinity_Unifloat(pow10_spec)
+                );
+        }
+
+        if(isUnderflow_Unifloat(model))
+        {
+            if(isRepresentable_Unifloat(model))
+            {
+                model = checkRange_Unifloat(model);
+                /*
+                 * If the correct value would cause underflow, and is representable, a range error
+                 * may occur and the correct value shall be returned.
+                 */
+                REQ("pow10.exp2.11;pow10f.exp2f.11;pow10l.exp2l.11",
+                    "the correct value cause underflow and is representable",
+                    compare_Unifloat(pow10_spec, model) == 0
+                    );
+            }
+            else
+            {
+#if ZERO_SUPPORTED == 1
+                /*
+                 * If the correct value would cause underflow, and is not representable, a range
+                 * error may occur, and [MX] either 0.0 (if supported), or an implementation-
+                 * defined value shall be returned.
+                 */
+
+                REQ("pow10.exp2.06;pow10f.exp2f.06;pow10l.exp2l.06",
+                    "the correct value cause underflow and is not representable",
+                    isZero_Unifloat(pow10_spec)
+                    );
+#endif
+            }
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Range Error The result overflows.
+         *
+         *
+         * These functions may fail if:
+         *
+         * Range Error The result underflows.
+         */
+        ERROR_BEGIN(POSIX_POW10,
+            "pow10.exp2.12;pow10f.exp2f.12;pow10l.exp2l.12;"
+            "pow10.exp2.13;pow10f.exp2f.13;pow10l.exp2l.13",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result overflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_POW10, ERANGE,
+                "pow10.exp2.12.01.01;pow10f.exp2f.12.01.01;pow10l.exp2l.12.01.01",
+                isOverflow_Unifloat(model)
+                )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_POW10, ERANGE,
+                "pow10.exp2.13.01.01;pow10f.exp2f.13.01.01;pow10l.exp2l.13.01.01",
+                isUnderflow_Unifloat(model)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("pow10.exp2.07;pow10f.exp2f.07;pow10l.exp2l.07",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(pow10_spec)
+                );
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, 1 shall be returned.
+             */
+            REQ("pow10.exp2.08;pow10f.exp2f.08;pow10l.exp2l.08",
+                "x is ±0, 1 shall be returned",
+                compare_Unifloat(pow10_spec, createOne_Unifloat(x->type)) == 0
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            if(x->sign == -1)
+            {
+                /*
+                 * If x is -Inf, +0 shall be returned.
+                 */
+                REQ("pow10.exp2.09;pow10f.exp2f.09;pow10l.exp2l.09",
+                    "x is -Inf, +0 shall be returned",
+                    compare_Unifloat(pow10_spec, createZero_Unifloat(x->type)) == 0
+                    );
+            }
+            else
+            {
+                /*
+                 * If x is +Inf, x shall be returned.
+                 */
+                REQ("pow10.exp2.10;pow10f.exp2f.10;pow10l.exp2l.10",
+                    "x is +Inf, x shall be returned",
+                    compare_Unifloat(pow10_spec, x) == 0
+                    );
+            }
+        }
+
+        if(isNormal_Unifloat(x)
+            && !isOverflow_Unifloat(model)
+            && !isUnderflow_Unifloat(model)
+            )
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return 10x
+             */
+            REQ("pow10.exp2.04;pow10f.exp2f.04;pow10l.exp2l.04",
+                "functions shall return 10x",
+                compareWithPrecision_Unifloat(pow10_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* pow10_model(Unifloat* x)
+{
+    Unifloat *res;
+
+    res = mul_Unifloat(x, Log2_10[x->type]);
+    res = exp2_Unifloat(res);
+
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    sqrt, sqrtf, sqrtl - square root function
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double sqrt(double x);
+
+    float sqrtf(float x);
+
+    long double sqrtl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the square root of their argument
+    x,
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the square root of x.
+
+    For finite values of x < -0, a domain error shall occur, and [MX] either a
+    NaN (if supported), or an implementation-defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0 or +Inf, x shall be returned.
+
+    If x is -Inf, a domain error shall occur, and either a NaN (if supported), or
+    an implementation-defined value shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The finite value of x is < -0, [MX] or x is -Inf.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If the integer expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+*/
+
+//This specification refers to: sqrtf, sqrt, sqrtl
+specification
+Unifloat* sqrt_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"sqrtf", (CharT *)"sqrt", (CharT *)"sqrtl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+            return {x_neg_Inf, "x is negative Infinity"};
+        else
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+            return {x_pos_Inf, "x is positive Infinity"};
+        else
+            return {x_Norm, "x is Normal"};
+    }
+    post
+    {
+        Unifloat* model = sqrt_model(x);
+
+        if(x->sign == -1 && isNormal_Unifloat(x) && !isZero_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite values of x < -0, a domain error shall occur, and [MX] either a
+             * NaN (if supported), or an implementation-defined value shall be returned.
+             */
+            REQ("sqrt.05;sqrtf.05;sqrtl.05",
+                "x < -0, NaN shall be returned",
+                isNan_Unifloat(sqrt_spec)
+                );
+#endif
+        }
+
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * If x is -Inf, a domain error shall occur, and either a NaN (if supported), or
+             * an implementation-defined value shall be returned.
+             */
+            REQ("sqrt.08;sqrtf.08;sqrtl.08",
+                "x is -Inf, NaN shall be returned",
+                isNan_Unifloat(sqrt_spec)
+                );
+#endif
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The finite value of x is < -0, [MX] or x is -Inf.
+         */
+        ERROR_BEGIN(POSIX_SQRT,
+            "sqrt.09;sqrtf.09;sqrtl.09",
+            *errno,
+            *errno
+            )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The finite value of x is < -0, [MX] or x is -Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_SQRT, EDOM,
+                "sqrt.09.01.01;sqrtf.09.01.01;sqrtl.09.01.01",
+                x->sign == -1 && !isNan_Unifloat(x) && !isZero_Unifloat(x)
+                )
+
+        ERROR_END()
+
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("sqrt.06;sqrtf.06;sqrtl.06",
+                "x is NaN, NaN shall be returned",
+                isNan_Unifloat(sqrt_spec)
+                );
+        }
+
+        if(isZero_Unifloat(x) || (isInfinity_Unifloat(x) && x->sign == 1))
+        {
+            /*
+             * If x is ±0 or +Inf, x shall be returned.
+             */
+            REQ("sqrt.07;sqrtf.07;sqrtl.07",
+                "x is ±0 or +Inf, x shall be returned",
+                compare_Unifloat(sqrt_spec, x) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x) && x->sign == 1)
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the square root of x.
+             */
+            REQ("sqrt.04;sqrtf.04;sqrtl.04",
+                "functions shall return the square root of x",
+                compareWithPrecision_Unifloat(sqrt_spec, model, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* sqrt_model(Unifloat* x)
+{
+    return sqrt_Unifloat(x);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+/* this function shall be used only with integer x */
+bool isOdd_Unifloat(Unifloat* x)
+{
+    if(x->exp <= 0)
+        return true;
+    else
+    if(x->exp >= digMant_Unifloat(x->type))
+        return false;
+    else
+        return getMant_Unifloat(x, x->exp);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

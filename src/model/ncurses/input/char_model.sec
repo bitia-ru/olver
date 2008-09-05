@@ -1,0 +1,506 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/input/char_model.seh"
+
+
+#pragma SEC subsystem input "ncurses.input"
+
+
+
+/*
+   The group of functions 'ncurses.input.char' consists of:
+       getch [1]
+       mvgetch [1]
+       mvwgetch [1]
+       ungetch [1]
+       wgetch [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    getch, wgetch, mvgetch, mvwgetch - get a single-byte character from the
+    terminal
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int getch(void);
+
+    int mvgetch(int y, int x);
+
+    int mvwgetch(WINDOW *win, int y, int x);
+
+    int wgetch(WINDOW *win);
+
+DESCRIPTION
+
+    These functions read a single-byte character from the terminal associated
+    with the current or specified window. The results are unspecified if the
+    input is not a single-byte character. If keypad() is enabled, these
+    functions respond to the pressing of a function key by returning the
+    corresponding KEY_ value defined in <curses.h>.
+
+    Processing of terminal input is subject to the general rules described in
+    Input Processing .
+
+    If echoing is enabled, then the character is echoed as though it were
+    provided as an input argument to addch(), except for the following characters:
+
+    <backspace>, <left-arrow> and the current erase character:
+
+        The input is interpreted as specified in and then the character at the
+        resulting cursor position is deleted as though were called, except that
+        if the cursor was originally in the first column of the line, then the
+        user is alerted as though were called.
+
+    Function keys
+
+        The user is alerted as though were called. Information concerning the
+        function keys is not returned to the caller.
+
+    If the current or specified window is not a pad, and it has been moved or
+    modified since the last refresh operation, then it will be refreshed before
+    another character is read.
+
+RETURN VALUE
+
+    Upon successful completion getch(), mvgetch(), mvwgetch() and wgetch()
+    return the single-byte character, KEY_ value, or ERR. When in the nodelay
+    mode and no data is available, ERR is returned.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: mvwgetch, wgetch, mvgetch, getch
+specification
+IntT getch_spec( CallContext context, WindowTPtr* win, NCursesPosition* pos)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst_pre = clone(term->inserted_character_buffer);
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+    IntT size = size_List(lst_pre);
+
+    getch_model(context, local, pos);
+
+    FILTER("halfdelay");
+
+    if(win)
+    {
+        if(pos){ FILTER("mvwgetch");}
+        else{ FILTER("wgetch");}
+    }
+    else
+    {
+        if(pos){ FILTER("mvgetch");}
+        else{ FILTER("getch");}
+    }
+
+    pre
+    {
+        if(size)
+        {
+            IntT* iO = get_List(lst_pre, size_List(lst_pre)-1);
+            /*
+             * The results are unspecified if the input is not a single-byte
+             * character.
+             */
+            REQ("getch.02;mvgetch.02;wgetch.02;mvwgetch.02",
+                "The results are unspecified if the input is not "
+                "a single-byte character",
+                *iO < 128);
+        }
+
+        return true;
+    }
+    post
+    {
+        NCursesTerminal* term = getNCursesStdTerminal(context);
+        List* lst_post = term->inserted_character_buffer;
+        IntT i = ~SUT_UNGETCH;
+        NCursesWindow* wnd = getWindowMayNULL(context, win);
+
+        if(!wnd->delay && !size)
+        {
+            /*
+             * When in the nodelay mode and no data is available,
+             * ERR is returned.
+             */
+            REQ("getch.06.02;mvgetch.06.02;wgetch.06.02;mvwgetch.06.02",
+                "When in the nodelay mode and no data is available, "
+                "ERR is returned",
+                getch_spec == SUT_ERR);
+        }
+
+        if(getch_spec == SUT_ERR)
+        {
+            return true;
+        }
+
+        if(!size)
+        {
+            //All checks possible only if we push elements using
+            //ncursesInputChar or ungetch
+
+            return true;
+        }
+
+        i &= *((IntTObj*)get_List(lst_pre, size-1));
+
+        if( (term->nl
+             ||
+             (
+             !(term->input_mode & MODE_CBREAK)
+             //&& !(term->input_mode & MODE_RAW)
+             ))
+            && i == '\r')
+        {
+            i = '\n';
+
+        }
+
+        /*
+        if(i != getch_spec)
+        {
+            DUMP("nocbreak(%d), noraw(%d)\n", !(term->input_mode & MODE_CBREAK) ? 1 : 0, !(term->input_mode & MODE_RAW) ? 1:0);
+            DUMP("i == %d(%c), getch_spec == %d(%c)\n", i, i, getch_spec, getch_spec);
+            getch();getch();
+        }
+        */
+
+        /*
+         * These functions read a single-byte character from the terminal
+         * associated with the current or specified window.
+         */
+        REQ("getch.01;mvgetch.01;wgetch.01;mvwgetch.01",
+            "Read a single-byte character from the terminal",
+                                 i == getch_spec
+                                 //|| i == '\r'
+                                 );
+
+        remove_List(lst_pre, size-1);
+
+        REQ("", "lst_pre without last element shall be equal to lst_post",
+            prePostListEquals(lst_pre, lst_post));
+        /*
+         * If keypad() is enabled, these functions respond to the pressing of
+         * a function key by returning the corresponding KEY_ value defined in
+         * <curses.h>.
+         */
+        REQ("getch.03;mvgetch.03;wgetch.03;mvwgetch.03", "", TODO_REQ());
+
+        /*
+         * If echoing is enabled, then the character is echoed as though it
+         * were provided as an input argument to addch(), except for the
+         * following characters:
+         *
+         *      <backspace>, <left-arrow> and the current erase character:
+         *
+         *          The input is interpreted as specified in and then the
+         *          character at the resulting cursor position is deleted as
+         *          though were called, except that if the cursor was
+         *          originally in the first column of the line, then the user
+         *          is alerted as though were called.
+         *
+         *      Function keys
+         *
+         *          The user is alerted as though were called. Information
+         *          concerning the function keys is not returned to the caller.
+         */
+        REQ("getch.04;mvgetch.04;wgetch.04;mvwgetch.04", "", TODO_REQ());
+
+        /*
+         * If the current or specified window is not a pad, and it has been
+         * moved or modified since the last refresh operation, then it will
+         * be refreshed before another character is read.
+         */
+        REQ("getch.05;mvgetch.05;wgetch.05;mvwgetch.05", "", TODO_REQ());
+
+        /*
+         * Upon successful completion getch(), mvgetch(), mvwgetch() and
+         * wgetch() return the single-byte character, KEY_ value, or ERR.
+         */
+        REQ("getch.06.01;mvgetch.06.01;wgetch.06.01;mvwgetch.06.01",
+                "", TODO_REQ());
+
+        REQ("", "Check all", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+        REQ("", "Screen check", compareScreens_Context(context));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+
+}
+
+void getch_model(CallContext context, NCursesWindow* local, NCursesPosition* pos)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst = term->inserted_character_buffer;
+    IntT size = size_List(lst);
+    IntTObj* chr;
+    ChTypeT ch = create_emptyChTypeT();
+
+    if(!size)
+        return;
+
+    chr = get_List(lst, size-1);
+
+    ch.letter = *chr;
+
+    if(pos)
+        local->cursorPos = clone(pos);
+
+    if(!(*chr & SUT_UNGETCH))
+    {
+        if(!isSpecChar(ch))
+        {
+            setElement_NCursesWindow(local, local->cursorPos, ch);
+            changeCursorPos(local, local->cursorPos, 1);
+        }
+        else
+        {
+             addSpecChar(local, local->cursorPos, ch, true, false);
+        }
+
+        if(!readStrStop(*chr))
+            nocbreak_mode(context, local);
+    }
+    pushNCursesWindow(local);
+}
+
+void onGetch( CallContext context, WindowTPtr* win, NCursesPosition* pos,
+             IntT getch_spec)
+{
+    if(getch_spec != SUT_ERR)
+    {
+        NCursesWindow* wnd = getWindowMayNULL(context, win);
+        NCursesTerminal* term = getNCursesStdTerminal(context);
+        List* lst = term->inserted_character_buffer;
+
+        if(size_List(lst))
+            remove_List(lst, size_List(lst)-1);
+
+        updateNCursesWindow(context, wnd->address);
+
+        if(!(wnd->flags & SUT__ISPAD))
+        {
+            refresh_WindowTPtr(context, &wnd->address, 1);
+        }
+    }
+
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    ungetch, unget_wch - push a character onto the input queue
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int ungetch(int ch);
+
+    int unget_wch(const wchar_t wch);
+
+DESCRIPTION
+
+    The ungetch() function pushes the single-byte character ch onto the head of
+    the input queue.
+
+    The unget_wch() function pushes the wide character wch onto the head of the
+    input queue.
+
+    One character of push-back is guaranteed. The result of successive calls
+    without an intervening call to getch() or get_wch() are unspecified.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT ungetch_spec( CallContext context, IntT ch)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst_pre = clone(term->inserted_character_buffer);
+    NCursesWindow* curWnd = getNCursesStdWindow(context);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    pre
+    {
+        /*
+         * One character of push-back is guaranteed. The result of successive
+         * calls without an intervening call to getch() or get_wch() are
+         * unspecified.
+         */
+        REQ("app.ungetch.02", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        List* lst_post = term->inserted_character_buffer;
+
+        if(ungetch_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("ungetch.03.02", "", TODO_REQ());
+
+            return true;
+        }
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("ungetch.03.01",
+            "Upon successful completion return OK",
+            ungetch_spec == SUT_OK);
+
+        append_List(lst_pre, create_IntTObj(ch | SUT_UNGETCH));
+        /*
+         * The ungetch() function pushes the single-byte character ch onto the
+         * head of the input queue.
+         */
+        REQ("ungetch.01",
+            "Pushes the single-byte character ch onto the head "
+            "of the input queue",
+            equals(lst_pre, lst_post));
+
+        REQ("", "Check all", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+}
+void onUngetch( CallContext context, IntT ch, IntT ungetch_spec)
+{
+    if(ungetch_spec != SUT_ERR)
+    {
+        NCursesTerminal* term = getNCursesStdTerminal(context);
+        List* lst = term->inserted_character_buffer;
+        NCursesWindow* wnd = getNCursesStdWindow(context);
+
+        //SUT_UNGETCH indicates that element was pushed into
+        //inserted_character_buffer with ungetch...
+        append_List(lst, create_IntTObj(ch | SUT_UNGETCH));
+
+        updateNCursesWindow(context, wnd->address);
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+IntT prePostListEquals(List* lst_pre,List* lst_post)
+{
+    IntT size = size_List(lst_pre), i;
+    IntT i1, i2;
+
+    if(size != size_List(lst_post))
+        return 0;
+
+    for(i=0;i<size;i++)
+    {
+        i1 = *((IntTObj*)get_List(lst_pre, i));
+        i2 = *((IntTObj*)get_List(lst_post, i));
+
+        i1 &= SUT_UNGETCH - 1;
+        i2 &= SUT_UNGETCH - 1;
+
+        if(i1 != i2)
+            return 0;
+    }
+
+    return 1;
+}
+
+void nocbreak_mode(CallContext context, NCursesWindow* local)
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst = term->inserted_character_buffer;
+    IntT size = size_List(lst), tmp;
+    IntTObj* chr;
+    ChTypeT ch = create_emptyChTypeT();
+
+    if(    !(term->input_mode & MODE_CBREAK)
+        && !(term->input_mode & MODE_RAW)
+        && size > 1)
+    {
+        IntT i = size - 1;
+
+        do
+        {
+            chr = get_List(lst, --i);
+
+            ch.letter = *chr;
+            if(!isSpecChar(ch))
+            {
+                setElement_NCursesWindow(local, local->cursorPos, ch);
+                changeCursorPos(local, local->cursorPos, 1);
+            }
+            else
+            {
+                addSpecChar(local, local->cursorPos, ch, 1, false);
+            }
+
+            *chr |= SUT_UNGETCH;
+        }
+        while(i>0 && !readStrStop(*chr ^ SUT_UNGETCH));
+    }
+}

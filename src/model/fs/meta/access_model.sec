@@ -1,0 +1,2785 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "fs/meta/access_config.h"
+#include "fs/meta/access_model.seh"
+#include "config/interpretation.seh"
+#include "data/errno_model.seh"
+#include "system/system/system_model.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "fs/meta/meta_model.seh"
+#include "config/system_config.seh"
+
+#include <atl/map.h>
+#include <atl/list.h>
+#pragma SEC subsystem access "fs.meta"
+
+
+
+/*
+   The group of functions 'fs.meta.access' consists of:
+       access [2]
+       chmod [2]
+       chown [2]
+       fchmod [2]
+       fchown [2]
+       lchown [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+
+IEEE Std 1003.1, 2004 Edition
+
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    access - determine accessibility of a file
+
+SYNOPSIS
+
+    #include <unistd.h>
+
+    int access(const char *path, int amode);
+
+DESCRIPTION
+
+    The access() function shall check the file named by the pathname pointed to
+    by the path argument for accessibility according to the bit pattern
+    contained in amode, using the real user ID in place of the effective user
+    ID and the real group ID in place of the effective group ID.
+
+    The value of amode is either the bitwise-inclusive OR of the access
+    permissions to be checked (R_OK, W_OK, X_OK) or the existence test (F_OK).
+    If any access permissions are checked, each shall be checked individually,
+    as described in the Base Definitions volume of IEEE Std 1003.1-2001,
+    Chapter 3, Definitions. If the process has appropriate privileges, an
+    implementation may indicate success for X_OK even if none of the execute
+    file permission bits are set.
+
+RETURN VALUE
+
+    If the requested access is permitted, access() succeeds and shall return 0;
+    otherwise, -1 shall be returned and errno shall be set to indicate the
+    error.
+
+ERRORS
+
+    The access() function shall fail if:
+
+    [EACCES]
+
+        Permission bits of the file mode do not permit the requested access, or
+        search permission is denied on a component of the path prefix.
+
+    [ELOOP]
+
+        A loop exists in symbolic links encountered during resolution of the
+        path argument.
+
+    [ENAMETOOLONG]
+
+        The length of the path argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+    [ENOENT]
+
+        A component of path does not name an existing file or path is an empty
+        string.
+
+    [ENOTDIR]
+
+        A component of the path prefix is not a directory.
+
+    [EROFS]
+
+        Write access is requested for a file on a read-only file system.
+
+
+    The access() function may fail if:
+
+    [EINVAL]
+
+        The value of the amode argument is invalid.
+
+    [ELOOP]
+
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the path argument.
+
+    [ENAMETOOLONG]
+
+        As a result of encountering a symbolic link in resolution of the path
+        argument, the length of the substituted pathname string exceeded
+        {PATH_MAX}.
+
+    [ETXTBSY]
+
+        Write access is requested for a pure procedure (shared text) file that
+        is being executed.
+*/
+
+Bool3 shall_isEACCES_access(CallContext context, CString* path,
+                                AccessModeAccess* amode)
+{
+    ProcessState* ps=getProcessState_CallContext(context);
+    Bool3 eloop=False_Bool3;
+    FileSystem* fs=getFileSystem(context);
+    CString* resolved=resolvePath_Ext(context, fs, path, &eloop);
+    File* file=getFile_FileSystem(fs, resolved);
+    FilePermission* perm=create_FilePermission(false, false, false);
+    AccessPrivileges apriv={false, false, true};
+
+    if(file==NULL || ps==NULL)
+        return Unknown_Bool3;
+
+    if(file->uid==NULL || file->gid==NULL || file->permissions==NULL)
+        return Unknown_Bool3;
+
+    if(file->permissions->owner==NULL || file->permissions->group==NULL
+        || file->permissions->other==NULL)
+        return Unknown_Bool3;
+
+    if(*(file->uid)==ps->meta.effective_userid)
+    {
+        perm->read|=file->permissions->owner->read;
+        perm->write|=file->permissions->owner->write;
+        perm->execute|=file->permissions->owner->execute;
+    }
+    if(*(file->gid)==ps->meta.effective_groupid)
+    {
+        perm->read|=file->permissions->group->read;
+        perm->write|=file->permissions->group->write;
+        perm->execute|=file->permissions->group->execute;
+    }
+    perm->read|=file->permissions->other->read;
+    perm->write|=file->permissions->other->write;
+    perm->execute|=file->permissions->other->execute;
+
+    if(ps->meta.effective_userid==(UidT)0)//*****Improve?*****
+    {
+        perm->execute=      file->permissions->owner->execute
+                        ||  file->permissions->group->execute
+                        ||  file->permissions->owner->execute;
+        perm->write=      file->permissions->owner->write
+                        ||  file->permissions->group->write
+                        ||  file->permissions->owner->write;
+        perm->read=      file->permissions->owner->read
+                        ||  file->permissions->group->read
+                        ||  file->permissions->owner->read;
+
+    }
+/*
+ * If the process has appropriate privileges, an implementation may indicate
+ * success for X_OK even if none of the execute file permission bits are set.
+ *
+ */
+    IMPLEMENT_REQ("access.08");
+    if(hasAppropriatePrivileges(context, apriv, file->fileid))
+        perm->execute=true;
+
+    if(     !perm->read && amode->isR_OK
+        ||  !perm->write && amode->isW_OK
+        ||  !perm->execute && amode->isX_OK)
+        return True_Bool3;
+
+    return False_Bool3;
+}
+Bool3 shall_isEROFS_access(CallContext context,CString* path,
+                           AccessModeAccess* amode)
+{
+    return Unknown_Bool3;
+}
+Bool3 shall_isEINVAL_access(CallContext context,CString* path,
+                            AccessModeAccess* amode)
+{
+    return Unknown_Bool3;
+}
+
+
+specification
+IntT access_spec( CallContext context, CString* path, AccessModeAccess* amode,
+                                                            ErrorCode* errno)
+{
+    pre
+    {
+        /*
+         * The value of amode is either the bitwise-inclusive OR of the access
+         * permissions to be checked (R_OK, W_OK, X_OK) or the existence test
+         * (F_OK).
+         *
+         */
+        REQ("app.access.06", "Checking amode correctness",
+            !(amode->isF_OK && (amode->isR_OK||amode->isW_OK||amode->isX_OK)));
+        return true;
+    }
+    post
+    {
+        Bool3 eloop=False_Bool3;
+        FileSystem* fs=getFileSystem(context);
+        CString* resolved=resolvePath_Ext(context, fs, path, &eloop);
+
+        /*
+         * otherwise, -1 shall be returned and errno shall be set to indicate
+         * the error.
+         */
+        ERROR_BEGIN(POSIX_ACCESS, "access.03", access_spec==-1, *errno)
+        /*
+         * The access() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Permission bits of the file mode do not permit the requested access,
+         * or search permission is denied on a component of the path prefix.
+         */
+            ERROR_SHALL3(POSIX_ACCESS, EACCES, "access.04.01",
+                shall_isEACCES_access(context, path, amode))
+
+        /*
+         * The access() function shall fail if:
+         *
+         * [ELOOP]
+         *
+         * A loop exists in symbolic links encountered during resolution of the
+         * path argument.
+         */
+            ERROR_SHALL3(POSIX_ACCESS, ELOOP, "access.04.02", eloop)
+
+        /*
+         * The access() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * The length of the path argument exceeds {PATH_MAX} or a pathname
+         * component is longer than {NAME_MAX}.
+         */
+            ERROR_SHALL3(POSIX_ACCESS, ENAMETOOLONG, "access.04.03",
+                shall_isENAMETOOLONG_access(context, path))
+
+        /*
+         * The access() function shall fail if:
+         *
+         * [ENOENT]
+         *
+         * A component of path does not name an existing file or path is an
+         * empty string.
+         */
+            ERROR_SHALL3(POSIX_ACCESS, ENOENT, "access.04.04",
+                shall_isENOENT_access(context, fs, resolved))
+
+        /*
+         * The access() function shall fail if:
+         *
+         * [ENOTDIR]
+         *
+         * A component of the path prefix is not a directory.
+         */
+            ERROR_SHALL3(POSIX_ACCESS, ENOTDIR, "access.04.05",
+            shall_isENOTDIR_access(context, fs, getParentDir_Path(resolved)))
+
+        /*
+         * The access() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * Write access is requested for a file on a read-only file system.
+         */
+            ERROR_SHALL3(POSIX_ACCESS, EROFS, "access.04.06",
+                        shall_isEROFS_access(context, path, amode))
+
+        /*
+         * The access() function may fail if:
+         *
+         * [EINVAL]
+         *
+         * The value of the amode argument is invalid.
+         */
+            ERROR_MAY3(POSIX_ACCESS, EINVAL, "access.05.01",
+                    shall_isEINVAL_access(context, path, amode))
+
+        /*
+         * The access() function may fail if:
+         *
+         * [ELOOP]
+         *
+         * More than {SYMLOOP_MAX} symbolic links were encountered during
+         * resolution of the path argument.
+         */
+            ERROR_MAY3(POSIX_ACCESS, ELOOP, "access.05.02", eloop)
+
+        /*
+         * The access() function may fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * As a result of encountering a symbolic link in resolution of the
+         * path argument, the length of the substituted pathname string
+         * exceeded {PATH_MAX}.
+         */
+            ERROR_MAY3(POSIX_ACCESS, ENAMETOOLONG, "access.05.03",
+                        may_isENAMETOOLONG_access(context, resolved))
+
+        /*
+         * The access() function may fail if:
+         *
+         * [ETXTBSY]
+         *
+         * Write access is requested for a pure procedure (shared text) file
+         * that is being executed.
+         */
+            ERROR_UNCHECKABLE(POSIX_ACCESS, ETXTBSY, "access.05.04",
+                "Poor model")
+
+        ERROR_END()
+
+        /*
+         * If the requested access is permitted, access() succeeds and shall
+         * return 0;
+         */
+        REQ("access.02", "Access is permitted", access_spec==0
+            && *errno==SUT_EOK);
+
+        /*
+         * If any access permissions are checked, each shall be checked
+         * individually, as described in the Base Definitions volume of IEEE
+         * Std 1003.1-2001, Chapter 3, Definitions.
+         *
+         */
+        REQ_UNCHECKABLE("access.07", "Standard isn't clear");
+
+        /*
+         * The access() function shall check the file named by the pathname
+         * pointed to by the path argument for accessibility according to the
+         * bit pattern contained in amode, using the real user ID in place of
+         * the effective user ID and the real group ID in place of the
+         * effective group ID.
+         */
+        IMPLEMENT_REQ("access.01");
+
+        return true;
+    }
+}
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+
+IEEE Std 1003.1, 2004 Edition
+
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    chmod - change mode of a file
+
+SYNOPSIS
+
+    #include <sys/stat.h>
+
+    int chmod(const char *path, mode_t mode);
+
+DESCRIPTION
+
+    The chmod() function shall change S_ISUID, S_ISGID, [XSI]  S_ISVTX, and the
+    file permission bits of the file named by the pathname pointed to by the
+    path argument to the corresponding bits in the mode argument. The
+    application shall ensure that the effective user ID of the process matches
+    the owner of the file or the process has appropriate privileges in order to
+    do this.
+
+    S_ISUID, S_ISGID, [XSI]  S_ISVTX, and the file permission bits are
+    described in <sys/stat.h>.
+
+    If the calling process does not have appropriate privileges, and if the
+    group ID of the file does not match the effective group ID or one of the
+    supplementary group IDs and if the file is a regular file, bit S_ISGID
+    (set-group-ID on execution) in the file's mode shall be cleared upon
+    successful return from chmod().
+
+    Additional implementation-defined restrictions may cause the S_ISUID and
+    S_ISGID bits in mode to be ignored.
+
+    The effect on file descriptors for files open at the time of a call to
+    chmod() is implementation-defined.
+
+    Upon successful completion, chmod() shall mark for update the st_ctime
+    field of the file.
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned; otherwise, -1 shall be
+    returned and errno set to indicate the error. If -1 is returned, no change
+    to the file mode occurs.
+
+ERRORS
+
+    The chmod() function shall fail if:
+
+    [EACCES]
+
+        Search permission is denied on a component of the path prefix.
+
+    [ELOOP]
+
+        A loop exists in symbolic links encountered during resolution of the
+        path argument.
+
+    [ENAMETOOLONG]
+
+        The length of the path argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+    [ENOTDIR]
+
+        A component of the path prefix is not a directory.
+
+    [ENOENT]
+
+        A component of path does not name an existing file or path is an empty
+        string.
+
+    [EPERM]
+
+        The effective user ID does not match the owner of the file and the
+        process does not have appropriate privileges.
+
+    [EROFS]
+
+        The named file resides on a read-only file system.
+
+
+    The chmod() function may fail if:
+
+    [EINTR]
+
+        A signal was caught during execution of the function.
+
+    [EINVAL]
+
+        The value of the mode argument is invalid.
+
+    [ELOOP]
+
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the path argument.
+
+    [ENAMETOOLONG]
+
+        As a result of encountering a symbolic link in resolution of the path
+        argument, the length of the substituted pathname strings exceeded
+        {PATH_MAX}.
+*/
+
+
+Bool3 shall_isEPERM_chmod(CallContext context, FileSystem* fs, CString* path)
+{
+    Bool3 nl=True_Bool3;
+    ProcessState* ps=getProcessState_CallContext(context);
+    File* fl;
+    FileStatus* file_status;
+
+    ps=getProcessState_CallContext(context);
+    fl=getFile_FileSystem(fs, path);
+    file_status=create_FileStatus_FromFile(context, fl);
+
+    DUMP("\nnl_1==$(obj)\n", createCString_Bool3(nl));
+
+    if(fl==NULL)
+        return Unknown_Bool3;
+
+    if(fl->uid!=NULL)
+    {
+        if(ps->meta.effective_userid==*(fl->uid))
+            nl = False_Bool3;
+    }
+    else
+        return Unknown_Bool3;
+
+    DUMP("nl_2==$(obj)\n", createCString_Bool3(nl));
+    nl = and_Bool3(nl, not_Bool3(hasAppropriatePrivileges(context,
+        chmod_AccessPrivileges, fl->fileid)));
+
+    DUMP("nl_3==$(obj)\n", createCString_Bool3(nl));
+    if(nl==True_Bool3)
+        DUMP("path==$(obj)\n", path);
+
+    return nl;
+}
+Bool3 shall_isEROFS_chmod(CallContext context, CString* path,
+                          FilePermissions* mode)
+{
+    return Unknown_Bool3;
+}
+Bool3 shall_isEINVAL_chmod(CallContext context, CString* path,
+                           FilePermissions* mode)
+{
+    return Unknown_Bool3;
+}
+specification
+IntT chmod_spec( CallContext context, CString* path, FilePermissions* mode,
+                ErrorCode* errno)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    CString* resolved=resolvePath_Ext(context, fs, path, &eloop);
+    File* file=getFile_FileSystem(fs, resolved);
+    ProcessState* ps=getProcessState_CallContext(context);
+    FilePermissions* file_perm_pre;
+
+    if(file!=NULL)
+        if(file->permissions!=NULL)
+            file_perm_pre=clone(file->permissions);
+    pre
+    {
+        /*
+         * The effect on file descriptors for files open at the time of a call
+         * to chmod() is implementation-defined.
+         *
+         */
+        REQ("chmod.09", "Chmod on open file: file shan't be opened",
+            !chmod_isFileOpened(context, path));
+        return true;
+    }
+    post
+    {
+        /*
+         * otherwise, -1 shall be returned and errno set to indicate the error.
+         * If -1 is returned, no change to the file mode occurs.
+         */
+        ERROR_BEGIN(POSIX_CHMOD, "chmod.05", chmod_spec==-1, *errno)
+        /*
+         * The chmod() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Search permission is denied on a component of the path prefix.
+         */
+            ERROR_SHALL3(POSIX_CHMOD, EACCES, "chmod.06.01",
+            shall_isEACCES_chmod(context, fs, resolved))
+
+        /*
+         * The chmod() function shall fail if:
+         *
+         * [ELOOP]
+         *
+         * A loop exists in symbolic links encountered during resolution of
+         * the path argument.
+         */
+            ERROR_SHALL3(POSIX_CHMOD, ELOOP, "chmod.06.02", eloop)
+
+        /*
+         * The chmod() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * The length of the path argument exceeds {PATH_MAX} or a pathname
+         * component is longer than {NAME_MAX}.
+         */
+            ERROR_SHALL3(POSIX_CHMOD, ENAMETOOLONG, "chmod.06.03",
+                shall_isENAMETOOLONG_chmod(context, path))
+
+        /*
+         * The chmod() function shall fail if:
+         *
+         * [ENOTDIR]
+         *
+         * A component of the path prefix is not a directory.
+         */
+            ERROR_SHALL3(POSIX_CHMOD, ENOTDIR, "chmod.06.04",
+            shall_isENOTDIR_chmod(context, fs, getParentDir_Path(resolved)))
+
+        /*
+         * The chmod() function shall fail if:
+         *
+         * [ENOENT]
+         *
+         * A component of path does not name an existing file or path is an
+         * empty string.
+         */
+            ERROR_SHALL3(POSIX_CHMOD, ENOENT, "chmod.06.05",
+                shall_isENOENT_chmod(context, fs, resolved))
+
+        /*
+         * The chmod() function shall fail if:
+         *
+         * [EPERM]
+         *
+         * The effective user ID does not match the owner of the file and the
+         * process does not have appropriate privileges.
+         */
+            ERROR_SHALL3(POSIX_CHMOD, EPERM, "chmod.06.06",
+                shall_isEPERM_chmod(context, fs, resolved))
+
+        /*
+         * The chmod() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * The named file resides on a read-only file system.
+         */
+            ERROR_SHALL3(POSIX_CHMOD, EROFS, "chmod.06.07",
+                shall_isEROFS_chmod(context, path, mode))
+
+        /*
+         * The chmod() function may fail if:
+         *
+         * [EINTR]
+         *
+         * A signal was caught during execution of the function.
+         */
+            ERROR_UNCHECKABLE(POSIX_CHMOD, EINTR, "chmod.07.01",
+                "Difficult check")
+
+        /*
+         * The chmod() function may fail if:
+         *
+         * [EINVAL]
+         *
+         * The value of the mode argument is invalid.
+         */
+            ERROR_MAY3(POSIX_CHMOD, EINVAL, "chmod.07.02",
+                shall_isEINVAL_chmod(context, path, mode))
+
+        /*
+         * The chmod() function may fail if:
+         *
+         * [ELOOP]
+         *
+         * More than {SYMLOOP_MAX} symbolic links were encountered during
+         * resolution of the path argument.
+         */
+            ERROR_MAY3(POSIX_CHMOD, ELOOP, "chmod.07.03", eloop)
+
+        /*
+         * The chmod() function may fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * As a result of encountering a symbolic link in resolution of the
+         * path argument, the length of the substituted pathname strings
+         * exceeded {PATH_MAX}.
+         */
+            ERROR_MAY3(POSIX_CHMOD, ENAMETOOLONG, "chmod.07.04",
+                may_isENAMETOOLONG_chmod(context, resolved))
+
+        ERROR_END()
+
+        /*
+         * Upon successful completion, 0 shall be returned;
+         */
+        REQ("chmod.04", "Successful completion chmod", chmod_spec==0
+            && *errno==SUT_EOK);
+
+        if(file==NULL || file_perm_pre==NULL)
+            return true;
+
+        REQ("", "Mode remain unchanged", equals(mode, @mode));
+
+        /*
+         * Additional implementation-defined restrictions may cause the S_ISUID
+         * and S_ISGID bits in mode to be ignored.
+         *
+         */
+        REQ("chmod.08;fchmod.chmod.08", "set_uid, set_gid change table check",
+                S_IS_check(context, file_perm_pre, mode, file->permissions));
+
+        /*
+         * If the calling process does not have appropriate privileges, and if
+         * the group ID of the file does not match the effective group ID or
+         * one of the supplementary group IDs and if the file is a regular
+         * file, bit S_ISGID (set-group-ID on execution) in the file's mode
+         * shall be cleared upon successful return from chmod().
+         *
+         */
+        REQ("chmod.02;fchmod.chmod.02", "Set_gid cleared",
+                Set_gid_cleared(context, ps, file));
+
+
+        /*
+         * Upon successful completion, chmod() shall mark for update the
+         * st_ctime field of the file.
+         *
+         */
+        REQ("chmod.03;fchmod.chmod.03", "Ctime cleared",
+                file->ctime_updated==false);
+
+        /*
+         * The chmod() function shall change S_ISUID, S_ISGID, [XSI]  S_ISVTX,
+         * and the file permission bits of the file named by the pathname
+         * pointed to by the path argument to the corresponding bits in the
+         * mode argument. The application shall ensure that the effective user
+         * ID of the process matches the owner of the file or the process has
+         * appropriate privileges in order to do this.
+         *
+         */
+        REQ("chmod.01", "Permissions changed",
+                chmod_PermissionsEquals(context, file_perm_pre, mode,
+                        file->permissions));
+
+        return true;
+    }
+}
+
+void OnChmod( CallContext context, CString* path, FilePermissions* mode,
+                                                ErrorCode* errno, IntT ret)
+{
+    if(ret!=-1)
+    {
+        Bool3 eloop;
+        FileSystem* fs=getFileSystem(context);
+        CString* resolved=resolvePath_Ext(context, fs, path, &eloop);
+        File* file=getFile_FileSystem(fs, resolved);
+        ProcessState* ps=getProcessState_CallContext(context);
+        FilePermissions* tmp;
+        IntT i;
+
+        if(file==NULL)
+            return;
+
+        tmp=clone(mode);
+
+        if(file->permissions!=NULL)
+        {
+            tmp->set_uid= tmp->set_uid==file->permissions->set_uid ?
+                                    file->permissions->set_uid : Unknown_Bool3;
+            tmp->set_gid= tmp->set_gid==file->permissions->set_gid ?
+                                    file->permissions->set_gid : Unknown_Bool3;
+            if(POSIX_OPTION(context, XSI))
+                tmp->set_vtx= tmp->set_vtx==file->permissions->set_vtx ?
+                                    file->permissions->set_vtx : Unknown_Bool3;
+            else
+                tmp->set_vtx= Unknown_Bool3;
+        }
+
+        file->permissions=clone(tmp);
+
+        if(     file->kind==RegularFile
+            && not_Bool3(hasAppropriatePrivileges(context,
+                                        chmod_AccessPrivileges, file->fileid))
+            && chmod_BadGroupId(ps, file))
+        {
+            file->permissions->set_gid=False_Bool3;
+        }
+
+        file->ctime_updated=false;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+
+IEEE Std 1003.1, 2004 Edition
+
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    chown - change owner and group of a file
+
+SYNOPSIS
+
+    #include <unistd.h>
+
+    int chown(const char *path, uid_t owner, gid_t group);
+
+DESCRIPTION
+
+    The chown() function shall change the user and group ownership of a file.
+
+    The path argument points to a pathname naming a file. The user ID and group
+    ID of the named file shall be set to the numeric values contained in owner
+    and group, respectively.
+
+    Only processes with an effective user ID equal to the user ID of the file
+    or with appropriate privileges may change the ownership of a file. If
+    _POSIX_CHOWN_RESTRICTED is in effect for path:
+
+    Changing the user ID is restricted to processes with appropriate privileges.
+
+    Changing the group ID is permitted to a process with an effective user ID
+    equal to the user ID of the file, but without appropriate privileges, if
+    and only if owner is equal to the file's user ID or ( uid_t)-1 and group is
+    equal either to the calling process' effective group ID or to one of its
+    supplementary group IDs.
+
+    If the specified file is a regular file, one or more of the S_IXUSR,
+    S_IXGRP, or S_IXOTH bits of the file mode are set, and the process does not
+    have appropriate privileges, the set-user-ID (S_ISUID) and set-group-ID
+    (S_ISGID) bits of the file mode shall be cleared upon successful return
+    from chown(). If the specified file is a regular file, one or more of the
+    S_IXUSR, S_IXGRP, or S_IXOTH bits of the file mode are set, and the process
+    has appropriate privileges, it is implementation-defined whether the
+    set-user-ID and set-group-ID bits are altered. If the chown() function is
+    successfully invoked on a file that is not a regular file and one or more
+    of the S_IXUSR, S_IXGRP, or S_IXOTH bits of the file mode are set, the
+    set-user-ID and set-group-ID bits may be cleared.
+
+    If owner or group is specified as ( uid_t)-1 or ( gid_t)-1, respectively,
+    the corresponding ID of the file shall not be changed. If both owner and
+    group are -1, the times need not be updated.
+
+    Upon successful completion, chown() shall mark for update the st_ctime
+    field of the file.
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned; otherwise, -1 shall be
+    returned and errno set to indicate the error. If -1 is returned, no changes
+    are made in the user ID and group ID of the file.
+
+ERRORS
+
+    The chown() function shall fail if:
+
+    [EACCES]
+
+        Search permission is denied on a component of the path prefix.
+
+    [ELOOP]
+
+        A loop exists in symbolic links encountered during resolution of the
+        path argument.
+
+    [ENAMETOOLONG]
+
+        The length of the path argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+    [ENOTDIR]
+
+        A component of the path prefix is not a directory.
+
+    [ENOENT]
+
+        A component of path does not name an existing file or path is an empty
+        string.
+
+    [EPERM]
+
+        The effective user ID does not match the owner of the file, or the
+        calling process does not have appropriate privileges and
+        _POSIX_CHOWN_RESTRICTED indicates that such privilege is required.
+
+    [EROFS]
+
+        The named file resides on a read-only file system.
+
+
+    The chown() function may fail if:
+
+    [EIO]
+
+        An I/O error occurred while reading or writing to the file system.
+
+    [EINTR]
+
+        The chown() function was interrupted by a signal which was caught.
+
+    [EINVAL]
+
+        The owner or group ID supplied is not a value supported by the
+        implementation.
+
+    [ELOOP]
+
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the path argument.
+
+    [ENAMETOOLONG]
+
+        As a result of encountering a symbolic link in resolution of the path
+        argument, the length of the substituted pathname string exceeded
+        {PATH_MAX}.
+*/
+
+Bool3 shall_isEPERM_chown(CallContext context, CString* path, UidT owner,
+                                        GidT group)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    CString* resolved=clone(path);
+    File* file=getFile_FileSystem(fs, resolved);
+    ProcessState* ps=getProcessState_CallContext(context);
+
+    if(file==NULL)
+        return Unknown_Bool3;
+    if(file->uid==NULL)
+        return Unknown_Bool3;
+
+    if(owner==-1 || group==-1)
+        return False_Bool3;
+
+    if(     ps->meta.effective_userid!=*(file->uid)
+        ||
+                ps->meta.effective_userid==*(file->uid)
+            &&  getPathSystemConfigurationValue(context, path,
+                                                    SUT_PC_CHOWN_RESTRICTED)
+            &&  !hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                                                                file->fileid))
+    {
+        DUMP("effective_uid==%d, file_uid==%u\n",
+                                        ps->meta.effective_userid, *file->uid);
+        return False_Bool3;
+    }
+
+    DUMP("Failed\n");
+    return False_Bool3;
+}
+Bool3 may_isEINVAL_chown(CallContext context, UidT owner, GidT group)
+{
+    SystemState* st=getSystemState_CallContext(context);
+    Set* tmp;
+    IntT i;
+
+    if(st->isGlobalSetFilled)
+    {
+        tmp=st->globalUsers;
+        if(!contains_Set(tmp, create_UidTObj(owner)))
+            return True_Bool3;
+    }
+    else
+        return Unknown_Bool3;
+
+    if(st->isGroupsSetFilled && st->isGroupsSetValid)
+    {
+        tmp=st->groups;
+        if(!contains_Set(tmp, create_GidTObj(group)))
+            return True_Bool3;
+    }
+    else
+        return Unknown_Bool3;
+
+    return False_Bool3;
+}
+Bool3 shall_isEROFS_chown(CallContext context, CString* path, UidT  owner,
+                                                                    GidT group)
+{
+    return Unknown_Bool3;
+}
+specification
+IntT chown_spec( CallContext context, CString* path, UidT owner, GidT group,
+                                                            ErrorCode* errno)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    CString* resolved=resolvePath_Ext(context, fs, path, &eloop);
+    File* file=getFile_FileSystem(fs, resolved);
+    ProcessState* ps=getProcessState_CallContext(context);
+    File* file_pre;
+
+    if(file!=NULL)
+        file_pre=clone(file);
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        bool bigChange=false;
+
+        /*
+         * If -1 is returned, no changes are made in the user ID and group ID
+         * of the file.
+         */
+        REQ("chown.11", "uid, gid unchanged",
+            file!=NULL && file_pre!=NULL && chown_spec==-1 ?
+                    equals(file->uid, file_pre->uid)
+                &&  equals(file->gid, file_pre->gid) : true);
+
+        /*
+         * otherwise, -1 shall be returned and errno set to indicate the error.
+         *
+         */
+        ERROR_BEGIN( POSIX_CHOWN, "chown.10", chown_spec==-1, *errno)
+        /*
+         * The chown() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Search permission is denied on a component of the path prefix.
+         *
+         */
+            ERROR_SHALL3( POSIX_CHOWN, EACCES, "chown.12.01",
+                                shall_isEACCES_chown(context, fs, resolved))
+
+        /*
+         * The chown() function shall fail if:
+         *
+         * [ELOOP]
+         *
+         * A loop exists in symbolic links encountered during resolution of
+         * the path argument.
+         *
+         */
+            ERROR_SHALL3( POSIX_CHOWN, ELOOP, "chown.12.02", eloop)
+
+        /*
+         * The chown() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * The length of the path argument exceeds {PATH_MAX} or a pathname
+         * component is longer than {NAME_MAX}.
+         *
+         */
+            ERROR_SHALL3( POSIX_CHOWN, ENAMETOOLONG, "chown.12.03",
+                                shall_isENAMETOOLONG_chown(context, path))
+
+        /*
+         * The chown() function shall fail if:
+         *
+         * [ENOTDIR]
+         *
+         * A component of the path prefix is not a directory.
+         *
+         */
+            ERROR_SHALL3( POSIX_CHOWN, ENOTDIR, "chown.12.04",
+            shall_isENOTDIR_chown(context, fs, getParentDir_Path(resolved)))
+
+        /*
+         * The chown() function shall fail if:
+         *
+         * [ENOENT]
+         *
+         * A component of path does not name an existing file or path is an
+         * empty string.
+         */
+            ERROR_SHALL3( POSIX_CHOWN, ENOENT, "chown.12.05",
+                                shall_isENOENT_chown(context, fs, resolved))
+
+        /*
+         * The chown() function shall fail if:
+         *
+         * [EPERM]
+         *
+         * The effective user ID does not match the owner of the file, or the
+         * calling process does not have appropriate privileges and
+         * _POSIX_CHOWN_RESTRICTED indicates that such privilege is required.
+         *
+         */
+            ERROR_SHALL3( POSIX_CHOWN, EPERM, "chown.12.06",
+                            shall_isEPERM_chown(context, path, owner, group))
+
+        /*
+         * The chown() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * The named file resides on a read-only file system.
+         *
+         */
+            ERROR_SHALL3( POSIX_CHOWN, EROFS, "chown.12.07",
+                            shall_isEROFS_chown(context, path, owner, group))
+
+        /*
+         * The chown() function may fail if:
+         *
+         * [EIO]
+         *
+         * An I/O error occurred while reading or writing to the file system.
+         *
+         */
+            ERROR_UNCHECKABLE( POSIX_CHOWN, EIO, "chown.13.01",
+                                                        "Difficult check")
+
+        /*
+         * The chown() function may fail if:
+         *
+         * [EINTR]
+         *
+         * The chown() function was interrupted by a signal which was caught.
+         *
+         */
+            ERROR_UNCHECKABLE( POSIX_CHOWN, EINTR, "chown.13.02",
+                                                            "Difficult check")
+
+        /*
+         * The chown() function may fail if:
+         *
+         * [EINVAL]
+         *
+         * The owner or group ID supplied is not a value supported by the
+         * implementation.
+         */
+            ERROR_MAY3( POSIX_CHOWN, EINVAL, "chown.13.03",
+                                may_isEINVAL_chown(context, owner, group))
+
+        /*
+         * The chown() function may fail if:
+         *
+         * [ELOOP]
+         *
+         * More than {SYMLOOP_MAX} symbolic links were encountered during
+         * resolution of the path argument.
+         *
+         */
+            ERROR_MAY3( POSIX_CHOWN, ELOOP, "chown.13.04", eloop)
+
+        /*
+         * The chown() function may fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * As a result of encountering a symbolic link in resolution of the
+         * path argument, the length of the substituted pathname string
+         * exceeded {PATH_MAX}.
+         *
+         */
+            ERROR_MAY3( POSIX_CHOWN, ENAMETOOLONG, "chown.13.05",
+                                may_isENAMETOOLONG_chown(context, resolved))
+
+        ERROR_END()
+
+        /*
+         * Upon successful completion, 0 shall be returned;
+         *
+         */
+        REQ("chown.09", "Chown: successful completion", chown_spec==0
+                && *errno==SUT_EOK);
+
+        if(file==NULL)
+            return true;
+
+        if(     ps->meta.effective_userid==*file_pre->uid
+           ||
+                hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                                                            file_pre->fileid))
+        {
+            /*
+             * Only processes with an effective user ID equal to the user ID of
+             * the file or with appropriate privileges may change the ownership
+             * of a file.
+             */
+            IMPLEMENT_REQ("chown.02");
+            if(getPathSystemConfigurationValue(context, resolved,
+                                                    SUT_PC_CHOWN_RESTRICTED))
+            {
+                if(hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                                                        file_pre->fileid))
+                {
+                    /*
+                     * If _POSIX_CHOWN_RESTRICTED is in effect for path:
+                     *
+                     * Changing the user ID is restricted to processes with
+                     * appropriate privileges.
+                     *
+                     */
+                    IMPLEMENT_REQ("chown.03.01");
+                    bigChange=true;
+                }
+                else
+                {
+                    /*
+                     * If _POSIX_CHOWN_RESTRICTED is in effect for path:
+                     *
+                     * Changing the group ID is permitted to a process with an
+                     * effective user ID equal to the user ID of the file, but
+                     * without appropriate privileges, if and only if owner is
+                     * equal to the file's user ID or ( uid_t)-1 and group is
+                     * equal either to the calling process' effective group ID
+                     * or to one of its supplementary group IDs.
+                     *
+                     */
+                    REQ("chown.03.02",
+                        "If _POSIX_CHOWN_RESTRICTED is in effect for path",
+                                        restr_change(file, ps, owner, group));
+                }
+            }
+            else
+                bigChange=true;
+
+            if(
+                file->permissions->owner->execute
+            ||  file->permissions->group->execute
+            ||  file->permissions->other->execute
+            )
+            {
+                if(file->kind==RegularFile)
+                {
+                    if(hasAppropriatePrivileges(context,
+                                        chown_AccessPrivileges, file->fileid))
+                    {
+                        /*
+                         * If the specified file is a regular file, one or more
+                         * of the S_IXUSR, S_IXGRP, or S_IXOTH bits of the file
+                         * mode are set, and the process has appropriate
+                         * privileges, it is implementation-defined whether
+                         * the set-user-ID and set-group-ID bits are altered.
+                         *
+                         */
+                        REQ("chown.05", "Altered",
+                                file->permissions->set_gid==Unknown_Bool3
+                            &&  file->permissions->set_gid==Unknown_Bool3);
+
+                    }
+                    else
+                    {
+                        /*
+                         * If the specified file is a regular file, one or more
+                         * of the S_IXUSR, S_IXGRP, or S_IXOTH bits of the file
+                         * mode are set, and the process does not have
+                         * appropriate privileges, the set-user-ID (S_ISUID)
+                         * and set-group-ID (S_ISGID) bits of the file mode
+                         * shall be cleared upon successful return from
+                         * chown().
+                         *
+                         */
+                        REQ("chown.04", "Shall Clear",
+                                file->permissions->set_gid==False_Bool3
+                            &&  file->permissions->set_gid==False_Bool3);
+                    }
+                }
+                else
+                {
+                    /*
+                     * If the chown() function is successfully invoked on a
+                     * file that is not a regular file and one or more of the
+                     * S_IXUSR, S_IXGRP, or S_IXOTH bits of the file mode are
+                     * set, the set-user-ID and set-group-ID bits may be
+                     * cleared.
+                     *
+                     */
+                    REQ("chown.06", "May clear",
+                                file->permissions->set_gid==Unknown_Bool3
+                            &&  file->permissions->set_gid==Unknown_Bool3);
+                }
+            }
+        }
+
+        if(bigChange)
+        {
+            /*
+             * If owner or group is specified as ( uid_t)-1 or ( gid_t)-1,
+             * respectively, the corresponding ID of the file shall not be
+             * changed.
+             *
+             */
+            /*
+             * The path argument points to a pathname naming a file. The user
+             * ID and group ID of the named file shall be set to the numeric
+             * values contained in owner and group, respectively.
+             *
+             */
+            REQ("chown.07.01;chown.14", "uid and gid changing[0]",
+                    (owner==-1) ? equals(file->uid, file_pre->uid) :
+                                                            *file->uid==owner
+                &&  (group==-1) ? equals(file->gid, file_pre->gid) :
+                                                            *file->gid==group);
+
+            /*
+             * Upon successful completion, chown() shall mark for update the
+             * st_ctime field of the file.
+             *
+             */
+            /*
+             * If both owner and group are -1, the times need not be updated.
+             *
+             */
+            REQ("chown.08;chown.07.02", "Ctime update(-1)[0]",
+                                        CtimeUpdateCheck(owner, group, file));
+        }
+
+        /*
+         * The chown() function shall change the user and group ownership of a
+         * file.
+         */
+        IMPLEMENT_REQ("chown.01");
+        return true;
+    }
+}
+
+void OnChown( CallContext context, CString* path, UidT owner, GidT group,
+                                                    ErrorCode* errno, IntT ret)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    CString* resolved=clone(path);
+    File* file=getFile_FileSystem(fs, resolved);
+    ProcessState* ps=getProcessState_CallContext(context);
+    IntT i;
+
+    if(file==NULL)
+        return;
+
+    if(ret==-1)
+        return;
+
+    if(CHOWN_CTIME_UPDATE_MARK==MARK_ALWAYS)
+        file->ctime_updated=false;
+
+    if(  file->uid!=NULL &&(  ps->meta.effective_userid==*(file->uid)
+        ||  hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                                                                file->fileid)))
+    {
+        if(getPathSystemConfigurationValue(context, path,
+                                                    SUT_PC_CHOWN_RESTRICTED))
+        {
+            if(hasAppropriatePrivileges(context,
+                                        chown_AccessPrivileges, file->fileid))
+            {
+                if(owner!=-1)
+                    file->uid=create_UidTObj(owner);
+                if(group!=-1)
+                    file->gid=create_GidTObj(group);
+
+                if(owner!=(UidT)-1 || group!=(GidT)-1)
+                    file->ctime_updated=false;
+            }
+            else
+            {
+                if(     *file->uid==ps->meta.effective_userid
+                    && ( owner==*(file->uid) || owner==(UidT)-1)
+                    && !chmod_BadGroupId(ps, file))
+                {
+                    if(group!=(GidT)-1)
+                        file->ctime_updated=false;
+
+                    if(group!=-1)
+                        file->gid=create_GidTObj(group);
+                }
+            }
+        }
+        else
+        {
+            if(owner!=-1)
+                file->uid=create_UidTObj(owner);
+            if(group!=-1)
+                file->gid=create_GidTObj(group);
+
+            if(owner!=(UidT)-1 || group!=(GidT)-1)
+                file->ctime_updated=false;
+        }
+
+        if(
+            file->permissions->owner->execute
+        ||  file->permissions->group->execute
+        ||  file->permissions->other->execute
+        )
+        {
+            if(file->kind==RegularFile)
+            {
+                if(hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                                                                file->fileid))
+                    file->permissions->set_gid = file->permissions->set_uid =
+                                                                Unknown_Bool3;
+                else
+                    file->permissions->set_gid = file->permissions->set_uid =
+                                                                False_Bool3;
+            }
+            else
+                file->permissions->set_gid = file->permissions->set_uid =
+                                                                Unknown_Bool3;
+        }
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+
+IEEE Std 1003.1, 2004 Edition
+
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    fchmod - change mode of a file
+
+SYNOPSIS
+
+    #include <sys/stat.h>
+
+    int fchmod(int fildes, mode_t mode);
+
+DESCRIPTION
+
+    The fchmod() function shall be equivalent to chmod() except that the file
+    whose permissions are changed is specified by the file descriptor fildes.
+
+    [SHM] If fildes references a shared memory object, the fchmod() function
+    need only affect the S_IRUSR, S_IWUSR, S_IRGRP, S_IWGRP, S_IROTH, and
+    S_IWOTH file permission bits.
+
+    [TYM] If fildes references a typed memory object, the behavior of fchmod()
+    is unspecified.
+
+    If fildes refers to a socket, the behavior of fchmod() is unspecified.
+
+    [XSR] If fildes refers to a STREAM (which is fattach()-ed into the file
+    system name space) the call returns successfully, doing nothing.
+
+RETURN VALUE
+
+    Upon successful completion, fchmod() shall return 0. Otherwise, it shall
+    return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The fchmod() function shall fail if:
+
+    [EBADF]
+
+        The fildes argument is not an open file descriptor.
+
+    [EPERM]
+
+        The effective user ID does not match the owner of the file and the
+        process does not have appropriate privilege.
+
+    [EROFS]
+
+        The file referred to by fildes resides on a read-only file system.
+
+    The fchmod() function may fail if:
+
+    [EINTR]
+
+        [XSI] The fchmod() function was interrupted by a signal.
+
+    [EINVAL]
+
+        [XSI] The value of the mode argument is invalid.
+
+    [EINVAL]
+
+        The fildes argument refers to a pipe and the implementation disallows
+        execution of fchmod() on a pipe.
+*/
+Bool3 shall_isEBADF_fchmod(CallContext context, FileDescId fildes,
+                                                            ErrorCode* errno)
+{
+    if(*errno==SUT_EBADF)
+    {
+        CString* path=getPath_FileDescId(fildes);
+
+        return path==NULL? Unknown_Bool3: True_Bool3;
+    }
+    return Unknown_Bool3;
+}
+Bool3 shall_isEPERM_fchmod(CallContext context, FileDescId fildes,
+                                                            ErrorCode* errno)
+{
+    FileSystem* fs=getFileSystem(context);
+    CString* path=getPath_FileDescId(fildes);
+    return shall_isEPERM_chmod(context, fs, path);
+}
+Bool3 may_isEINVAL_fchmod(CallContext context, FileDescId fildes,
+                                                            ErrorCode* errno)
+{
+    FileSystem* fs=getFileSystem(context);
+    CString* path=getPath_FileDescId(fildes);
+    File* file=getFile_FileSystem(fs, path);
+
+    if(file->kind==FIFOFile)
+        return Unknown_Bool3;
+
+    return False_Bool3;
+}
+Bool3 shall_isEROFS_fchmod(CallContext context, FileDescId fildes,
+                                                        FilePermissions* mode)
+{
+    CString* path=getPath_FileDescId(fildes);
+
+    if(path==NULL)
+        return Unknown_Bool3;
+
+    return shall_isEROFS_chmod(context, path, mode);
+}
+Bool3 shall_isEINVAL_fchmod(CallContext context, FileDescId fildes,
+                                                        FilePermissions* mode)
+{
+    CString* path=getPath_FileDescId(fildes);
+
+    if(path==NULL)
+        return Unknown_Bool3;
+
+    return shall_isEINVAL_chmod(context, path, mode);
+}
+specification
+IntT fchmod_spec( CallContext context, FileDescId fildes,
+                                    FilePermissions* mode, ErrorCode* errno)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    CString* path=getPath_FileDescId(fildes);
+    ProcessState* ps=getProcessState_CallContext(context);
+    CString* resolved;
+    File* file, *file_pre;
+    FilePermissions* file_perm_pre;
+
+    if(path!=NULL)
+        resolved=resolvePath_Ext(context, fs, path, &eloop);
+    if(resolved!=NULL)
+        file=getFile_FileSystem(fs, resolved);
+
+    if(file!=NULL)
+    {
+        file_pre=clone(file);
+        if(file->permissions!=NULL)
+            file_perm_pre=clone(file->permissions);
+    }
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * Otherwise, it shall return -1 and set errno to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_FCHMOD, "fchmod.07", fchmod_spec==-1, *errno)
+        /*
+         * The fchmod() function shall fail if:
+         *
+         * [EBADF]
+         *
+         * The fildes argument is not an open file descriptor.
+         *
+         */
+            ERROR_SHALL3(POSIX_FCHMOD, EBADF, "fchmod.08.01",
+                                shall_isEBADF_fchmod(context, fildes, errno))
+
+        /*
+         * The fchmod() function shall fail if:
+         *
+         * [EPERM]
+         *
+         * The effective user ID does not match the owner of the file and the
+         * process does not have appropriate privilege.
+         *
+         */
+            ERROR_SHALL3(POSIX_FCHMOD, EPERM, "fchmod.08.02",
+                                shall_isEPERM_fchmod(context, fildes, errno))
+
+        /*
+         * The fchmod() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * The file referred to by fildes resides on a read-only file system.
+         *
+         */
+            ERROR_SHALL3(POSIX_FCHMOD, EROFS, "fchmod.08.03",
+                                shall_isEROFS_fchmod(context, fildes, mode))
+
+        /*
+         * The fchmod() function may fail if:
+         *
+         * [EINTR]
+         *
+         * [XSI] The fchmod() function was interrupted by a signal.
+         *
+         */
+            ERROR_UNCHECKABLE(POSIX_FCHMOD, EINTR, "fchmod.09.01",
+                                                            "Difficult check")
+
+        /*
+         * The fchmod() function may fail if:
+         *
+         * [EINVAL]
+         *
+         * [XSI] The value of the mode argument is invalid.
+         *
+         */
+            ERROR_MAY3(POSIX_FCHMOD, EINVAL, "fchmod.09.02",
+                                shall_isEINVAL_fchmod(context, fildes, mode))
+
+        /*
+         * The fchmod() function may fail if:
+         *
+         * [EINVAL]
+         *
+         * The fildes argument refers to a pipe and the implementation
+         * disallows execution of fchmod() on a pipe.
+         *
+         */
+            ERROR_MAY3(POSIX_FCHMOD, EINVAL, "fchmod.09.03",
+                                may_isEINVAL_fchmod(context, fildes, errno))
+
+        ERROR_END()
+
+        /*
+         * Upon successful completion, fchmod() shall return 0.
+         *
+         */
+        REQ("fchmod.06", "Fchmod: successful completion", fchmod_spec==0
+                                                        && *errno==SUT_EOK);
+
+        if(file==NULL)
+            return true;
+
+        REQ("", "Mode remain unchanged", equals(mode, @mode));
+
+        /*
+         * [TYM] If fildes references a typed memory object, the behavior of
+         * fchmod() is unspecified.
+         *
+         */
+        REQ_UNCHECKABLE("fchmod.03", "We don't have TYM in model");
+        /*
+         * If fildes refers to a socket, the behavior of fchmod() is
+         * unspecified.
+         */
+        REQ("fchmod.04", "", TODO_REQ());
+
+        /*
+         * [SHM] If fildes references a shared memory object, the fchmod()
+         * function need only affect the S_IRUSR, S_IWUSR, S_IRGRP, S_IWGRP,
+         * S_IROTH, and S_IWOTH file permission bits.
+         *
+         */
+        if(POSIX_OPTION(context, SHM) && file->kind==SharedMemoryObject)
+        {
+            REQ("fchmod.02", "Fchmod shm check", fchmod_shm_check(file_pre,
+                                                                file, mode));
+            return true;
+        }
+
+        /*
+         * [XSR] If fildes refers to a STREAM (which is fattach()-ed into the
+         * file system name space) the call returns successfully, doing
+         * nothing.
+         *
+         */
+        REQ_UNCHECKABLE("fchmod.05", "We don't have XSR in model");
+
+        /*
+         * Additional implementation-defined restrictions may cause the
+         * S_ISUID and S_ISGID bits in mode to be ignored.
+         *
+         */
+        REQ("chmod.08;fchmod.chmod.08", "set_uid, set_gid change table check",
+                S_IS_check(context, file_perm_pre, mode, file->permissions));
+
+        /*
+         * If the calling process does not have appropriate privileges, and if
+         * the group ID of the file does not match the effective group ID or
+         * one of the supplementary group IDs and if the file is a regular
+         * file, bit S_ISGID (set-group-ID on execution) in the file's mode
+         * shall be cleared upon successful return from chmod().
+         *
+         */
+        REQ("chmod.02;fchmod.chmod.02", "Set_gid cleared",
+                                        Set_gid_cleared(context, ps, file));
+
+
+        /*
+         * Upon successful completion, chmod() shall mark for update the
+         * st_ctime field of the file.
+         *
+         */
+        REQ("chmod.03;fchmod.chmod.03", "Ctime cleared",
+                                                file->ctime_updated==false);
+
+        /*
+         * The fchmod() function shall be equivalent to chmod() except that the
+         * file whose permissions are changed is specified by the file
+         * descriptor fildes.
+         *
+         */
+        REQ("fchmod.01", "Permissions changed",
+                chmod_PermissionsEquals(context, file_perm_pre, mode,
+                                                        file->permissions));
+
+        return true;
+    }
+}
+
+void OnFchmod( CallContext context, FileDescId fildes, FilePermissions* mode,
+                                                ErrorCode* errno, IntT ret)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    CString* path=getPath_FileDescId(fildes);
+    CString* resolved=resolvePath_Ext(context, fs, path, &eloop);
+    File* file=getFile_FileSystem(fs, resolved);
+    ProcessState* ps=getProcessState_CallContext(context);
+    FilePermissions* tmp;
+    bool owner_ex, group_ex, other_ex;
+
+    if(file==NULL)
+        return;
+
+    if(file->kind==Socket)
+        return;
+
+    if(POSIX_OPTION(context, SHM) && file->kind==SharedMemoryObject && ret!=-1)
+    {
+        if(file==NULL)
+            return;
+        if(file->permissions==NULL)
+            return;
+
+        file->permissions->owner->read=mode->owner->read;
+        file->permissions->group->read=mode->group->read;
+        file->permissions->other->read=mode->other->read;
+
+        file->permissions->owner->write=mode->owner->write;
+        file->permissions->group->write=mode->group->write;
+        file->permissions->other->write=mode->other->write;
+        return;
+    }
+
+    OnChmod(context, path, mode, errno, ret);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+
+IEEE Std 1003.1, 2004 Edition
+
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    fchown - change owner and group of a file
+
+SYNOPSIS
+
+    #include <unistd.h>
+
+    int fchown(int fildes, uid_t owner, gid_t group);
+
+DESCRIPTION
+
+    The fchown() function shall be equivalent to chown() except that the file
+    whose owner and group are changed is specified by the file descriptor
+    fildes.
+
+RETURN VALUE
+
+    Upon successful completion, fchown() shall return 0. Otherwise, it shall
+    return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The fchown() function shall fail if:
+
+    [EBADF]
+
+        The fildes argument is not an open file descriptor.
+
+    [EPERM]
+
+        The effective user ID does not match the owner of the file or the
+        process does not have appropriate privilege and _POSIX_CHOWN_RESTRICTED
+        indicates that such privilege is required.
+
+    [EROFS]
+
+        The file referred to by fildes resides on a read-only file system.
+
+
+    The fchown() function may fail if:
+
+    [EINVAL]
+
+        The owner or group ID is not a value supported by the implementation.
+        The fildes argument refers to a pipe or socket [XSR]  or an
+        fattach()-ed STREAM and the implementation disallows execution of
+        fchown() on a pipe.
+
+    [EIO]
+
+        A physical I/O error has occurred.
+
+    [EINTR]
+
+        The fchown() function was interrupted by a signal which was caught.
+*/
+
+
+Bool3 shall_isEPERM_fchown(CallContext context, FileDescId fildes, UidT owner,
+                                                                    GidT group)
+{
+    CString* path=getPath_FileDescId(fildes);
+
+    if(path==NULL)
+        return Unknown_Bool3;
+
+    return shall_isEPERM_chown(context, path, owner, group);
+}
+Bool3 shall_isEROFS_fchown(CallContext context, FileDescId fildes, UidT owner,
+                                                                    GidT group)
+{
+    CString* path=getPath_FileDescId(fildes);
+
+    if(path==NULL)
+        return Unknown_Bool3;
+
+    return shall_isEROFS_chown(context, path, owner, group);
+}
+Bool3 may_isEINVAL_fchown(CallContext context, FileDescId fildes, UidT owner,
+                                                                    GidT group)
+{
+    CString* path=getPath_FileDescId(fildes);
+
+    if(path==NULL)
+        return Unknown_Bool3;
+
+    return may_isEINVAL_chown(context, owner, group);
+}
+
+specification
+IntT fchown_spec( CallContext context, FileDescId fildes, UidT owner,
+                                                GidT group, ErrorCode* errno)
+{
+    CString* path=getPath_FileDescId(fildes);
+    Bool3 eloop;
+    FileSystem* fs;
+    CString* resolved=NULL;
+    File* file_pre, *file;
+    ProcessState* ps;
+
+    if(path!=NULL)
+    {
+        fs=getFileSystem(context);
+        resolved=resolvePath_Ext(context, fs, path, &eloop);
+        file=getFile_FileSystem(fs, resolved);
+        ps=getProcessState_CallContext(context);
+
+        if(file!=NULL)
+            file_pre=clone(file);
+    }
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        bool bigChange=false;
+
+        /*
+         * If -1 is returned, no changes are made in the user ID and group ID
+         * of the file.
+         *
+         */
+        REQ("fchown.chown.11", "uid, gid unchanged",
+            file!=NULL && file_pre!=NULL && fchown_spec==-1 ?
+                    equals(file->uid, file_pre->uid)
+                &&  equals(file->gid, file_pre->gid) : true);
+
+        /*
+         * Otherwise, it shall return -1 and set errno to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_FCHOWN, "fchown.03", fchown_spec==-1,  *errno )
+        /*
+         * The fchown() function shall fail if:
+         *
+         * [EBADF]
+         *
+         * The fildes argument is not an open file descriptor.
+         *
+         */
+            ERROR_SHALL3(POSIX_FCHOWN, EBADF, "fchown.04.01",
+                                shall_isEBADF_fchown(context, fildes, errno))
+
+        /*
+         * The fchown() function shall fail if:
+         *
+         * [EPERM]
+         *
+         * The effective user ID does not match the owner of the file or the
+         * process does not have appropriate privilege and
+         * _POSIX_CHOWN_RESTRICTED indicates that such privilege is required.
+         *
+         */
+            ERROR_SHALL3(POSIX_FCHOWN, EPERM, "fchown.04.02",
+                        shall_isEPERM_fchown(context, fildes, owner, group))
+
+        /*
+         * The fchown() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * The file referred to by fildes resides on a read-only file system.
+         *
+         */
+            ERROR_SHALL3(POSIX_FCHOWN, EROFS, "fchown.04.03",
+                        shall_isEROFS_fchown(context, fildes, owner, group))
+
+        /*
+         * The fchown() function may fail if:
+         *
+         * [EINVAL]
+         *
+         * The owner or group ID is not a value supported by the
+         * implementation. The fildes argument refers to a pipe or socket [XSR]
+         * or an fattach()-ed STREAM and the implementation disallows execution
+         * of fchown() on a pipe.
+         *
+         */
+            ERROR_MAY3(POSIX_FCHOWN, EINVAL, "fchown.05.01",
+                        may_isEINVAL_fchown(context, fildes, owner, group))
+
+        /*
+         * The fchown() function may fail if:
+         *
+         * [EIO]
+         *
+         * A physical I/O error has occurred.
+         *
+         */
+            ERROR_UNCHECKABLE(POSIX_FCHOWN, EIO, "fchown.05.02",
+                                                            "Difficult check")
+
+        /*
+         * The fchown() function may fail if:
+         *
+         * [EINTR]
+         *
+         * The fchown() function was interrupted by a signal which was caught.
+         *
+         */
+            ERROR_UNCHECKABLE(POSIX_FCHOWN, EINTR, "fchown.05.03",
+                                                            "Difficult check")
+
+        ERROR_END()
+
+        /*
+         * Upon successful completion, fchown() shall return 0.
+         *
+         */
+        REQ("fchown.02", "Fchown: successful completion", fchown_spec==0
+                                                        && *errno==SUT_EOK);
+
+        if(file==NULL)
+            return true;
+
+
+        if( ps->meta.effective_userid==*file_pre->uid
+            ||
+            hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                                                            file_pre->fileid))
+        {
+            /*
+             * Only processes with an effective user ID equal to the user ID of
+             * the file or with appropriate privileges may change the ownership
+             * of a file.
+             */
+            IMPLEMENT_REQ("fchown.chown.02");
+            if(getPathSystemConfigurationValue(context, resolved,
+                                                    SUT_PC_CHOWN_RESTRICTED))
+            {
+                if(hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                    file_pre->fileid))
+                {
+                    /*
+                     * If _POSIX_CHOWN_RESTRICTED is in effect for path:
+                     *
+                     * Changing the user ID is restricted to processes with
+                     * appropriate privileges.
+                     *
+                     */
+                    IMPLEMENT_REQ("fchown.chown.03.01");
+                    bigChange=true;
+                }
+                else
+                {
+                    /*
+                     * If _POSIX_CHOWN_RESTRICTED is in effect for path:
+                     *
+                     * Changing the group ID is permitted to a process with an
+                     * effective user ID equal to the user ID of the file,
+                     * but without appropriate privileges, if and only if owner
+                     * is equal to the file's user ID or ( uid_t)-1 and group
+                     * is equal either to the calling process' effective group
+                     * ID or to one of its supplementary group IDs.
+                     *
+                     */
+                    REQ("fchown.chown.03.02",
+                        "If _POSIX_CHOWN_RESTRICTED is in effect for path",
+                                        restr_change(file, ps, owner, group));
+                }
+            }
+            else
+                bigChange=true;
+
+            if(
+                file->permissions->owner->execute
+            ||  file->permissions->group->execute
+            ||  file->permissions->other->execute
+            )
+            {
+                if(file->kind==RegularFile)
+                {
+                    if(hasAppropriatePrivileges(context,
+                                        chown_AccessPrivileges, file->fileid))
+                    {
+                        /*
+                         * If the specified file is a regular file, one or more
+                         * of the S_IXUSR, S_IXGRP, or S_IXOTH bits of the file
+                         * mode are set, and the process has appropriate
+                         * privileges, it is implementation-defined whether the
+                         * set-user-ID and set-group-ID bits are altered.
+                         *
+                         */
+                        REQ("fchown.chown.05", "Altered",
+                                file->permissions->set_gid==Unknown_Bool3
+                            &&  file->permissions->set_uid==Unknown_Bool3);
+
+                    }
+                    else
+                    {
+                        /*
+                         * If the specified file is a regular file, one or more
+                         * of the S_IXUSR, S_IXGRP, or S_IXOTH bits of the file
+                         * mode are set, and the process does not have
+                         * appropriate privileges, the set-user-ID (S_ISUID)
+                         * and set-group-ID (S_ISGID) bits of the file mode
+                         * shall be cleared upon successful return from
+                         * chown().
+                         */
+                        REQ("fchown.chown.04", "Shall Clear",
+                                file->permissions->set_gid==False_Bool3
+                            &&  file->permissions->set_uid==False_Bool3);
+                    }
+                }
+                else
+                {
+                    /*
+                     * If the chown() function is successfully invoked on a
+                     * file that is not a regular file and one or more of the
+                     * S_IXUSR, S_IXGRP, or S_IXOTH bits of the file mode are
+                     * set, the set-user-ID and set-group-ID bits may be
+                     * cleared.
+                     */
+                    REQ("fchown.chown.06", "May clear",
+                                file->permissions->set_gid==Unknown_Bool3
+                            &&  file->permissions->set_uid==Unknown_Bool3);
+                }
+            }
+        }
+
+        if(bigChange)
+        {
+            /*
+             * If owner or group is specified as ( uid_t)-1 or ( gid_t)-1,
+             * respectively, the corresponding ID of the file shall not be
+             * changed.
+             */
+            /*
+             * The path argument points to a pathname naming a file. The
+             * user ID and group ID of the named file shall be set to the
+             * numeric values contained in owner and group, respectively.
+             *
+             */
+            REQ("fchown.chown.07.01;fchown.chown.14", "uid and gid changing[0]",
+                    (owner==-1) ? equals(file->uid, file_pre->uid) :
+                                                            *file->uid==owner
+                &&  (group==-1) ? equals(file->gid, file_pre->gid) :
+                                                            *file->gid==group);
+
+            /*
+             * Upon successful completion, chown() shall mark for update the
+             * st_ctime field of the file.
+             *
+             */
+            /*
+             * If both owner and group are -1, the times need not be updated.
+             *
+             */
+            REQ("fchown.chown.08;fchown.chown.07.02", "Ctime update(-1)[0]",
+                                        CtimeUpdateCheck(owner, group, file));
+        }
+
+        /*
+         * The fchown() function shall be equivalent to chown() except that
+         * the file whose owner and group are changed is specified by the file
+         * descriptor fildes.
+         */
+        REQ("fchown.01", "", TODO_REQ());
+
+
+        return true;
+    }
+}
+
+void OnFchown( CallContext context, FileDescId fildes, UidT owner, GidT group,
+                                                ErrorCode* errno, IntT ret)
+{
+    if(ret!=-1)
+    {
+        CString* path=getPath_FileDescId(fildes);
+
+        if(path==NULL)
+            return;
+        
+        if(charAt_CString(path, length_CString(path)-1)==(CharT)'/')
+        {
+            path = substring_CString(path, 0, length_CString(path)-1 );
+        }
+        
+        OnChown(context, path, owner, group, errno, ret);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+
+IEEE Std 1003.1, 2004 Edition
+
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    lchown - change the owner and group of a symbolic link
+
+SYNOPSIS
+
+    [XSI] #include <unistd.h>
+
+    int lchown(const char *path, uid_t owner, gid_t group);
+
+DESCRIPTION
+
+    The lchown() function shall be equivalent to chown(), except in the case
+    where the named file is a symbolic link. In this case, lchown() shall
+    change the ownership of the symbolic link file itself, while chown()
+    changes the ownership of the file or directory to which the symbolic link
+    refers.
+
+RETURN VALUE
+
+    Upon successful completion, lchown() shall return 0. Otherwise, it shall
+    return -1 and set errno to indicate an error.
+
+ERRORS
+
+    The lchown() function shall fail if:
+
+    [EACCES]
+
+        Search permission is denied on a component of the path prefix of path.
+
+    [EINVAL]
+
+        The owner or group ID is not a value supported by the implementation.
+
+    [ELOOP]
+
+        A loop exists in symbolic links encountered during resolution of the
+        path argument.
+
+    [ENAMETOOLONG]
+
+        The length of a pathname exceeds {PATH_MAX} or a pathname component is
+        longer than {NAME_MAX}.
+
+    [ENOENT]
+
+        A component of path does not name an existing file or path is an empty
+        string.
+
+    [ENOTDIR]
+
+        A component of the path prefix of path is not a directory.
+
+    [EOPNOTSUPP]
+
+        The path argument names a symbolic link and the implementation does not
+        support setting the owner or group of a symbolic link.
+
+    [EPERM]
+
+        The effective user ID does not match the owner of the file and the
+        process does not have appropriate privileges.
+
+    [EROFS]
+
+        The file resides on a read-only file system.
+
+    The lchown() function may fail if:
+
+    [EIO]
+
+        An I/O error occurred while reading or writing to the file system.
+
+    [EINTR]
+
+        A signal was caught during execution of the function.
+
+    [ELOOP]
+
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the path argument.
+
+    [ENAMETOOLONG]
+
+        Pathname resolution of a symbolic link produced an intermediate result
+        whose length exceeds {PATH_MAX}.
+*/
+
+specification
+IntT lchown_spec( CallContext context, CString* path, UidT owner, GidT group,
+                                                            ErrorCode* errno)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    ProcessState* ps=getProcessState_CallContext(context);
+    CString* parent=getParentDir_Path(path), *resolved;
+    CString* basename=getBaseName_Path(path);
+    File* file_pre, *file;
+
+    parent=resolvePath_Ext(context, fs, parent, &eloop);
+
+    if(parent!=NULL && basename!=NULL)
+    {
+        resolved=concat_Path(parent, basename);
+        file=getFile_FileSystem(fs, resolved);
+        if(file!=NULL)
+            file_pre=clone(file);
+    }
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        bool bigChange=false;
+
+        /*
+         * If -1 is returned, no changes are made in the user ID and group ID
+         * of the file.
+         *
+         */
+        REQ("lchown.chown.11", "uid, gid unchanged",
+            file!=NULL && file_pre!=NULL && lchown_spec==-1 ?
+                    equals(file->uid, file_pre->uid)
+                &&  equals(file->gid, file_pre->gid) : true);
+        /*
+         * Otherwise, it shall return -1 and set errno to indicate an error.
+         *
+         */
+        ERROR_BEGIN(POSIX_LCHOWN, "lchown.04", lchown_spec==-1,  *errno )
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Search permission is denied on a component of the path prefix of
+         * path.
+         *
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, EACCES, "lchown.05.01",
+                                shall_isEACCES_lchown(context, fs, resolved))
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The owner or group ID is not a value supported by the implementation.
+         *
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, EINVAL, "lchown.05.02",
+                                shall_isEINVAL_lchown(context, owner, group))
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [ELOOP]
+         *
+         * A loop exists in symbolic links encountered during resolution of
+         * the path argument.
+         *
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, ELOOP, "lchown.05.03", eloop)
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * The length of a pathname exceeds {PATH_MAX} or a pathname component
+         * is longer than {NAME_MAX}.
+         *
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, ENAMETOOLONG, "lchown.05.04",
+                                    shall_isENAMETOOLONG_lchown(context, path))
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [ENOENT]
+         *
+         * A component of path does not name an existing file or path is an
+         * empty string.
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, ENOENT, "lchown.05.05",
+                                shall_isENOENT_lchown(context, fs, resolved))
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [ENOTDIR]
+         *
+         * A component of the path prefix of path is not a directory.
+         *
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, ENOTDIR, "lchown.05.06",
+                    shall_isENOTDIR_lchown(context, fs,
+                                                getParentDir_Path(resolved)))
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [EOPNOTSUPP]
+         *
+         * The path argument names a symbolic link and the implementation does
+         * not support setting the owner or group of a symbolic link.
+         *
+         */
+            ERROR_UNCHECKABLE(POSIX_LCHOWN, EOPNOTSUPP, "lchown.05.07",
+                                                            "Difficult check")
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [EPERM]
+         *
+         * The effective user ID does not match the owner of
+         * the file and the process does not have appropriate privileges.
+         *
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, EPERM, "lchown.05.08",
+                    shall_isEPERM_lchown(context, resolved, owner, group))
+
+        /*
+         * The lchown() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * The file resides on a read-only file system.
+         *
+         */
+            ERROR_SHALL3(POSIX_LCHOWN, EROFS, "lchown.05.09",
+                        shall_isEROFS_lchown(context, resolved, owner, group))
+
+        /*
+         * The lchown() function may fail if:
+         *
+         * [EIO]
+         *
+         * An I/O error occurred while reading or writing to the file system.
+         *
+         */
+            ERROR_UNCHECKABLE(POSIX_LCHOWN, EIO, "lchown.06.01",
+                                                            "Difficult check")
+
+        /*
+         * The lchown() function may fail if:
+         *
+         * [EINTR]
+         *
+         * A signal was caught during execution of the function.
+         *
+         */
+            ERROR_UNCHECKABLE(POSIX_LCHOWN, EINTR, "lchown.06.02",
+                                                            "Difficult check")
+
+        /*
+         * The lchown() function may fail if:
+         *
+         * [ELOOP]
+         *
+         * More than {SYMLOOP_MAX} symbolic links were encountered during
+         * resolution of the path argument.
+         *
+         */
+            ERROR_MAY3(POSIX_LCHOWN, ELOOP, "lchown.06.03", eloop)
+
+        /*
+         * The lchown() function may fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * Pathname resolution of a symbolic link produced an intermediate
+         * result whose length exceeds {PATH_MAX}.
+         *
+         */
+            ERROR_MAY3(POSIX_LCHOWN, ENAMETOOLONG, "lchown.06.04",
+                                may_isENAMETOOLONG_lchown(context, resolved))
+
+        ERROR_END()
+        /*
+         * Upon successful completion, lchown() shall return 0.
+         *
+         */
+        REQ("lchown.03", "lchown: successful completion", lchown_spec==0
+                                                        && *errno==SUT_EOK);
+
+        if(file==NULL)
+            return true;
+
+        if(     ps->meta.effective_userid==*file_pre->uid
+            ||  hasAppropriatePrivileges(context,
+                    chown_AccessPrivileges, file_pre->fileid))
+        {
+            /*
+             * Only processes with an effective user ID equal to the user ID of
+             * the file or with appropriate privileges may change the ownership
+             * of a file.
+             */
+            IMPLEMENT_REQ("lchown.chown.02");
+            if(getPathSystemConfigurationValue(context, resolved,
+                                                    SUT_PC_CHOWN_RESTRICTED))
+            {
+                if(hasAppropriatePrivileges(context, chown_AccessPrivileges,
+                                                            file_pre->fileid))
+                {
+                    /*
+                     * If _POSIX_CHOWN_RESTRICTED is in effect for path:
+                     *
+                     * Changing the user ID is restricted to processes with
+                     * appropriate privileges.
+                     */
+                    IMPLEMENT_REQ("lchown.chown.03.01");
+                    bigChange=true;
+                }
+                else
+                {
+                    /*
+                     * If _POSIX_CHOWN_RESTRICTED is in effect for path:
+                     *
+                     * Changing the group ID is permitted to a process with an
+                     * effective user ID equal to the user ID of the file, but
+                     * without appropriate privileges, if and only if owner is
+                     * equal to the file's user ID or ( uid_t)-1 and group is
+                     * equal either to the calling process' effective group ID
+                     * or to one of its supplementary group IDs.
+                     *
+                     */
+                    REQ("lchown.chown.03.02",
+                        "If _POSIX_CHOWN_RESTRICTED is in effect for path",
+                                        restr_change(file, ps, owner, group));
+                }
+            }
+            else
+                bigChange=true;
+
+            if(
+                file->permissions->owner->execute
+            ||  file->permissions->group->execute
+            ||  file->permissions->other->execute
+            )
+            {
+                if(file->kind==RegularFile)
+                {
+                    if(hasAppropriatePrivileges(context,
+                                        chown_AccessPrivileges, file->fileid))
+                    {
+                        /*
+                         * If the specified file is a regular file, one or more
+                         * of the S_IXUSR, S_IXGRP, or S_IXOTH bits of the file
+                         * mode are set, and the process has appropriate
+                         * privileges, it is implementation-defined whether the
+                         * set-user-ID and set-group-ID bits are altered.
+                         *
+                         */
+                        REQ("lchown.chown.05", "Altered",
+                                file->permissions->set_gid==Unknown_Bool3
+                            &&  file->permissions->set_gid==Unknown_Bool3);
+
+                    }
+                    else
+                    {
+                        /*
+                         * If the specified file is a regular file, one or more
+                         * of the S_IXUSR, S_IXGRP, or S_IXOTH bits of the file
+                         * mode are set, and the process does not have
+                         * appropriate privileges, the set-user-ID (S_ISUID)
+                         * and set-group-ID (S_ISGID) bits of the file mode
+                         * shall be cleared upon successful return from
+                         * chown().
+                         */
+                        REQ("lchown.chown.04", "Shall Clear",
+                                file->permissions->set_gid==False_Bool3
+                            &&  file->permissions->set_gid==False_Bool3);
+                    }
+                }
+                else
+                {
+                    /*
+                     * If the chown() function is successfully invoked on a
+                     * file that is not a regular file and one or more of the
+                     * S_IXUSR, S_IXGRP, or S_IXOTH bits of the file mode are
+                     * set, the set-user-ID and set-group-ID bits may be
+                     * cleared.
+                     */
+                    REQ("lchown.chown.06", "May clear",
+                                file->permissions->set_gid==Unknown_Bool3
+                            &&  file->permissions->set_gid==Unknown_Bool3);
+                }
+            }
+        }
+
+        if(bigChange)
+        {
+            /*
+             * If owner or group is specified as ( uid_t)-1 or ( gid_t)-1,
+             * respectively, the corresponding ID of the file shall not be
+             * changed.
+             *
+             */
+            /*
+             * The path argument points to a pathname naming a file. The user
+             * ID and group ID of the named file shall be set to the numeric
+             * values contained in owner and group, respectively.
+             *
+             */
+            REQ("lchown.chown.07.01;lchown.chown.14","uid and gid changing[0]",
+                    (owner==-1) ? equals(file->uid, file_pre->uid) :
+                                                            *file->uid==owner
+                &&  (group==-1) ? equals(file->gid, file_pre->gid) :
+                                                            *file->gid==group);
+
+            /*
+             * Upon successful completion, chown() shall mark for update the
+             * st_ctime field of the file.
+             *
+             */
+            /*
+             * If both owner and group are -1, the times need not be updated.
+             *
+             */
+            REQ("lchown.chown.08;lchown.chown.07.02", "Ctime update(-1)[0]",
+                                        CtimeUpdateCheck(owner, group, file));
+        }
+
+
+        /*
+         * The lchown() function shall be equivalent to chown(), except in the
+         * case where  the named file is a symbolic link.
+         *
+         */
+        /*
+         * In this case, lchown() shall change the ownership of the symbolic
+         * link file itself, while chown() changes the ownership of the file or
+         * directory to which the symbolic link refers.
+         *
+         */
+        IMPLEMENT_REQ("lchown.01;lchown.02");
+
+
+        return true;
+    }
+}
+
+
+/*****************************************************************************/
+/**                            AccessModeAccess Type                        **/
+/*****************************************************************************/
+
+specification typedef struct AccessModeAccess AccessModeAccess = {};
+
+AccessModeAccess* create_AccessModeAccess(bool isR_OK, bool isW_OK,
+                                          bool isX_OK, bool isF_OK)
+{
+    return create(&type_AccessModeAccess, isR_OK, isW_OK, isX_OK, isF_OK);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+CString* createCString_Bool3(Bool3 par)
+{
+    return par==True_Bool3 ? create_CString("True_Bool3") :
+                par == False_Bool3 ? create_CString("False_Bool3") :
+                                        create_CString("Unknown_Bool3");
+}
+bool chmod_isFileOpened(CallContext context, CString* path)
+{
+    Bool3 eloop;
+    FileSystem* fs=getFileSystem(context);
+    CString* resolved=resolvePath_Ext(context, fs, path, &eloop);
+    File* file=getFile_FileSystem(fs, resolved);
+    Map* mp=getFileDescriptors(context);
+    IntT i, size=size_Map(mp);
+    FileDescriptor* tmp;
+
+    for(i=0;i<size;i++)
+    {
+        tmp=get_Map(mp, key_Map(mp, i));
+        if(equals_FileId(tmp->file, file->fileid))
+            return true;
+    }
+
+    return false;
+}
+bool chmod_BadGroupId(ProcessState* ps, File* file)
+{
+    IntT i;
+    List* tmp;
+    
+    assertion(ps != NULL, "chmod_BadGroupId: ps is NULL!!");
+    assertion(file != NULL, "chmod_BadGroupId: file is NULL!!");
+
+    if(*(file->gid)==ps->meta.effective_groupid)
+        return false;
+
+    tmp=ps->meta.groups;
+    for(i=0;i<size_List(tmp);i++)
+        if(*(file->gid)==*((GidTObj*)get_List(tmp, i)))
+            return false;
+
+    return true;
+}
+
+bool chmod_PermissionsEquals(CallContext context, FilePermissions* fp1,
+                                FilePermissions* fp2, FilePermissions* res)
+{
+    return equals(fp2->owner, res->owner) && equals(fp2->group, res->group)
+                                            &&equals(fp2->other, res->other);
+}
+
+bool S_IS_check(CallContext context, FilePermissions* fp1,
+                                FilePermissions* fp2, FilePermissions* res)
+{
+    if(fp1!=NULL)
+    {
+        DUMP("fp1==$(obj), uid==$(obj), gid==$(obj), vtx==$(obj)\n", fp1,
+            createCString_Bool3(fp1->set_uid),
+            createCString_Bool3(fp1->set_gid),
+            createCString_Bool3(fp1->set_vtx));
+
+        if(res->set_uid != (fp1->set_uid == fp2->set_uid ? fp2->set_uid :
+                                                                Unknown_Bool3))
+            return false;
+
+        if(res->set_gid != (fp1->set_gid==fp2->set_gid ? fp2->set_gid :
+                                                                Unknown_Bool3))
+           return false;
+
+        if(POSIX_OPTION(context, XSI))
+        {
+            if(res->set_vtx != (fp1->set_vtx==fp2->set_vtx ? fp2->set_vtx :
+                                                                Unknown_Bool3))
+                return false;
+        }
+        else
+        if(res->set_vtx != Unknown_Bool3)
+            return false;
+    }
+
+    return true;
+}
+
+bool Set_gid_cleared(CallContext context, ProcessState* ps, File* file)
+{
+    if(    file->kind==RegularFile
+        &&  not_Bool3(hasAppropriatePrivileges(context, chmod_AccessPrivileges,
+                                                                file->fileid))
+        &&  chmod_BadGroupId(ps, file))
+            return file->permissions->set_gid==False_Bool3;
+
+    return true;
+}
+bool restr_change(File* file,ProcessState* ps,UidT owner,GidT group)
+{
+    if(     *file->uid==ps->meta.effective_userid
+        && ( owner==*(file->uid) || owner==(UidT)-1)
+        && !chmod_BadGroupId(ps, file))
+    {
+        return (group!=(GidT)-1) ? file->ctime_updated==false &&
+                                                    *file->gid==group : true;
+    }
+
+    return true;
+}
+bool CtimeUpdateCheck(UidT owner, GidT group, File* file)
+{
+    if(CHOWN_CTIME_UPDATE_MARK==MARK_ON_NON_MINUS_ONE)
+        return (owner!=(UidT)-1 || group!=(GidT)-1) ?
+                                            file->ctime_updated==false: true;
+
+    return true;
+}
+bool fchmod_shm_check(File* file_pre, File* file_post, FilePermissions* mode)
+{
+    File* file=clone(file_pre);
+
+    file->permissions->owner->read=mode->owner->read;
+    file->permissions->group->read=mode->group->read;
+    file->permissions->other->read=mode->other->read;
+
+    file->permissions->owner->write=mode->owner->write;
+    file->permissions->group->write=mode->group->write;
+    file->permissions->other->write=mode->other->write;
+
+    return equals(file, file_post);
+}
+
+
+

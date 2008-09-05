@@ -1,0 +1,319 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/meta/tests/nice_scenario.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_model.seh"
+#include "system/user/user_media.seh"
+#include "process/process/process_model.seh"
+#include "process/process/process_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/control_center.seh"
+#include "process/meta/user_model.seh"
+#include "process/meta/user_media.seh"
+#include "process/environ/environ_media.seh"
+#include "fs/meta/access_media.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "data/sys/resource_model.seh"
+#include "process/meta/fs_model.seh"
+#include "process/meta/fs_media.seh"
+#include "process/meta/tests/fs_scenario.seh"
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+List /* NULL */ * functionData;
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    int i;
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    if ( ( functionData = createContexts() ) == NULL ) { return false; }
+
+    for ( i = 0; i < size_List( functionData ); i++ ) {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        ProcessState * process_state = getProcessState_CallContext( * contextObj );
+        FilePermission * empty_FilePermission = NULL;
+        FilePermissions * unknownUmask = create_FilePermissions(
+                                             empty_FilePermission, empty_FilePermission, empty_FilePermission,
+                                             Unknown_Bool3, Unknown_Bool3, Unknown_Bool3
+                                         );
+        process_state->meta.umask = unknownUmask;
+    }
+
+    setFinishMode( UNTIL_END );
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init_ch_scenario   ( int argc, char ** argv ) { return init_scenario( "chdir chroot fchdir" ); }
+static bool init_wd_scenario   ( int argc, char ** argv ) { return init_scenario( "getcwd getwd"        ); }
+static bool init_umask_scenario( int argc, char ** argv ) { return init_scenario( "umask"               ); }
+
+static void finish_ch_scenario   ( void ) finish_scenario( ch    )
+static void finish_wd_scenario   ( void ) finish_scenario( wd    )
+static void finish_umask_scenario( void ) finish_scenario( umask )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool chdir_scen()
+{
+    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        iterate ( int j = 1; j <= 3; j++; )
+        {
+            dotPrint( 10, 50 );
+            switch ( j ) {
+                case 1: chdir_spec( * contextObj, create_CString( ""     ), requestErrorCode() ); break;
+                case 2: chdir_spec( * contextObj, create_CString( "/"    ), requestErrorCode() ); break;
+                case 3: chdir_spec( * contextObj, create_CString( "/tmp" ), requestErrorCode() ); break;
+            }
+        } // iterate j
+    } // iterate i
+    return true;
+}
+
+scenario
+bool chroot_scen()
+{
+    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        iterate ( int j = 1; j <= 3; j++; )
+        {
+            dotPrint( 10, 50 );
+            switch ( j ) {
+                case 1: chroot_spec( * contextObj, create_CString( ""     ), requestErrorCode() ); break;
+                case 2: chroot_spec( * contextObj, create_CString( "/"    ), requestErrorCode() ); break;
+                case 3: chroot_spec( * contextObj, create_CString( "/tmp" ), requestErrorCode() ); break;
+            }
+        } // iterate j
+    } // iterate i
+    return true;
+}
+
+scenario
+bool fchdir_scen()
+{
+    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        iterate ( int j = 1; j <= 1; j++; )
+        {
+            FileDescId fildes;
+            fildes.system   = contextObj->system ;
+            fildes.process  = contextObj->process;
+            fildes.filedesc = -1                 ;
+            dotPrint( 10, 50 );
+            switch ( j ) {
+                case 1: fchdir_spec( * contextObj, fildes, requestErrorCode() ); break;
+            }
+        } // iterate j
+    } // iterate i
+    return true;
+}
+
+scenario
+bool getcwd_scen()
+{
+    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        iterate ( int size = 0; size <= 1000; size += 100; )
+        {
+            StringTPtr buf = allocateMemoryBlock( * contextObj, size == 0 ? 1 : size );
+            if ( isNULL_VoidTPtr( buf ) ) { return false; }
+            dotPrint( 10, 50 );
+            getcwd_spec( * contextObj, buf, size, requestErrorCode() );
+            deallocateMemoryBlock( * contextObj, buf );
+        } // iterate size
+    } // iterate i
+    return true;
+}
+
+scenario
+bool getwd_scen()
+{
+    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        iterate ( int size = 100; size <= 1000; size += 100; )
+        {
+            StringTPtr path_name = allocateMemoryBlock( * contextObj, size );
+            if ( isNULL_VoidTPtr( path_name ) ) { return false; }
+            dotPrint( 10, 50 );
+            getwd_spec( * contextObj, path_name, requestErrorCode() );
+            deallocateMemoryBlock( * contextObj, path_name );
+        } // iterate size
+    } // iterate i
+    return true;
+}
+
+scenario
+bool umask_scen()
+{
+    iterate ( int i = 0; i < size_List( functionData ); i++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, i );
+        iterate ( int j = 1; j <= 3; j++; )
+        {
+            FilePermissions * cmask;
+            switch ( j ) {
+                case 1: cmask = create_FilePermissions_String( "rwxrwxrwx" ); break;
+                case 2: cmask = create_FilePermissions_String( "rw-rw-rw-" ); break;
+                case 3: cmask = create_FilePermissions_String( "r--r--r--" ); break;
+            }
+            cmask->set_uid = False_Bool3;
+            cmask->set_gid = False_Bool3;
+            cmask->set_vtx = False_Bool3;
+            dotPrint( 10, 50 );
+            umask_spec( * contextObj, cmask ); break;
+        } // iterate j
+    } // iterate i
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm ch_scenario =
+{
+    .init              = init_ch_scenario  ,
+    .finish            = finish_ch_scenario,
+    .actions           = { fchdir_scen,
+                           chroot_scen,
+                              chdir_scen ,
+                           NULL
+                         }
+};
+
+scenario dfsm wd_scenario =
+{
+    .init              = init_wd_scenario  ,
+    .finish            = finish_wd_scenario,
+    .actions           = { getcwd_scen,
+                           getwd_scen ,
+                           NULL
+                         }
+};
+
+scenario dfsm umask_scenario =
+{
+    .init              = init_umask_scenario  ,
+    .finish            = finish_umask_scenario,
+    .actions           = { umask_scen ,
+                           NULL
+                         }
+};
+
+#ifdef PROCESS_META_FS_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initProcessMetaFsSubsystem();
+}
+
+bool main_process_meta_fs( int argc, char** argv )
+{
+    ch_scenario   ( argc, argv );
+    wd_scenario   ( argc, argv );
+    umask_scenario( argc, argv );
+    return true;
+}
+
+int main( int argc, char** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    main_process_meta_fs( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

@@ -1,0 +1,824 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "util/conversion/token_model.seh"
+
+#pragma SEC subsystem conversion "util.conversion"
+
+
+
+/*
+   The group of functions 'util.conversion.token' consists of:
+       __strtok_r [1]
+       strsep [1]
+       strtok [2]
+       strtok_r [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    strsep -- extract token from string
+
+SYNOPSIS
+
+    #include <string.h>
+
+    char * strsep(char * * stringp, const char * delim);
+
+DESCRIPTION
+
+    The strsep() function shall find the first token in the string referenced
+    by the pointer stringp, using the characters in delim as delimiters.
+
+    If stringp is NULL, strsep() shall return NULL and do nothing else.
+
+    If stringp is non-NULL, strsep() shall find the first token in the string
+    referenced by stringp, where tokens are delimited by characters in the
+    string delim. This token shall be terminated with a \0 character by
+    overwriting the delimiter, and stringp shall be updated to point past the
+    token. In case no delimiter was found, the token is taken to be the entire
+    string referenced by stringp, and the location referenced by stringp is
+    made NULL.
+
+RETURN VALUE
+
+    strsep() shall return a pointer to the beginning of the token.
+
+*/
+specification
+StrSepResult* strsep_spec( CallContext context, StringTPtr stringp,
+                                                            StringTPtr delim)
+{
+    StringTPtr stringp_ptr=stringp;
+    CString* stringp_pre=NULL;
+    CString* expected_stringp_past;
+    CString* expected_ret=NULL;
+    CString* ret=NULL;
+    CString* stringp_past=NULL;
+    CString* delim_str;
+
+    pre
+    {
+        REQ("", "Implicit precondition: delim!=NULL", !isNULL_VoidTPtr(delim));
+        delim_str=readCString_VoidTPtr(delim);
+        if(!isNULL_VoidTPtr(stringp))
+        {
+            MemoryBlock* mb=getMemoryBlock(stringp);
+            REQ("", "Implicit precondition: stringp is writable",
+            sizeRWMemoryAvailable(stringp)==mb->size);
+        }
+    }
+    coverage C
+    {
+        if(isNULL_VoidTPtr(stringp))
+        {
+            return { Stringp_null, "Stringp==NULL" };
+        }
+        else
+        {
+            stringp_pre=readCString_VoidTPtr(stringp);
+            VERBOSE("stringp_pre==%s\n", *stringp_pre);
+            return { Stringp_n_null, "Stringp!=NULL" };
+        }
+    }
+    post
+    {
+        StrSepResult* spec_ret=strsep_spec;
+        bool NoToken=false;
+        /*
+         * If stringp is NULL, strsep() shall return NULL and do nothing else.
+         */
+        DUMP("stringp.address==%d, spec.ret.address==%d\n", stringp.address,
+            spec_ret->parameter.address);
+        if(stringp_pre==NULL)
+        {
+            REQ("strsep.01", "Returning value shall be NULL",
+                            isNULL_VoidTPtr(spec_ret->ret)
+                        &&  equals(delim_str, readCString_VoidTPtr(delim)));
+            return true;
+        }
+
+        expected_stringp_past=clone(stringp_pre);
+        expected_ret=strsep_model(expected_stringp_past, delim_str, &NoToken);
+        DUMP("expected_stringp_past==$(obj), addr==%d\n",
+            expected_stringp_past, expected_stringp_past->data);
+        DUMP("expected_ret==$(obj)\n", expected_ret);
+        /*
+         *   In case no delimiter was found, the token is taken to be the
+         *   entire string referenced by stringp, and the location referenced
+         *   by stringp is made NULL.
+         */
+        if(NoToken)
+        {
+            REQ("", "We shall not return NULL",
+                !isNULL_VoidTPtr(spec_ret->ret));
+
+            ret=readCString_VoidTPtr(spec_ret->ret);
+
+            REQ("strsep.03",
+                "Returning value shall be equal to input value: no delim"
+                                                       "character found",
+                    equals(ret, expected_ret)
+                &&  equals(expected_stringp_past, stringp_pre)
+                && spec_ret->ret.address==stringp_ptr.address
+                && isNULL_VoidTPtr(spec_ret->parameter));
+
+            return true;
+        }
+
+        /*
+         *  If stringp is non-NULL, strsep() shall find the first token in the
+         *  string referenced by stringp, where tokens are delimited by
+         *  characters in the string delim. This token shall be terminated with
+         *  a \0 character by overwriting the delimiter, and stringp shall be
+         *  updated to point past the token.
+         */
+        REQ("", "We shall not return NULL", !isNULL_VoidTPtr(spec_ret->ret));
+        REQ("", "Parameter shall not be NULL",
+                                        !isNULL_VoidTPtr(spec_ret->parameter));
+
+        ret=readCString_VoidTPtr(spec_ret->ret);
+        stringp_past=readCString_VoidTPtr(spec_ret->parameter);
+
+        REQ("strsep.02",
+            "Checking stringp value",
+                equals(expected_stringp_past, stringp_past)
+            &&      stringp_ptr.address+length_CString(ret)+1
+                ==  spec_ret->parameter.address);
+
+        DUMP("ExRet==$(obj), ret==$(obj), ExPast==$(obj), past==$(obj)\n",
+            expected_ret, ret, expected_stringp_past, stringp_past);
+        /*
+         *  strsep() shall return a pointer to the beginning of the token.
+         */
+        REQ("strsep.04",
+            "Checking ret value",
+                equals(expected_ret, ret)
+            &&  stringp_ptr.address==spec_ret->ret.address);
+
+        return true;
+    }
+}
+
+CString* strsep_model(CString* stringp_past, CString* delim_str, bool* NoToken)
+{
+    CString* ret, *tmp;
+    CharT arr[256];
+    IntT i, size=length_CString(stringp_past);
+
+    for(i=0;i<256;i++)
+        arr[i]=0;
+
+    for(i=0;i<length_CString(delim_str);i++)
+        arr[charAt_CString(delim_str, i)]=1;
+
+    i=0;
+
+    while(i<size && arr[charAt_CString(stringp_past, i)]==0)       i++;
+
+    ret=substring_CString(stringp_past, 0, i);
+
+    if(i<size)
+    {
+        /*
+         * If stringp is non-NULL, strsep() shall find the first token in the
+         * string referenced by stringp, where tokens are delimited by
+         * characters in the string delim. This token shall be terminated with
+         * a \0 character by overwriting the delimiter, and stringp shall be
+         * updated to point past the token.
+         */
+        IMPLEMENT_REQ("strsep.03");
+
+        tmp=substring_CString(stringp_past, i+1, size);
+        copy(tmp, stringp_past);
+        DUMP("stringp_past==$(obj)\n", stringp_past);
+    }
+    else
+        *NoToken=true;
+
+    return ret;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    strtok - split string into tokens
+
+SYNOPSIS
+
+    #include <string.h>
+
+    char *strtok(char *restrict s1, const char *restrict s2);
+
+
+DESCRIPTION
+
+    A sequence of calls to strtok() breaks the string pointed to by s1 into a
+    sequence of tokens, each of which is delimited by a byte from the string
+    pointed to by s2. The first call in the sequence has s1 as its first
+    argument, and is followed by calls with a null pointer as their first
+    argument. The separator string pointed to by s2 may be different from call
+    to call.
+
+    The first call in the sequence searches the string pointed to by s1 for the
+    first byte that is not contained in the current separator string pointed to
+    by s2. If no such byte is found, then there are no tokens in the string
+    pointed to by s1 and strtok() shall return a null pointer. If such a byte
+    is found, it is the start of the first token.
+
+    The strtok() function then searches from there for a byte that is contained
+    in the current separator string. If no such byte is found, the current
+    token extends to the end of the string pointed to by s1, and subsequent
+    searches for a token shall return a null pointer. If such a byte is found,
+    it is overwritten by a null byte, which terminates the current token. The
+    strtok() function saves a pointer to the following byte, from which the
+    next search for a token shall start.
+
+    Each subsequent call, with a null pointer as the value of the first
+    argument, starts searching from the saved pointer and behaves as
+    described above.
+
+    The implementation shall behave as if no function defined in this volume of
+    IEEE Std 1003.1-2001 calls strtok().
+
+    The strtok() function need not be reentrant. A function that is not
+    required to be reentrant is not required to be thread-safe.
+
+
+RETURN VALUE
+
+    Upon successful completion, strtok() shall return a pointer to the first
+    byte of a token. Otherwise, if there is no token, strtok() shall return a
+    null pointer.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+StringTPtr strtok_spec( CallContext context, StringTPtr stringp,
+                                                            StringTPtr delim)
+{
+    CString* delim_str;
+    ProcessState* ps=getProcessState_CallContext(context);
+    StringTPtr buff=NULL_VoidTPtr, ps_buf_pre=ps->buffer_string;
+    CByteArray* byte_pre=NULL;
+
+    DUMP("\n");
+    pre
+    {
+        REQ("", "[Implicit precondition]", !isNULL_VoidTPtr(delim));
+        delim_str=readCString_VoidTPtr(delim);
+        if(!isNULL_VoidTPtr(stringp))
+        {
+            MemoryBlock* mb=getMemoryBlock(stringp);
+            REQ("", "Implicit precondition: stringp is writable",
+            sizeRWMemoryAvailable(stringp)==mb->size);
+        }
+    }
+    coverage C
+    {
+        if(isNULL_VoidTPtr(stringp))
+        {
+            buff=ps->buffer_string;
+            if(!isNULL_VoidTPtr(buff))
+                byte_pre=readCByteArray_MemoryBlock(getMemoryBlock(buff));
+            return { Null_String, "Taking token from buffer" };
+        }
+        else
+        {
+            buff=stringp;
+            byte_pre=readCByteArray_MemoryBlock(getMemoryBlock(buff));
+            return { New_String, "Getting new string" };
+        }
+    }
+    post
+    {
+        StringTPtr ret=strtok_spec;
+        MemoryBlock* mb;
+        CByteArray* byte_past=NULL;
+        IntT begin, ret_beg;
+        CString* ret_str, *delim_past;
+
+        delim_past=readCString_VoidTPtr(delim);
+        REQ("", "Delim shall be unchanged", equals(delim_str, delim_past));
+
+        //Implemented in scenario
+        /*
+         * The first call in the sequence has s1 as its first argument, and is
+         * followed by calls with a null pointer as their first argument.
+         */
+        IMPLEMENT_REQ("strtok.02");
+        /*
+         * The separator string pointed to by s2 may be different from call
+         * to call.
+         */
+        IMPLEMENT_REQ("strtok.03");
+
+        if(!isNULL_VoidTPtr(ps->buffer_string))
+            DUMP("ps->buffer_string==%d\n", (IntT)ps->buffer_string.address);
+        else
+            DUMP("ps->buffer_string==NULL\n");
+
+        if( NoToken(context, buff, delim_str) )
+        {
+            if(!isNULL_VoidTPtr(ret))
+                DUMP("ret_str==$(obj)\n", readCString_VoidTPtr(ret));
+
+            if(     getPosixStrtokBufferClearsInterpretation()
+                !=  POSIX_STRTOK_BUFFER_CLEARS_UNKNOWN)
+            {
+                if(     !equals_VoidTPtr(ps_buf_pre, ps->buffer_string)
+                    &&  !isNULL_VoidTPtr(ps_buf_pre)) {
+                    REQ("", "POSIX_STRTOK_BUFFER_CLEARS_YES expected",
+                        getPosixStrtokBufferClearsInterpretation()
+                        ==
+                        POSIX_STRTOK_BUFFER_CLEARS_YES);
+                } else {
+                    REQ("", "POSIX_STRTOK_BUFFER_CLEARS_NO expected",
+                        getPosixStrtokBufferClearsInterpretation()
+                        ==
+                        POSIX_STRTOK_BUFFER_CLEARS_NO);
+                }
+            }
+            /*
+             * Otherwise, if there is no token, strtok() shall return a null
+             * pointer.
+             */
+            REQ("strtok.14", "strtok returns null", isNULL_VoidTPtr(ret));
+            DUMP("No tokens(post)\n");
+            return true;
+        }
+
+        REQ("", "Non-null return value", !isNULL_VoidTPtr(ret));
+        DUMP("Non-null return value\n");
+
+        ret_str=readCString_VoidTPtr(ret);
+
+        if(isNULL_VoidTPtr(ps->buffer_string))
+            mb=getMemoryBlock(buff);
+        else
+            mb=getMemoryBlock(ps->buffer_string);
+
+        byte_past=readCByteArray_MemoryBlock(mb);
+        begin=buff.address - mb->address.address;
+
+        if((ret_beg=NoDelim(byte_pre, begin, delim_str))!=-1)
+        {
+            /*
+             * If no such byte is found, the current token extends to the end
+             * of the string pointed to by s1, and subsequent searches for a
+             * token shall return a null pointer
+             */
+            REQ("strtok.08", "Returning entire string",
+                        isNULL_VoidTPtr(ps->buffer_string)
+                    &&  mb->address.address+ret_beg==ret.address);
+        }
+
+        /*
+         * If such a byte is found, it is overwritten by a null byte, which
+         * terminates the current token.
+         */
+        IMPLEMENT_REQ("strtok.09");
+        REQ("", "Only correct changes of the buffer",
+            CorrectBuffChange(byte_pre, byte_past, begin, delim_str));
+        DUMP("Only correct changes of the buffer\n");
+        /*
+         * Upon successful completion, strtok() shall return a pointer to the
+         * first byte of a token.
+         */
+        REQ("strtok.13", "Model's return shall be equal to real return",
+                mb->address.address + RetBeginPos(byte_pre, begin, delim_str)
+            ==  ret.address);
+        DUMP("Model's return shall be equal to real return\n");
+        return true;
+    }
+}
+void OnStrtok( CallContext context, StringTPtr stringp, StringTPtr delim,
+                    StringTPtr ret, StringTPtr* buffer_ptr, CByteArray* buffer,
+                    StringTPtr ps_buf_pre, StringTPtr buff)
+{
+    CString* delim_str=readCString_VoidTPtr(delim);
+    ProcessState* ps=getProcessState_CallContext(context);
+    MemoryBlock* mb;
+    CharT arr[256];
+    IntT i, j, bg;
+
+    for(i=0;i<256;i++)
+        arr[i]=0;
+
+    for(i=0;i<length_CString(delim_str);i++)
+        arr[charAt_CString(delim_str, i)]=1;
+
+    if( NoToken(context, buff, delim_str) )
+    if(     getPosixStrtokBufferClearsInterpretation()
+        ==  POSIX_STRTOK_BUFFER_CLEARS_UNKNOWN)
+    {
+        if(     !equals_VoidTPtr(ps_buf_pre, ps->buffer_string)
+            &&  !isNULL_VoidTPtr(ps_buf_pre))
+            setPosixStrtokBufferClearsInterpretation(
+                POSIX_STRTOK_BUFFER_CLEARS_YES);
+        else
+            setPosixStrtokBufferClearsInterpretation(
+                POSIX_STRTOK_BUFFER_CLEARS_NO);
+    }
+
+    if(isNULL_VoidTPtr(stringp))
+    {
+        if(isNULL_VoidTPtr(*buffer_ptr))
+            return;
+
+        /*
+         * Each subsequent call, with a null pointer as the value of the first
+         * argument, starts searching from the saved pointer and behaves as
+         * described above.
+         */
+        IMPLEMENT_REQ("strtok.11");
+
+        mb=getMemoryBlock(*buffer_ptr);
+        bg=i=(*buffer_ptr).address - mb->address.address;
+
+        /*
+         * The first call in the sequence searches the string pointed to by s1
+         * for the first byte that is not contained in the current separator
+         * string pointed to by s2
+         */
+        IMPLEMENT_REQ("strtok.04");
+        while(      byteAt_CByteArray(buffer, i)!='\0'
+                &&  arr[byteAt_CByteArray(buffer, i)]==1)
+            i++;
+
+        if(byteAt_CByteArray(buffer, i)=='\0')
+        {
+        /*
+         * If no such byte is found, then there are no tokens in the string
+         * pointed to by s1 and strtok() shall return a null pointer.
+         */
+        IMPLEMENT_REQ("strtok.05");
+
+            if(getPosixStrtokBufferClearsInterpretation()==
+                POSIX_STRTOK_BUFFER_CLEARS_YES)
+                *buffer_ptr=NULL_VoidTPtr;
+            VERBOSE("No tokens\n");
+            return;
+        }
+
+        /*
+         * If such a byte is found, it is the start of the first token.
+         */
+        IMPLEMENT_REQ("strtok.06");
+
+        j=i;
+
+        /*
+         * The strtok() function then searches from there for a byte that is
+         * contained in the current separator string.
+         */
+        IMPLEMENT_REQ("strtok.07");
+        while(      byteAt_CByteArray(buffer, j)!='\0'
+                &&  arr[byteAt_CByteArray(buffer, j)]==0)
+            j++;
+
+        DUMP("bg==%d, j==%d\n", bg, j);
+
+        if(byteAt_CByteArray(buffer, j)=='\0')
+            *buffer_ptr=NULL_VoidTPtr;
+        else
+        {
+        /*
+         * The strtok() function saves a pointer to the following byte,
+         * from which the next search for a token shall start.
+         */
+            IMPLEMENT_REQ("strtok.10");
+            (*buffer_ptr).address+=j-bg+1;
+            DUMP("!slash0(%d)\n", j-bg+1);
+            DUMP("buffer_ptr==%d\n", (IntT)buffer_ptr->address);
+        }
+    }
+    else
+    {
+        mb=getMemoryBlock(stringp);
+        bg=i=(stringp).address - mb->address.address;
+
+        /*
+         * The first call in the sequence searches the string pointed to by s1
+         * for the first byte that is not contained in the current separator
+         * string pointed to by s2
+         */
+        IMPLEMENT_REQ("strtok.04");
+        while(      byteAt_CByteArray(buffer, i)!='\0'
+                &&  arr[byteAt_CByteArray(buffer, i)]==1)
+            i++;
+
+        if(byteAt_CByteArray(buffer, i)=='\0')
+        {
+        /*
+         * If no such byte is found, then there are no tokens in the string
+         * pointed to by s1 and strtok() shall return a null pointer.
+         */
+        IMPLEMENT_REQ("strtok.05");
+            if(getPosixStrtokBufferClearsInterpretation()==
+                POSIX_STRTOK_BUFFER_CLEARS_YES)
+                *buffer_ptr=NULL_VoidTPtr;
+            VERBOSE("No tokens\n");
+            return;
+        }
+
+        /*
+         * If such a byte is found, it is the start of the first token.
+         */
+        IMPLEMENT_REQ("strtok.06");
+
+        j=i;
+
+        /*
+         * The strtok() function then searches from there for a byte that is
+         * contained in the current separator string.
+         */
+        IMPLEMENT_REQ("strtok.07");
+        while(      byteAt_CByteArray(buffer, j)!='\0'
+                &&  arr[byteAt_CByteArray(buffer, j)]==0)
+            j++;
+
+        DUMP("bg==%d, j==%d\n", bg, j);
+
+        if(byteAt_CByteArray(buffer, j)=='\0')
+            *buffer_ptr=NULL_VoidTPtr;
+        else
+        {
+        /*
+         * The strtok() function saves a pointer to the following byte,
+         * from which the next search for a token shall start.
+         */
+            IMPLEMENT_REQ("strtok.10");
+            *buffer_ptr=stringp;
+            (*buffer_ptr).address+=j-bg+1;
+            DUMP("!slash0(%d)\n", j-bg+1);
+            DUMP("buffer_ptr==%d\n", (IntT)buffer_ptr->address);
+        }
+    }
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    strtok, strtok_r - split string into tokens
+
+SYNOPSIS
+
+    #include <string.h>
+
+    char *strtok_r(char *restrict s, const char *restrict sep,
+                                                char **restrict lasts);
+
+DESCRIPTION
+
+    The strtok_r() function considers the null-terminated string s as a
+    sequence of zero or more text tokens separated by spans of one or more
+    characters from the separator string sep. The argument lasts points to a
+    user-provided pointer which points to stored information necessary for
+    strtok_r() to continue scanning the same string.
+
+    In the first call to strtok_r(), s points to a null-terminated string, sep
+    to a null-terminated string of separator characters, and the value pointed
+    to by lasts is ignored. The strtok_r() function shall return a pointer to
+    the first character of the first token, write a null character into s
+    immediately following the returned token, and update the pointer to which
+    lasts points.
+
+    In subsequent calls, s is a NULL pointer and lasts shall be unchanged from
+    the previous call so that subsequent calls shall move through the string s,
+    returning successive tokens until no tokens remain. The separator string
+    sep may be different from call to call. When no token remains in s, a NULL
+    pointer shall be returned.
+
+RETURN VALUE
+
+    The strtok_r() function shall return a pointer to the token found, or a
+    NULL pointer when no token is found.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+/* [ Specification is in the file token_spec.seh ] */
+#include "token_spec.seh"
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+    __strtok_r -- alias for strtok_r
+
+SYNOPSIS
+
+    char * __strtok_r(char * restrict s, const char * restrict delim,
+                                                char * * restrict save_ptr);
+
+DESCRIPTION
+
+    __strtok_r() has the same specification as strtok_r().
+
+    __strtok_r() is not in the source standard; it is only in the binary
+    standard.
+*/
+#define a_name 1
+#define strtok_r_spec __strtok_r_spec
+/* [__strtok_r_spec has EQUIVALENT SPECIFICATION: strtok_r_spec] */
+/* [ Specification in the file token_spec.seh ] */
+#include "token_spec.seh"
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+//-1--undefined, 0--no clearing buffer, 1--clearing buffer,
+static int ClearBuf=-1;
+
+specification typedef struct StrSepResult StrSepResult={};
+
+StrSepResult* create_StrSepResult(StringTPtr rt, StringTPtr param)
+{
+    StrSepResult* res = create(&type_StrSepResult,
+        rt,
+        param
+        );
+
+    return res;
+}
+bool CorrectBuffChange(CByteArray* byte_pre, CByteArray* byte_past, IntT begin,
+                       CString* delim_str)
+{
+    IntT arr[256], i, j;
+
+    for(i=0;i<256;i++)
+        arr[i]=0;
+
+    for(i=0;i<length_CString(delim_str);i++)
+        arr[charAt_CString(delim_str, i)]=1;
+
+    i=0;
+    while(i<begin &&        byteAt_CByteArray(byte_pre, i)
+                        ==  byteAt_CByteArray(byte_past, i))
+        i++;
+
+    if(i<begin)
+        return false;//Buffer has changes in part, that should remain unchanged
+
+    while(byteAt_CByteArray(byte_pre, i)!='\0' &&
+            arr[byteAt_CByteArray(byte_pre, i)]==1
+        &&  byteAt_CByteArray(byte_pre, i)==byteAt_CByteArray(byte_past, i))
+        i++;
+
+    if( byteAt_CByteArray(byte_pre, i)=='\0')
+        return false;//No token, which was checked before calling this function
+
+    if(byteAt_CByteArray(byte_pre, i)!=byteAt_CByteArray(byte_past, i))
+        return false;//Buffer has changes in part, that should remain unchanged
+
+    j=i;
+    while(byteAt_CByteArray(byte_pre, i)!='\0' &&
+            arr[byteAt_CByteArray(byte_pre, i)]==0
+        &&  byteAt_CByteArray(byte_pre, i)==byteAt_CByteArray(byte_past, i))
+        i++;
+
+    if(byteAt_CByteArray(byte_past, i)!='\0')
+        return false;//End of token doesn't match with expected
+
+    if(byteAt_CByteArray(byte_pre, i)=='\0')
+        return true;
+
+    i++;
+
+    while(byteAt_CByteArray(byte_pre, i)!='\0' &&
+            byteAt_CByteArray(byte_pre, i)==byteAt_CByteArray(byte_past, i))
+        i++;
+
+    return byteAt_CByteArray(byte_pre, i)=='\0';
+}
+IntT RetBeginPos(CByteArray* byte_pre, IntT begin, CString* delim_str)
+{
+    IntT arr[256], i;
+
+    for(i=0;i<256;i++)
+        arr[i]=0;
+
+    for(i=0;i<length_CString(delim_str);i++)
+        arr[charAt_CString(delim_str, i)]=1;
+
+    i=begin;
+    while(  byteAt_CByteArray(byte_pre, i)!='\0'
+        &&  arr[byteAt_CByteArray(byte_pre, i)]==1)
+        i++;
+
+    return i;
+}
+IntT NoDelim(CByteArray* byte_pre, IntT begin, CString* delim_str)
+{
+    IntT arr[256], i, j;
+
+    for(i=0;i<256;i++)
+        arr[i]=0;
+
+    for(i=0;i<length_CString(delim_str);i++)
+        arr[charAt_CString(delim_str, i)]=1;
+
+    i=begin;
+    while(  byteAt_CByteArray(byte_pre, i)!='\0'
+        &&  arr[byteAt_CByteArray(byte_pre, i)]==1)
+        i++;
+
+    if(byteAt_CByteArray(byte_pre, i)=='\0')
+        return -1;
+
+    j=i;
+    while(  byteAt_CByteArray(byte_pre, i)!='\0'
+        &&  arr[byteAt_CByteArray(byte_pre, i)]==0)
+        i++;
+
+    if(byteAt_CByteArray(byte_pre, i)!='\0')
+        return -1;
+
+    return j;
+}
+bool NoToken(CallContext context, StringTPtr ptr, CString* delim_str)
+{
+    CByteArray* byte_arr;
+    MemoryBlock* mb;
+    IntT arr[256], i;
+
+    if(isNULL_VoidTPtr(ptr))
+        return true;
+
+    mb=getMemoryBlock(ptr);
+
+    byte_arr=readCByteArray_MemoryBlock(mb);
+
+    for(i=0;i<256;i++)
+        arr[i]=0;
+
+    for(i=0;i<length_CString(delim_str);i++)
+        arr[charAt_CString(delim_str, i)]=1;
+
+    i=ptr.address - mb->address.address;
+    while(  byteAt_CByteArray(byte_arr, i)!='\0'
+        &&  arr[byteAt_CByteArray(byte_arr, i)]==1)
+        i++;
+
+    return byteAt_CByteArray(byte_arr, i)=='\0';
+}

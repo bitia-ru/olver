@@ -1,0 +1,593 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "system/host/host_config.h"
+#include "system/host/host_model.seh"
+#include "config/system_config.seh"
+#include "data/errno_model.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+#pragma SEC subsystem host "system.host"
+
+/*
+   The group of functions 'system.host' consists of:
+       gethostid [POSIX]
+       gethostname [2]
+       sethostname [LSB]
+       uname [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    gethostid - get an identifier for the current host
+
+SYNOPSIS
+
+    [XSI]  #include <unistd.h>
+    long gethostid(void);
+
+DESCRIPTION
+
+    The gethostid() function shall retrieve a 32-bit identifier for the current
+    host.
+
+RETURN VALUE
+
+    Upon successful completion, gethostid() shall return an identifier for the
+    current host.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+LongT gethostid_spec( CallContext context )
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        /*
+         * The gethostid() function shall retrieve a 32-bit identifier for the current host.
+         */
+        REQ("gethostid.01", "shall retrieve a 32-bit identifier for the current host",
+            true
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    gethostname - get name of current host
+
+SYNOPSIS
+
+    #include <unistd.h>
+
+    int gethostname(char *name, size_t namelen);
+
+DESCRIPTION
+
+    The gethostname() function shall return the standard host name for the
+    current machine. The namelen argument shall specify the size of the array
+    pointed to by the name argument. The returned name shall be
+    null-terminated, except that if namelen is an insufficient length to hold
+    the host name, then the returned name shall be truncated and it is
+    unspecified whether the returned name is null-terminated.
+
+    Host names are limited to {HOST_NAME_MAX} bytes.
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned; otherwise, -1 shall be
+    returned.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT gethostname_spec( CallContext context, StringTPtr name, SizeT namelen )
+{
+    CByteArray * name_cba_post;
+    SizeT wlen;
+    CByteArray * atsign_block;
+    SystemState * sysstate = getSystemState(context.system);
+
+    pre
+    {
+        /* [namelen is assumed to be not negative] */
+        REQ("","namelen is assumed to be not negative", namelen>=0);
+
+        /* [missed precondition] */
+        REQ("","name shall not be NULL",!isNULL_VoidTPtr(name));
+
+        /* [Consistency of test suite] */
+        REQ("","Memory pointed to by name is available in the context",
+            isValidPointer(context, name)
+            );
+
+        REQ("","Memory pointed to by name is at least namelen bytes",
+            sizeWMemoryAvailable(name) >= namelen* sizeof_CharT
+            );
+        /* [Saving the memory block for further comparing] */
+        wlen = namelen * sizeof_CharT;
+        atsign_block = readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(name), name,wlen);
+
+
+        return true;
+    }
+    coverage C
+    {
+        if(sysstate->hostname!=NULL && length_CString(sysstate->hostname)<namelen)
+        {
+            return { hostname_notrunc, "no truncate" };
+        }
+        else
+        {
+            return { hostname_trunc, "may truncate" };
+        }
+    }
+    post
+    {
+        ByteT * byteAr;
+        CharT * byteAr2;
+        SizeT i,j;
+
+        REQ("gethostname.01","shall return the standard host name for the current machine",true);
+
+        if(!isNULL_VoidTPtr(name))
+        {
+            /* [Other memory shall not be changed] */
+            wlen = namelen * sizeof_CharT;
+            REQ("","Other memory shall not be changed",
+                equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(name), name, wlen), atsign_block )
+               );
+        }
+
+        if(gethostname_spec==-1)
+        {
+            REQ("?gethostname.04.02","otherwise, -1 shall be returned",
+                gethostname_spec==-1);
+
+            if(!isNULL_VoidTPtr(name) && sysstate->hostname!=NULL && namelen>0)
+            { /* Compare with stored hostname */
+
+                /* ...if namelen is an insufficient length to hold
+                 * the host name, then the returned name shall be truncated and it
+                 * is unspecified whether the returned name is null-terminated.
+                 */
+                name_cba_post = readCByteArray_VoidTPtr( name, namelen );
+                if(name_cba_post == NULL)
+                    REQ("","readCByteArray_VoidTPtr( name, namelen )",false);
+
+                byteAr = byteArray_CByteArray(name_cba_post);
+                if(byteAr == NULL)
+                    REQ("","byteArray_CByteArray(name_cba_post)",false);
+
+                byteAr2 = toCharArray_CString(sysstate->hostname);
+
+                if(byteAr[namelen-1]==0)
+                    j=namelen-2;
+                else
+                    j=namelen-1;
+                /* [shall compare j bytes] */
+
+                for(i=0;i<j;i++)
+                    if(byteAr[i]!=byteAr2[i])
+                        break;
+                REQ("gethostname.02","..shall be truncated..", i==j);
+            }
+
+            return true;
+        }
+
+
+        REQ("gethostname.04.01","Upon successful completion, 0 shall be returned",
+            gethostname_spec==0
+           );
+
+        REQ("gethostname.04.01","name==NULL can not lead to successful completion",!isNULL_VoidTPtr(name));
+
+        /* The returned name shall be null-terminated */
+        name_cba_post = readCByteArray_VoidTPtr( name, namelen );
+        if(name_cba_post == NULL)
+            return false;
+
+        byteAr = byteArray_CByteArray(name_cba_post);
+        if(byteAr == NULL)
+            return false;
+
+        for(i=0;i<namelen;i++)
+            if(byteAr[i]==0)
+                break;
+
+        REQ("gethostname.02","The returned name shall be null-terminated",
+            i<namelen
+           );
+
+        /* Host names are limited to {HOST_NAME_MAX} bytes. */
+        REQ("gethostname.03", "Host names are limited to {HOST_NAME_MAX} bytes",
+            i < read_HOSTNAMEMAX(context)
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    sethostname -- set host name
+
+SYNOPSIS
+
+    #include <unistd.h>
+    #include <sys/param.h.h>
+    #include <sys/utsname.h>
+
+    int sethostname(const char * name, size_t len);
+
+DESCRIPTION
+
+    If the process has appropriate privileges, the sethostname() function shall
+    change the host name for the current macine. The name shall point to a
+    null-terminated string of at most len bytes that holds the new hostname.
+
+    If the symbol HOST_NAME_MAX is defined, or if sysconf(_SC_HOST_NAME_MAX)()
+    returns a value greater than 0, this value shall represent the maximum
+    length of the new hostname. Otherwise, if the symbol MAXHOSTLEN is defined,
+    this value shall represent the maximum length for the new hostname. If none
+    of these values are defined, the maximum length shall be the size of the
+    nodename field of the utsname structure.
+
+RETURN VALUE
+
+    On success, 0 is returned. On error, -1 is returned and the global variable
+    errno is set appropriately.
+
+ERRORS
+
+    EINVAL
+        len is negative or larger than the maximum allowed size.
+
+    EPERM
+        The process did not have appropriate privilege.
+
+    EFAULT
+        name is an invalid address.
+*/
+specification
+IntT sethostname_spec( CallContext context, StringTPtr name, SizeT len, ErrorCode * errno)
+{
+    CString * name_str = readCString_VoidTPtr(name);
+    SystemState * sysstate = getSystemState(context.system);
+
+    pre
+    {
+        /* The name shall point to a null-terminated string of at most len bytes that holds the new hostname. */
+        REQ("sethostname.02","name shall point to a string ", name_str!=NULL);
+
+        /* The name shall point to a null-terminated string of at
+         * most len bytes that holds the new hostname.
+         */
+        REQ("sethostname.02","null-terminated",
+            length_CString(name_str) < len
+            );
+
+        /* [Consistency of test suite] */
+        REQ("sethostname.02","Memory pointed to by name is available in the context",
+            isValidPointer(context, name)
+           );
+        REQ("sethostname.02","Memory pointed to by name is at least len bytes",
+            sizeWMemoryAvailable(name) >= len*sizeof_CharT
+           );
+
+        return true;
+    }
+    coverage C
+    {
+        if(isEnoughPrivileges(context))
+            return { enoughPriv, "Enough priviliges" };
+        else
+            return { notEnoughPriv, "Not enough privileges" };
+
+    }
+    post
+    {
+        /* On error, -1 is returned and the global
+         * variable errno is set appropriately
+         */
+        ERROR_BEGIN(LSB_SETHOSTNAME, "sethostname.04.02", sethostname_spec==-1,  *errno )
+        /*
+         * The sethostname() function shall fail if:
+         * [EINVAL]
+         *      len is negative or larger than the maximum allowed size.
+         */
+            ERROR_SHALL(LSB_SETHOSTNAME, EINVAL,"sethostname.05.01",
+                        len<0 || len> read_HOSTNAMEMAX(context)
+                       )
+
+        /*
+         * The sethostname() function shall fail if:
+         * [EPERM]
+         *      The process did not have appropriate privilege.
+         */
+            ERROR_SHALL(LSB_SETHOSTNAME, EPERM,"sethostname.05.02",
+                        !isEnoughPrivileges(context)
+                       )
+        /*
+         * The sethostname() function shall fail if:
+         * [EFAULT]
+         *       name is an invalid address.
+         */
+          ERROR_SHALL(LSB_SETHOSTNAME, EFAULT,"sethostname.05.03",
+                       TODO_ERR(EFAULT)
+                       )
+
+
+
+        ERROR_END()
+
+        REQ("sethostname.04.01","On success, 0 is returned",
+            sethostname_spec==0
+           );
+
+        /* If the process has appropriate privileges, the
+         * function shall change the host name for the current machine.
+         */
+        /* [checking privileges] */
+#ifdef NewCTesK
+        REQ("sethostname.01","If the process has appropriate privileges",
+            C == C.enoughPriv
+           );
+#else
+        REQ("sethostname.01","If the process has appropriate privileges",
+            coverage(C) == enoughPriv
+           );
+#endif
+
+        /* [checking hostname] */
+        REQ("sethostname.01","shall change the host name",
+            equals(name_str, sysstate->hostname)
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    uname - get the name of the current system
+
+SYNOPSIS
+
+    #include <sys/utsname.h>
+
+    int uname(struct utsname *name);
+
+DESCRIPTION
+
+    The uname() function shall store information identifying the current system
+    in the structure pointed to by name.
+
+    The uname() function uses the utsname structure defined in <sys/utsname.h>.
+
+    The uname() function shall return a string naming the current system in the
+    character array sysname. Similarly, nodename shall contain the name of this
+    node within an implementation-defined communications network. The arrays
+    release and version shall further identify the operating system. The array
+    machine shall contain a name that identifies the hardware that the system
+    is running on.
+
+    The format of each member is implementation-defined.
+
+RETURN VALUE
+
+    Upon successful completion, a non-negative value shall be returned.
+    Otherwise, -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT uname_spec( CallContext context, UtsnameT * name, ErrorCode * errno)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        ERROR_BEGIN(POSIX_UNAME, "uname.08.02", uname_spec==-1, *errno )
+        ERROR_END()
+
+        /* Upon successful completion, a non-negative value shall be returned.*/
+        REQ("uname.08.01", "Upon successful completion, a non-negative value shall be returned",
+            uname_spec>=0
+           );
+
+        /* [name==NULL can not lead to successful result] */
+        REQ("uname.08.01","name==NULL can not lead to successful result",name!=NULL);
+
+        /* The uname() function shall store information identifying the current
+         * system in the structure pointed to by name.
+         */
+        REQ("uname.01","shall store information in the structure",invariant(name));
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                          Model Data                            **/
+/********************************************************************/
+
+invariant specification typedef struct UtsnameT UtsnameT = {};
+
+UtsnameT * create_UtsnameT(
+    CString * sysname,
+    CString * nodename,
+    CString * release,
+    CString * version,
+    CString * machine,
+    CString * domainname
+)
+{
+    return create(&type_UtsnameT,
+        sysname,
+        nodename,
+        release,
+        version,
+        machine,
+        domainname);
+
+}
+
+invariant(UtsnameT * val)
+{
+ /*
+  * The uname() function shall return a string naming the current system in the
+  * character array sysname. Similarly, nodename shall contain
+  * the name of this node within an implementation-defined communications
+  * network. The arrays release and version shall further identify
+  * the operating system. The array machine shall contain a name
+  * that identifies the hardware that the system is running on.
+  */
+    return (val->sysname==NULL    || length_CString(val->sysname) < 65 )
+        && (val->nodename==NULL   || length_CString(val->nodename) < 65 )
+        && (val->release==NULL    || length_CString(val->release) < 65 )
+        && (val->version==NULL    || length_CString(val->version) < 65 )
+        && (val->machine==NULL    || length_CString(val->machine) <65 )
+        && (val->domainname==NULL || length_CString(val->domainname) <65);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+/*
+ * If the symbol HOST_NAME_MAX is defined, or if sysconf(_SC_HOST_NAME_MAX)()
+ * returns a value greater than 0, this value shall represent the maximum
+ * length of the new hostname. Otherwise, if the symbol MAXHOSTLEN is defined,
+ * this value shall represent the maximum length for the new hostname. If none
+ * of these values are defined, the maximum length shall be the size of the
+ * nodename field of the utsname structure.
+ */
+ /* [All these actions are doing in the agent] */
+LongT read_HOSTNAMEMAX(CallContext context)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+    LongT res=-1;
+
+    format_TSCommand( &command, "read_HOSTNAMEMAX");
+    verdict = executeCommandInContext( context, &command );
+
+    if (verdict)
+    {
+        res = readLong_TSStream(&command.response);
+    }
+
+    destroy_TSCommand(&command);
+
+    return res;
+}
+
+/* [whether it is enough privileges is implementation-defined] */
+
+bool isEnoughPrivileges(CallContext context)
+{
+    ProcessState * process_state = getProcessState_CallContext( context );
+    ProcessMetaInfo * meta = & process_state->meta;
+
+    return (meta->effective_userid==0);
+}

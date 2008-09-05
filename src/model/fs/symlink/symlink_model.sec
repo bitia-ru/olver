@@ -1,0 +1,824 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "fs/symlink/symlink_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "data/errno_model.seh"
+#include "config/interpretation.seh"
+#include "fs/symlink/symlink_config.h"
+#include "system/system/system_model.seh"
+#include "system/sysconf/confname.h"
+
+#pragma SEC subsystem symlink "fs.symlink"
+
+
+
+/* 
+   The group of functions 'fs.symlink' consists of: 
+       readlink [2]
+       symlink [2]
+ */
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    readlink - read the contents of a symbolic link
+
+SYNOPSIS
+
+    #include <unistd.h>
+    ssize_t readlink(const char *restrict path, char *restrict buf,
+    size_t bufsize);
+
+DESCRIPTION
+
+    The readlink() function shall place the contents of the symbolic link 
+    referred to by path in the buffer buf which has size bufsize. If the 
+    number of bytes in the symbolic link is less than bufsize, the contents 
+    of the remainder of buf are unspecified. If the buf argument is not large 
+    enough to contain the link content, the first bufsize bytes shall be 
+    placed in buf.
+
+    If the value of bufsize is greater than {SSIZE_MAX}, the result is 
+    implementation-defined.
+
+RETURN VALUE
+
+    Upon successful completion, readlink() shall return the count of bytes 
+    placed in the buffer. Otherwise, it shall return a value of -1, leave 
+    the buffer unchanged, and set errno to indicate the error.
+
+ERRORS
+
+    The readlink() function shall fail if:
+
+    [EACCES]
+    Search permission is denied for a component of the path prefix of path.
+
+    [EINVAL]
+    The path argument names a file that is not a symbolic link.
+
+    [EIO]
+    An I/O error occurred while reading from the file system.
+
+    [ELOOP]
+    A loop exists in symbolic links encountered during resolution of the path 
+    argument.
+
+    [ENAMETOOLONG]
+    The length of the path argument exceeds {PATH_MAX} or a pathname component 
+    is longer than {NAME_MAX}.
+
+    [ENOENT]
+    A component of path does not name an existing file or path is an empty 
+    string.
+
+    [ENOTDIR]
+    A component of the path prefix is not a directory.
+
+    The readlink() function may fail if:
+
+    [EACCES]
+    Read permission is denied for the directory.
+
+    [ELOOP]
+    More than {SYMLOOP_MAX} symbolic links were encountered during resolution 
+    of the path argument.
+
+    [ENAMETOOLONG]
+    As a result of encountering a symbolic link in resolution of the path 
+    argument, the length of the substituted pathname string 
+    exceeded {PATH_MAX}.
+*/
+specification typedef struct ReadlinkReturnType ReadlinkReturnType = {};
+ReadlinkReturnType *create_ReadlinkReturnType(
+    SSizeT    retValue,
+    CByteArray*  buffer,
+    bool bufChanged
+)
+{
+    return create(&type_ReadlinkReturnType, retValue, buffer, bufChanged);
+}
+
+
+CString *resolveSymLink_Path(FileSystem *file_system, CString *path);
+
+specification
+ReadlinkReturnType* readlink_spec(CallContext context, CString* path,  
+                                  SizeT bufsize, ErrorCode* errno)
+{
+    FileSystem* file_system=getFileSystem(context);
+    File* file=getFile_FileSystem(file_system, path);
+    //CString* absPath=convertToAbsolute_Path(context, path);
+    Bool3 isELOOP;
+    CString *absPath = resolvePath_Ext(context, file_system, path, &isELOOP);
+    CString* symLink=resolveSymLink_Path(file_system, path);
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Path shall be not NULL", path!=NULL);
+
+        *errno=SUT_EOK;
+
+        return true;
+    }
+    coverage C_Symlink
+    {
+        if (file==NULL)
+        {
+            return { FileNotFound, "File was not found" };
+        }
+        else if(file->kind!=SymbolicLinkFile)
+        {
+            return { NotSymLink, "File is not symbolic link" };
+        }
+        else
+        {
+            return { SymLink, "File is the symbolic link" };
+        }
+    }
+    coverage C_Bufsize
+    {
+        if (symLink!=NULL)
+        {
+            if (bufsize<symLink->length)
+            {
+                return { BufsizeSmall, "Size of the buffer is not enough"};
+            }
+            else
+            {
+                return { BufsizeOK, "Size of the buffer is enough"};
+            }
+        }
+        else
+        {
+            return { NotResolved, "Symbolic link was not resolved"};
+        }
+    }
+    coverage C_Path
+    {
+        if(isEmpty_Path(path))
+        {
+            return { PathEmpty, "Path is empty" };
+        }
+        else if(isAbsolute_Path(path))
+        {
+            return { PathAbsolute, "Path is absolute" };
+        }
+        else 
+        {
+            return { PathRelative, "Path is relative" };
+        }
+    }
+    post
+    {
+        if (readlink_spec->retValue==-1)
+        {
+            /*
+            * and set errno to indicate the error
+            */
+            REQ("readlink.05.03", "Errno shall be valid", *errno!=SUT_EOK);
+
+            /*
+            * leave the buffer unchanged,
+            */
+            REQ("readlink.05.02", "Buffer shall be unchanged", 
+            readlink_spec->bufChanged==false);
+        }
+
+        /*
+        * Otherwise, it shall return a
+        * value of -1,
+        */
+        ERROR_BEGIN(POSIX_READLINK, "readlink.05.01", readlink_spec->retValue==-1, 
+          *errno)
+        /*
+         * The readlink() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Search permission is denied for a component of the path prefix of path.
+         *
+         */
+        ERROR_SHALL3(POSIX_READLINK, EACCES, "readlink.06.01", 
+          isEACCES_dir_open(context, file_system, getParentDir_Path(absPath)))
+
+        /*
+         * The readlink() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The path argument names a file that is not a symbolic link.
+         *
+         */
+        ERROR_SHALL(POSIX_READLINK, EINVAL, "readlink.06.02", file!=NULL && 
+          file->kind!=SymbolicLinkFile)
+
+        /*
+         * The readlink() function shall fail if:
+         *
+         * [EIO]
+         *
+         * An I/O error occurred while reading from the file system.
+         *
+         */
+        ERROR_SHALL(POSIX_READLINK, EIO, "readlink.06.03", TODO_ERR(EIO))
+
+        /*
+         * The readlink() function shall fail if:
+         *
+         *
+         * [ELOOP]
+         *
+         * A loop exists in symbolic links encountered during resolution of the 
+         * path argument.
+         *
+         *
+         */
+        ERROR_SHALL(POSIX_READLINK, ELOOP, "readlink.06.04", TODO_ERR(ELOOP))
+
+        /*
+         * The readlink() function shall fail if:
+         *
+         *
+         * [ENAMETOOLONG]
+         *
+         *
+         * The length of the path argument exceeds {PATH_MAX} or a pathname 
+         * component is longer than {NAME_MAX}.
+         *
+         *
+         */
+        ERROR_SHALL3(POSIX_READLINK, ENAMETOOLONG, "readlink.06.05", 
+          isENAMETOOLONG(context, path))
+
+        /*
+         * The readlink() function shall fail if:
+         *
+         *
+         * [ENOENT]
+         *
+         * A component of path does not name an existing file or path is an 
+         * empty string.
+         *
+         *
+         */
+        ERROR_SHALL3(POSIX_READLINK, ENOENT, "readlink.06.06", 
+          isENOENT_dir(context, file_system, 
+          getParentDir_Path(absPath)))
+
+        /*
+         * The readlink() function shall fail if:
+         *
+         *
+         * [ENOTDIR]
+         *
+         * A component of the path prefix is not a directory.
+         *
+         */
+        ERROR_SHALL3(POSIX_READLINK, ENOTDIR, "readlink.06.07", 
+          isENOTDIR_dir(context, file_system, getParentDir_Path(absPath)))
+
+        /*
+         * The readlink() function may fail if:
+         *
+         *
+         * [EACCES]
+         *
+         * Read permission is denied for the directory.
+         *
+         */
+        ERROR_MAY3(POSIX_READLINK, EACCES, "readlink.07.01", 
+          isEACCES_dir_open(context, file_system, getParentDir_Path(absPath)))
+
+        /*
+         * The readlink() function may fail if:
+         *
+         *
+         * [ELOOP]
+         *
+         * More than {SYMLOOP_MAX} symbolic links were encountered during 
+         * resolution of the path argument.
+         *
+         */
+        ERROR_SHALL(POSIX_READLINK, ELOOP, "readlink.07.02", TODO_ERR(ELOOP))
+
+        /*
+         * The readlink() function may fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         *
+         * As a result of encountering a symbolic link in resolution of the path 
+         * argument, the length of the substituted pathname
+         * string exceeded {PATH_MAX}.
+         *
+         */
+         ERROR_MAY3(POSIX_READLINK, ENAMETOOLONG, "readlink.07.03", 
+          isENAMETOOLONG(context, absPath))
+
+        ERROR_END()
+
+        if (symLink!=NULL)
+        {
+            if (symLink->length <= bufsize)
+            {
+                /*
+                * The readlink() function shall place the contents of the symbolic link 
+                * referred to by path in the buffer buf
+                * which has size bufsize.
+                */
+                REQ("readlink.01", 
+                  "The readlink() function shall place the symbolic link in the buffer", 
+                  readlink_spec->retValue == symLink->length &&
+                  compareCByteArrayCString(readlink_spec->buffer, symLink, 
+                  symLink->length));
+            }
+            else
+            {
+                /*
+                * If the buf argument is not large enough to contain the link content, 
+                * the first bufsize bytes shall be placed in buf.
+                */
+                REQ("readlink.03", "The first bufsize bytes shall be placed in buf",
+                  readlink_spec->retValue == bufsize &&
+                  compareCByteArrayCString(readlink_spec->buffer, symLink, 
+                  bufsize));
+
+                /*
+                * If the number of bytes in the symbolic link is less than bufsize, the 
+                * contents of the remainder of buf are unspecified.
+                */
+                REQ("readlink.02", 
+                    "If the number of bytes in the symbolic link is less "
+                    "than bufsize", 
+                    true);
+            }
+        }
+
+        /*
+        * Upon successful completion, readlink() shall return the count of bytes 
+        * placed in the buffer.
+        */
+        REQ("readlink.04", 
+          "readlink() shall return the count of bytes placed in the buffer", 
+          true);
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+  symlink - make a symbolic link to a file
+
+SYNOPSIS
+
+  #include <unistd.h>
+  int symlink(const char *path1, const char *path2);
+
+
+DESCRIPTION
+
+  The symlink() function shall create a symbolic link called path2 that 
+  contains the string pointed to by path1 ( path2 is the name of the symbolic 
+  link created, path1 is the string contained in the symbolic link).
+
+  The string pointed to by path1 shall be treated only as a character string 
+  and shall not be validated as a pathname.
+
+  If the symlink() function fails for any reason other than [EIO], any 
+  file named by path2 shall be unaffected.
+
+RETURN VALUE
+
+  Upon successful completion, symlink() shall return 0;otherwise, it shall 
+  return -1 and set errno to indicate the error.
+
+ERRORS
+
+  The symlink() function shall fail if:
+
+  [EACCES] 
+  Write permission is denied in the directory where the symbolic link is being
+  created, or search permission is denied for a component of the path prefix 
+  of path2. 
+
+  [EEXIST] 
+  The path2 argument names an existing file or symbolic link. 
+
+  [EIO] 
+  An I/O error occurs while reading from or writing to the file system. 
+
+  [ELOOP] 
+  A loop exists in symbolic links encountered during resolution of the path2 
+  argument. 
+
+  [ENAMETOOLONG] 
+  The length of the path2 argument exceeds {PATH_MAX} or a pathname component 
+  is longer than {NAME_MAX} or the length of the path1 argument is longer 
+  than {SYMLINK_MAX}. 
+
+  [ENOENT] 
+  A component of path2 does not name an existing file or path2 is an 
+  empty string. 
+
+  [ENOSPC] 
+  The directory in which the entry for the new symbolic link is being placed 
+  cannot be extended because no space is left on the file system containing 
+  the directory, or the new symbolic link cannot be created because no space 
+  is left on the file system which shall contain the link, or the file system 
+  is out of file-allocation resources. 
+
+  [ENOTDIR] 
+  A component of the path prefix of path2 is not a directory. 
+
+  [EROFS] 
+  The new symbolic link would reside on a read-only file system. 
+
+  The symlink() function may fail if:
+
+  [ELOOP] 
+  More than {SYMLOOP_MAX} symbolic links were encountered during resolution 
+  of the path2 argument. 
+
+  [ENAMETOOLONG] 
+  As a result of encountering a symbolic link in resolution of the path2 
+  argument, the length of the substituted pathname string exceeded 
+  {PATH_MAX} bytes (including the terminating null byte), or the length of 
+  the string pointed to by path1 exceeded {SYMLINK_MAX}. 
+
+*/
+
+
+specification
+IntT symlink_spec( CallContext context, CString* path1, CString* path2, 
+                   ErrorCode* errno, CancelStatus status)
+{
+    FileSystem* file_system=clone(getFileSystem(context));
+    Bool3 isELOOP;
+    //CString* absPath=convertToAbsolute_Path(context, path2);
+    CString *absPath = resolvePath_Ext(context, file_system, path2, &isELOOP);
+
+    File* file=getFile_FileSystem(file_system, absPath);
+    LongT symlink_max= getPathSystemConfigurationValue(context, path1, 
+    SUT_PC_SYMLINK_MAX);
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Path1 shall be not NULL", path1!=NULL);
+
+        /* [Implicit precondition] */
+        REQ("", "Path2 shall be not NULL", path2!=NULL);
+
+        if (file!=NULL)
+        {
+            file=clone(file);
+        }
+
+        *errno=SUT_EOK;
+
+        return true;
+    }
+    coverage C_Path
+    {
+        if(isEmpty_Path(path2))
+        {
+            return { PathEmpty, "Path is empty" };
+        }
+        else if(isAbsolute_Path(path2))
+        {
+            return { PathAbsolute, "Path is absolute" };
+        }
+        else 
+        {
+            return { PathRelative, "Path is relative" };
+        }
+    }
+    coverage C_Symlink
+    {
+        if (doesFileExist_FileSystem(file_system, absPath)!=True_Bool3)
+        {
+            return { FileNotFound, "File was not found" };
+        }
+        else if(file->kind!=SymbolicLinkFile)
+        {
+            return { NotSymLink, "File is not symbolic link" };
+        }
+        else
+        {
+            return { SymLink, "File is the symbolic link" };
+        }
+    }
+    CANCELPOINT_COVERAGE(context)
+    post
+    {    
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+
+        if (symlink_spec==-1 &&  *errno!=SUT_EIO)
+        {
+            /*
+            * If the symlink() function fails for any reason other than [EIO], 
+            * any file named by path2 shall be unaffected.
+            */
+
+            REQ("symlink.03", "File shall be unaffected", 
+            isFileUnaffected(file_system, file, absPath));
+        }
+
+        /*
+        * otherwise, it shall return -1 and set errno to indicate the
+        * error.
+        */
+        ERROR_BEGIN(POSIX_SYMLINK, "symlink.04.02", symlink_spec==-1,  *errno )
+        /*
+         * The symlink() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Write permission is denied in the directory where the symbolic link is 
+         * being created, or search permission is denied for a
+         * component of the path prefix of path2.
+         *
+         */
+        ERROR_SHALL3(POSIX_SYMLINK, EACCES, "symlink.05.01", 
+          isEACCES_dir_mkrm(context, file_system, absPath))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         * [EEXIST]
+         *
+         * The path2 argument names an existing file or symbolic link.
+         *
+         */
+        ERROR_SHALL3(POSIX_SYMLINK, EEXIST, "symlink.05.02", 
+          doesFileExist_FileSystem(file_system, absPath))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         * [EIO]
+         *
+         * An I/O error occurs while reading from or writing to the file system.
+         *
+         */
+        ERROR_SHALL(POSIX_SYMLINK, EIO, "symlink.05.03", TODO_ERR(EIO))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         * [ELOOP]
+         *
+         * A loop exists in symbolic links encountered during resolution of the 
+         * path2 argument.
+         *
+         */
+        ERROR_SHALL(POSIX_SYMLINK, ELOOP, "symlink.05.04", TODO_ERR(ELOOP))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         *
+         * The length of the path2 argument exceeds {PATH_MAX} or a pathname 
+         * component is longer than {NAME_MAX} or the length of the
+         * path1 argument is longer than {SYMLINK_MAX}.
+         *
+         *
+         */
+        ERROR_SHALL(POSIX_SYMLINK, ENAMETOOLONG, "symlink.05.05", 
+          isENAMETOOLONG(context, absPath)==True_Bool3 || 
+          (symlink_max!=SC_VALUE_UNKNOWN && 
+          path1->length > symlink_max))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         *
+         * [ENOENT]
+         *
+         * A component of path2 does not name an existing file or path2 
+         * is an empty string.
+         *
+         */
+         ERROR_SHALL3(POSIX_SYMLINK, ENOENT, "symlink.05.06", 
+           isENOENT_dir(context, file_system, 
+           getParentDir_Path(absPath)))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         *
+         * [ENOSPC]
+         *
+         * The directory in which the entry for the new symbolic link is being
+         * placed cannot be extended because no space is left on the
+         * file system containing the directory, or the new symbolic link cannot
+         * be created because no space is left on the file system which
+         * shall contain the link, or the file system is out of file-allocation
+         * resources.
+         *
+         *
+         */
+        ERROR_SHALL(POSIX_SYMLINK, ENOSPC, "symlink.05.07", TODO_ERR(ENOSPC))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         * [ENOTDIR]
+         *
+         * A component of the path prefix of path2 is not a directory.
+         *
+         *
+         */
+        ERROR_SHALL3(POSIX_SYMLINK, ENOTDIR, "symlink.05.08", 
+          isENOTDIR_dir(context, file_system, getParentDir_Path(absPath)))
+
+        /*
+         * The symlink() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * The new symbolic link would reside on a read-only file system.
+         *
+         */
+        ERROR_SHALL(POSIX_SYMLINK, EROFS, "symlink.05.09", TODO_ERR(EROFS))
+
+        /*
+         * The symlink() function may fail if:
+         *
+         * [ELOOP]
+         *
+         * More than {SYMLOOP_MAX} symbolic links were encountered during 
+         * resolution of the path2 argument.
+         *
+         */
+        ERROR_SHALL(POSIX_SYMLINK, ELOOP, "symlink.06.01", TODO_ERR(ELOOP))
+
+        /*
+         * The symlink() function may fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         *
+         * As a result of encountering a symbolic link in resolution of the path2 
+         * argument, the length of the substituted pathname
+         * string exceeded {PATH_MAX} bytes (including the terminating null byte), 
+         * or the length of the string pointed to by path1
+         * exceeded {SYMLINK_MAX}.
+         *
+         */
+        ERROR_MAY(POSIX_SYMLINK, ENAMETOOLONG, "symlink.06.02", 
+        isENAMETOOLONG(context, absPath)==True_Bool3 || 
+        (symlink_max!=SC_VALUE_UNKNOWN && 
+          path1->length > symlink_max))
+
+
+        ERROR_END()
+
+        /*
+        * Upon successful completion, symlink() shall return 0;
+        */
+        REQ("symlink.04.01", 
+            "Upon successful completion, symlink() shall return 0", 
+            true);
+
+
+        /*
+        * The symlink() function shall create a symbolic link called path2 
+        * that contains the string pointed to by path1
+        */
+        DUMP("resolve==$(obj)\npath1==$(obj)\npath2==$(obj)\nabsPath==$(obj)\n", resolveSymLink_Path(getFileSystem(context), path2), path1, path2, absPath);
+        REQ("symlink.01", 
+          "symbolic link called path2 shall contain the string path1", 
+          equals(resolveSymLink_Path(getFileSystem(context), absPath), path1));
+
+        /*
+        * The string pointed to by path1 shall be treated only as a character 
+        * string and shall not be validated as a pathname.
+        */
+        REQ("symlink.02", 
+            "The string pointed to by path1 shall be treated only as a "
+            "character string", 
+            true);
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool compareCByteArrayCString(CByteArray* array, CString* str, SizeT length)
+{
+    SizeT i;
+    ByteT c1;
+    CharT c2;
+    for (i=0;i<length;i++)
+    {
+        c1=byteAt_CByteArray(array, i);
+        c2=charAt_CString(str, i);
+        if (c1!=c2)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isFileUnaffected(FileSystem* file_system, File* file, CString* path)
+{
+    File* newFile=getFile_FileSystem(file_system, path);
+    DUMP("File==$(obj)\nNew_File==$(obj)\npath==$(obj)\n", file, newFile, path);
+    if (file==NULL)
+    {
+        if(newFile!=NULL)
+            return false;
+    }
+    else
+    {
+        if(newFile==NULL)
+            return false;
+        if (newFile->atime!=NULL && file->atime!=NULL && !equals(newFile->atime,
+            file->atime))
+        {
+            VERBOSE("atime failed...\n");
+            return false;
+        }
+        if (newFile->mtime!=NULL && file->mtime!=NULL && !equals(newFile->mtime,
+            file->mtime))
+        {
+            VERBOSE("mtime failed...\n");
+            return false;
+        }
+        if (newFile->ctime!=NULL && file->ctime!=NULL && !equals(newFile->ctime,
+            file->ctime))
+        {
+            VERBOSE("ctime failed...\n");
+            return false;
+        }
+    }
+    return true;
+
+}

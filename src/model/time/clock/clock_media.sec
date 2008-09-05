@@ -1,0 +1,296 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "process/fenv/fenv_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/meta/user_model.seh"
+#include "fs/meta/access_model.seh"
+#include "config/system_config.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "time/clock/clock_model.seh"
+#include "time/clock/clock_media.seh"
+#include "common/common_media.seh"
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+
+static void sleep_return_processor( ThreadId threadId, TSStream * stream, TSMetaData * meta )
+{
+    String       * funcName       = readString_TSStream( stream );
+    IntT           returned_value = readInt_TSStream   ( stream );
+    // clock_nanosleep, nanosleep
+    TimeSpecTObj * rmtp                                          ;
+    // nanosleep, usleep
+    ErrorCode    * error_code                                    ;
+
+    if ( equals( create_String( "clock_nanosleep" ), funcName ) || equals( create_String( "nanosleep" ), funcName ) ) {
+        if ( readInt_TSStream( stream ) != 0 ) {
+            rmtp = NULL;
+        } else {
+            TimeSpecT tp;
+            tp.sec  = readInt_TSStream( stream );
+            tp.nsec = readInt_TSStream( stream );
+            rmtp = create_TimeSpecTObj( tp );
+        }
+    } else {
+        rmtp = NULL;
+    }
+
+    if ( equals( create_String( "nanosleep" ), funcName ) ||
+         equals( create_String( "usleep"    ), funcName ) ) { error_code = readErrorCode_TSStream ( stream ); }
+                                                       else { error_code = NULL                             ; }
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID( threadId ),
+        NULL,
+        sleep_return,
+        create_SleepReturnType( funcName, threadId, returned_value, rmtp, error_code ),
+        meta->timestamp
+    );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initTimeClockSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_clock_getcpuclockid_spec( clock_getcpuclockid_media );
+    set_mediator_clock_getres_spec       ( clock_getres_media        );
+    set_mediator_clock_gettime_spec      ( clock_gettime_media       );
+    set_mediator_sleep_return            ( sleep_return_media        );
+    set_mediator_clock_nanosleep_spec    ( clock_nanosleep_media     );
+    set_mediator_clock_settime_spec      ( clock_settime_media       );
+
+    // Set up dr processors
+    registerDRProcessor( "sleep_return", sleep_return_processor );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** clock_getcpuclockid_spec **/
+mediator clock_getcpuclockid_media for specification
+IntT clock_getcpuclockid_spec( CallContext context, ProcessId pid, ClockidTObj * clock_id )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "clock_getcpuclockid:$(int)", create_PidTObj( pid.process ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ClockidTObj( readInt_TSStream( &command.response ) ), clock_id );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( clock_getcpuclockid_spec == 0 ) {
+            SystemState  * systemState ;
+            ProcessState * processState;
+            systemState = getSystemState_CallContext( context );
+            if ( ! containsKey_Map( systemState->clocks, clock_id ) ) {
+                put_Map( systemState->clocks, clock_id, create_ClockState( NULL ) );
+            }
+            if ( pid.process == 0 ) { processState = getProcessState_CallContext( context ); }
+                               else { processState = getProcessState            ( pid     ); }
+            if ( processState != NULL ) { add_Set( processState->meta.clockIds, clock_id ); }
+        }
+    }
+}
+
+/** clock_getres_spec **/
+mediator clock_getres_media for specification
+IntT clock_getres_spec( CallContext context, ClockidTObj * clock_id, TimeSpecTObj * res, ErrorCode * errno )
+{
+    call
+    {
+        IntT result = -10;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "clock_getres:$(int)$(int)", clock_id, create_IntTObj( res == NULL ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            result = readInt_TSStream( & command.response );
+            if ( res != NULL ) {
+                TimeSpecT resolution;
+                resolution.sec  = readInt_TSStream( & command.response );
+                resolution.nsec = readInt_TSStream( & command.response );
+                copy( create_TimeSpecTObj( resolution ), res );
+            }
+            copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return result;
+    }
+    state
+    {
+        if ( clock_getres_spec == 0 ) {
+            SystemState * systemState = getSystemState_CallContext( context );
+            if ( ! containsKey_Map( systemState->clocks, clock_id ) ) {
+                put_Map( systemState->clocks, clock_id, create_ClockState( res ) );
+            } else if ( res != NULL ) {
+                ClockState * clockState = get_Map( systemState->clocks, clock_id );
+                clockState->resolution = res;
+                put_Map( systemState->clocks, clock_id, clockState );
+            }
+        }
+    }
+}
+
+/** clock_gettime_spec **/
+mediator clock_gettime_media for specification
+IntT clock_gettime_spec( CallContext context, ClockidTObj * clock_id, TimeSpecTObj * tp, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "clock_gettime:$(int)", clock_id );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            TimeSpecT time;
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            time.sec  = readInt_TSStream( & command.response );
+            time.nsec = readInt_TSStream( & command.response );
+            copy( create_TimeSpecTObj( time ), tp );
+            copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( clock_gettime_spec == 0 ) {
+            SystemState * systemState = getSystemState_CallContext( context );
+            if ( ! containsKey_Map( systemState->clocks, clock_id ) ) {
+                put_Map( systemState->clocks, clock_id, create_ClockState( NULL ) );
+            }
+            ClockState * clockState = get_Map( systemState->clocks, clock_id );
+            clockState->observedValues = create_ObservedValues( tp, tp, tp );
+            put_Map( systemState->clocks, clock_id, clockState );
+        }
+    }
+}
+
+/** common for clock_nanosleep, nanosleep, sleep and usleep **/
+mediator sleep_return_media for reaction
+SleepReturnType * sleep_return( void )
+{
+    state
+    {
+        onSleepReturn( sleep_return->context );
+    }
+}
+
+/** clock_nanosleep_spec **/
+mediator clock_nanosleep_media for specification
+void clock_nanosleep_spec
+         ( CallContext context, ClockidTObj * clock_id, IntT flags, TimeSpecTObj * rqtp, TimeSpecTObj * rmtp )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "clock_nanosleep:$(int)$(int)$(int)$(int)$(int)$(int)$(int)",
+                                    clock_id, create_IntTObj( flags ),
+                                    create_IntTObj( (IntT)rqtp->sec ), create_IntTObj( (IntT)rqtp->nsec ),
+                                    create_IntTObj( rmtp == NULL ), create_IntTObj( rmtp == NULL ? 0 : (IntT)rmtp->sec ),
+                                                                    create_IntTObj( rmtp == NULL ? 0 : (IntT)rmtp->nsec )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            deferredAcceptTestAgent();
+        }
+
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onClockNanosleep( context, clock_id, flags, rqtp, rmtp, timestamp );
+    }
+}
+
+/** clock_settime_spec **/
+mediator clock_settime_media for specification
+IntT clock_settime_spec( CallContext context, ClockidTObj * clock_id, TimeSpecTObj * tp, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "clock_settime:$(int)$(int)$(int)",
+                                    clock_id, create_IntTObj( (IntT)tp->sec ), create_IntTObj( (IntT)tp->nsec )
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( create_ErrorCode( readInt_TSStream( &command.response ) ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( clock_settime_spec == 0 ) {
+            SystemState * systemState = getSystemState_CallContext( context );
+            if ( ! containsKey_Map( systemState->clocks, clock_id ) ) {
+                put_Map( systemState->clocks, clock_id, create_ClockState( NULL ) );
+            }
+            ClockState * clockState = get_Map( systemState->clocks, clock_id );
+            TimeSpecTObj * tpTruncated = getTpTruncated( tp, clockState->resolution );
+            clockState->observedValues = create_ObservedValues( tpTruncated, tpTruncated, tpTruncated );
+            put_Map( systemState->clocks, clock_id, clockState );
+        }
+    }
+}

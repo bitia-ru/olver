@@ -1,0 +1,2549 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "pthread/sem/pthread_sem_config.h"
+#include "pthread/sem/sem_model.seh"
+#include "config/system_config.seh"
+#include "atl/stringbuffer.h"
+
+#pragma SEC subsystem sem "pthread.sem"
+
+/* 
+   The group of functions 'pthread.sem' consists of: 
+       sem_close [2]
+       sem_destroy [2]
+       sem_getvalue [2]
+       sem_init [2]
+       sem_open [2]
+       sem_post [2]
+       sem_timedwait [2]
+       sem_trywait [2]
+       sem_unlink [2]
+       sem_wait [2]
+ */
+
+specification typedef struct Semaphore Semaphore = 
+{
+    .to_string = (ToString)semaphore_To_String
+};
+
+/*
+    TODO: 
+    The list of requirements which should be met in scenarios:
+
+    REQ("sem_close.02", "", true);
+
+    REQ("sem_init.03", "", true);
+
+    REQ("sem_init.04", "", true);
+
+    REQ("sem_init.06", "", true);
+
+    REQ("sem_unlink.02", "", true);
+
+    /*
+    The sem_unlink() call shall not block until
+    all references have been destroyed; it shall return immediately.
+    * /
+    REQ("sem_unlink.03", "", true); - TODO now!!!
+
+*/
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_close - close a named semaphore (REALTIME)
+
+SYNOPSIS
+    #include <semaphore.h>
+    
+    int sem_close(sem_t *sem); 
+
+DESCRIPTION
+
+    The sem_close() function shall indicate that the calling process is 
+    finished using the named semaphore indicated by sem. The effects of calling
+    sem_close() for an unnamed semaphore (one created by sem_init()) are 
+    undefined. The sem_close() function shall deallocate (that is, make 
+    available for reuse by a subsequent sem_open() by this process) any system 
+    resources allocated by the system for use by this process for this 
+    semaphore. The effect of subsequent use of the semaphore indicated by sem 
+    by this process is undefined. If the semaphore has not been removed with a 
+    successful call to sem_unlink(), then sem_close() has no effect on the 
+    state of the semaphore. If the sem_unlink() function has been successfully 
+    invoked for name after the most recent call to sem_open() with O_CREAT for 
+    this semaphore, then when all processes that have opened the semaphore 
+    close it, the semaphore is no longer accessible.
+
+RETURN VALUE
+    Upon successful completion, a value of zero shall be returned. Otherwise, 
+    a value of -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    The sem_close() function may fail if:
+
+    [EINVAL]
+        The sem argument is not a valid semaphore descriptor.
+*/
+
+specification
+IntT sem_close_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno)
+{
+    Semaphore *pre_sem_m = NULL;
+    pre
+    {
+        //verbose("sem_close_spec............... pre\n");
+        pre_sem_m = getSemaphore(semaphore, context);
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+        
+        if (POSIX_SEM_CLOSE_FAILS_WITH_EINVAL == 0)
+        {
+            /* [The value specified by semaphore is invalid. Behaviour is unspecified.] */
+            REQ("","The value specified by semaphore is invalid", (pre_sem_m != NULL));            
+        }
+
+        if(pre_sem_m)
+        {
+             /*
+             * The effects of calling sem_close() for an unnamed semaphore (one created by sem_init()) are undefined.
+             */
+            REQ("app.sem_close.01", 
+                "The effects for an unnamed semaphore are undefined", 
+                pre_sem_m->type == NAMED_SEMAPHORE);
+
+            /* [To close semaphore thread should had opened it before] */
+            REQ("", "To close semaphore thread should have opened it before",
+                isThreadSemaphoreOpener(pre_sem_m, context));
+        }
+
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        Semaphore *post_sem_m = getSemaphore(semaphore, context);
+        /*
+         * Otherwise, a value of -1 shall be returned and errno set to indicate
+         * the error.
+         */
+        ERROR_BEGIN(POSIX_SEM_CLOSE, "sem_close.05.02", sem_close_spec != 0, *errno)
+        /*
+         * The sem_close() function may fail if
+         * striy
+         * [EINVAL]
+         * 
+         * The sem argument is not a valid semaphore descriptor.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_CLOSE, EINVAL,"sem_close.06.01", pre_sem_m == NULL)
+
+        ERROR_END()
+
+        /* 
+         * Upon successful completion, a value of zero shall be returned.
+         */
+        REQ("sem_close.05.01", "Upon successful completion, a value of zero shall be returned",
+            sem_close_spec == 0);
+
+        if(!isSemaphoreOpened(pre_sem_m) && pre_sem_m->should_removed )
+        {
+            /*
+             * If the
+             * sem_unlink() function has been successfully invoked for name after the
+             * most recent call to sem_open() with O_CREAT for this semaphore, then when all
+             * processes that have opened the semaphore close it, the semaphore is no longer accessible.
+             */
+            REQ("sem_close.04", "The semaphore should be removed", post_sem_m == NULL );
+        }
+
+        if(post_sem_m)
+        {
+            /* Semaphore yet exists */
+            
+            /*
+             * If the semaphore has not been removed with a successful call to sem_unlink(), 
+             * then sem_close() has no effect on the state of the semaphore.
+             */
+            REQ("sem_close.03", "The semaphore state should not been changed",
+                !isSemaphoreChangedState(pre_sem_m, post_sem_m));
+
+            /* [Current thread should close given semaphore] */
+            REQ("", "Current thread should close given semaphore", !isThreadSemaphoreOpener(post_sem_m, context));
+
+            /* At least one opener must exist or unlink has not been invoked to remove the semaphore */
+            REQ("", "At least one opener should exist or unlink has not been invoked to remove the semaphore", 
+                isSemaphoreOpened(post_sem_m) || post_sem_m->should_removed == false);
+
+        }else
+        {
+            /* Semaphore has been removed */
+
+            /* [Semaphore had had to have only one opener - this thread] */
+            REQ("", "Semaphore had to have onle one opener - this thread", 
+                size_Set(pre_sem_m->openers)==1 && contains_Set(pre_sem_m->openers, create_ThreadIdObj(context)));
+
+            /* [If semaphore is removed it had had to be unlinked before close was called] */
+            REQ("", "If semaphore is removed it had had to be unlinked before close was called", pre_sem_m->should_removed);
+
+        }
+        return true;
+    }
+}
+
+void onPThreadSemClose(CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_close_spec)
+{
+    if (sem_close_spec == 0)
+    {
+        Semaphore* sem_m = getSemaphore(semaphore, context);
+        remove_Set( sem_m->openers, create_ThreadIdObj(context));
+        removeSemaphoreIfPossible(sem_m);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    sem_destroy - destroy an unnamed semaphore (REALTIME)
+
+SYNOPSIS
+    
+    #include <semaphore.h>
+
+    int sem_destroy(sem_t *sem); 
+
+DESCRIPTION
+
+    The sem_destroy() function shall destroy the unnamed semaphore indicated 
+    by sem. Only a semaphore that was created using sem_init() may be destroyed
+    using sem_destroy(); the effect of calling sem_destroy() with a named 
+    semaphore is undefined. The effect of subsequent use of the semaphore sem 
+    is undefined until sem is reinitialized by another call to sem_init().
+
+    It is safe to destroy an initialized semaphore upon which no threads are 
+    currently blocked. The effect of destroying a semaphore upon which other 
+    threads are currently blocked is undefined.
+
+RETURN VALUE
+
+    Upon successful completion, a value of zero shall be returned. Otherwise, 
+    a value of -1 shall be returned and errno set to indicate the error.
+
+ERRORS
+
+    The sem_destroy() function may fail if:
+
+    [EINVAL]
+        The sem argument is not a valid semaphore.
+
+    [EBUSY]
+        There are currently processes blocked on the semaphore.
+*/
+
+specification
+IntT sem_destroy_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno)
+{
+    Semaphore *pre_sem_m;
+    pre
+    {
+        pre_sem_m = getSemaphore(semaphore, context);
+        if(pre_sem_m) pre_sem_m = clone(pre_sem_m);
+
+
+        if (POSIX_SEM_DESTROY_FAILS_WITH_EINVAL == 0)
+        {
+            /* [The value specified by semaphore is invalid. Behaviour is unspecified.] */
+            REQ("","The value specified by semaphore is invalid", (pre_sem_m != NULL));            
+        }
+        /*
+         * The effect of subsequent use of the semaphore sem is undefined
+         * until sem is reinitialized by another call to sem_init().
+         */
+        REQ("app.sem_destroy.03", "The semaphore should exist", true);
+
+        /*
+         * Only a semaphore that was created
+         * using sem_init() may be destroyed using sem_destroy(); the effect of calling
+         * sem_destroy() with a named semaphore is undefined.
+         */
+        REQ("app.sem_destroy.02", "Semaphore type should be unnamed",
+            !pre_sem_m || pre_sem_m->type == UNNAMED_SEMAPHORE);
+
+        /*
+         * It is safe to destroy an initialized semaphore upon which no threads are currently blocked. The effect of destroying a semaphore
+         * upon which other threads are currently blocked is undefined.
+         */
+        REQ("app.sem_destroy.04", "The effect of destroying a semaphore upon which other threads are currently blocked is undefined",
+            !pre_sem_m || size_List(pre_sem_m->wait_list)==0);
+
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+
+    post
+    {
+        Semaphore *post_sem_m = getSemaphoreByCopy(pre_sem_m);
+        
+        /*
+         * Otherwise, a value of -1 shall be returned and errno set to indicate
+         * the error
+        */
+        ERROR_BEGIN(POSIX_SEM_DESTROY, "sem_destroy.05.02", sem_destroy_spec != 0, *errno)
+        /*
+         * The sem_destroy() function may fail if
+         * 
+         * [EINVAL]
+         * 
+         * The sem argument is not a valid semaphore.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_DESTROY, EINVAL,"sem_destroy.06.01", pre_sem_m == NULL)
+
+        /*
+         * The sem_destroy() function may fail if
+         * 
+         * [EBUSY]
+         * 
+         * There are currently processes blocked on the semaphore.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_DESTROY, EBUSY,"sem_destroy.06.02", doesWaitedThreadExist(pre_sem_m))
+
+        ERROR_END()
+
+        /* Upon successful completion, a value of zero shall be returned */
+        REQ("sem_destroy.05.01", "Upon successful completion, a value of zero shall be returned",
+            sem_destroy_spec == 0);
+
+        /*
+         * The sem_destroy() function shall destroy the unnamed semaphore 
+         * indicated by sem.
+         */
+        REQ("sem_destroy.01", 
+            "Shall destroy the unnamed semaphore indicated by sem", 
+            post_sem_m == NULL );
+        
+        return true;
+    }
+}
+
+/*
+[EINVAL]
+The sem argument is not a valid semaphore.
+[EBUSY]
+*/
+
+void onPThreadSemDestroy( CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_destroy_spec)
+{
+    if (sem_destroy_spec == 0)
+    {
+        Semaphore* sem_m = getSemaphore(semaphore, context);
+        if(sem_m)
+        {
+            remove_Set( sem_m->openers, create_ThreadIdObj(context));
+            removeSemaphoreIfPossible(sem_m);
+        }
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_getvalue - get the value of a semaphore (REALTIME)
+
+SYNOPSIS
+    #include <semaphore.h>
+
+    int sem_getvalue(sem_t *restrict sem, int *restrict sval); 
+
+DESCRIPTION
+
+    The sem_getvalue() function shall update the location referenced by the 
+    sval argument to have the value of the semaphore referenced by sem without 
+    affecting the state of the semaphore. The updated value represents an 
+    actual semaphore value that occurred at some unspecified time during the 
+    call, but it need not be the actual value of the semaphore when it is 
+    returned to the calling process.
+
+    If sem is locked, then the object to which sval points shall either be set 
+    to zero or to a negative number whose absolute value represents the number 
+    of processes waiting for the semaphore at some unspecified time during the 
+    call.
+
+RETURN VALUE
+
+    Upon successful completion, the sem_getvalue() function shall return a 
+    value of zero. Otherwise, it shall return a value of -1 and set errno to 
+    indicate the error.
+
+ERRORS
+
+    The sem_getvalue() function may fail if:
+
+    [EINVAL]
+        The sem argument does not refer to a valid semaphore.
+*/
+
+specification
+IntT sem_getvalue_spec( CallContext context, PThreadSemaphoreTPtr semaphore, IntT* sval, ErrorCode* errno)
+{
+    Semaphore *pre_sem_m = NULL;
+    pre
+    {
+        pre_sem_m = getSemaphore(semaphore, context);
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+        
+        if (POSIX_SEM_GETVALUE_CHECK_FOR_EINVAL == 0)
+        {
+            /* [The value specified by semaphore is invalid. Behaviour is unspecified.] */
+            REQ("","The value specified by semaphore is invalid", (pre_sem_m != NULL));            
+        }
+        return true;
+    }
+
+    coverage SemaphoreTypeC
+    {
+        if(POSIX_SEM_GETVALUE_CHECK_FOR_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(pre_sem_m->type == UNNAMED_SEMAPHORE)
+            return { UnnamedSemaphore, "Unnamed semaphore" };
+
+        else return { NamedSemaphore, "Named semaphore" };
+    }
+
+    coverage WaitedThreadC
+    {
+        if(POSIX_SEM_GETVALUE_CHECK_FOR_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(doesWaitedThreadExist(pre_sem_m))
+            return { WaitedTheadExist, "Waited thread exists" };
+        else return { WaitedTheadNOTExist, "Waited thread does not exist" };
+    }
+
+    post
+    {
+        Semaphore *post_sem_m = getSemaphoreByCopy(pre_sem_m);
+
+        ERROR_BEGIN(POSIX_SEM_GETVALUE, "sem_getvalue.03.02", sem_getvalue_spec != 0, *errno)
+        /*
+         * The sem_getvalue() function may fail if
+         * 
+         * [EINVAL]
+         * 
+         * The sem argument does not refer to a valid semaphore.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_GETVALUE, EINVAL,"sem_getvalue.04.01", pre_sem_m == NULL)
+
+        ERROR_END()
+
+        /* 
+         * Otherwise, it shall return a value of -1 and set errno to indicate 
+         * the error.
+         */
+        REQ("sem_getvalue.03.01", "Otherwise, it shall return a value of -1 and set errno to indicate the error",
+            sem_getvalue_spec == 0);
+
+        if(size_List(pre_sem_m->wait_list)>0)
+        {
+            /*
+             * If sem is locked, then the object to which sval points shall either be set to zero or to a negative number whose
+             * absolute value represents the number of processes waiting for the semaphore at some unspecified time during the call.
+             */
+            REQ("sem_getvalue.02", "The value of *sval shall equal to zero or the number of blocked processes",
+                (*sval == 0) || (*sval == -(IntT)size_List(pre_sem_m->wait_list)));
+
+        }else
+        {
+            /*
+             * The sem_getvalue() function shall update the location referenced by the sval argument to have the value of the
+             * semaphore referenced by sem without affecting the state of the semaphore. The updated value represents an actual semaphore
+             * value that occurred at some unspecified time during the call, but it need not be the actual value of the semaphore when it is
+             * returned to the calling process.
+             */
+            REQ("sem_getvalue.01", "The value of *sval should equal to the value of the semaphore and the semaphore shall not been changed",
+                post_sem_m->counter == *sval && !isSemaphoreChangedState(pre_sem_m, post_sem_m));
+        }
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_init - initialize an unnamed semaphore (REALTIME)
+
+SYNOPSIS
+    #include <semaphore.h>
+
+    int sem_init(sem_t *sem, int pshared, unsigned value); 
+
+DESCRIPTION
+
+    The sem_init() function shall initialize the unnamed semaphore referred to 
+    by sem. The value of the initialized semaphore shall be value. Following a 
+    successful call to sem_init(), the semaphore may be used in subsequent 
+    calls to sem_wait(), [TMO]  sem_timedwait(),  sem_trywait(), sem_post(), 
+    and sem_destroy(). This semaphore shall remain usable until the semaphore 
+    is destroyed.
+
+    If the pshared argument has a non-zero value, then the semaphore is shared 
+    between processes; in this case, any process that can access the semaphore 
+    sem can use sem for performing sem_wait(), [TMO]  sem_timedwait(),  
+    sem_trywait(), sem_post(), and sem_destroy() operations.
+
+    Only sem itself may be used for performing synchronization. The result of 
+    referring to copies of sem in calls to sem_wait(), [TMO]  sem_timedwait(), 
+    sem_trywait(), sem_post(), and sem_destroy() is undefined.
+
+    If the pshared argument is zero, then the semaphore is shared between 
+    threads of the process; any thread in this process can use sem for 
+    performing sem_wait(), [TMO]  sem_timedwait(),  sem_trywait(), sem_post(), 
+    and sem_destroy() operations. The use of the semaphore by threads other 
+    than those created in the same process is undefined.
+
+    Attempting to initialize an already initialized semaphore results in undefined behavior.
+
+    RETURN VALUE
+
+    Upon successful completion, the sem_init() function shall initialize the 
+    semaphore in sem. Otherwise, it shall return -1 and set errno to indicate 
+    the error.
+
+ERRORS
+
+    The sem_init() function shall fail if:
+    
+    [EINVAL]
+        The value argument exceeds {SEM_VALUE_MAX}.
+    
+    [ENOSPC]
+        A resource required to initialize the semaphore has been exhausted, or the limit on semaphores ( {SEM_NSEMS_MAX}) has been reached.
+    
+    [EPERM]
+        The process lacks the appropriate privileges to initialize the semaphore.
+*/
+
+specification
+IntT sem_init_spec( CallContext context, PThreadSemaphoreTPtr semaphore, IntT pshared, UIntT value, ErrorCode* errno)
+{
+    Semaphore *pre_sem_m;
+    pre
+    {
+        pre_sem_m = getSemaphore(semaphore, context);
+
+        /*
+         * The use of the semaphore by threads other than those
+         * created in the same process is undefined.
+         */
+        REQ("app.sem_init.07", "The use of the semaphore by threads other than those created in the same process is undefined",
+            isValidPointer(context, semaphore));
+
+        /*
+         * Attempting to initialize an already initialized semaphore results in undefined behavior.
+         */
+        REQ("app.sem_init.08", "The semaphore shall not exist",
+            pre_sem_m == NULL);
+        
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        Semaphore *post_sem_m = getSemaphore(semaphore, context);
+
+        ERROR_BEGIN(POSIX_SEM_INIT, "sem_init.09.02", sem_init_spec != 0, *errno )
+        /*
+         * The sem_init() function shall fail if
+         * 
+         * [EINVAL]
+         * 
+         * The value argument exceeds {SEM_VALUE_MAX}.
+         * 
+         */
+            ERROR_SHALL(POSIX_SEM_INIT, EINVAL,"sem_init.10.01", value > SUT_SEM_VALUE_MAX)
+
+        /*
+         * The sem_init() function shall fail if
+         * 
+         * [ENOSPC]
+         * 
+         * A resource required to initialize the semaphore has been exhausted, or the limit on semaphores ( {SEM_NSEMS_MAX}) has been
+         * reached.
+         * 
+         */
+            ERROR_SHALL(POSIX_SEM_INIT, ENOSPC,"sem_init.10.02", false)
+
+        /*
+         * The sem_init() function shall fail if
+         * 
+         * [EPERM]
+         * 
+         * The process lacks the appropriate privileges to initialize the semaphore.
+         * 
+         */
+            ERROR_SHALL(POSIX_SEM_INIT, EPERM,"sem_init.10.03", false)
+
+        ERROR_END()
+
+        /* 
+         * Upon successful completion, the sem_init() function shall initialize
+         * the semaphore in sem
+         */
+        REQ("sem_init.09.01", "Upon successful completion, the sem_init() function shall initialize the semaphore in sem",
+            sem_init_spec == 0);
+
+        /*
+         * The sem_init() function shall initialize the unnamed semaphore referred to by sem.
+         */
+        REQ("?sem_init.01", "The semaphore should exist", 
+            post_sem_m !=NULL && post_sem_m->type == UNNAMED_SEMAPHORE);
+
+        /*
+         * The value of the initialized semaphore shall be value.
+         */
+        REQ("?sem_init.02", "The value of the initialized semaphore shall be value",
+            post_sem_m->counter == value);
+
+        return true;
+    }
+}
+
+void onPThreadSemInit(CallContext context, PThreadSemaphoreTPtr semaphore, IntT pshared, UIntT value, IntT sem_init_spec)
+{
+    if(sem_init_spec==0)
+    {
+        Semaphore *sem_m;
+        registerSemaphore(semaphore, value, create_CString(""), UNNAMED_SEMAPHORE);
+        sem_m = getSemaphore(semaphore, context);
+        sem_m->pshared = pshared;
+        add_Set(sem_m->openers, create_ThreadIdObj(context));
+    }
+    return;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_open - initialize and open a named semaphore (REALTIME)
+
+SYNOPSIS
+    
+      #include <semaphore.h>
+
+        sem_t *sem_open(const char *name, int oflag, ...); 
+
+DESCRIPTION
+
+    The sem_open() function shall establish a connection between a named 
+    semaphore and a process. Following a call to sem_open() with semaphore name
+    name, the process may reference the semaphore associated with name using 
+    the address returned from the call. This semaphore may be used in 
+    subsequent calls to sem_wait(), [TMO]  sem_timedwait(),  sem_trywait(), 
+    sem_post(), and sem_close(). The semaphore remains usable by this process 
+    until the semaphore is closed by a successful call to sem_close(), _exit(),
+    or one of the exec functions.
+
+    The oflag argument controls whether the semaphore is created or merely 
+    accessed by the call to sem_open(). The following flag bits may be set in 
+    oflag: 
+
+    O_CREAT
+        This flag is used to create a semaphore if it does not already exist. 
+        If O_CREAT is set and the semaphore already exists, then O_CREAT has 
+        no effect, except as noted under O_EXCL. Otherwise, sem_open() creates 
+        a named semaphore. The O_CREAT flag requires a third and a fourth 
+        argument: mode, which is of type mode_t, and value, which is of type 
+        unsigned. The semaphore is created with an initial value of value. 
+        Valid initial values for semaphores are less than or equal to 
+        {SEM_VALUE_MAX}. 
+
+    The user ID of the semaphore is set to the effective user ID of the 
+    process; the group ID of the semaphore is set to a system default group ID 
+    or to the effective group ID of the process. The permission bits of the 
+    semaphore are set to the value of the mode argument except those set in the
+    file mode creation mask of the process. When bits in mode other than the 
+    file permission bits are specified, the effect is unspecified.
+
+    After the semaphore named name has been created by sem_open() with the 
+    O_CREAT flag, other processes can connect to the semaphore by calling 
+    sem_open() with the same value of name.
+    
+    O_EXCL
+
+    If O_EXCL and O_CREAT are set, sem_open() fails if the semaphore name 
+    exists. The check for the existence of the semaphore and the creation of 
+    the semaphore if it does not exist are atomic with respect to other 
+    processes executing sem_open() with O_EXCL and O_CREAT set. If O_EXCL is 
+    set and O_CREAT is not set, the effect is undefined. 
+
+    If flags other than O_CREAT and O_EXCL are specified in the oflag 
+    parameter, the effect is unspecified.
+
+    The name argument points to a string naming a semaphore object. It is 
+    unspecified whether the name appears in the file system and is visible to 
+    functions that take pathnames as arguments. The name argument conforms to 
+    the construction rules for a pathname. If name begins with the slash 
+    character, then processes calling sem_open() with the same value of name 
+    shall refer to the same semaphore object, as long as that name has not been
+    removed. If name does not begin with the slash character, the effect is 
+    implementation-defined. The interpretation of slash characters other than 
+    the leading slash character in name is implementation-defined.
+
+    If a process makes multiple successful calls to sem_open() with the same 
+    value for name, the same semaphore address shall be returned for each such 
+    successful call, provided that there have been no calls to sem_unlink() for
+    this semaphore, and at least one previous successful sem_open() call for 
+    this semaphore has not been matched with a sem_close() call.
+
+    References to copies of the semaphore produce undefined results.
+
+RETURN VALUE
+
+    Upon successful completion, the sem_open() function shall return the 
+    address of the semaphore. Otherwise, it shall return a value of SEM_FAILED 
+    and set errno to indicate the error. The symbol SEM_FAILED is defined in 
+    the <semaphore.h> header. No successful return from sem_open() shall return
+    the value SEM_FAILED.
+    
+    ERRORS
+
+    If any of the following conditions occur, the sem_open() function shall 
+    return SEM_FAILED and set errno to the corresponding value:
+
+    [EACCES]
+        The named semaphore exists and the permissions specified by oflag are 
+        denied, or the named semaphore does not exist and permission to create 
+        the named semaphore is denied.
+
+    [EEXIST]
+        O_CREAT and O_EXCL are set and the named semaphore already exists.
+    
+    [EINTR]
+        The sem_open() operation was interrupted by a signal.
+    
+    [EINVAL]
+        The sem_open() operation is not supported for the given name, or 
+        O_CREAT was specified in oflag and value was greater than 
+        {SEM_VALUE_MAX}.
+    
+    [EMFILE]
+        Too many semaphore descriptors or file descriptors are currently in use
+        by this process.
+
+    [ENAMETOOLONG]
+        The length of the name argument exceeds {PATH_MAX} or a pathname 
+        component is longer than {NAME_MAX}.
+    
+    [ENFILE]
+        Too many semaphores are currently open in the system.
+    
+    [ENOENT]
+        O_CREAT is not set and the named semaphore does not exist.
+    
+    [ENOSPC]
+        There is insufficient space for the creation of the new named semaphore.
+*/
+
+specification
+PThreadSemaphoreTPtr sem_open_spec( CallContext context, StringTPtr name,  OpenFlags oflag, FilePermissions* mode, 
+                                    UIntT value, ErrorCode* errno)
+{
+    CString *name_m = readCString_VoidTPtr(name);
+    Semaphore *pre_sem_m = NULL;
+    pre
+    {
+        CharT c;
+        c = charAt_CString(name_m, 0);
+        
+        /* [Implicit precondition] */
+        REQ("", "Name is not NULL", !isNULL_VoidTPtr(name));
+        REQ("", "Memory pointed to by name is available in the context", isValidPointer(context, name));
+
+        {   
+        /*
+         * The O_CREAT flag
+         * requires a third and a fourth argument: mode, which is of type mode_t, and value, which is of type
+         * unsigned.
+         */
+        REQ("app.sem_open.02", 
+            "The O_CREAT flag requires a third and a fourth argument", 
+            true);
+
+        /*
+         * Valid initial values for semaphores are less than
+         * or equal to {SEM_VALUE_MAX}
+         */
+        REQ("app.sem_open.04", "Valid initial values for semaphores are less than or equal to {SEM_VALUE_MAX}", 
+            value < 1000/* TODO: SUT_SEM_VALUE_MAX*/);
+
+        /*
+         * If O_EXCL is set and O_CREAT is not set, the effect is undefined.
+         */
+        REQ("app.sem_open.18", "If O_EXCL is set and O_CREAT is not set, the effect is undefined.", 
+             (oflag.excl==true && oflag.creat==true) || oflag.excl==false );
+        
+        /*
+         * If flags other than O_CREAT and O_EXCL are specified in the oflag parameter, the effect is unspecified.
+         */
+        REQ("app.sem_open.10", "If flags other than O_CREAT and O_EXCL are specified in the oflag parameter, the effect is unspecified.", 
+            oflag.append == false && oflag.trunc == false && oflag.noctty == false);
+
+        /*
+         * The name argument conforms to the construction rules
+         * for a pathname.
+         */
+        REQ("app.sem_open.12", 
+            "name argument conforms to the construction rules for a pathname", 
+            true);
+
+        /*
+         * If name begins with the slash character, then processes calling sem_open() with the same value of
+         * name shall refer to the same semaphore object, as long as that name has not been removed. If name does not begin with
+         * the slash character, the effect is implementation-defined.
+         */
+        REQ("app.sem_open.13", "The name must begin with the slash character", length_CString(name_m)>=1 && c == '/');
+
+        /*
+         * The interpretation of slash characters other than the leading slash
+         * character in name is implementation-defined.
+         */
+        REQ("app.sem_open.14", 
+            "The slash characters or the leading slash character", 
+            indexOfChar_CString(name_m, '/') <= 0);
+        
+        }
+
+        /* Get model semaphore before the function is called */
+        pre_sem_m = getVitalSemaphoreByName(name_m);
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        Semaphore *post_sem_m = NULL;
+        post_sem_m = getSemaphore(sem_open_spec, context);
+
+        /*
+            Otherwise, it shall return a value of SEM_FAILED and set errno to 
+            indicate the error. The symbol SEM_FAILED is defined in the 
+            <semaphore.h> header. No successful return from sem_open() shall 
+            return the value SEM_FAILED.
+        */
+        ERROR_BEGIN(POSIX_SEM_OPEN, "sem_open.16.02", equals_VoidTPtr(SUT_SEM_FAILED, sem_open_spec), *errno)
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [EACCES]
+         * 
+         * The named semaphore exists and the permissions specified by oflag are denied, or the named semaphore does not exist and
+         * permission to create the named semaphore is denied.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_OPEN, EACCES, "sem_open.17.01", "")
+
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [EEXIST]
+         * 
+         * O_CREAT and O_EXCL are set and the named semaphore already exists.
+         * 
+         */
+            ERROR_SHALL(POSIX_SEM_OPEN, EEXIST,"sem_open.17.02", pre_sem_m != NULL && oflag.creat == true && oflag.excl == true)
+
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [EINTR]
+         * 
+         * The sem_open() operation was interrupted by a signal.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_OPEN, EINTR,"sem_open.17.03", "")
+
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [EINVAL]
+         * 
+         * The sem_open() operation is not supported for the given name, or O_CREAT was specified in oflag and value
+         * was greater than {SEM_VALUE_MAX}.
+         * 
+         */
+            ERROR_SHALL(POSIX_SEM_OPEN, EINVAL,"sem_open.17.04",
+                !isValidSemaphoreName(name_m) || (oflag.creat == true && value > SUT_SEM_VALUE_MAX))
+
+                
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [EMFILE]
+         * 
+         * Too many semaphore descriptors or file descriptors are currently in use by this process.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_OPEN, EMFILE,"sem_open.17.05", "")
+
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [ENAMETOOLONG]
+         * 
+         * 
+         * The length of the name argument exceeds {PATH_MAX} or a pathname component is longer than {NAME_MAX}.
+         * 
+         */
+            ERROR_SHALL(POSIX_SEM_OPEN, ENAMETOOLONG,"sem_open.17.06", isNameTooLong(name_m))
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [ENFILE]
+         * 
+         * Too many semaphores are currently open in the system.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_OPEN, ENFILE,"sem_open.17.07", "")
+
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [ENOENT]
+         * 
+         * O_CREAT is not set and the named semaphore does not exist.
+         * 
+         */
+            ERROR_SHALL(POSIX_SEM_OPEN, ENOENT,"sem_open.17.08", 
+                oflag.creat == false && pre_sem_m == NULL)
+
+        /*
+         * If any of the following conditions occur, the sem_open() function shall return SEM_FAILED and set errno to the
+         * corresponding value
+         * 
+         * [ENOSPC]
+         * 
+         * There is insufficient space for the creation of the new named semaphore.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_OPEN, ENOSPC,"sem_open.17.09", "")
+
+        ERROR_END()
+
+        /* 
+         * Upon successful completion, the sem_open() function shall return the
+         * address of the semaphore.
+         */
+        REQ("sem_open.16.01", "Upon successful completion, the sem_open() function shall return the address of the semaphore",
+            !equals_VoidTPtr(SUT_SEM_FAILED, sem_open_spec) && post_sem_m != NULL);
+
+        /*
+         * The sem_open() function shall establish a connection between a named semaphore and a process.
+         */
+        REQ("?sem_open.00", "The sem_open() function shall establish a connection between a named semaphore and a process.", 
+            post_sem_m != NULL);
+
+        if(oflag.creat)
+        {
+            /*
+             * If O_CREAT is set and the semaphore already exists, then
+             * O_CREAT has no effect, except as noted under O_EXCL. Otherwise, sem_open() creates a named semaphore.
+             */
+            REQ("sem_open.01", "If semaphore exists then open has no effect on it", 
+                pre_sem_m==NULL || !isSemaphoreChangedState(pre_sem_m, post_sem_m));
+        }
+
+        /*
+         * The semaphore is created with an initial value of value.
+         */
+        REQ("?sem_open.03", "The semaphore is created with an initial value of value.", 
+            post_sem_m->counter == value);
+
+        /*
+         * the group ID of the semaphore is set to a system
+         * default group ID or to the effective group ID of the process.
+         */
+        REQ("sem_open.05", "The value of group ID of the semaphore", true);
+
+        /*
+         * The permission bits of the semaphore are set to the value of the
+         * mode argument except those set in the file mode creation mask of the process. When bits in mode other than the file
+         * permission bits are specified, the effect is unspecified.
+         */
+        REQ("sem_open.06", "The permission bits of the semaphore", true);
+
+        /*
+         * After the semaphore named name has been created by sem_open() with the O_CREAT flag, other processes can connect
+         * to the semaphore by calling sem_open() with the same value of name.
+         */
+        REQ("sem_open.07", 
+            "Behaviour of processes after the semaphore named", true);
+
+        /*
+         * If O_EXCL and O_CREAT are set, sem_open() fails if the semaphore name exists.
+         */
+        REQ("sem_open.08", 
+            "If O_EXCL and O_CREAT are set, fails if semaphore name exists", 
+            true);
+
+        /*
+         * The check for the existence of the
+         * semaphore and the creation of the semaphore if it does not exist are atomic with respect to other processes executing
+         * sem_open() with O_EXCL and O_CREAT set.
+         */
+        REQ("sem_open.11", 
+            "The check for the existence and the creation of the semaphore", 
+            true);
+
+        /*
+         * Upon successful completion, the sem_open() function shall return the address of the semaphore.
+         */
+        REQ("sem_open.16", 
+            "Upon successful, shall return the address of the semaphore", 
+            true);
+
+        /*
+         * Otherwise, it shall return
+         * a value of SEM_FAILED and set errno to indicate the error. The symbol SEM_FAILED is defined in the <semaphore.h> header. No successful return from sem_open() shall return the
+         * value SEM_FAILED.
+         */
+        REQ("sem_open.17", 
+            "Otherwise, it shall return a value of SEM_FAILED and set errno", 
+            true);
+        
+        /* [Semaphore with given name must exist.] */
+        REQ("", " Semaphore with given name must exist ", post_sem_m!=NULL);
+
+        /* 
+            The sem_open() function shall establish a connection between 
+            a named semaphore and a process.
+        */
+
+        if(pre_sem_m)
+        {
+            REQ("", "If semaphore with given name already exists returned pointer should refer to the existed semaphore",
+                isTheSameSemaphore(pre_sem_m, post_sem_m));
+        }
+        
+        /* Returned semaphore can't refer to unlinked semaphore. */
+        REQ("", "Returned semaphore can't refer to unlinked semaphore", post_sem_m->should_removed==false);
+
+        return true;
+    }
+}
+
+void onPThreadSemOpen(CallContext context, IntT value, StringTPtr name, OpenFlags oflag, PThreadSemaphoreTPtr semaphore)
+{
+    if(!equals_VoidTPtr(SUT_SEM_FAILED, semaphore))
+    {
+        Semaphore* sem_m = getSemaphore(semaphore, context);
+        if(!sem_m) 
+        {
+            registerSemaphore(semaphore, value, readCString_VoidTPtr(name), NAMED_SEMAPHORE);
+            sem_m = getSemaphore(semaphore, context);
+        }
+        add_Set(sem_m->openers, create_ThreadIdObj(context));
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_post - unlock a semaphore (REALTIME)
+
+SYNOPSIS
+    
+    #include <semaphore.h>
+
+    int sem_post(sem_t *sem); 
+
+DESCRIPTION
+
+    The sem_post() function shall unlock the semaphore referenced by sem by 
+    performing a semaphore unlock operation on that semaphore.
+
+    If the semaphore value resulting from this operation is positive, then no 
+    threads were blocked waiting for the semaphore to become unlocked; the 
+    semaphore value is simply incremented.
+
+    If the value of the semaphore resulting from this operation is zero, then 
+    one of the threads blocked waiting for the semaphore shall be allowed to 
+    return successfully from its call to sem_wait(). 
+    
+    If the Process Scheduling option is supported, the thread to be unblocked 
+    shall be chosen in a manner appropriate to the scheduling policies and 
+    parameters in effect for the blocked threads. In the case of the schedulers 
+    SCHED_FIFO and SCHED_RR, the highest priority waiting thread shall be 
+    unblocked, and if there is more than one highest priority thread blocked 
+    waiting for the semaphore, then the highest priority thread that has been 
+    waiting the longest shall be unblocked. If the Process Scheduling option 
+    is not defined, the choice of a thread to unblock is unspecified. 
+
+    If the Process Sporadic Server option is supported, and the scheduling 
+    policy is SCHED_SPORADIC, the semantics are as per SCHED_FIFO above. 
+
+    The sem_post() function shall be reentrant with respect to signals and may 
+    be invoked from a signal-catching function.
+
+RETURN VALUE
+    If successful, the sem_post() function shall return zero; otherwise, the 
+    function shall return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The sem_post() function may fail if:
+    
+    [EINVAL]
+        The sem argument does not refer to a valid semaphore.
+*/
+
+specification
+IntT sem_post_spec( CallContext context, PThreadSemaphoreTPtr semaphore)
+{
+    Semaphore *pre_sem_m = getSemaphore(semaphore, context);
+    pre
+    {
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+
+        if (POSIX_SEM_POST_FAILS_WITH_EINVAL == 0)
+        {
+            /* [The value specified by semaphore is invalid. Behaviour is unspecified.] */
+            REQ("","The value specified by semaphore is invalid", (pre_sem_m != NULL));            
+        }
+
+        return true;
+    }
+
+    coverage SemaphoreTypeC
+    {
+        if(POSIX_SEM_POST_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(pre_sem_m->type == UNNAMED_SEMAPHORE)
+            return { UnnamedSemaphore, "Unnamed semaphore" };
+
+        else return { NamedSemaphore, "Named semaphore" };
+    }
+
+    coverage WaitedThreadC
+    {
+        if(POSIX_SEM_POST_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(doesWaitedThreadExist(pre_sem_m))
+            return { WaitedTheadExist, "Waited thread exists" };
+        else return { WaitedTheadNOTExist, "Waited thread does not exist" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+void onPThreadSemPost(CallContext context, PThreadSemaphoreTPtr semaphore)
+{
+    Semaphore* sem_m = getSemaphore(semaphore, context);
+    Semaphore *pre_semaphore = NULL;
+    if(sem_m)
+    {
+        pre_semaphore = clone(sem_m);
+        free_Semaphore(sem_m);
+    }
+    startBlockedCall(context, create_SemaphoreUnlockCall(context, semaphore, pre_semaphore));
+}
+
+reaction SemaphoreLockReturnType* pthread_sem_post_return(void)
+{
+    Semaphore *post_sem_m = NULL;
+    post
+    {
+        int locks_before, locks_after;
+        CallContext context = pthread_sem_post_return->context;
+        SemaphoreUnlockCall* unblocked_call = findBlockedCall(@getBlockedCalls(), context);
+
+        PThreadSemaphoreTPtr semaphore = unblocked_call->semaphore;
+        Semaphore* pre_sem_m = unblocked_call->pre_semaphore; //findSemaphore(@getAllSemaphores(), semaphore);
+
+        post_sem_m = getSemaphore(semaphore, context);
+
+        ERROR_BEGIN(POSIX_SEM_POST, "sem_post.06.02", *pthread_sem_post_return->returned_value != 0 , *pthread_sem_post_return->errno_value)
+        /*
+         * The sem_post() function may fail if
+         * 
+         * [EINVAL]
+         * 
+         * The sem argument does not refer to a valid semaphore.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_POST, EINVAL,"sem_post.07.01", pre_sem_m == NULL)
+
+        ERROR_END()
+
+        /* 
+         * If successful, the sem_post() function shall return zero
+         */
+        REQ("sem_post.06.01", "If successful, the sem_post() function shall return zero",
+            *pthread_sem_post_return->returned_value == 0);
+
+        if (post_sem_m->counter > 0)
+        {
+            /*
+             * If the semaphore value resulting from this operation is positive, then no threads were blocked waiting for the semaphore to
+             * become unlocked; the semaphore value is simply incremented.
+             */
+            REQ("sem_post.01", "Semaphore counter shall be incremented and no waited process shall exist", 
+                size_List(pre_sem_m->wait_list) == 0 && post_sem_m->counter - pre_sem_m->counter == 1);
+        }
+        else
+        {
+            /*
+             * If the value of the semaphore resulting from this operation is zero, then one of the threads blocked waiting for the semaphore
+             * shall be allowed to return successfully from its call to sem_wait().
+             */
+            REQ("sem_post.02", "One waited process shall be revived", 
+                post_sem_m->counter == 0 && size_List(pre_sem_m->wait_list) - size_List(post_sem_m->wait_list) == 1);
+
+        }
+
+        /*
+         * If the Process
+         * Scheduling option is supported, the thread to be unblocked shall be chosen in a manner appropriate to the scheduling policies and
+         * parameters in effect for the blocked threads. In the case of the schedulers SCHED_FIFO and SCHED_RR, the highest priority waiting
+         * thread shall be unblocked, and if there is more than one highest priority thread blocked waiting for the semaphore, then the
+         * highest priority thread that has been waiting the longest shall be unblocked. If the Process Scheduling option is not defined, the
+         * choice of a thread to unblock is unspecified.
+         */
+        REQ("sem_post.03", 
+            "If the Process Scheduling option is supported", 
+            true);
+
+        /*
+         * If
+         * the Process Sporadic Server option is supported, and the scheduling policy is SCHED_SPORADIC, the semantics are as per SCHED_FIFO
+         * above.
+         */
+        REQ("sem_post.04", 
+            "If the Process Sporadic Server option is supported", 
+            true);
+
+        /*
+         * The sem_post() function shall be reentrant with respect to signals and may be invoked from a signal-catching
+         * function.
+         */
+        REQ("sem_post.05", 
+            "Shall be reentrant with respect to signals", 
+            true);
+
+        /* TODO: Check permissions to lock semaphore */
+    }
+}
+
+void onPThreadSemPostReturn(CallContext context, ErrorCode* pthread_sem_post_spec)
+{
+    SemaphoreUnlockCall* blocked_call = finishBlockedCall(context);
+    PThreadSemaphoreTPtr semaphore = blocked_call->semaphore;
+    Semaphore* semaphore_m = getSemaphore(semaphore, context);
+
+    /* This code was replaced to onPThreadSemPost */
+    /*
+    if (semaphore_m != NULL)
+    {
+        if (*pthread_sem_post_spec == 0)
+        {
+            free_Semaphore(semaphore_m);
+        }
+    }
+    */
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_trywait, sem_wait - lock a semaphore (REALTIME)
+
+SYNOPSIS
+    #include <semaphore.h>
+
+    int sem_trywait(sem_t *sem);
+    int sem_wait(sem_t *sem); 
+
+DESCRIPTION
+
+    The sem_trywait() function shall lock the semaphore referenced by sem only 
+    if the semaphore is currently not locked; that is, if the semaphore value 
+    is currently positive. Otherwise, it shall not lock the semaphore.
+
+    The sem_wait() function shall lock the semaphore referenced by sem by 
+    performing a semaphore lock operation on that semaphore. If the semaphore 
+    value is currently zero, then the calling thread shall not return from the 
+    call to sem_wait() until it either locks the semaphore or the call is 
+    interrupted by a signal. 
+
+    Upon successful return, the state of the semaphore shall be locked and 
+    shall remain locked until the sem_post() function is executed and returns 
+    successfully.
+
+    The sem_wait() function is interruptible by the delivery of a signal.
+
+RETURN VALUE
+    The sem_trywait() and sem_wait() functions shall return zero if the calling
+    process successfully performed the semaphore lock operation on the 
+    semaphore designated by sem. If the call was unsuccessful, the state of the
+    semaphore shall be unchanged, and the function shall return a value of -1 
+    and set errno to indicate the error.
+
+ERRORS
+
+    The sem_trywait() and sem_wait() functions shall fail if:
+    
+    [EAGAIN]
+        The semaphore was already locked, so it cannot be immediately locked by
+        the sem_trywait() operation ( sem_trywait() only).
+
+        The sem_trywait() and sem_wait() functions may fail if:
+
+    [EDEADLK]
+        A deadlock condition was detected.
+    
+    [EINTR]
+        A signal interrupted this function.
+    
+    [EINVAL]
+        The sem argument does not refer to a valid semaphore.
+*/
+
+specification
+IntT sem_trywait_spec( CallContext context, PThreadSemaphoreTPtr semaphore, ErrorCode* errno)
+{
+    Semaphore *pre_sem_m;
+    pre
+    {
+        pre_sem_m = getSemaphore(semaphore, context);
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+
+        if (POSIX_SEM_TRYWAIT_FAILS_WITH_EINVAL == 0)
+        {
+            /* [The value specified by semaphore is invalid. Behaviour is unspecified.] */
+            REQ("","The value specified by semaphore is invalid", (pre_sem_m != NULL));            
+        }
+
+        return true;
+    }
+    coverage SemaphoreTypeC
+    {
+        if(POSIX_SEM_TRYWAIT_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(pre_sem_m->type == UNNAMED_SEMAPHORE)
+            return { UnnamedSemaphore, "Unnamed semaphore" };
+
+        else return { NamedSemaphore, "Named semaphore" };
+    }
+    coverage SuccessfulC
+    {
+        if(POSIX_SEM_TRYWAIT_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(isSemaphoreFree(pre_sem_m))
+            return { SuccessfulBranch, "Successful branch" };
+
+        else return { UnsuccessfulBranch, "Unsuccessful branch" };
+    }
+    post
+    {
+        Semaphore *post_sem_m = getSemaphore(semaphore, context);
+        
+        /*
+         * If the call was unsuccessful, the state of the semaphore shall be 
+         * unchanged, and the function shall return a value of -1 and set 
+         * errno to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_SEM_TRYWAIT, "sem_trywait.04.02", sem_trywait_spec != 0, *errno)
+            /*
+             * The sem_trywait() and sem_wait() functions shall fail if:
+             * 
+             * [EAGAIN]
+             * 
+             * The semaphore was already locked, so it cannot be immediately locked by the sem_trywait() operation (
+             * sem_trywait() only).
+             * 
+             */
+                ERROR_SHALL(POSIX_SEM_TRYWAIT, EAGAIN,"sem_trywait.05.01", !isSemaphoreFree(pre_sem_m))
+
+            /*
+             * The sem_trywait() and sem_wait() functions may fail if:
+             * 
+             * [EDEADLK]
+             * 
+             * A deadlock condition was detected.
+             * 
+             */
+             /* parock: I decided that this function can not lead to deadlock */
+                ERROR_MAY(POSIX_SEM_TRYWAIT, EDEADLK,"sem_trywait.06.01", false)
+
+            /*
+             * The sem_trywait() and sem_wait() functions may fail if:
+             * 
+             * [EINTR]
+             * 
+             * A signal interrupted this function.
+             * 
+             */
+                ERROR_UNCHECKABLE(POSIX_SEM_TRYWAIT, EINTR,"sem_trywait.06.02", "")
+
+            /*
+             * The sem_trywait() and sem_wait() functions may fail if:
+             * 
+             * [EINVAL]
+             * 
+             * The sem argument does not refer to a valid semaphore.
+             * 
+             */
+                ERROR_MAY(POSIX_SEM_TRYWAIT, EINVAL,"sem_trywait.06.03", pre_sem_m == NULL)
+
+        ERROR_END()        
+
+        /* 
+         * The sem_trywait() and sem_wait() functions shall return zero if the 
+         * calling process successfully performed the semaphore lock operation 
+         * on the semaphore designated by sem.
+         */
+        REQ("sem_trywait.04.01", "Shall return zero if the calling process successfully performed",
+            sem_trywait_spec == 0);
+
+        /* [Semaphore should exist] */
+        REQ("", "Semaphore should exist", post_sem_m!=NULL);
+
+        /*
+         * The sem_trywait() function shall lock the semaphore referenced by sem only if the semaphore is currently not
+         * locked; that is, if the semaphore value is currently positive. Otherwise, it shall not lock the semaphore.
+         */
+        REQ("sem_trywait.01", "The semaphore counter shall be positive", 
+            pre_sem_m->counter>0);
+
+        /*
+         * Upon successful return, the state of the semaphore shall be locked and shall remain locked until the sem_post() function is executed and returns successfully.
+         */
+        REQ("sem_wait.02", "The semaphore counter shall be decreamented",
+            pre_sem_m->counter - post_sem_m->counter == 1);
+
+        /*
+         * The sem_wait() function is interruptible by the delivery of a signal.
+         */
+        REQ("sem_wait.03", 
+            "Is interruptible by the delivery of a signal", 
+            true);
+
+        return true;
+    }
+}
+
+void onPThreadSemTryWait(CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_trywait_spec)
+{
+    Semaphore* semaphore_m = getSemaphore(semaphore, context);
+
+    if ((semaphore_m != NULL) && (sem_trywait_spec == 0))
+        lock_Semaphore(semaphore_m);
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_unlink - remove a named semaphore (REALTIME)
+
+SYNOPSIS
+
+    #include <semaphore.h>
+
+    int sem_unlink(const char *name); 
+
+DESCRIPTION
+
+    The sem_unlink() function shall remove the semaphore named by the string 
+    name. If the semaphore named by name is currently referenced by other 
+    processes, then sem_unlink() shall have no effect on the state of the 
+    semaphore. If one or more processes have the semaphore open when 
+    sem_unlink() is called, destruction of the semaphore is postponed until 
+    all references to the semaphore have been destroyed by calls to sem_close(),
+    _exit(), or exec. Calls to sem_open() to recreate or reconnect to the 
+    semaphore refer to a new semaphore after sem_unlink() is called. The 
+    sem_unlink() call shall not block until all references have been destroyed;
+    it shall return immediately.
+
+RETURN VALUE
+
+    Upon successful completion, the sem_unlink() function shall return a value 
+    of 0. Otherwise, the semaphore shall not be changed and the function shall 
+    return a value of -1 and set errno to indicate the error.
+    
+ERRORS
+
+    The sem_unlink() function shall fail if:
+
+    [EACCES]
+        Permission is denied to unlink the named semaphore.
+
+    [ENAMETOOLONG]
+        The length of the name argument exceeds {PATH_MAX} or a pathname 
+        component is longer than {NAME_MAX}.
+    
+    [ENOENT]
+        The named semaphore does not exist.
+*/
+
+specification
+IntT sem_unlink_spec( CallContext context, StringTPtr sem_name, ErrorCode* errno)
+{
+    Semaphore *pre_sem_m=NULL;
+    CString *name_m = readCString_VoidTPtr(sem_name);
+    pre
+    {
+         /* [Implicit precondition] */
+        REQ("", "Sem_name is not NULL", !isNULL_VoidTPtr(sem_name));
+        REQ("", "Memory pointed to by name is available in the context", isValidPointer(context, sem_name));
+        
+        pre_sem_m = getVitalSemaphoreByName(name_m);
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+
+    post
+    {
+        if(sem_unlink_spec != 0)
+        {
+            //failed branch
+            /*  
+                Otherwise, the semaphore shall not be changed and the function 
+                shall return a value of -1 and set errno to indicate the error. 
+            */
+            REQ("", " If the call was unsuccessful, the state of the semaphore shall be unchanged, and the function shall return a value of -1 and set errno to indicate the error",
+                sem_unlink_spec == -1);
+
+            if(*errno == SUT_EACCES)
+            {
+                /* Permission is denied to unlink the named semaphore. */
+                /* TODO: */
+            } else
+            if(*errno == SUT_ENAMETOOLONG)
+            {
+                /* The length of the name argument exceeds {PATH_MAX} or a pathname component is longer than {NAME_MAX}. */
+                /* TODO: */
+            } else
+            if(*errno == SUT_ENOENT)
+            {
+                /* The named semaphore does not exist. */
+                /* TODO: */
+                REQ("", "The named semaphore shall does not exist...", pre_sem_m == NULL);
+            }
+        } else
+        {
+            //successful branch
+            Semaphore *post_sem_m = getSemaphoreByCopy(pre_sem_m);
+            
+            /*
+             * The sem_unlink() function shall remove the semaphore named by the string name. If the semaphore named by
+             * name is currently referenced by other processes, then sem_unlink() shall have no effect on the state of the
+             * semaphore. If one or more processes have the semaphore open when sem_unlink() is called, destruction of the semaphore is
+             * postponed until all references to the semaphore have been destroyed by calls to sem_close(), _exit(), or exec.
+             */
+            REQ("sem_unlink.01", 
+                "Shall remove the semaphore named by the string name",
+                (!isSemaphoreOpened(pre_sem_m) && post_sem_m ==NULL)
+                || (isSemaphoreOpened(pre_sem_m) && isSemaphoreChangedState(pre_sem_m, post_sem_m))
+                );
+
+            if(post_sem_m)
+            {
+                /* Semaphore yet exists */
+                /* [Flag should_removed shall be set up] */
+                REQ("", "Flag should_removed shall be set up", 
+                    post_sem_m->should_removed == true);
+            }
+        }
+        return true;
+    }
+}
+
+void onPThreadSemUnlink(CallContext context, StringTPtr sem_name, IntT sem_unlink_spec)
+{
+    if(sem_unlink_spec==0)
+    {
+        Semaphore* sem_m = getVitalSemaphoreByName(readCString_VoidTPtr(sem_name));
+        if (sem_m) 
+        {
+            sem_m->should_removed = true;
+            removeSemaphoreIfPossible(sem_m);
+        }
+    }
+}
+
+specification
+IntT sem_wait_spec( CallContext context, PThreadSemaphoreTPtr semaphore)
+{
+    Semaphore *pre_sem_m;
+    pre
+    {
+        pre_sem_m = getSemaphore(semaphore, context);
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+
+        if (POSIX_SEM_WAIT_FAILS_WITH_EINVAL == 0)
+        {
+            /* [The value specified by semaphore is invalid. Behaviour is unspecified.] */
+            REQ("","The value specified by semaphore is invalid", (pre_sem_m != NULL));            
+        }
+
+        return true;
+    }
+    
+    coverage SemaphoreTypeC
+    {
+        if(POSIX_SEM_WAIT_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(pre_sem_m->type == UNNAMED_SEMAPHORE)
+            return { UnnamedSemaphore, "Unnamed semaphore" };
+
+        else return { NamedSemaphore, "Named semaphore" };
+    }
+
+    coverage FreeRightAwayC
+    {
+        if(POSIX_SEM_WAIT_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(isSemaphoreFree(pre_sem_m))
+            return { SemaphoreFreeRightAway, "Semaphore is free right away" };
+
+        else return { SemaphoreNOTFreeRightAway, "Semaphore is not free right away" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+void onPThreadSemWait(CallContext context, PThreadSemaphoreTPtr semaphore, IntT sem_wait_spec)
+{
+    Semaphore* pre_semaphore = getSemaphore(semaphore, context);
+    
+    if (pre_semaphore != NULL)
+    {
+        append_List(pre_semaphore->wait_list, create_ThreadIdObj(context));
+    }
+    startBlockedCall(context, create_SemaphoreLockCall(context, semaphore, clone(pre_semaphore)));
+}
+
+specification typedef struct SemaphoreLockReturnType  SemaphoreLockReturnType = {};
+
+SemaphoreLockReturnType * create_SemaphoreLockReturnType(
+    CallContext context,
+    ErrorCode*  returned_value,
+    ErrorCode*  errno_value
+)
+{
+    return create(&type_SemaphoreLockReturnType,
+        context,
+        returned_value,
+        errno_value
+        );
+
+}
+
+Semaphore * create_Semaphore(
+    int sem_id,
+    List* addresses,
+    List* wait_list,
+    IntT counter,
+    IntT type,
+    CString* name,
+    Set* openers,
+    bool should_removed,
+    IntT pshared
+)
+{
+    return create(&type_Semaphore,
+        sem_id,
+        addresses,
+        wait_list,
+        counter,
+        type,
+        name,
+        openers,
+        should_removed,
+        pshared
+        );
+}
+
+reaction SemaphoreLockReturnType* pthread_sem_wait_return(void)
+{
+    Semaphore *post_sem_m = NULL;
+    
+    post
+    {
+        CallContext context = pthread_sem_wait_return->context;
+        SemaphoreLockCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+
+        PThreadSemaphoreTPtr semaphore = blocked_call->semaphore;
+        Semaphore* pre_sem_m = blocked_call->pre_semaphore;//findSemaphore(@getAllSemaphores(), semaphore);
+
+        post_sem_m = getSemaphore(semaphore, context);
+        
+        ERROR_BEGIN(POSIX_SEM_WAIT, "sem_wait.04.02", *pthread_sem_wait_return->returned_value != 0 , *pthread_sem_wait_return->errno_value)
+        /*
+         * The sem_trywait() and sem_wait() functions may fail if:
+         * 
+         * [EDEADLK]
+         * 
+         * A deadlock condition was detected.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_WAIT, EDEADLK,"sem_wait.06.01", isDeadlockIfThreadBlocked(pthread_sem_wait_return->context, pre_sem_m))
+
+        /*
+         * The sem_trywait() and sem_wait() functions may fail if:
+         * 
+         * [EINTR]
+         * 
+         * A signal interrupted this function.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_WAIT, EINTR,"sem_wait.06.02", "")
+
+        /*
+         * The sem_trywait() and sem_wait() functions may fail if:
+         * 
+         * [EINVAL]
+         * 
+         * The sem argument does not refer to a valid semaphore.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_WAIT, EINVAL,"sem_wait.06.03", pre_sem_m == NULL)
+
+        ERROR_END()
+        
+        /* 
+         * The sem_trywait() and sem_wait() functions shall return zero if the 
+         * calling process successfully performed the semaphore lock operation 
+         * on the semaphore designated by sem.
+         */
+        REQ("sem_wait.04.01", "Shall return zero if the calling process successfully performed",
+            *pthread_sem_wait_return->returned_value == 0);
+        
+        /*
+         * The sem_wait() function shall lock the semaphore referenced by sem by performing a semaphore lock operation on
+         * that semaphore. If the semaphore value is currently zero, then the calling thread shall not return from the call to sem_wait() until it either locks the semaphore or the call is interrupted by a signal.
+         */
+        REQ("sem_wait.01", 
+            "Shall lock the semaphore referenced by sem", 
+            true);
+
+        /*
+         * Upon successful return, the state of the semaphore shall be locked and shall remain locked until the sem_post() function is executed and returns successfully.
+         */
+        REQ("sem_wait.02", 
+            "Upon successful, the state of the semaphore shall be locked", 
+            true);
+
+        /*
+         * The sem_wait() function is interruptible by the delivery of a signal.
+         */
+        REQ("sem_wait.03", 
+            "Is interruptible by the delivery of a signal", 
+            true);
+
+        /*
+         * The sem_trywait() and sem_wait() functions shall return zero if the calling process successfully performed the
+         * semaphore lock operation on the semaphore designated by sem. If the call was unsuccessful, the state of the semaphore shall
+         * be unchanged, and the function shall return a value of -1 and set errno to indicate the error.
+         */
+        REQ("sem_trywait.04", 
+            "Shall return zero if successfull, else return -1 and set errno", 
+            true);
+
+        /*
+         * The sem_trywait() and sem_wait() functions shall return zero if the calling process successfully performed the
+         * semaphore lock operation on the semaphore designated by sem. If the call was unsuccessful, the state of the semaphore shall
+         * be unchanged, and the function shall return a value of -1 and set errno to indicate the error.
+         */
+        REQ("sem_wait.04", 
+            "Shall return zero if successfull, else return -1 and set errno", 
+            true);
+
+        /* TODO: Check permissions to lock semaphore */
+        /* 
+            The sem_trywait() function shall lock the semaphore referenced 
+            by sem only if the semaphore is currently not locked; 
+        */
+    }
+}
+
+void onPThreadSemWaitReturn(CallContext context, ErrorCode* pthread_sem_wait_spec)
+{
+    SemaphoreLockCall* blocked_call = finishBlockedCall(context);
+    PThreadSemaphoreTPtr semaphore = blocked_call->semaphore;
+    Semaphore* semaphore_m = getSemaphore(semaphore, context);
+
+    /* Scheduling policy */
+    remove_List(semaphore_m->wait_list, indexOf_List(semaphore_m->wait_list, create_ThreadIdObj(context)));
+
+    if ((semaphore_m != NULL) && (*pthread_sem_wait_spec == 0)) 
+        lock_Semaphore(semaphore_m);
+}
+
+specification typedef struct SemTimedLockCall SemTimedLockCall = {};
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    sem_timedwait - lock a semaphore (ADVANCED REALTIME)
+
+SYNOPSIS
+    #include <semaphore.h>
+    #include <time.h>
+
+    int sem_timedwait(sem_t *restrict sem,
+           const struct timespec *restrict abs_timeout); 
+
+DESCRIPTION
+
+    The sem_timedwait() function shall lock the semaphore referenced by sem as 
+    in the sem_wait() function. However, if the semaphore cannot be locked 
+    without waiting for another process or thread to unlock the semaphore by 
+    performing a sem_post() function, this wait shall be terminated when the 
+    specified timeout expires.
+
+    The timeout shall expire when the absolute time specified by abs_timeout 
+    passes, as measured by the clock on which timeouts are based (that is, when
+    the value of that clock equals or exceeds abs_timeout), or if the absolute 
+    time specified by abs_timeout has already been passed at the time of the 
+    call.
+
+    If the Timers option is supported, the timeout shall be based on the 
+    CLOCK_REALTIME clock. If the Timers option is not supported, the timeout 
+    shall be based on the system clock as returned by the time() function. 
+    The resolution of the timeout shall be the resolution of the clock on which
+    it is based. The timespec data type is defined as a structure in the 
+    <time.h> header.
+
+    Under no circumstance shall the function fail with a timeout if the 
+    semaphore can be locked immediately. The validity of the abs_timeout need 
+    not be checked if the semaphore can be locked immediately. 
+
+RETURN VALUE
+    
+    The sem_timedwait() function shall return zero if the calling process 
+    successfully performed the semaphore lock operation on the semaphore 
+    designated by sem. {sem_timedwait.05.02} If the call was unsuccessful, the 
+    state of the semaphore shall be unchanged, and the function shall return a 
+    value of -1 and set errno to indicate the error.
+
+ERRORS
+
+    The sem_timedwait() function shall fail if:
+    [EINVAL]
+        The process or thread would have blocked, and the abs_timeout parameter
+        specified a nanoseconds field value less than zero or greater than or 
+        equal to 1000 million.
+    
+    [ETIMEDOUT]
+        The semaphore could not be locked before the specified timeout expired.
+
+     The sem_timedwait() function may fail if:
+
+    [EDEADLK]
+        A deadlock condition was detected.
+
+    [EINTR]
+        A signal interrupted this function.
+        
+    [EINVAL]
+        The sem argument does not refer to a valid semaphore.
+
+*/
+specification
+void sem_timedwait_spec(CallContext context, PThreadSemaphoreTPtr semaphore, TimeUnit delta)
+{
+    Semaphore *pre_sem_m;
+    pre
+    {
+        pre_sem_m = getSemaphore(semaphore, context);
+        if (pre_sem_m) pre_sem_m = clone(pre_sem_m);
+
+        if (POSIX_SEM_TIMEDWAIT_FAILS_WITH_EINVAL == 0)
+        {
+            /* [The value specified by semaphore is invalid. Behaviour is unspecified.] */
+            REQ("","The value specified by semaphore is invalid", (pre_sem_m != NULL));            
+        }
+
+        return true;
+    }
+
+    coverage SemaphoreTypeC
+    {
+        if(POSIX_SEM_TIMEDWAIT_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(pre_sem_m->type == UNNAMED_SEMAPHORE)
+            return { UnnamedSemaphore, "Unnamed semaphore" };
+
+        else return { NamedSemaphore, "Named semaphore" };
+    }
+
+    coverage FreeRightAwayC
+    {
+        if(POSIX_SEM_TIMEDWAIT_FAILS_WITH_EINVAL == 1 && !pre_sem_m)
+            return { UnvalidSemaphore, "Unvalid semaphore" };
+
+        else if(isSemaphoreFree(pre_sem_m))
+            return { SemaphoreFreeRightAway, "Semaphore is free right away" };
+
+        else return { SemaphoreNOTFreeRightAway, "Semaphore is not free right away" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+void onSemTimedWait(CallContext context, PThreadSemaphoreTPtr semaphore, TimeInterval timestamp, TimeUnit delta)
+{
+    Semaphore* pre_semaphore = getSemaphore(semaphore, context);
+
+    if (pre_semaphore != NULL)
+    {
+        append_List(pre_semaphore->wait_list, create_ThreadIdObj(context));
+    }
+
+    startBlockedCall(context, create_SemaphoreTimedLockCall(context, semaphore, clone(pre_semaphore), timestamp, delta));
+}
+
+reaction SemaphoreLockReturnType* sem_timedwait_return(void)
+{
+    Semaphore *post_sem_m = NULL;
+    post
+    {
+        CallContext context = sem_timedwait_return->context;
+        SemaphoreTimedLockCall* blocked_call = findBlockedCall(@getBlockedCalls(), context);
+
+        PThreadSemaphoreTPtr semaphore = blocked_call->semaphore;
+        Semaphore* pre_sem_m = blocked_call->pre_semaphore; //findSemaphore(@getAllSemaphores(), semaphore);
+        Bool3 check_ETIMEDOUT;
+
+        post_sem_m = getSemaphore(semaphore, context);
+
+        /*
+         * If the call was unsuccessful, the state of the semaphore shall be 
+         * unchanged, and the function shall return a value of -1 and set 
+         * errno to indicate the error
+         */
+        ERROR_BEGIN(POSIX_SEM_TIMEDWAIT, "sem_timedwait.05.02", *sem_timedwait_return->returned_value, *sem_timedwait_return->errno_value)
+        /*
+         * The sem_timedwait() function shall fail if
+         * 
+         * [EINVAL]
+         * 
+         * The process or thread would have blocked, and the abs_timeout parameter specified a nanoseconds field value less than
+         * zero or greater than or equal to 1000 million.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_TIMEDWAIT, EINVAL,"sem_timedwait.06.01", "")
+
+        /*
+         * The sem_timedwait() function shall fail if
+         * 
+         * [ETIMEDOUT]
+         * 
+         * The semaphore could not be locked before the specified timeout expired.
+         * 
+         */
+            if(!isSemaphoreFree(post_sem_m) && lessOrEqualTimeMarks(addTimeMarks(blocked_call->t_stamp.minMark, blocked_call->delta), timestamp.maxMark))
+                check_ETIMEDOUT = Unknown_Bool3; else check_ETIMEDOUT = False_Bool3;
+            ERROR_SHALL3(POSIX_SEM_TIMEDWAIT, ETIMEDOUT, "sem_timedwait.06.02", check_ETIMEDOUT)
+
+        /*
+         * The sem_timedwait() function may fail if
+         * 
+         * [EDEADLK]
+         * 
+         * A deadlock condition was detected.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_TIMEDWAIT, EDEADLK,"sem_timedwait.07.01", isDeadlockIfThreadBlocked(context, pre_sem_m))
+
+        /*
+         * The sem_timedwait() function may fail if
+         * 
+         * [EINTR]
+         * 
+         * A signal interrupted this function.
+         * 
+         */
+            ERROR_UNCHECKABLE(POSIX_SEM_TIMEDWAIT, EINTR,"sem_timedwait.07.02", "")
+
+        /*
+         * The sem_timedwait() function may fail if
+         * 
+         * [EINVAL]
+         * 
+         * The sem argument does not refer to a valid semaphore.
+         * 
+         */
+            ERROR_MAY(POSIX_SEM_TIMEDWAIT, EINVAL,"sem_timedwait.07.03", pre_sem_m == NULL)
+
+        ERROR_END()
+
+        /* 
+         * The sem_timedwait() function shall return zero if the calling 
+         * process successfully performed the semaphore lock operation on the 
+         * semaphore designated by sem
+         */
+        REQ("sem_timedwait.05.01", "Shall return zero if the calling process successfully performed",
+            *sem_timedwait_return->returned_value == 0);
+
+        /*
+         * The sem_timedwait() function shall lock the semaphore referenced by sem as in the sem_wait() function. However, if the semaphore cannot be locked without waiting for another
+         * process or thread to unlock the semaphore by performing a sem_post() function, this
+         * wait shall be terminated when the specified timeout expires.
+         */
+        REQ("sem_timedwait.01", "Semaphore shall be locked",
+            !contains_List(post_sem_m->wait_list, create_ThreadIdObj(context)) &&
+            (
+                (pre_sem_m->counter>0 && pre_sem_m->counter - post_sem_m->counter == 1)
+                || (pre_sem_m->counter == 0)
+            )
+            );
+
+        /*
+         * Under no circumstance shall the function fail with a timeout if the semaphore can be locked immediately. The validity of the
+         * abs_timeout need not be checked if the semaphore can be locked immediately.
+         */
+        REQ("sem_timedwait.04", 
+            "If the semaphore can be locked immediately", 
+            true);
+
+        /*
+         * The sem_timedwait() function shall return zero if the calling process successfully performed the semaphore lock operation
+         * on the semaphore designated by sem. If the call was unsuccessful, the state of the semaphore shall be unchanged, and the
+         * function shall return a value of -1 and set errno to indicate the error.
+         */
+        REQ("sem_timedwait.05", 
+            "Shall return zero if successfull, else return -1 and set errno", 
+            true);
+
+        return true;
+    }
+}
+
+void onSemTimedWaitReturn(CallContext context, ErrorCode* sem_timedwait_spec)
+{
+    SemaphoreTimedLockCall* blocked_call = finishBlockedCall(context);
+    PThreadSemaphoreTPtr semaphore = blocked_call->semaphore;
+    Semaphore* semaphore_m = getSemaphore(semaphore, context);
+
+    /* Scheduling policy */
+    remove_List(semaphore_m->wait_list, indexOf_List(semaphore_m->wait_list, create_ThreadIdObj(context)));
+    
+    if ((semaphore_m != NULL) && (*sem_timedwait_spec == 0)) 
+        lock_Semaphore(semaphore_m);
+}
+
+SemTimedLockCall* create_SemTimedLockCall(CallContext context, PThreadSemaphoreTPtr semaphore, TimeInterval t_stamp, TimeUnit delta)
+{
+    return create(&type_SemTimedLockCall, context, semaphore, t_stamp, delta);
+}
+
+specification typedef struct SemaphoreLockCall SemaphoreLockCall = {};
+specification typedef struct SemaphoreTimedLockCall SemaphoreTimedLockCall = {};
+
+SemaphoreLockCall* create_SemaphoreLockCall(CallContext context, PThreadSemaphoreTPtr semaphore, Semaphore* pre_semaphore)
+{
+    return create(&type_SemaphoreLockCall, context, semaphore, pre_semaphore);
+}
+
+SemaphoreTimedLockCall* create_SemaphoreTimedLockCall(CallContext context, PThreadSemaphoreTPtr semaphore, Semaphore* pre_semaphore, TimeInterval t_stamp, TimeUnit delta)
+{
+    return create(&type_SemaphoreTimedLockCall, context, semaphore, pre_semaphore, t_stamp, delta);
+}
+
+specification typedef struct SemaphoreUnlockCall SemaphoreUnlockCall = {};
+
+SemaphoreUnlockCall* create_SemaphoreUnlockCall(CallContext context, PThreadSemaphoreTPtr semaphore, Semaphore *pre_semaphore)
+{
+    return create(&type_SemaphoreUnlockCall, context, semaphore, pre_semaphore);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+static int sem_ID_Generator = 0;
+
+Semaphore* createSemaphore(PThreadSemaphoreTPtr psemaphore, IntT counter_value, CString* name, IntT type)
+{
+    List *adresses = create_List(&type_VoidTPtrObj);
+    append_List(adresses, create_VoidTPtrObj(psemaphore));
+
+    return create_Semaphore( sem_ID_Generator++, adresses, create_List(&type_ThreadIdObj), 
+        counter_value, type, name, create_Set(&type_ThreadIdObj), false, 0);
+}
+
+void registerSemaphore(PThreadSemaphoreTPtr psemaphore, IntT value, CString* name, IntT type)
+{
+    if(type==NAMED_SEMAPHORE)
+    {
+        Semaphore * sem_m = getVitalSemaphoreByName(name);
+        if(sem_m)
+        {
+            if(!contains_List(sem_m->addresses, create_VoidTPtrObj(psemaphore))) append_List(sem_m->addresses, create_VoidTPtrObj(psemaphore));
+        }else
+        {
+            registerObjectInMemory(psemaphore,
+                                 sizeof_SUTType("sem_t"),
+                                 createSemaphore(psemaphore, value, name, type)
+                                );
+        }
+        return;
+    }else if(type==UNNAMED_SEMAPHORE)
+    {
+        registerObjectInMemory(psemaphore,
+                             sizeof_SUTType("sem_t"),
+                             createSemaphore(psemaphore, value, name, type)
+                            );
+        return;
+    }
+    VERBOSE("Function 'registerSemaphore': error in the specification\n");
+    return;
+}
+
+void unregisterSemaphore(PThreadSemaphoreTPtr psemaphore)
+{
+    unregisterObjectInMemory(psemaphore);
+}
+
+ObjectsInMemory* getAllSemaphores(void)
+{
+    return getAllTypedObjectsInMemory(&type_Semaphore);
+}
+
+Semaphore* findSemaphore(ObjectsInMemory* objects, PThreadSemaphoreTPtr psemaphore)
+{
+    //iterate through all objects and work out searched semaphore 
+    int i,size;
+    size = size_Map(objects);
+    for(i=0;i<size;i++)
+    {
+        Semaphore* tmp = get_Map( objects, key_Map(objects, i));
+        if(contains_List(tmp->addresses, create_VoidTPtrObj(psemaphore)))
+            return tmp;
+    }
+    return NULL;
+}
+
+Semaphore* getSemaphore(PThreadSemaphoreTPtr psemaphore, CallContext context)
+{
+    Map *all_sems;
+    int i, size;
+
+    if(psemaphore.process != context.process)
+        return NULL;
+
+    all_sems = getAllSemaphores();
+    size = size_Map(all_sems);
+    
+    for(i=0; i<size; i++)
+    {
+        Semaphore* sem_m = get_Map( all_sems, key_Map( all_sems, i));
+        if(contains_List(sem_m->addresses, create_VoidTPtrObj(psemaphore)))
+        {
+            return sem_m;
+        }
+    }
+    return NULL;
+
+}
+
+Semaphore *getSemaphoreByCopy(Semaphore *copy)
+{
+    Map *all_sems = getAllSemaphores();
+    int i, size = size_Map(all_sems);
+    if(!copy) return NULL;
+    for(i=0; i<size; i++)
+    {
+         Semaphore* sem_m = get_Map( all_sems, key_Map( all_sems, i ));
+         if(isTheSameSemaphore(sem_m, copy)) return sem_m;
+    }
+    return NULL;
+}
+
+Semaphore* getVitalSemaphoreByName(CString* sem_name)
+{
+    Map *all_sems = getAllSemaphores();
+    int i, size = size_Map(all_sems);
+    for(i=0; i<size; i++)
+    {
+        Semaphore* sem_m = get_Map( all_sems, key_Map( all_sems, i));
+         if(sem_m->type == NAMED_SEMAPHORE)
+             if(compare(sem_name, sem_m->name)==0
+                 && !sem_m->should_removed
+                 ) return sem_m;
+    }
+    return NULL;
+}
+
+bool isSemaphoreFree(Semaphore* sem_m)
+{
+    return (sem_m->counter>0);
+}
+
+bool doesWaitedThreadExist(Semaphore *sem_m)
+{
+    return size_List(sem_m->wait_list)>0;
+}
+
+bool isSemaphoreChangedState(Semaphore *virgin, Semaphore *exposed)
+{
+    bool done = false;
+
+    if(virgin->sem_id != exposed->sem_id ) done = true;
+    if(!equals(virgin->name,exposed->name)) done = true;
+    if(virgin->counter != exposed->counter )done = true;
+    if(virgin->pshared != exposed->pshared )done = true;
+    if(virgin->type != exposed->type ) done = true;
+    if(virgin->should_removed != exposed->should_removed ) done = true;
+    if(!equals(virgin->wait_list,exposed->wait_list)) done = true;
+
+    return done;
+}
+
+bool isTheSameSemaphore(Semaphore *genuine, Semaphore *fake)
+{
+    return genuine->sem_id == fake->sem_id;
+}
+
+bool isSemaphoreOpened(Semaphore* sem_m)
+{
+    if (sem_m==NULL)
+    {
+        return false;
+    }
+    
+    return size_Set(sem_m->openers)>0;
+}
+
+bool isThreadSemaphoreOpener(Semaphore* sem_m, CallContext thread)
+{
+    return contains_Set(sem_m->openers, create_ThreadIdObj(thread));
+}
+
+bool isDeadlockIfThreadBlocked(ThreadId thread, Semaphore *sem_m)
+{
+    return false;
+}
+
+bool isValidSemaphoreName(CString* name)
+{
+    return true;
+}
+
+int free_Semaphore(Semaphore* sem_m)
+{
+    /* Increase counter */
+    sem_m->counter++;
+    return 0;
+}
+
+int lock_Semaphore(Semaphore* sem_m)
+{
+    /* Decrease counter */
+    sem_m->counter--;
+    return 0;
+}
+
+bool isAddressValidInContext(VoidTPtr t_ptr, CallContext context)
+{
+    return t_ptr.process == context.process;
+}
+
+bool isNameTooLong(CString* cstring)
+{
+    if(cstring)
+    {
+        if(length_CString(cstring)>SUT_PATH_MAX)
+            return true;
+        else
+            return false;
+    }
+    else
+        return false;
+}
+
+void removeSemaphoreIfPossible(Semaphore* sem_m)
+{
+    if(sem_m->type == NAMED_SEMAPHORE)
+    {
+        if(sem_m->should_removed && size_Set(sem_m->openers)==0)
+        {
+            VoidTPtr tmp = *(VoidTPtrObj*)get_List(sem_m->addresses, 0); 
+            unregisterSemaphore(tmp);
+        }
+    }else
+    {
+        if(size_Set(sem_m->openers)==0)
+        {
+            VoidTPtr tmp = *(VoidTPtrObj*)get_List(sem_m->addresses, 0); 
+            unregisterSemaphore(tmp);
+        }
+    }
+}
+
+/********************************************************************/
+/**                      Printing functions for debugging
+/********************************************************************/
+
+void printVoidTPtr1(VoidTPtrObj* ptr)
+{
+    verbose("        ptr.process %u\n", ptr->process);
+    verbose("        ptr.address %u\n", ptr->address);
+}
+
+void printfSemaphoreModel(Semaphore* sem_m)
+{
+    int i;
+    if(sem_m==NULL) verbose("poshel na \n");
+
+    verbose("SEMAPHORE\n");
+
+    //print ID
+    verbose("    ID: %d\n", sem_m->sem_id);
+
+    //print addresses
+    verbose("    addresses\n");
+    for(i=0;i<size_List(sem_m->addresses);i++)
+    {
+        printVoidTPtr1(get_List(sem_m->addresses, i));
+    }
+    verbose("\n");
+
+    //print wait_list
+    verbose("    wait_list: ");
+    for(i=0;i<size_List(sem_m->wait_list);i++)
+    {
+        ThreadIdObj* tmp = get_List(sem_m->wait_list, i);
+        verbose("%u ", tmp->thread);
+    }
+    verbose("\n");
+
+    //print counter
+    verbose("    counter value %u\n", sem_m->counter);
+
+    //print type
+    verbose("    semaphore type %u\n", sem_m->type);
+
+    //print name
+    verbose("    semaphore name %s\n", toCharArray_CString(sem_m->name));
+
+    //print should_removed
+    if(sem_m->should_removed) verbose("  should_removed\n");
+        else verbose("   vital\n");
+
+    return;
+}
+
+String *VoidTPtr_To_String(VoidTPtrObj* ptr)
+{
+    StringBuffer* result = create_StringBuffer();
+    appendFormat_StringBuffer(result,  "        ptr.process %u\n", ptr->process);
+    appendFormat_StringBuffer(result,  "        ptr.address %u\n", ptr->address);
+    return toString(result);
+}
+
+String *semaphore_To_String(struct Semaphore* sem_m)
+{
+    int i;
+    StringBuffer* result = create_StringBuffer();
+
+    if(sem_m==NULL) return toString(result);
+
+    append_StringBuffer(result, "SEMAPHORE\n");
+
+    //print ID
+    appendFormat_StringBuffer(result, "    ID: %d\n", sem_m->sem_id);
+
+    //print addresses
+    append_StringBuffer(result, "    addresses\n");
+
+    for(i=0;i<size_List(sem_m->addresses);i++)
+    {
+        appendString_StringBuffer(result, VoidTPtr_To_String(get_List(sem_m->addresses, i)));
+    }
+    
+    append_StringBuffer(result, "\n");
+
+    //print wait_list
+    append_StringBuffer(result, "    wait_list: ");
+    for(i=0;i<size_List(sem_m->wait_list);i++)
+    {
+        ThreadIdObj* tmp = get_List(sem_m->wait_list, i);
+        appendFormat_StringBuffer(result, "%u ", tmp->thread);
+    }
+    append_StringBuffer(result, "\n");
+
+    //print counter
+    appendFormat_StringBuffer(result, "    counter value %u\n", sem_m->counter);
+
+    //print type
+    appendFormat_StringBuffer(result, "    semaphore type %u\n", sem_m->type);
+
+    //print name
+    appendFormat_StringBuffer(result, "    semaphore name %s\n", toCharArray_CString(sem_m->name));
+
+    //print should_removed
+    if(sem_m->should_removed)
+    {
+        append_StringBuffer(result, "  should_removed\n");
+    }
+    else
+    {
+        append_StringBuffer(result, "   vital\n");
+    }
+
+    return toString(result);
+}

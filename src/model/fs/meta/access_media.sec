@@ -1,0 +1,265 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "fs/meta/access_media.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+
+static void accessmodeaccess_formatter(TSStream* stream,
+                                                    AccessModeAccess* value)
+{
+    VERIFY_TYPE( accessmodeaccess_formatter, &type_AccessModeAccess, value );
+
+    writeTypeHeaderTSStream(stream,"accessmodeaccess");
+    writeInt_TSStream(stream, value->isR_OK ? 1 : 0);
+    writeInt_TSStream(stream, value->isW_OK ? 1 : 0);
+    writeInt_TSStream(stream, value->isX_OK ? 1 : 0);
+    writeInt_TSStream(stream, value->isF_OK ? 1 : 0);
+}
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initFsMetaAccessSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_access_spec(access_media);
+    set_mediator_chmod_spec(chmod_media);
+    set_mediator_chown_spec(chown_media);
+    set_mediator_fchmod_spec(fchmod_media);
+    set_mediator_fchown_spec(fchown_media);
+    set_mediator_lchown_spec(lchown_media);
+
+    //Set up formatters
+    registerTSFormatter("accessmodeaccess",
+        (TSFormatterFuncType)accessmodeaccess_formatter);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** access_spec **/
+
+mediator access_media for specification
+IntT access_spec( CallContext context, CString* path, AccessModeAccess* amode,
+                                                            ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "access:$(str)$(accessmodeaccess)", path,
+                                                                    amode);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** chmod_spec **/
+
+mediator chmod_media for specification
+IntT chmod_spec( CallContext context, CString* path, FilePermissions* mode,
+                                                            ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "chmod:$(str)$(perms)", path, mode);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        OnChmod(context, path, mode, errno, chmod_spec);
+    }
+}
+
+
+
+/** chown_spec **/
+
+mediator chown_media for specification
+IntT chown_spec( CallContext context, CString* path, UidT owner, GidT group,
+                                                            ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "chown:$(str)$(uint)$(uint)", path,
+            create_UidTObj(owner), create_GidTObj(group));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        Bool3 eloop;
+        FileSystem* fs=getFileSystem(context);
+        OnChown(context, resolvePath_Ext(context, fs, path, &eloop), owner,
+                                                    group, errno, chown_spec);
+    }
+}
+
+
+
+/** fchmod_spec **/
+mediator fchmod_media for specification
+IntT fchmod_spec( CallContext context, FileDescId fildes,
+                                    FilePermissions* mode, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "fchmod:$(int)$(perms)",
+                                    create_IntTObj(fildes.filedesc), mode );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        OnFchmod(context, fildes, mode, errno, fchmod_spec);
+    }
+}
+
+
+
+/** fchown_spec **/
+
+mediator fchown_media for specification
+IntT fchown_spec( CallContext context, FileDescId fildes, UidT owner,
+                                                GidT group, ErrorCode* errno)
+{
+   call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         format_TSCommand( &command, "fchown:$(int)$(uint)$(uint)",
+            create_IntTObj(fildes.filedesc), create_UidTObj(owner),
+            create_GidTObj(group));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        OnFchown(context, fildes, owner, group, errno, fchown_spec);
+    }
+}
+
+
+
+/** lchown_spec **/
+mediator lchown_media for specification
+IntT lchown_spec( CallContext context, CString* path, UidT owner, GidT group,
+                                                        ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "lchown:$(str)$(uint)$(uint)", path,
+            create_UidTObj(owner), create_GidTObj(group));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res     =   readInt_TSStream(&command.response);
+            *errno  =   readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        Bool3 eloop;
+        FileSystem* fs=getFileSystem(context);
+        CString* parent=getParentDir_Path(path), *resolved;
+        CString* basename=getBaseName_Path(path);
+
+        parent=resolvePath_Ext(context, fs, parent, &eloop);
+
+        if(parent!=NULL && basename!=NULL)
+            resolved=concat_Path(parent, basename);
+
+        OnChown(context, resolved, owner, group, errno, lchown_spec);    
+    }
+}
+
+
+

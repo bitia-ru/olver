@@ -1,0 +1,227 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "data/wchar_model.seh"
+#include "io/fstream/wstream_media.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initIoFstreamWstreamSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_fgetwc_spec(fgetwc_media);
+    set_mediator_fgetws_spec(fgetws_media);
+    set_mediator_fputwc_spec(fputwc_media);
+    set_mediator_fputws_spec(fputws_media);
+    set_mediator_fwide_spec(fwide_media);
+    set_mediator_ungetwc_spec(ungetwc_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** fgetwc_spec **/
+//This mediator refers to: fgetwc, fgetwc_unlocked, getwc, getwchar
+mediator fgetwc_media for specification
+WIntT fgetwc_spec( CallContext context, FILETPtr stream, ErrorCode * errno,
+                   IntT getwc_type, WString * input, CString * stdinAsFile
+                 )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        WIntT res;
+        VoidTPtrObj * file = create_VoidTPtrObj( stream );
+
+        switch ( getwc_type ) {
+            case F_Type         : format_TSCommand( & command, "fgetwc:$(ptr)"         , file               ); break;
+            case F_Unlocked_Type: format_TSCommand( & command, "fgetwc_unlocked:$(ptr)", file               ); break;
+            case Macro_Type     : format_TSCommand( & command, "getwc:$(ptr)"          , file               ); break;
+            case Char_Type      : format_TSCommand( & command, "getwchar:$(wstr)$(str)", input, stdinAsFile ); break;
+        }
+
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            res     = readUInt_TSStream( & command.response );
+            * errno = readInt_TSStream ( & command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( getwc_type != Char_Type ) {
+            if ( fgetwc_spec != SUT_WEOF ) { onFgetwc( context, stream, fgetwc_spec ); }
+        }
+    }
+}
+
+/** fgetws_spec **/
+mediator fgetws_media for specification
+WString * fgetws_spec( CallContext context, IntT n, FILETPtr stream, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        WString * res = NULL;
+
+        format_TSCommand( & command, "fgetws:$(ptr)$(int)", create_VoidTPtrObj( stream ), create_IntTObj( n ) );
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            bool notNULL;
+            timestamp = command.meta.timestamp;
+            notNULL = readInt_TSStream( & command.response );
+            if ( notNULL ) { res=readWString_TSStream( & command.response ); }
+            * errno = readInt_TSStream( & command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( fgetws_spec != NULL ) { onFgetws( context, stream, fgetws_spec ); }
+    }
+}
+
+/** fputwc_spec **/
+//This mediator refers to: fputwc, putwc, putwchar
+mediator fputwc_media for specification
+WIntT fputwc_spec( CallContext context, WCharT wc, FILETPtr stream, ErrorCode * errno, IntT putwc_type )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        WIntT res;
+        VoidTPtrObj * file = create_VoidTPtrObj( stream );
+
+        switch ( putwc_type ) {
+            case F_Type    : format_TSCommand( & command, "fputwc:$(int)$(ptr)"  , create_IntTObj( wc ), file ); break;
+            case Macro_Type: format_TSCommand( & command, "putwc:$(int)$(ptr)"   , create_IntTObj( wc ), file ); break;
+            case Char_Type : format_TSCommand( & command, "putwchar:$(int)$(ptr)", create_IntTObj( wc ), file ); break;
+        }
+
+        executeCommandInContext( context, & command );
+        if ( ! isBadVerdict() ) {
+            timestamp = command.meta.timestamp;
+            res     = readUInt_TSStream( & command.response );
+            * errno = readInt_TSStream ( & command.response );
+        }
+
+        destroy_TSCommand( & command );
+
+        return res;
+    }
+    state
+    {
+        if ( putwc_type != Char_Type ) {
+            if ( fputwc_spec != SUT_WEOF ) { onFputwc( context, stream, fputwc_spec ); }
+        }
+    }
+}
+
+/** fputws_spec **/
+mediator fputws_media for specification
+IntT fputws_spec( CallContext context, WString * ws, FILETPtr stream, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( & command, "fputws:$(wstr)$(ptr)", ws, create_VoidTPtrObj( stream ) );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( fputws_spec >= 0 ) { onFputws( context, stream, ws ); }
+    }
+}
+
+/** fwide_spec **/
+mediator fwide_media for specification
+IntT fwide_spec( CallContext context, FILETPtr stream, IntT mode, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand(&command, "fwide:$(ptr)$(int)",
+            create_VoidTPtrObj(stream),
+            create_IntTObj(mode)
+            );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** ungetwc_spec **/
+mediator ungetwc_media for specification
+WIntT ungetwc_spec( CallContext context, WIntT wc, FILETPtr stream, ErrorCode * errno, bool toStdin )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        WIntT res;
+
+        format_TSCommand(&command, "ungetwc:$(int)$(int)$(ptr)",
+            create_IntTObj(toStdin),
+            create_IntTObj(wc),
+            create_VoidTPtrObj(stream)
+            );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readUInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}

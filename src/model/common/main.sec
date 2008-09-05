@@ -1,0 +1,577 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <time.h>
+#include <stdio.h>
+#include <string.h>
+#include <libgen.h>
+
+#include "config/system_config.seh"
+#include "config/test_system_config.h" 
+
+#ifndef WIN32
+  #include <unistd.h>
+  #include <fcntl.h>
+#endif
+#include "common/init.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "ts/system.h"
+#include "config/config_loader.seh"
+#include "common/progress_timer.h"
+#include <sys/stat.h>
+
+typedef bool (*scenario_main_entry)(int argc, char** argv );
+
+typedef struct
+{
+    char* name;
+    scenario_main_entry handler;
+} ScenarioTableEntry;
+
+
+#include "scenario_decl.inl"
+
+extern TSSocket tsSocket;
+
+ScenarioTableEntry scenario_table[] =
+{
+#include "scenario_table.inl"
+};
+
+scenario_main_entry findScenario(const char* name)
+{
+    int size = sizeof(scenario_table)/sizeof(ScenarioTableEntry);
+    int i;
+    for(i = 0; i < size; i++)
+    {
+        if (!strcmp(scenario_table[i].name, name))
+        {
+            return scenario_table[i].handler;
+        }
+    }
+    return 0;
+}
+static char *scen_name = NULL;
+
+
+// Command Line Options
+char    *optarg;        // global argument pointer
+int     optind = 0;     // global argv index
+int     optopt = 0;
+
+int     useLocalAgent = 0;
+int     useMasterAgent = 0;
+int     switchVerboseOn = 0;
+int     killTimeout = -1; // seconds
+
+
+char *ts_program_path;
+
+#ifndef WIN32
+    int guard_pid = 0;
+    int progress_pid = 0;
+#endif
+
+void usage(void)
+{
+   fprintf(stdout, "Usage: automated_test [options] <name>\n\n");
+   fprintf(stdout,
+          "  <name>          - the name of a single scenario or\n"
+          "                    the name of a group of scenarios\n"
+          "  -l              - runs agent locally\n"
+          "  -m <host:port>  - use master agent\n"
+          "  -f              - does not wait agent infinitely\n"
+          "  -v              - switches verbose mode on\n"
+          "  -t N            - sets test termination timeout in N seconds\n"
+          "  -C              - save compiled config file (/tmp/olver/olver.conf.temp)\n"
+          "  -c filepath     - load config from 'filepath'\n"
+   );
+}
+
+int getopt_portable(int argc, char *argv[], char *optstring)
+{
+    static char *next = NULL;
+    char c;
+    char *cp;
+
+    if (optind == 0)
+        next = NULL;
+
+    optarg = NULL;
+
+    if (next == NULL || *next == '\0' )
+    {
+        if (optind == 0)
+            optind++;
+
+        if (optind >= argc || argv[optind][0] != '-' || argv[optind][1] == '\0')
+        {
+            optarg = NULL;
+            if (optind < argc)
+                optarg = argv[optind];
+            return EOF;
+        }
+
+        if (strcmp(argv[optind], "--") == 0)
+        {
+            optind++;
+            optarg = NULL;
+            if (optind < argc)
+                optarg = argv[optind];
+            return EOF;
+        }
+
+        next = argv[optind];
+        next++;     // skip past -
+        optind++;
+    }
+
+    c = *next++;
+    cp = strchr(optstring, c);
+
+    if (cp == NULL || c == ':') {
+        optopt = c;
+        return '?';
+    }
+
+    cp++;
+    if (*cp == ':')
+    {
+        if (*next != '\0')
+        {
+            optarg = next;
+            next = NULL;
+        }
+        else if (optind < argc)
+        {
+            optarg = argv[optind];
+            optind++;
+        }
+        else
+        {
+            optopt = c;
+            return ':';
+        }
+    }
+
+    return c;
+}
+
+int parseCommandLine(int argc, char** argv)
+
+{
+    int c;
+    int errflg = 0;
+
+    while ((c = getopt_portable(argc, argv, "lm:fvt:dCc:")) != -1)
+    {
+        switch(c)
+        {
+        case 'l':
+            useLocalAgent = 1;
+            break;
+        case 'm':
+            useMasterAgent = 1;
+            setEnvironmentVariable("MASTER_AGENT",optarg);
+            break;
+        case 'f':
+            setWaitAgentInfinitely(false);
+            break;
+        case 'v':
+            switchVerboseOn = 1;
+            break;
+        case 'd':
+            setDebugMode(true);
+            break;
+        case 't':
+            killTimeout = atoi(optarg);
+            if (killTimeout < 0)
+            {
+                fprintf(stderr, "Please, specify positive timeout\n", optopt);
+                errflg++;
+            }
+            break;
+        case 'C':
+            bDeleteConfig = false;
+            break;
+        case 'c':
+            strcpy(configFilePath, optarg);
+            bLoadConfigReq = true;
+            break;
+        case ':':       /* -m or -t without operand */
+            fprintf(stderr, "Option -%c requires an operand\n", optopt);
+            errflg++;
+            break;
+        case '?':
+            fprintf(stderr, "Unrecognized option: -%c\n", optopt);
+            errflg++;
+        }
+    }
+
+    if (useLocalAgent && useMasterAgent)
+    {
+        fprintf(stderr, "Local agent and master agent are specified at the same time\n");
+        errflg++;
+    }
+
+    if (errflg)
+    {
+        usage();
+        return 0;
+    }
+
+    for ( ; optind < argc; optind++)
+    {
+        scen_name = optarg;
+    }
+
+    if (!scen_name)
+    {
+        usage();
+        return 0;
+    }
+
+    return 1;
+}
+
+#ifndef WIN32
+void testAgentRunnerFail(const char* str)
+{
+    perror( str );
+    fprintf( stderr, "\n\nerror: failed to run agent.\n\n");
+    exit(1);
+}
+
+void testAgentRunner(void)
+{
+    int code;
+    int logfd;
+    
+    // Wait for some time
+    sleep_msec(50);
+    
+    // Change current dir to bin
+    code = chdir(dirname(ts_program_path));
+    if(code != 0)
+    {
+        testAgentRunnerFail( "testAgentRunner[chdir]" );
+    }
+    
+    // Run test agent
+    if(isDebugMode())
+    {
+        execl( "./agent", "./agent", "-debug", NULL );
+    }
+    else
+    {
+        logfd = open( AGENT_LOG, O_WRONLY | O_CREAT | O_APPEND );
+        if (logfd == -1)
+        {
+            testAgentRunnerFail( "testAgentRunner[open]" );
+        }
+        
+        // Change mode of the log file
+        code = chmod( AGENT_LOG, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH );
+        if (code != 0)
+        {
+            testAgentRunnerFail( "testAgentRunner[chmod]" );
+        }
+        
+        // Set up stdout
+        code = dup2( logfd, 1 );
+        if (code == -1)
+        {
+            testAgentRunnerFail( "testAgentRunner[dup2]" );
+        }
+        
+        // Set up stderr
+        code = dup2( logfd, 2 );
+        if (code == -1)
+        {
+            testAgentRunnerFail( "testAgentRunner[dup2]" );
+        }
+        
+        close( logfd );
+        
+        execl( "./agent", "./agent", "-silent", NULL );
+    }
+    
+    // This code is executed iff execl fails only
+    testAgentRunnerFail( "testAgentRunner[execl]" );
+}
+
+ThreadId startAgentByFork(void)
+{
+
+    int code = fork();
+    // Child code
+    if (code == 0)
+    {
+        testAgentRunner();
+        exit(1);
+    }
+    // Test system code
+    if (code == -1)
+    {
+        perror( "startAgentByFork[fork]" );
+        fprintf(stderr, "\n\nerror: failed to run agent.\n\n");
+        exit(1);
+    }
+    
+    VERBOSE("Waiting for the TestAgent...\n");
+    return acceptTestAgent(false);
+}
+
+int startGuardProcess(void)
+{
+    int code = fork();
+
+    // termination process
+    if (code == 0)
+    {
+        time_t start;
+        time_t now;
+        int dif;
+
+        time(&start);
+
+        while(1)
+        {
+            sleep(1);
+
+            time(&now);
+            dif = difftime(now, start);
+
+            // if timeout then kill parent and stop progress timer
+            if (dif > killTimeout)
+            {
+                // stop progress timer
+                kill(progress_pid, SIGALRM);
+
+                // try to stop parent
+                if (kill(getppid(), SIGTERM) == 0)
+                {
+                    fprintf(stderr, "\nScenario failed to finish within %d second(s). Terminate...\n", killTimeout);
+
+                    // kill parent to make sure
+                    sleep(10);
+                    kill(getppid(), SIGKILL);
+                }
+
+                exit(0);
+            }
+
+            // if parent is not alive then exit
+            if (kill(getppid(), SIGCONT) == -1)
+            {
+                exit(0);
+            }
+
+            // if stopped by parent then simply exit
+            if (checkSignal())
+            {
+                exit(0);
+            }
+        }
+    }
+
+    // error
+    if (code == -1)
+    {
+        fprintf(stderr, "error: failed to start termination guard process\n");
+        exit(1);
+    }
+
+    return code;
+}
+
+int loadEstimate()
+{
+    FILE* f = fopen("times.ref", "rt");
+    if (f)
+    {
+        char buf[256];
+        int estimate;
+
+        while (fscanf(f, "%s\t%d\n", buf, &estimate) != EOF)
+        {
+            if (!strcmp(buf, scen_name))
+            {
+                return estimate;
+            }
+        }
+        fclose(f);
+    }
+    return 86400; /* one day */
+}
+
+#endif
+
+bool fileExists(const char* fileName)
+{
+    struct stat buf;
+    return !stat(fileName, &buf);
+}
+
+void constructTraceFileName(const char* scenarioName, char* traceFileName)
+{
+    int i;
+
+    sprintf(traceFileName, "%s.utt", scenarioName);
+
+    for(i = 0; i < 1000; i++)
+    {
+        if (!fileExists(traceFileName))
+        {
+          break;
+        }
+
+        sprintf(traceFileName, "%s_%03d.utt", scenarioName, i);
+    }
+}
+
+int main(int argc,char** argv)
+{
+    scenario_main_entry sme;
+    bool result;
+    FILE* out = NULL;
+    int beg;
+    char traceFileName[256];
+
+    ts_program_path = argv[0];
+
+    if (!parseCommandLine(argc, argv))
+    { 
+        return 0;
+    }
+
+    // Lookup scenario
+    sme = findScenario(scen_name);
+    if (!sme)
+    {
+        fprintf(stderr, "error: scenario '%s' not found\n", scen_name);
+        return 1;
+    }
+
+#ifndef WIN32
+    if (useLocalAgent)
+    {
+        setTestAgentStarter(startAgentByFork);
+    }
+#endif
+
+    if (switchVerboseOn)
+    {
+        VERBOSE_ON();
+    }
+    else
+    {
+        VERBOSE_OFF();
+    }
+
+#ifndef WIN32
+
+    if (!switchVerboseOn&&!isDebugMode())
+    {
+        // Start progress timer
+        progress_pid = launchProgressTimer(loadEstimate());
+
+        // Start Guard Process
+        if (killTimeout != -1)
+        {
+            guard_pid = startGuardProcess();
+        }
+    }
+#endif
+
+    // Init
+    initTestSystem();
+
+    VERBOSE("Loading config...\n");
+
+    result = load_config();
+
+    initSystemConfiguration();
+    if(!result)
+    {
+        fprintf(stderr, "error: config loading failed.\n");
+        return 1;
+    }
+    VERBOSE("Config loaded.\n");
+
+    if (!loadSUT())
+    {
+        fprintf(stderr, "TestAgent launching failed\n");
+        return 1;
+    }
+
+    // Log start of the scenario
+    agentLog( getContext(), format_CString( "Test scenario start: %s\n", scen_name ) );
+
+    // Set up tracer
+    constructTraceFileName(scen_name, traceFileName);
+    addTraceToFile(traceFileName);
+    setTraceEncoding("iso8859-2");
+    setTraceDataFormatString();
+    startTrace();
+
+    // Run test scenario and measure duration
+    out = fopen("times.log", "a");
+    beg = time(0);
+
+    initReqFilters();
+
+    result = (*sme)(argc, argv);
+
+    if (out)
+    {
+        fprintf(out, "%s\t%d\n", scen_name, (int)time(0)-beg);
+        fclose(out);
+    }
+
+    // Finish
+    cleanupTestSystem();
+    endTrace();
+
+#ifndef WIN32
+    // Stop Guard Process
+    if (killTimeout != -1)
+    {
+        kill(guard_pid, SIGALRM);
+    }
+
+    // Stop progress timer
+    if (!switchVerboseOn&&!isDebugMode())
+    {    
+        kill(progress_pid, SIGALRM);
+        VERBOSE("\n");
+        fflush(stdout);
+    }
+#endif
+
+    if (testVerdict == TD_ok)
+    {
+        return 0;
+    }
+    else
+    {
+        return 2;
+    }
+}

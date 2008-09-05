@@ -1,0 +1,1487 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "math/hyper/hyper_model.seh"
+#include "math/hyper/hyper_config.h"
+
+
+#pragma SEC subsystem hyper "math.hyper"
+
+
+
+/*
+   The group of functions 'math.hyper' consists of:
+       acosh [2]
+       acoshf [2]
+       acoshl [2]
+       asinh [2]
+       asinhf [2]
+       asinhl [2]
+       atanh [2]
+       atanhf [2]
+       atanhl [2]
+       cosh [2]
+       coshf [2]
+       coshl [2]
+       sinh [2]
+       sinhf [2]
+       sinhl [2]
+       tanh [2]
+       tanhf [2]
+       tanhl [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+NAME
+
+    acosh, acoshf, acoshl - inverse hyperbolic cosine functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double acosh(double x);
+
+    float acoshf(float x);
+
+    long double acoshl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the inverse hyperbolic cosine of
+    their argument x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the inverse hyperbolic
+    cosine of their argument.
+
+    For finite values of x < 1, a domain error shall occur, and [MX] either a
+    NaN (if supported), or an implementation-defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is +1, +0 shall be returned.
+
+    If x is +Inf, +Inf shall be returned.
+
+    If x is -Inf, a domain error shall occur, and either a NaN (if supported), or
+    an implementation-defined value shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The x argument is finite and less than +1.0, [MX] or is -Inf.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If the integer expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+*/
+
+/** acosh_spec **/
+//This specification refers to: acoshf, acosh, acoshl
+specification
+Unifloat* acosh_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"acoshf", (CharT *)"acosh", (CharT *)"acoshl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isInfinity_Unifloat(x))
+            return {x_Inf, "x is Infinity"};
+        else
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 0)
+            return {x_One, "x is One"};
+        else
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+            return {x_more_One, "x - finite, but not in the range [-1;1]"};
+        else
+            return {x_less_One, "x - finite and in the range [-1;1]"};
+    }
+    post
+    {
+        Unifloat* model = acosh_model(x);
+
+        if(isNormal_Unifloat(x) && compare_Unifloat(x, createOne_Unifloat(x->type)) == -1)
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite values of x < 1, a domain error shall occur, and [MX] either a
+             * NaN (if supported), or an implementation-defined value shall be returned.
+             */
+            REQ("acosh.05;acoshf.05;acoshl.05",
+                "For finite values of x < 1, NaN should be returned",
+                isNan_Unifloat(acosh_spec));
+#endif
+        }
+
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * If x is -Inf, a domain error shall occur, and either a NaN (if supported), or
+             * an implementation-defined value shall be returned.
+             */
+            REQ("acosh.09;acoshf.09;acoshl.09",
+                "If x is -Inf, NaN shall be returned",
+                isNan_Unifloat(acosh_spec));
+#endif
+        }
+
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The x argument is finite and less than +1.0, [MX] or is -Inf.
+         */
+        ERROR_BEGIN(POSIX_ACOSH,
+                    "acosh.10;acoshf.10;acoshl.10",
+                    *errno,
+                    *errno
+                    )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The x argument is finite and less than +1.0, [MX] or is -Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_ACOSH, EDOM,
+                        "acosh.10.01.01;acoshf.10.01.01;acoshl.10.01.01",
+                        (compare_Unifloat(x, createOne_Unifloat(x->type)) == -1)
+                        || (isInfinity_Unifloat(x) && x->sign == -1)
+                        )
+
+        ERROR_END()
+
+
+        if(isNan_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("acosh.06;acoshf.06;acoshl.06",
+                "If x is NaN, a NaN shall be returned",
+                isNan_Unifloat(acosh_spec)
+                );
+#endif
+        }
+
+        if(compare_Unifloat(x, createOne_Unifloat(x->type)) == 0)
+        {
+            /*
+             * If x is +1, +0 shall be returned.
+             */
+            REQ("acosh.07;acoshf.07;acoshl.07",
+                "If x is +1, +0 shall be returned",
+                isZero_Unifloat(acosh_spec) && acosh_spec->sign == 1
+                );
+        }
+
+        if(isInfinity_Unifloat(x) && x->sign == 1)
+        {
+            /*
+             * If x is +Inf, +Inf shall be returned.
+             */
+            REQ("acosh.08;acoshf.08;acoshl.08",
+                "If x is +Inf, +Inf shall be returned",
+                isInfinity_Unifloat(acosh_spec) && acosh_spec->sign == 1
+                );
+        }
+
+        if(isNormal_Unifloat(x) && compare_Unifloat(x, createOne_Unifloat(x->type)) == 1)
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the inverse hyperbolic
+             * cosine of their argument.
+             */
+            REQ("acosh.04;acoshf.04;acoshl.04",
+                "It shall return the inverse hyperbolic cosine",
+                compareWithPrecision_Unifloat(model, acosh_spec, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+Unifloat* acosh_model(Unifloat* x)
+{
+    Unifloat* res;
+
+    if(compare_Unifloat(x, createOne_Unifloat(x->type)) == -1 || isNan_Unifloat(x))
+        return clone(nan_Unifloat(x->type));
+
+    res = sub_Unifloat(mul_Unifloat(x, x), createOne_Unifloat(x->type));
+    res = sqrt_Unifloat(res);
+    res = add_Unifloat(res, x);
+    res = log_Unifloat(res);
+
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+NAME
+
+    asinh, asinhf, asinhl - inverse hyperbolic sine functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double asinh(double x);
+
+    float asinhf(float x);
+
+    long double asinhl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the inverse hyperbolic sine of
+    their argument x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the inverse hyperbolic
+    sine of their argument.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, or ±Inf, x shall be returned.
+
+    If x is subnormal, a range error may occur and x should be returned.
+
+ERRORS
+
+    These functions may fail if:
+
+        Range Error [MX] The value of x is subnormal.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+/** asinh_spec **/
+//This specification refers to: asinhf, asinh, asinhl
+specification
+Unifloat* asinh_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"asinhf", (CharT *)"asinh", (CharT *)"asinhl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isInfinity_Unifloat(x))
+            return {x_Inf, "x is Infinity"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+            return {x_more_One, "x - finite, but not in the range [-1;1]"};
+        else
+            return {x_less_One, "x - finite and in the range [-1;1]"};
+    }
+    post
+    {
+        Unifloat* model = asinh_model(x);
+
+        if(isUnderflow_Unifloat(x))
+        {
+            /*
+             * If x is subnormal, a range error may occur and x should be returned.
+             */
+            REQ("asinh.07;asinhf.07;asinhl.07",
+                "If x is subnormal, x should be returned",
+                compare_Unifloat(x, asinh_spec) == 0
+                );
+        }
+
+        /*
+         * These functions may fail if:
+         *
+         * Range Error [MX] The value of x is subnormal.
+         */
+        ERROR_BEGIN(POSIX_ASINH,
+                    "asinh.08;asinhf.08;asinhl.08",
+                    *errno,
+                    *errno
+                    )
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The value of x is subnormal.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_ASINH, ERANGE,
+                      "asinh.08.01.01;asinhf.08.01.01;asinhl.08.01.01",
+                      isUnderflow_Unifloat(x)
+                      )
+        ERROR_END()
+
+
+        if(isNan_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("asinh.05;asinhf.05;asinhl.05",
+                "If x is NaN, a NaN shall be returned",
+                isNan_Unifloat(asinh_spec)
+                );
+#endif
+        }
+
+
+        if(isZero_Unifloat(x) || isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±0, or ±Inf, x shall be returned.
+             */
+            REQ("asinh.06;asinhf.06;asinhl.06",
+                "If x is ±0, or ±Inf, x shall be returned",
+                compare_Unifloat(x, asinh_spec) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the inverse hyperbolic
+             * sine of their argument.
+             */
+            REQ("asinh.04;asinhf.04;asinhl.04",
+                "It shall return the inverse hyperbolic sine",
+                compareWithPrecision_Unifloat(model, asinh_spec, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+Unifloat* asinh_model(Unifloat* x)
+{
+    Unifloat* res;
+
+    if(isNan_Unifloat(x))
+        return clone(nan_Unifloat(x->type));
+
+    res = add_Unifloat(mul_Unifloat(x, x), createOne_Unifloat(x->type));
+    res = sqrt_Unifloat(res);
+    res = add_Unifloat(res, abs_Unifloat(x));
+    res = log_Unifloat(res);
+
+    res->sign = x->sign;
+
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+NAME
+
+    atanh, atanhf, atanhl - inverse hyperbolic tangent functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double atanh(double x);
+
+    float atanhf(float x);
+
+    long double atanhl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the inverse hyperbolic tangent of
+    their argument x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the inverse hyperbolic
+    tangent of their argument.
+
+    If x is ±1, a pole error shall occur, and atanh(), atanhf(), and atanhl() shall
+    return the value of the macro HUGE_VAL, HUGE_VALF, and HUGE_VALL, respectively,
+    with the same sign as the correct value of the function.
+
+    For finite |x|>1, a domain error shall occur, and [MX] either a NaN (if
+    supported), or an implementation-defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, x shall be returned.
+
+    If x is ±Inf, a domain error shall occur, and either a NaN (if supported), or
+    an implementation-defined value shall be returned.
+
+    If x is subnormal, a range error may occur and x should be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Domain Error The x argument is finite and not in the range [-1,1], [MX] or is ±
+        Inf.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [EDOM]. If the integer expression (math_errhandling &
+            MATH_ERREXCEPT) is non-zero, then the invalid floating-point exception shall be
+            raised.
+
+        Pole Error The x argument is ±1.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the divide-by-zero floating-point
+            exception shall be raised.
+
+    These functions may fail if:
+
+        Range Error [MX] The value of x is subnormal.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+/** atanh_spec **/
+//This specification refers to: atanhf, atanh, atanhl
+specification
+Unifloat* atanh_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"atanhf", (CharT *)"atanh", (CharT *)"atanhl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isInfinity_Unifloat(x))
+            return {x_Inf, "x is Infinity"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+            return {x_more_One, "x - finite, but not in the range [-1;1]"};
+        else
+            return {x_less_One, "x - finite and in the range [-1;1]"};
+    }
+    post
+    {
+        Unifloat* model = atanh_model(x);
+
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 0)
+        {
+            /*
+             * If x is ±1, a pole error shall occur, and atanh(), atanhf(), and atanhl() shall
+             * return the value of the macro HUGE_VAL, HUGE_VALF, and HUGE_VALL, respectively,
+             * with the same sign as the correct value of the function.
+             */
+            REQ("atanh.05;atanhf.05;atanhl.05",
+                "If x is ±1, HUGE_VAL should be returned",
+                isInfinity_Unifloat(atanh_spec) && x->sign == atanh_spec->sign
+                );
+        }
+
+
+        if(isNormal_Unifloat(x) && compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * For finite |x|>1, a domain error shall occur, and [MX] either a NaN (if
+             * supported), or an implementation-defined value shall be returned.
+             */
+            REQ("atanh.06;atanhf.06;atanhl.06",
+                "For finite |x|>1, NaN shall be returned",
+                isNan_Unifloat(atanh_spec)
+                );
+#endif
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * If x is ±Inf, a domain error shall occur, and either a NaN (if supported), or
+             * an implementation-defined value shall be returned.
+             */
+            REQ("atanh.09;atanhf.09;atanhl.09",
+                "If x is ±Inf, NaN shall be returned",
+                isNan_Unifloat(atanh_spec)
+                );
+#endif
+        }
+
+        if(isUnderflow_Unifloat(x))
+        {
+            /*
+             * If x is subnormal, a range error may occur and x should be returned.
+             */
+            REQ("atanh.10;atanhf.10;atanhl.10",
+                "If x is subnormal, x should be returned",
+                compare_Unifloat(x, atanh_spec) == 0
+                );
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Domain Error The x argument is finite and not in the range [-1,1], [MX] or is ±
+         * Inf.
+         */
+        ERROR_BEGIN(POSIX_ATANH,
+                    "atanh.11;atanhf.11;atanhl.11",
+                    *errno,
+                    *errno
+                    )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Domain Error The x argument is finite and not in the range [-1,1], [MX] or is ±
+             * Inf.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [EDOM].
+             */
+            ERROR_SHALL(POSIX_ATANH, EDOM,
+                        "atanh.11.01.01;atanhf.11.01.01;atanhl.11.01.01",
+                        (isNormal_Unifloat(x) && compare_Unifloat(abs_Unifloat(x),createOne_Unifloat(x->type)) == 1)
+                        || isInfinity_Unifloat(x)
+                        )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Pole Error The x argument is ±1.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_ATANH, ERANGE,
+                        "atanh.11.02.01;atanhf.11.02.01;atanhl.11.02.01",
+                        compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 0
+                        )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The value of x is subnormal.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_ATANH, ERANGE,
+                      "atanh.12.01.01;atanhf.12.01.01;atanhl.12.01.01",
+                      isUnderflow_Unifloat(x)
+                      )
+        ERROR_END()
+
+
+        if(isNan_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("atanh.07;atanhf.07;atanhl.07",
+                "If x is NaN, a NaN shall be returned",
+                isNan_Unifloat(atanh_spec)
+                );
+#endif
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, x shall be returned.
+             */
+            REQ("atanh.08;atanhf.08;atanhl.08",
+                "If x is ±0, x shall be returned",
+                compare_Unifloat(x, atanh_spec) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the inverse hyperbolic
+             * tangent of their argument.
+             */
+            REQ("atanh.04;atanhf.04;atanhl.04",
+                "It shall return the inverse hyperbolic tangent",
+                compareWithPrecision_Unifloat(model, atanh_spec, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+Unifloat* atanh_model(Unifloat* x)
+{
+    /*
+     * var - the same thing as x, used to not change x in calculations
+     * inaccuracy - evaluation of inaccuracy of chain fraction
+     *
+     * curNumer, preNumer, curDenom, preDenom - current and previous numerators
+     * and denominators of chain fraction
+     *
+     * a, b - factors of chain fraction
+     * temp - auxiliary variable
+     */
+    UIntT i, k;
+    UnifloatType type = x->type;
+    Unifloat *res, *temp, *inaccuracy, *two, *x2;
+    Unifloat *a, *b, *preNumer, *curNumer, *preDenom, *curDenom;
+
+    if(isNan_Unifloat(x))
+        return clone(nan_Unifloat(x->type));
+
+    if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+        return clone(nan_Unifloat(x->type));
+
+    if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 0)
+        return clone(changeSign_Unifloat(infinity_Unifloat(x->type), x->sign));
+
+    two = createOne_Unifloat(type);
+    two->exp++;
+
+    x2 = mul_Unifloat(x, x);
+    x2->sign = -1;
+
+    /* b[] = 0, 1, 3, 5, 7, 9, 11, 13, ...*/
+    b = createOne_Unifloat(type);
+
+    /* a[] = -, 2*x, -x^2, -4*x^2, -9*x^2, -16*x^2, ...*/
+
+    /* preNumer = b0 */
+    preNumer = createZero_Unifloat(type);
+    /* preDenom = 1 */
+    preDenom = createOne_Unifloat(type);
+    /* curNumer = b0*b1 + a1 */
+    curNumer = clone(x);
+    curNumer->exp++;
+    /* curDenom = b1 */
+    curDenom = createOne_Unifloat(type);
+
+    k = 2;
+    b = add_Unifloat(b, two);
+    a = mul_Unifloat(x2, convertInteger_Unifloat((k - 1) * (k - 1), type));
+
+    inaccuracy = createOne_Unifloat(type);
+    temp = createZero_Unifloat(type);
+
+    while((inaccuracy->exp - curDenom->exp - preDenom->exp) >= -(IntT)PRECISION && isZero_Unifloat(inaccuracy) == 0)
+    {
+        copy(curNumer, temp);
+        curNumer = add_Unifloat(mul_Unifloat(b, curNumer), mul_Unifloat(a, preNumer));
+        copy(temp, preNumer);
+
+        copy(curDenom, temp);
+        curDenom = add_Unifloat(mul_Unifloat(b, curDenom), mul_Unifloat(a, preDenom));
+        copy(temp, preDenom);
+
+        inaccuracy = mul_Unifloat(inaccuracy, b);
+        k++;
+
+        b = add_Unifloat(b, two);
+        a = mul_Unifloat(x2, convertInteger_Unifloat((k - 1) * (k - 1), type));
+    }
+
+    res = div_Unifloat(curNumer, curDenom);
+    res->exp--;
+
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+NAME
+
+    cosh, coshf, coshl - hyperbolic cosine functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double cosh(double x);
+
+    float coshf(float x);
+
+    long double coshl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the hyperbolic cosine of their
+    argument x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the hyperbolic cosine
+    of x.
+
+    If the correct value would cause overflow, a range error shall occur and
+    cosh(), coshf(), and coshl() shall return the value of the macro HUGE_VAL,
+    HUGE_VALF, and HUGE_VALL, respectively.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, the value 1.0 shall be returned.
+
+    If x is ±Inf, +Inf shall be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Range Error The result would cause an overflow.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+            shall be raised.
+*/
+
+/** cosh_spec **/
+//This specification refers to: coshf, cosh, coshl
+specification
+Unifloat* cosh_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"coshf", (CharT *)"cosh", (CharT *)"coshl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isInfinity_Unifloat(x))
+            return {x_Inf, "x is Infinity"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+            return {x_more_One, "x - finite, but not in the range [-1;1]"};
+        else
+            return {x_less_One, "x - finite and in the range [-1;1]"};
+    }
+    post
+    {
+        Unifloat* model = cosh_model(x);
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the correct value would cause overflow, a range error shall occur and
+             * cosh(), coshf(), and coshl() shall return the value of the macro HUGE_VAL,
+             * HUGE_VALF, and HUGE_VALL, respectively.
+             */
+            REQ("cosh.05;coshf.05;coshl.05",
+                "If the correct value would cause overflow, HUGE_VAL should be returned",
+                isInfinity_Unifloat(cosh_spec) && cosh_spec->sign == 1
+                );
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Range Error The result would cause an overflow.
+         */
+        ERROR_BEGIN(POSIX_COSH,
+                    "cosh.09;coshf.09;coshl.09",
+                    *errno,
+                    *errno
+                    )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result would cause an overflow.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_COSH, ERANGE,
+                        "cosh.09.01.01;coshf.09.01.01;coshl.09.01.01",
+                        isOverflow_Unifloat(model)
+                        )
+
+        ERROR_END()
+
+
+        if (isNan_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("cosh.06;coshf.06;coshl.06",
+                "If x is NaN, a NaN shall be returned",
+                isNan_Unifloat(cosh_spec)
+                );
+#endif
+        }
+
+        if (isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, the value 1.0 shall be returned.
+             */
+            REQ("cosh.07;coshf.07;coshl.07",
+                "If x is ±0, the value 1.0 shall be returned",
+                compare_Unifloat(cosh_spec, createOne_Unifloat(x->type)) == 0
+                );
+        }
+
+        if (isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±Inf, +Inf shall be returned.
+             */
+            REQ("cosh.08;coshf.08;coshl.08",
+                "If x is ±Inf, +Inf shall be returned",
+                isInfinity_Unifloat(cosh_spec) && cosh_spec->sign == 1
+                );
+        }
+
+        if(isNormal_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the hyperbolic cosine
+             * of x.
+             */
+            REQ("cosh.04;coshf.04;coshl.04",
+                "It shall return the hyperbolice cosine",
+                compareWithPrecision_Unifloat(model, cosh_spec, digMant_Unifloat(x->type)) == 0
+                );
+        }
+
+
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+Unifloat* cosh_model(Unifloat* x)
+{
+    Unifloat* res = exp_Unifloat(x);
+
+    res = add_Unifloat(res, div_Unifloat(createOne_Unifloat(x->type), res));
+    res->exp--;
+
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+NAME
+
+    sinh, sinhf, sinhl - hyperbolic sine functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double sinh(double x);
+
+    float sinhf(float x);
+
+    long double sinhl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the hyperbolic sine of their
+    argument x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the hyperbolic sine of
+    x.
+
+    If the result would cause an overflow, a range error shall occur and ±HUGE_VAL,
+    ±HUGE_VALF, and ±HUGE_VALL (with the same sign as x) shall be returned as
+    appropriate for the type of the function.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0 or ±Inf, x shall be returned.
+
+    If x is subnormal, a range error may occur and x should be returned.
+
+ERRORS
+
+    These functions shall fail if:
+
+        Range Error The result would cause an overflow.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+    errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+    amp; MATH_ERREXCEPT) is non-zero, then the overflow floating-point exception
+    shall be raised.
+
+    These functions may fail if:
+
+        Range Error [MX] The value x is subnormal.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+/** sinh_spec **/
+//This specification refers to: sinhf, sinh, sinhl
+specification
+Unifloat* sinh_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"sinhf", (CharT *)"sinh", (CharT *)"sinhl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isInfinity_Unifloat(x))
+            return {x_Inf, "x is Infinity"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+            return {x_more_One, "x - finite, but not in the range [-1;1]"};
+        else
+            return {x_less_One, "x - finite and in the range [-1;1]"};
+    }
+    post
+    {
+        Unifloat* model = sinh_model(x);
+
+        if(isOverflow_Unifloat(model))
+        {
+            /*
+             * If the result would cause an overflow, a range error shall occur and ±HUGE_VAL,
+             * ±HUGE_VALF, and ±HUGE_VALL (with the same sign as x) shall be returned as
+             * appropriate for the type of the function.
+             */
+            REQ("sinh.05;sinhf.05;sinhl.05",
+                "If the result would cause an overflow, HUGE_VAL should be returned",
+                isInfinity_Unifloat(sinh_spec) && x->sign == sinh_spec->sign
+                );
+        }
+
+        if(isUnderflow_Unifloat(x))
+        {
+            /*
+             * If x is subnormal, a range error may occur and x should be returned.
+             */
+            REQ("sinh.08;sinhf.08;sinhl.08",
+                "If x is subnormal, x should be returned",
+                compare_Unifloat(x, sinh_spec) == 0
+                );
+        }
+
+        /*
+         * These functions shall fail if:
+         *
+         * Range Error The result would cause an overflow.
+         */
+        ERROR_BEGIN(POSIX_SINH,
+                    "sinh.09;sinhf.09;sinhl.09",
+                    *errno,
+                    *errno
+                    )
+
+            /*
+             * These functions shall fail if:
+             *
+             * Range Error The result would cause an overflow.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_SHALL(POSIX_SINH, ERANGE,
+                        "sinh.09.01.01;sinhf.09.01.01;sinhl.09.01.01",
+                        isOverflow_Unifloat(model)
+                        )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The value x is subnormal.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_SINH, ERANGE,
+                      "sinh.10.01.01;sinhf.10.01.01;sinhl.10.01.01",
+                      isUnderflow_Unifloat(x)
+                      )
+        ERROR_END()
+
+
+        if(isNan_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("sinh.06;sinhf.06;sinhl.06",
+                "If x is NaN, a NaN shall be returned",
+                isNan_Unifloat(sinh_spec)
+                );
+#endif
+        }
+
+
+        if(isZero_Unifloat(x) || isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±0 or ±Inf, x shall be returned.
+             */
+            REQ("sinh.07;sinhf.07;sinhl.07",
+                "If x is ±0 or ±Inf, x shall be returned",
+                compare_Unifloat(x, sinh_spec) == 0
+                );
+        }
+
+        if(isNormal_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the hyperbolic sine of
+             * x.
+             */
+            REQ("sinh.04;sinhf.04;sinhl.04",
+                "It shall return the hyperbolic sine",
+                compareWithPrecision_Unifloat(model, sinh_spec, digMant_Unifloat(x->type)) == 0);
+        }
+
+
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+Unifloat* sinh_model(Unifloat* x)
+{
+    Unifloat* res = clone(x);
+
+    res->exp++;
+    res = expm1_Unifloat(res);
+    res = div_Unifloat(res, exp_Unifloat(x));
+    res->exp--;
+
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+NAME
+
+    tanh, tanhf, tanhl - hyperbolic tangent functions
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double tanh(double x);
+
+    float tanhf(float x);
+
+    long double tanhl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the ISO C
+    standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the
+    ISO C standard. These functions shall compute the hyperbolic tangent of their
+    argument x.
+
+    An application wishing to check for error situations should set errno to zero
+    and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. On
+    return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO |
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return the hyperbolic tangent
+    of x.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, x shall be returned.
+
+    If x is ±Inf, ±1 shall be returned.
+
+    If x is subnormal, a range error may occur and x should be returned.
+
+ERRORS
+
+    These functions may fail if:
+
+        Range Error [MX] The value of x is subnormal.
+
+            If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+            errno shall be set to [ERANGE]. If the integer expression (math_errhandling &
+            amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point exception
+            shall be raised.
+*/
+
+/** tanh_spec **/
+//This specification refers to: tanhf, tanh, tanhl
+specification
+Unifloat* tanh_spec(CallContext context, Unifloat* x, ErrorCode* errno)
+{
+    CharT * filter[] = {(CharT *)"tanhf", (CharT *)"tanh", (CharT *)"tanhl"};
+
+    FILTER(filter[x->type]);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+
+        return true;
+    }
+    coverage C
+    {
+        if(isNan_Unifloat(x))
+            return {x_NaN, "x is NaN"};
+        else
+        if(isInfinity_Unifloat(x))
+            return {x_Inf, "x is Infinity"};
+        else
+        if(isZero_Unifloat(x))
+            return {x_Zero, "x is Zero"};
+        else
+        if(compare_Unifloat(abs_Unifloat(x), createOne_Unifloat(x->type)) == 1)
+            return {x_more_One, "x - finite, but not in the range [-1;1]"};
+        else
+            return {x_less_One, "x - finite and in the range [-1;1]"};
+    }
+    post
+    {
+        Unifloat* model = tanh_model(x);
+
+        if(isUnderflow_Unifloat(x))
+        {
+            /*
+             * If x is subnormal, a range error may occur and x should be returned.
+             */
+            REQ("tanh.08;tanhf.08;tanhl.08",
+                "If x is subnormal, x should be returned",
+                compare_Unifloat(x, tanh_spec) == 0
+                );
+        }
+
+        /*
+         * These functions may fail if:
+         *
+         * Range Error [MX] The value of x is subnormal.
+         */
+        ERROR_BEGIN(POSIX_TANH,
+                    "tanh.09;tanhf.09;tanhl.09",
+                    *errno,
+                    *errno
+                    )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The value of x is subnormal.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then
+             * errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_TANH, ERANGE,
+                     "tanh.09.01.01;tanhf.09.01.01;tanhl.09.01.01",
+                     isUnderflow_Unifloat(x)
+                     )
+
+        ERROR_END()
+
+
+        if(isNan_Unifloat(x))
+        {
+#if NAN_SUPPORTED == 1
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("tanh.05;tanhf.05;tanhl.05",
+                "If x is NaN, a NaN shall be returned",
+                isNan_Unifloat(tanh_spec)
+                );
+#endif
+        }
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, x shall be returned.
+             */
+            REQ("tanh.06;tanhf.06;tanhl.06",
+                "If x is ±0, x shall be returned",
+                compare_Unifloat(x, tanh_spec) == 0
+                );
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±Inf, ±1 shall be returned.
+             */
+            REQ("tanh.07;tanhf.07;tanhl.07",
+                "If x is ±Inf, ±1 shall be returned",
+                (compare_Unifloat(abs_Unifloat(tanh_spec), createOne_Unifloat(x->type)) == 0)
+                && x->sign == tanh_spec->sign
+                );
+        }
+
+        if(isNormal_Unifloat(x))
+        {
+            model = checkRange_Unifloat(model);
+            /*
+             * Upon successful completion, these functions shall return the hyperbolic tangent
+             * of x.
+             */
+            REQ("tanh.04;tanhf.04;tanhl.04",
+                "It shall return the hyperbolic tangent",
+                compareWithPrecision_Unifloat(model, tanh_spec, digMant_Unifloat(x->type)) == 0);
+        }
+
+
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+Unifloat* tanh_model(Unifloat* x)
+{
+    Unifloat* res = clone(x);
+
+    res->exp++;
+    res = div_Unifloat(expm1_Unifloat(res), add_Unifloat(exp_Unifloat(res), createOne_Unifloat(x->type)));
+
+    return res;
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+
+
+
+

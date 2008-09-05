@@ -1,0 +1,242 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "process/ipc/ipc_model.seh"
+#include "fs/fs/fs_model.seh"
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "process/ipc/ipc_config.h"
+
+
+#pragma SEC subsystem ipc "process.ipc"
+
+
+
+/*
+   The group of functions 'process.ipc.ipc' consists of:
+       ftok [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright © 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    ftok - generate an IPC key
+
+SYNOPSIS
+
+    [XSI]  #include <sys/ipc.h>
+    key_t ftok(const char *path, int id);
+
+DESCRIPTION
+
+    The ftok() function shall return a key based on path and id that is usable
+    in subsequent calls to msgget(), semget(), and shmget(). The application
+    shall ensure that the path argument is the pathname of an existing file t
+    hat the process is able to stat().
+
+    The ftok() function shall return the same key value for all paths that name
+    the same file, when called with the same id value, and return different key
+    values when called with different id values or with paths that name
+    different files existing on the same file system at the same time. It is
+    unspecified whether ftok() shall return the same key value when called
+    again after the file named by path is removed and recreated with the same
+    name.
+
+    Only the low-order 8-bits of id are significant. The behavior of ftok() is
+    unspecified if these bits are 0.
+
+RETURN VALUE
+
+    Upon successful completion, ftok() shall return a key. Otherwise, ftok()
+    shall return (key_t)-1 and set errno to indicate the error.
+
+ERRORS
+
+    The ftok() function shall fail if:
+
+        [EACCES]
+        Search permission is denied for a component of the path prefix.
+
+        [ELOOP]
+        A loop exists in symbolic links encountered during resolution of the
+        path argument.
+
+        [ENAMETOOLONG]
+        The length of the path argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+        [ENOENT]
+        A component of path does not name an existing file or path is an empty
+        string.
+
+        [ENOTDIR]
+        A component of the path prefix is not a directory.
+
+    The ftok() function may fail if:
+
+        [ELOOP]
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the path argument.
+
+        [ENAMETOOLONG]
+        Pathname resolution of a symbolic link produced an intermediate result
+        whose length exceeds {PATH_MAX}.
+*/
+specification
+KeyT ftok_spec( CallContext context, CString* path, IntT id, ErrorCode* errno)
+{
+    Bool3   isELOOP;
+    CString *absPath   = resolvePath_Ext(context, getFileSystem(context), path, &isELOOP);
+    Bool3   fileExists = doesFileExist_FileSystem( getFileSystem(context), absPath);
+
+    pre
+    {
+        /*
+        * The application shall ensure that the path argument is the pathname of an
+        * existing file that the process is able to stat().
+        */
+        REQ("app.ftok.02", "File shall exist", fileExists!=False_Bool3);
+
+        /*
+        * Only the low-order 8-bits of id are significant.
+        */
+        /*
+        * The behavior of ftok() is unspecified if these bits are 0.
+        */
+        REQ("ftok.05;app.ftok.06", "The low-order 8-bits of id shall not be 0", (id&((IntT)0xFF)) !=0);
+
+        return true;
+    }
+    post
+    {
+        /*
+        * Otherwise, ftok() shall return (key_t)-1 and set errno to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_FTOK, "ftok.07.02", ftok_spec==-1, *errno)
+
+        /*
+        * The ftok() function shall fail if:
+        *
+        * [EACCES] Search permission is denied for a component of the path prefix.
+        */
+        ERROR_SHALL3(POSIX_FTOK, EACCES, "ftok.08.01", isEACCES_dir_open(context, getFileSystem(context),
+            getParentDir_Path(absPath)))
+
+        /*
+        * The ftok() function shall fail if:
+        *
+        * [ELOOP] A loop exists in symbolic links encountered during resolution of the
+        * path argument.
+        */
+        ERROR_SHALL3(POSIX_FTOK, ELOOP, "ftok.08.02", isELOOP)
+
+        /*
+        * The ftok() function shall fail if:
+        *
+        * [ENAMETOOLONG] The length of the path argument exceeds {PATH_MAX} or a
+        * pathname component is longer than {NAME_MAX}.
+        */
+        ERROR_SHALL3(POSIX_FTOK, ENAMETOOLONG, "ftok.08.03", isENAMETOOLONG(context, path))
+
+        /*
+        * The ftok() function shall fail if:
+        *
+        * [ENOENT] A component of path does not name an existing file or path is an
+        * empty string.
+        */
+        ERROR_SHALL3(POSIX_FTOK, ENOENT, "ftok.08.04",
+            isENOENT_dir(context, getFileSystem(context), absPath))
+
+        /*
+        * The ftok() function shall fail if:
+        *
+        * [ENOTDIR] A component of the path prefix is not a directory.
+        */
+        ERROR_SHALL3(POSIX_FTOK, ENOTDIR, "ftok.08.05", isENOTDIR_dir(context,
+            getFileSystem(context), getParentDir_Path(absPath)))
+
+        /*
+        * The ftok() function may fail if:
+        *
+        * [ELOOP] More than {SYMLOOP_MAX} symbolic links were encountered during
+        * resolution of the path argument.
+        */
+        ERROR_MAY3(POSIX_FTOK, ELOOP, "ftok.09.01", isELOOP)
+
+        /*
+        * The ftok() function may fail if:
+        *
+        * [ENAMETOOLONG] Pathname resolution of a symbolic link produced an
+        * intermediate result whose length exceeds {PATH_MAX}.
+        */
+        ERROR_MAY3(POSIX_FTOK, ENAMETOOLONG, "ftok.09.02", isENAMETOOLONG(context, absPath))
+
+        ERROR_END()
+
+        /*
+        * The ftok() function shall return a key based on path and id that is usable in
+        * subsequent calls to msgget(), semget(), and shmget().
+        */
+        /*
+        * Upon successful completion, ftok() shall return a key.
+        */
+        REQ("ftok.01;ftok.07.01", "ftok() shall return a key", ftok_spec!=-1);
+
+
+        /*
+        * It is unspecified whether ftok() shall return the same key value when called
+        * again after the file named by path is removed and recreated with the same name.
+        */
+        REQ_UNCHECKABLE("ftok.04", "This is unspecified and can not be checked");
+
+        return true;
+    }
+}
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/

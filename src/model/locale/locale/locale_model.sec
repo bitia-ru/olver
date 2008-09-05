@@ -1,0 +1,1657 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "locale/locale/locale_model.seh"
+#include "config/system_config.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+#include "common/common_model.seh"
+
+#pragma SEC subsystem locale "locale.locale"
+
+/*
+   The group of functions 'locale.locale' consists of:
+       setlocale [2]
+       nl_langinfo [2]
+       localeconv [2]
+       newlocale(GLIBC_2.3) [1]
+       freelocale(GLIBC_2.3) [1]
+       duplocale(GLIBC_2.3) [1]
+       uselocale(GLIBC_2.3) [1]
+ */
+
+LocaleT SUT_LC_GLOBAL_LOCALE;
+
+/********************************************************************/
+/**                     Specification Types                        **/
+/********************************************************************/
+specification typedef struct LocaleSelectorSt LocaleSelector = { };
+specification typedef struct LConvSt LConv = { };
+specification typedef struct LocaleInfoSt LocaleInfo = { };
+specification typedef struct CTypeGroupSt CTypeGroup = { };
+
+LocaleSelector* create_LocaleSelector(CString* BaseLoc)
+{
+    return create(&type_LocaleSelector,
+                  BaseLoc,  // All
+                  NULL,     // Collate
+                  NULL,     // CType
+                  NULL,     // Message
+                  NULL,     // Monetary
+                  NULL,     // Numeric
+                  NULL      // Time
+                 );
+}
+
+LConv* create_LConv(void)
+{
+    return create(&type_LConv,
+        NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        );
+}
+
+CTypeGroup* create_CTypeGroup(CString* sSyms)
+{
+    int i;
+    Set* lSyms = create_Set(&type_IntTObj);
+    
+    if(sSyms != NULL) for(i = 0; i < length_CString(sSyms); i++)
+        add_Set(lSyms, create_IntTObj(charAt_CString(sSyms, i)));
+    
+    return create(&type_CTypeGroup, lSyms, create_Set(&type_CTypeGroup), create_Set(&type_CTypeGroup));
+}
+
+LocaleInfo* create_LocaleInfo(void)
+{
+    return create ( &type_LocaleInfo,
+                    create_LConv(),
+                    create_Map(&type_CString, &type_CString),
+                    create_Map(&type_NlItemTObj, &type_CString),
+                    NULL,
+                    NULL,
+                    create_Map(&type_IntTObj, &type_IntTObj),
+                    create_Map(&type_CString, &type_CTypeGroup)
+                  );
+}
+
+Set* getFullSet_CTypeGroup(CTypeGroup* tg)
+{
+    int i;
+    Set* Syms;
+    
+    assertion(tg != NULL, "getFullSet_CTypeGroup: tg is NULL!");
+    assertion(tg->Syms != NULL, "getFullSet_CTypeGroup: tg->Syms is NULL!");
+    assertion(tg->Inherits != NULL, "getFullSet_CTypeGroup: tg->Inherits is NULL!");
+    assertion(tg->NotInherits != NULL, "getFullSet_CTypeGroup: tg->NotInherits is NULL!");
+    
+    Syms = clone(tg->Syms);
+    
+    if(size_Set(tg->Inherits) > 0)
+        for(i = 0; i < size_Set(tg->Inherits); i++)
+        {
+            CTypeGroup* btg = get_Set(tg->Inherits, i);
+            Set* bsyms = getFullSet_CTypeGroup(btg);
+            
+            addAll_Set(Syms, bsyms);
+        }
+    
+    return Syms;
+}
+
+void include_CTypeGroup(CTypeGroup* dst, CTypeGroup* src)
+{
+    assertion(dst != NULL, "include_CTypeGroup: dst is NULL!");
+    assertion(dst->Syms != NULL, "include_CTypeGroup: dst->Syms is NULL!");
+    assertion(dst->Inherits != NULL, "include_CTypeGroup: dst->Inherits is NULL!");
+    assertion(dst->NotInherits != NULL, "include_CTypeGroup: dst->NotInherits is NULL!");
+    
+    assertion(src != NULL, "include_CTypeGroup: src is NULL!");
+    assertion(src->Syms != NULL, "include_CTypeGroup: src->Syms is NULL!");
+    assertion(src->Inherits != NULL, "include_CTypeGroup: src->Inherits is NULL!");
+    assertion(src->NotInherits != NULL, "include_CTypeGroup: src->NotInherits is NULL!");
+    
+    add_Set(dst->Inherits, src);
+}
+
+void exclude_CTypeGroup(CTypeGroup* dst, CTypeGroup* src)
+{
+    assertion(dst != NULL, "exclude_CTypeGroup: dst is NULL!");
+    assertion(dst->Syms != NULL, "exclude_CTypeGroup: dst->Syms is NULL!");
+    assertion(dst->Inherits != NULL, "exclude_CTypeGroup: dst->Inherits is NULL!");
+    assertion(dst->NotInherits != NULL, "exclude_CTypeGroup: dst->NotInherits is NULL!");
+    
+    assertion(src != NULL, "exclude_CTypeGroup: src is NULL!");
+    assertion(src->Syms != NULL, "exclude_CTypeGroup: src->Syms is NULL!");
+    assertion(src->Inherits != NULL, "exclude_CTypeGroup: src->Inherits is NULL!");
+    assertion(src->NotInherits != NULL, "exclude_CTypeGroup: src->NotInherits is NULL!");
+    
+    add_Set(dst->NotInherits, src);
+}
+
+bool isInCTypeGroup_Locale(CallContext context, CString* group, IntT c)
+{
+    int i;
+    CTypeGroup* grp;
+    LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
+    
+    assertion(li != NULL, "isInCTypeGroup_Locale: li == NULL!");
+    assertion(li->mapGroups != NULL, "isInCTypeGroup_Locale: li->mapGroups == NULL!");
+    
+    grp = get_Map(li->mapGroups, group);
+    
+    assertion(grp != NULL, "isInCTypeGroup_Locale: grp == NULL (\"%s\")", group->data);
+    
+    return contains_CTypeGroup(grp, c);
+}
+
+bool isNotInCTypeGroup_Locale(CallContext context, CString* group, IntT c)
+{
+    int i;
+    CTypeGroup* grp;
+    LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
+    
+    assertion(li != NULL, "isInCTypeGroup_Locale: li == NULL!");
+    assertion(li->mapGroups != NULL, "isInCTypeGroup_Locale: li->mapGroups == NULL!");
+    
+    grp = get_Map(li->mapGroups, group);
+    
+    assertion(grp != NULL, "isNotInCTypeGroup_Locale: grp == NULL (\"%s\")", group->data);
+    
+    return containsNot_CTypeGroup(grp, c);
+}
+
+bool contains_CTypeGroup(CTypeGroup* grp, IntT c)
+{
+    int i;
+
+    assertion(grp != NULL, "contains_CTypeGroup: grp = NULL!");
+    assertion(grp->Syms != NULL, "contains_CTypeGroup: grp->Syms = NULL!");
+    assertion(grp->Inherits != NULL, "contains_CTypeGroup: grp->Inherits = NULL!");
+    assertion(grp->NotInherits != NULL, "contains_CTypeGroup: grp->NotInherits = NULL!");
+
+    if(contains_Set(grp->Syms, create_IntTObj(c)))
+        return true;
+    
+    for(i = 0; i < size_Set(grp->Inherits); i++)
+    {
+        CTypeGroup* bgrp = get_Set(grp->Inherits, i);
+        if(contains_CTypeGroup(bgrp, c))
+            return true;
+    }
+    
+    return false;
+}
+
+bool containsNot_CTypeGroup(CTypeGroup* grp, IntT c)
+{
+    int i;
+
+    assertion(grp != NULL, "containsNot_CTypeGroup: grp = NULL!");
+    assertion(grp->Syms != NULL, "containsNot_CTypeGroup: grp->Syms = NULL!");
+    assertion(grp->Inherits != NULL, "containsNot_CTypeGroup: grp->Inherits = NULL!");
+    assertion(grp->NotInherits != NULL, "containsNot_CTypeGroup: grp->NotInherits = NULL!");
+    
+    for(i = 0; i < size_Set(grp->Inherits); i++)
+    {
+        CTypeGroup* bgrp = get_Set(grp->Inherits, i);
+        if(containsNot_CTypeGroup(bgrp, c))
+            return true;
+    }
+    
+    return false;
+}
+
+bool isUpperCase(CallContext context, IntT c)
+{
+    LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
+    
+    assertion(li != NULL, "isUpperCase: li is NULL!");
+    assertion(li->toUpper != NULL, "isUpperCase: li->toUpper is NULL!");
+
+    return containsValue_Map(li->toUpper, create_IntTObj(c));
+}
+
+bool isLowerCase(CallContext context, IntT c)
+{
+    LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
+    
+    assertion(li != NULL, "isLowerCase: li is NULL!");
+    assertion(li->toUpper != NULL, "isLowerCase: li->toUpper is NULL!");
+
+    return containsKey_Map(li->toUpper, create_IntTObj(c));
+}
+
+IntT getUpperCase(CallContext context, IntT c)
+{
+    LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
+    IntTObj* res;
+    
+    assertion(li != NULL, "getUpperCase: li is NULL!");
+    assertion(li->toUpper != NULL, "getUpperCase: li->toUpper is NULL!");
+
+    return (res = get_Map(li->toUpper, create_IntTObj(c))) == NULL ? c : *res;
+}
+
+IntT getLowerCase(CallContext context, IntT c)
+{
+    LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
+    IntTObj* res;
+
+    assertion(li != NULL, "getUpperCase: li is NULL!");
+    assertion(li->toUpper != NULL, "getUpperCase: li->toUpper is NULL!");
+
+    return (res = getKey_Map(li->toUpper, create_IntTObj(c))) == NULL ? c : *res;
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+setlocale - set program locale 
+
+SYNOPSIS
+
+#include <locale.h>
+
+char *setlocale(int category, const char *locale);
+
+DESCRIPTION
+
+[CX] The functionality described on this reference page is aligned with the ISO 
+C standard. Any conflict between the requirements described here and the ISO C 
+standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the 
+ISO C standard. The setlocale() function selects the appropriate piece of the 
+program's locale, as specified by the category and locale arguments, and may be 
+used to change or query the program's entire locale or portions thereof. The 
+value LC_ALL for category names the program's entire locale; other values for 
+category name only a part of the program's locale:
+
+LC_COLLATE Affects the behavior of regular expressions and the collation 
+functions.
+
+LC_CTYPE Affects the behavior of regular expressions, character classification, 
+character conversion functions, and wide-character functions.
+
+LC_MESSAGES [CX] Affects what strings are expected by commands and utilities as 
+affirmative or negative responses. [XSI] It also affects what strings are given 
+by commands and utilities as affirmative or negative responses, and the content 
+of messages. 
+
+LC_MONETARY Affects the behavior of functions that handle monetary values.
+
+LC_NUMERIC Affects the behavior of functions that handle numeric values.
+
+LC_TIME Affects the behavior of the time conversion functions.
+
+The locale argument is a pointer to a character string containing the required 
+setting of category. The contents of this string are implementation-defined. In 
+addition, the following preset values of locale are defined for all settings of 
+category:
+
+"POSIX" [CX] Specifies the minimal environment for C-language translation 
+called the POSIX locale. If setlocale() is not invoked, the POSIX locale is the 
+default at entry to main(). 
+
+"C" Equivalent to "POSIX".
+
+"" Specifies an implementation-defined native environment. [CX] The 
+determination of the name of the new locale for the specified category depends 
+on the value of the associated environment variables, LC_* and LANG ; see the 
+Base Definitions volume of IEEE Std 1003.1-2001, Chapter 7, Locale and the Base 
+Definitions volume of IEEE Std 1003.1-2001, Chapter 8, Environment Variables. 
+
+A null pointer Used to direct setlocale() to query the current 
+internationalized environment and return the name of the locale.
+
+[CX] Setting all of the categories of the locale of the process is similar to 
+successively setting each individual category of the locale of the process, 
+except that all error checking is done before any actions are performed. To set 
+all the categories of the locale of the process, setlocale() is invoked as: 
+
+setlocale(LC_ALL, ""); 
+
+In this case, setlocale() shall first verify that the values of all the 
+environment variables it needs according to the precedence rules (described in 
+the Base Definitions volume of IEEE Std 1003.1-2001, Chapter 8, Environment 
+Variables) indicate supported locales. If the value of any of these environment 
+variable searches yields a locale that is not supported (and non-null), 
+setlocale() shall return a null pointer and the locale of the process shall not 
+be changed. If all environment variables name supported locales, setlocale() 
+shall proceed as if it had been called for each category, using the appropriate 
+value from the associated environment variable or from the implementation- 
+defined default if there is no such value. 
+
+[THR] The locale state is common to all threads within a process. 
+
+RETURN VALUE
+
+Upon successful completion, setlocale() shall return the string associated with 
+the specified category for the new locale. Otherwise, setlocale() shall return 
+a null pointer and the program's locale is not changed.
+
+A null pointer for locale causes setlocale() to return a pointer to the string 
+associated with the category for the program's current locale. The program's 
+locale shall not be changed.
+
+The string returned by setlocale() is such that a subsequent call with that 
+string and its associated category shall restore that part of the program's 
+locale. The application shall not modify the string returned which may be 
+overwritten by a subsequent call to setlocale().
+
+ERRORS
+
+No errors are defined.
+*/
+
+specification
+CString* setlocale_spec(CallContext context, IntT category, CString* locale)
+{
+    pre
+    {
+        REQ("", "category is known",
+                    category == SUT_LC_ALL ||
+                    category == SUT_LC_COLLATE ||
+                    category == SUT_LC_MESSAGES ||
+                    category == SUT_LC_MONETARY ||
+                    category == SUT_LC_NUMERIC ||
+                    category == SUT_LC_TIME
+                   );
+
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "TheOnlyBranch" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+nl_langinfo - language information 
+
+SYNOPSIS
+
+[XSI] #include <langinfo.h>
+
+char *nl_langinfo(nl_item item); 
+
+DESCRIPTION
+
+The nl_langinfo() function shall return a pointer to a string containing 
+information relevant to the particular language or cultural area defined in the 
+program's locale (see <langinfo.h>). The manifest constant names and 
+values of item are defined in <langinfo.h>. For example:
+
+nl_langinfo(ABDAY_1) 
+
+would return a pointer to the string "Dom" if the identified language was 
+Portuguese, and "Sun" if the identified language was English.
+
+Calls to setlocale() with a category corresponding to the category of item (see 
+<langinfo.h>), or to the category LC_ALL , may overwrite the array 
+pointed to by the return value.
+
+The nl_langinfo() function need not be reentrant. A function that is not 
+required to be reentrant is not required to be thread-safe.
+
+RETURN VALUE
+
+In a locale where langinfo data is not defined, nl_langinfo() shall return a 
+pointer to the corresponding string in the POSIX locale. In all locales, 
+nl_langinfo() shall return a pointer to an empty string if item contains an 
+invalid setting.
+
+This pointer may point to static data that may be overwritten on the next call.
+
+ERRORS
+
+No errors are defined.
+*/
+
+specification
+CString* nl_langinfo_spec(CallContext context, NlItemT item)
+{
+    pre
+    {
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "TheOnlyBranch" };
+    }
+
+    post
+    {
+        if(item == SUT_CRNCYSTR) { REQ("", "", true); }
+        else REQ3("", "", equalsCurrent_Locale(context, item, nl_langinfo_spec));
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+localeconv - return locale-specific information 
+
+SYNOPSIS
+
+#include <locale.h>
+
+struct lconv *localeconv(void);
+
+DESCRIPTION
+
+[CX] The functionality described on this reference page is aligned with the ISO 
+C standard. Any conflict between the requirements described here and the ISO C 
+standard is unintentional. This volume of IEEE Std 1003.1-2001 defers to the 
+ISO C standard. {localeconv.01} The localeconv() function shall set the 
+components of an object with the type struct lconv with the values appropriate 
+for the formatting of numeric quantities (monetary and otherwise) according to 
+the rules of the current locale.
+
+The members of the structure with type char * are pointers to strings, any of 
+which (except decimal_point) can point to "", to indicate that the value is not 
+available in the current locale or is of zero length. The members with type 
+char are non-negative numbers, any of which can be {CHAR_MAX} to indicate that 
+the value is not available in the current locale.
+
+The members include the following:
+
+char *decimal_point The radix character used to format non-monetary quantities.
+
+char *thousands_sep The character used to separate groups of digits before the 
+decimal-point character in formatted non-monetary quantities.
+
+char *grouping A string whose elements taken as one-byte integer values 
+indicate the size of each group of digits in formatted non-monetary quantities.
+
+char *int_curr_symbol The international currency symbol applicable to the 
+current locale. The first three characters contain the alphabetic international 
+currency symbol in accordance with those specified in the ISO 4217:2001 
+standard. The fourth character (immediately preceding the null byte) is the 
+character used to separate the international currency symbol from the monetary 
+quantity.
+
+char *currency_symbol The local currency symbol applicable to the current 
+locale.
+
+char *mon_decimal_point The radix character used to format monetary quantities.
+
+char *mon_thousands_sep The separator for groups of digits before the decimal- 
+point in formatted monetary quantities.
+
+char *mon_grouping A string whose elements taken as one-byte integer values 
+indicate the size of each group of digits in formatted monetary quantities.
+
+char *positive_sign The string used to indicate a non-negative valued formatted 
+monetary quantity.
+
+char *negative_sign The string used to indicate a negative valued formatted 
+monetary quantity.
+
+char int_frac_digits The number of fractional digits (those after the decimal- 
+point) to be displayed in an internationally formatted monetary quantity.
+
+char frac_digits The number of fractional digits (those after the decimal-point) 
+to be displayed in a formatted monetary quantity.
+
+char p_cs_precedes Set to 1 if the currency_symbol precedes the value for a non- 
+negative formatted monetary quantity. Set to 0 if the symbol succeeds the value.
+
+char p_sep_by_space Set to a value indicating the separation of the 
+currency_symbol, the sign string, and the value for a non-negative formatted 
+monetary quantity.
+
+char n_cs_precedes Set to 1 if the currency_symbol precedes the value for a 
+negative formatted monetary quantity. Set to 0 if the symbol succeeds the value.
+
+char n_sep_by_space Set to a value indicating the separation of the 
+currency_symbol, the sign string, and the value for a negative formatted 
+monetary quantity.
+
+char p_sign_posn Set to a value indicating the positioning of the positive_sign 
+for a non-negative formatted monetary quantity.
+
+char n_sign_posn Set to a value indicating the positioning of the negative_sign 
+for a negative formatted monetary quantity.
+
+char int_p_cs_precedes Set to 1 or 0 if the int_curr_symbol respectively 
+precedes or succeeds the value for a non-negative internationally formatted 
+monetary quantity.
+
+char int_n_cs_precedes Set to 1 or 0 if the int_curr_symbol respectively 
+precedes or succeeds the value for a negative internationally formatted 
+monetary quantity.
+
+char int_p_sep_by_space Set to a value indicating the separation of the 
+int_curr_symbol, the sign string, and the value for a non-negative 
+internationally formatted monetary quantity.
+
+char int_n_sep_by_space Set to a value indicating the separation of the 
+int_curr_symbol, the sign string, and the value for a negative internationally 
+formatted monetary quantity.
+
+char int_p_sign_posn Set to a value indicating the positioning of the 
+positive_sign for a non-negative internationally formatted monetary quantity.
+
+char int_n_sign_posn Set to a value indicating the positioning of the 
+negative_sign for a negative internationally formatted monetary quantity.
+
+The elements of grouping and mon_grouping are interpreted according to the 
+following:
+
+{CHAR_MAX} No further grouping is to be performed.
+
+0 The previous element is to be repeatedly used for the remainder of the digits.
+
+other The integer value is the number of digits that comprise the current group. 
+The next element is examined to determine the size of the next group of digits 
+before the current group.
+
+The values of p_sep_by_space, n_sep_by_space, int_p_sep_by_space, and 
+int_n_sep_by_space are interpreted according to the following:
+
+0 No space separates the currency symbol and value.
+
+1 If the currency symbol and sign string are adjacent, a space separates them 
+from the value; otherwise, a space separates the currency symbol from the value.
+
+2 If the currency symbol and sign string are adjacent, a space separates them; 
+otherwise, a space separates the sign string from the value.
+
+For int_p_sep_by_space and int_n_sep_by_space, the fourth character of 
+int_curr_symbol is used instead of a space.
+
+The values of p_sign_posn, n_sign_posn, int_p_sign_posn, and int_n_sign_posn 
+are interpreted according to the following:
+
+0 Parentheses surround the quantity and currency_symbol or int_curr_symbol.
+
+1 The sign string precedes the quantity and currency_symbol or int_curr_symbol.
+
+2 The sign string succeeds the quantity and currency_symbol or int_curr_symbol.
+
+3 The sign string immediately precedes the currency_symbol or int_curr_symbol.
+
+4 The sign string immediately succeeds the currency_symbol or int_curr_symbol.
+
+The implementation shall behave as if no function in this volume of IEEE Std 
+1003.1-2001 calls localeconv().
+
+[CX] The localeconv() function need not be reentrant. A function that is not 
+required to be reentrant is not required to be thread-safe. 
+
+RETURN VALUE
+
+The localeconv() function shall return a pointer to the filled-in object. The 
+application shall not modify the structure pointed to by the return value which 
+may be overwritten by a subsequent call to localeconv(). In addition, calls to 
+setlocale() with the categories LC_ALL , LC_MONETARY , or LC_NUMERIC may 
+overwrite the contents of the structure.
+
+ERRORS
+
+No errors are defined.
+*/
+
+specification
+LConv* localeconv_spec(CallContext context)
+{
+    pre
+    {
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "TheOnlyBranch" };
+    }
+
+    post
+    {
+        LConv* res = localeconv_spec;
+    
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_DECIMAL_POINT, res->decimal_point));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_THOUSANDS_SEP, res->thousands_sep));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_GROUPING, res->grouping));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_CURR_SYMBOL, res->int_curr_symbol));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_CURRENCY_SYMBOL, res->currency_symbol));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_MON_DECIMAL_POINT, res->mon_decimal_point));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_MON_THOUSANDS_SEP, res->mon_thousands_sep));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_MON_GROUPING, res->mon_grouping));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_POSITIVE_SIGN, res->positive_sign));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_NEGATIVE_SIGN, res->negative_sign));
+
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_FRAC_DIGITS, create_CharTObj(res->int_frac_digits)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_FRAC_DIGITS, create_CharTObj(res->frac_digits)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_P_CS_PRECEDES, create_CharTObj(res->p_cs_precedes)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_P_SEP_BY_SPACE, create_CharTObj(res->p_sep_by_space)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_N_CS_PRECEDES, create_CharTObj(res->n_cs_precedes)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_N_SEP_BY_SPACE, create_CharTObj(res->n_sep_by_space)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_P_SIGN_POSN, create_CharTObj(res->p_sign_posn)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_N_SIGN_POSN, create_CharTObj(res->n_sign_posn)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_P_CS_PRECEDES, create_CharTObj(res->int_p_cs_precedes)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_N_CS_PRECEDES, create_CharTObj(res->int_n_cs_precedes)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_P_SEP_BY_SPACE, create_CharTObj(res->int_p_sep_by_space)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_N_SEP_BY_SPACE, create_CharTObj(res->int_n_sep_by_space)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_P_SIGN_POSN, create_CharTObj(res->int_p_sign_posn)));
+        REQ3("", "", equalsCurrent_Locale(context, SUT_LV_INT_N_SIGN_POSN, create_CharTObj(res->int_n_sign_posn)));
+    
+        return true;
+    }
+}
+
+
+/*
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+newlocale -- allocate a locale object
+
+SYNOPSIS
+
+#include <locale.h>
+
+locale_t newlocale(int category_mask, const char * locale, locale_t base);
+
+DESCRIPTION
+
+The newlocale() function shall initialize a locale object. If base is NULL, 
+then newlocale() shall first allocate the object; otherwise it shall use the 
+locale object referenced by base.
+
+The object shall be initialized for the locale named by locale, and for the 
+categories selected in category_mask. The category_mask value is a bitwise 
+inclusive OR of the required LC_name_MASK values, or the value LC_ALL_MASK.
+
+RETURN VALUE
+
+On success, the newlocale() function shall return the initialized locale object. 
+Otherwise, it shall return NULL, and set errno to indicate the error.
+
+ERRORS
+
+The newlocale() function shall fail if: 
+
+{newlocale.08.01 | SHALL:LSB_NEWLOCALE} [ENOMEM] Insufficient memory.
+
+{newlocale.08.02 | SHALL:LSB_NEWLOCALE} [EINVAL] An invalid category_mask was 
+provided, or the locale was NULL.
+
+Application Usage (Informative)
+
+The only portable way to allocate a locale object is to call newlocale() with a 
+NULL base. The allocated object may be reinitialized to a new locale by passing 
+it back to newlocale(). The new object may be released by calling freelocale().
+
+See Also
+
+setlocale(), freelocale(), duplocale(), uselocale()
+*/
+
+specification
+LocaleT newlocale_spec (    CallContext context,
+                            IntT category_mask,
+                            CString* locale,
+                            LocaleT base
+                       )
+{
+    pre
+    {
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "TheOnlyBranch" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+freelocale -- free a locale object
+
+SYNOPSIS
+
+#include <locale.h>
+
+void freelocale(locale_t locale);
+
+DESCRIPTION
+
+The freelocale() function shall free the locale object locale, and release any 
+resources associated with it.
+
+RETURN VALUE
+
+None.
+
+ERRORS
+
+None defined.
+
+See Also
+
+setlocale(), newlocale(), duplocale(), uselocale()
+*/
+
+specification
+void freelocale_spec(CallContext context, LocaleT locale)
+{
+    pre
+    {
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "TheOnlyBranch" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+duplocale -- provide new handle for selection of locale
+
+SYNOPSIS
+
+#include <locale.h>
+
+locale_t duplocale(locale_t locale);
+
+DESCRIPTION
+
+The duplocale() function shall provide a new locale object based on the locale 
+object provided in locale, suitable for use in the newlocale() or uselocale() 
+functions. The new object may be released by calling freelocale().
+
+RETURN VALUE
+
+On success, the duplocale() function shall return a locale object. Otherwise, 
+it shall return NULL, and set errno to indicate the error.
+
+ERRORS
+
+The duplocale() function shall fail if: 
+
+{duplocale.05.01 | SHALL:LSB_DUPLOCALE} [ENOMEM] Insufficient memory.
+
+See Also
+
+setlocale(), freelocale(), newlocale(), uselocale()
+*/
+
+specification
+LocaleT duplocale_spec(CallContext context, LocaleT locale)
+{
+    pre
+    {
+        REQ("", "locale is a pointer to locale", getObjectInMemory(locale) != NULL);
+    
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+uselocale -- set locale for thread
+
+SYNOPSIS
+
+#include <locale.h>
+
+locale_t uselocale(locale_t newloc);
+
+DESCRIPTION
+
+The uselocale() function shall set the locale for the calling thread to the 
+locale specified by newloc.
+
+If newloc is the value LC_GLOBAL_LOCALE, the thread's locale shall be set to 
+the process current global locale, as set by setlocale(). If newloc is NULL, 
+the thread's locale is not altered.
+
+RETURN VALUE
+
+The uselocale() function shall return the previous locale, or LC_GLOBAL_LOCALE 
+if the thread local locale has not been previously set.
+
+ERRORS
+
+None defined.
+
+See Also
+
+setlocale(), freelocale(), duplocale(), newlocale()
+*/
+
+specification
+LocaleT uselocale_spec(CallContext context, LocaleT newloc)
+{
+    pre
+    {
+        if(equals_VoidTPtr(newloc, SUT_LC_GLOBAL_LOCALE)) return true;
+
+        REQ("", "newloc is a valid pointer", !isInvalid_VoidTPtr(newloc));
+
+        if(!isNULL_VoidTPtr(newloc))
+            REQ("", "newloc is a pointer to locale", getObjectInMemory(newloc) != NULL);
+
+        return true;
+    }
+
+    coverage C
+    {
+        return { TheOnlyBranch, "TheOnlyBranch" };
+    }
+
+    post
+    {
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                        State Functions                         **/
+/********************************************************************/
+
+void onSetLocale (  CallContext context,
+                    IntT category,
+                    CString* locale,
+                    CString* res
+                 )
+{
+    if(res != NULL)
+    {
+        switch(category)
+        {
+        case SUT_LC_ALL:
+        case SUT_LC_COLLATE:
+        case SUT_LC_MESSAGES:
+        case SUT_LC_MONETARY:
+        case SUT_LC_NUMERIC:
+        case SUT_LC_TIME:
+            selectProcessLocale(context, category, locale);
+            break;
+        }
+    }
+}
+
+void onNewLocale (  CallContext context,
+                    IntT category_mask,
+                    CString* locale,
+                    LocaleT base,
+                    LocaleT res
+                 )
+{
+    LocaleSelector* baseLoc;
+    LocaleSelector* ls;
+
+    if(isNULL_VoidTPtr(res)) return;
+    
+    baseLoc = (LocaleSelector*)getObjectInMemory(base);
+
+    if(baseLoc != NULL) ls = clone(baseLoc);
+    else ls = create_LocaleSelector(NULL);
+
+    registerObjectInMemory(res, 0, (Object*)ls);
+}
+
+void onFreeLocale(CallContext context, LocaleT locale)
+{
+    LocaleSelector* baseLoc;
+    
+    baseLoc = (LocaleSelector*)getObjectInMemory(locale);
+    
+    if(baseLoc) unregisterObjectInMemory(locale);
+}
+
+void onDupLocale(CallContext context, LocaleT locale, LocaleT res)
+{ 
+    LocaleSelector* Loc;
+    LocaleSelector* ls;
+    
+    if(isNULL_VoidTPtr(res)) return;
+    
+    Loc = (LocaleSelector*)getObjectInMemory(locale);
+
+    ls = clone(Loc);
+
+    registerObjectInMemory(res, 0, (Object*)ls);
+}
+
+void onUseLocale(CallContext context, LocaleT newloc, LocaleT res)
+{
+    if(isNULL_VoidTPtr(newloc)) return;
+
+    if(isInvalid_VoidTPtr(selectThreadLocale(context, newloc)))
+    {
+        SUT_LC_GLOBAL_LOCALE = res;
+        registerObjectInMemory(res, 0, (Object*)create_LocaleSelector(NULL));
+    }
+}
+
+/********************************************************************/
+/**                      Locale Model State API                    **/
+/********************************************************************/
+void init_Locale(CallContext context)
+{
+    IntT i, j;
+    LocaleInfo* pCLocale;
+    CTypeGroup* tgrp;
+
+    SUT_LC_GLOBAL_LOCALE = Invalid_VoidTPtr;
+
+    assertion (
+        (pCLocale = createLocale_Locale(context, _CS("C"), NULL)) != NULL,
+        "initLocaleLocaleSubsystem: can't create a new locale name \"C\""
+    );
+        
+    assertion (
+        nameLocale_Locale(context, _CS("C"), _CS("POSIX")),
+        "initLocaleLocaleSubsystem: can't create a new locale name \"POSIX\""
+    );
+    
+    // initialization of C locale
+    selectProcessLocale(context, SUT_LC_ALL,      _CS("C"));
+    selectProcessLocale(context, SUT_LC_COLLATE,  _CS("C"));
+    selectProcessLocale(context, SUT_LC_CTYPE,    _CS("C"));
+    selectProcessLocale(context, SUT_LC_MESSAGES, _CS("C"));
+    selectProcessLocale(context, SUT_LC_MONETARY, _CS("C"));
+    selectProcessLocale(context, SUT_LC_NUMERIC,  _CS("C"));
+    selectProcessLocale(context, SUT_LC_TIME,     _CS("C"));
+    
+    set_Locale(context, _CS("C"), SUT_DAY_1, _CS("Sunday"));
+    set_Locale(context, _CS("C"), SUT_DAY_2, _CS("Monday"));
+    set_Locale(context, _CS("C"), SUT_DAY_3, _CS("Tuesday"));
+    set_Locale(context, _CS("C"), SUT_DAY_4, _CS("Wednesday"));
+    set_Locale(context, _CS("C"), SUT_DAY_5, _CS("Thursday"));
+    set_Locale(context, _CS("C"), SUT_DAY_6, _CS("Friday"));
+    set_Locale(context, _CS("C"), SUT_DAY_7, _CS("Saturday"));
+    
+    set_Locale(context, _CS("C"), SUT_ABDAY_1, _CS("Sun"));
+    set_Locale(context, _CS("C"), SUT_ABDAY_2, _CS("Mon"));
+    set_Locale(context, _CS("C"), SUT_ABDAY_3, _CS("Tue"));
+    set_Locale(context, _CS("C"), SUT_ABDAY_4, _CS("Wed"));
+    set_Locale(context, _CS("C"), SUT_ABDAY_5, _CS("Thu"));
+    set_Locale(context, _CS("C"), SUT_ABDAY_6, _CS("Fri"));
+    set_Locale(context, _CS("C"), SUT_ABDAY_7, _CS("Sat"));
+    
+    set_Locale(context, _CS("C"), SUT_MON_1, _CS("January"));
+    set_Locale(context, _CS("C"), SUT_MON_2, _CS("February"));
+    set_Locale(context, _CS("C"), SUT_MON_3, _CS("March"));
+    set_Locale(context, _CS("C"), SUT_MON_4, _CS("April"));
+    set_Locale(context, _CS("C"), SUT_MON_5, _CS("May"));
+    set_Locale(context, _CS("C"), SUT_MON_6, _CS("June"));
+    set_Locale(context, _CS("C"), SUT_MON_7, _CS("July"));
+    set_Locale(context, _CS("C"), SUT_MON_8, _CS("August"));
+    set_Locale(context, _CS("C"), SUT_MON_9, _CS("September"));
+    set_Locale(context, _CS("C"), SUT_MON_10, _CS("October"));
+    set_Locale(context, _CS("C"), SUT_MON_11, _CS("November"));
+    set_Locale(context, _CS("C"), SUT_MON_12, _CS("December"));
+    
+    set_Locale(context, _CS("C"), SUT_ABMON_1, _CS("Jan"));
+    set_Locale(context, _CS("C"), SUT_ABMON_2, _CS("Feb"));
+    set_Locale(context, _CS("C"), SUT_ABMON_3, _CS("Mar"));
+    set_Locale(context, _CS("C"), SUT_ABMON_4, _CS("Apr"));
+    set_Locale(context, _CS("C"), SUT_ABMON_5, _CS("May"));
+    set_Locale(context, _CS("C"), SUT_ABMON_6, _CS("Jun"));
+    set_Locale(context, _CS("C"), SUT_ABMON_7, _CS("Jul"));
+    set_Locale(context, _CS("C"), SUT_ABMON_8, _CS("Aug"));
+    set_Locale(context, _CS("C"), SUT_ABMON_9, _CS("Sep"));
+    set_Locale(context, _CS("C"), SUT_ABMON_10, _CS("Oct"));
+    set_Locale(context, _CS("C"), SUT_ABMON_11, _CS("Nov"));
+    set_Locale(context, _CS("C"), SUT_ABMON_12, _CS("Dec"));
+    
+    set_Locale(context, _CS("C"), SUT_AM_STR, _CS("AM"));
+    set_Locale(context, _CS("C"), SUT_PM_STR, _CS("PM"));
+    
+    set_Locale(context, _CS("C"), SUT_D_T_FMT, _CS("%a %b %e %H:%M:%S %Y"));
+    set_Locale(context, _CS("C"), SUT_D_FMT, _CS("%m/%d/%y"));
+    set_Locale(context, _CS("C"), SUT_T_FMT, _CS("%H:%M:%S"));
+    set_Locale(context, _CS("C"), SUT_T_FMT_AMPM, _CS("%I:%M:%S %p"));
+    
+    set_Locale(context, _CS("C"), SUT_RADIXCHAR, _CS("."));
+    
+    set_Locale(context, _CS("C"), SUT_YESEXPR, _CS("^[yY]"));
+    set_Locale(context, _CS("C"), SUT_NOEXPR, _CS("^[nN]"));
+    
+    
+    set_Locale(context, _CS("C"), SUT_LV_DECIMAL_POINT, _CS("."));
+    set_Locale(context, _CS("C"), SUT_LV_THOUSANDS_SEP, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_GROUPING, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_INT_CURR_SYMBOL, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_CURRENCY_SYMBOL, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_MON_DECIMAL_POINT, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_MON_THOUSANDS_SEP, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_MON_GROUPING, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_POSITIVE_SIGN, _CS(""));
+    set_Locale(context, _CS("C"), SUT_LV_NEGATIVE_SIGN, _CS(""));
+
+    set_Locale(context, _CS("C"), SUT_LV_INT_FRAC_DIGITS, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_FRAC_DIGITS, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_P_CS_PRECEDES, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_P_SEP_BY_SPACE, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_N_CS_PRECEDES, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_N_SEP_BY_SPACE, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_P_SIGN_POSN, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_N_SIGN_POSN, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_INT_P_CS_PRECEDES, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_INT_N_CS_PRECEDES, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_INT_P_SEP_BY_SPACE, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_INT_N_SEP_BY_SPACE, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_INT_P_SIGN_POSN, create_CharTObj(127));
+    set_Locale(context, _CS("C"), SUT_LV_INT_N_SIGN_POSN, create_CharTObj(127));
+    
+    for(i = 'a', j = 'A'; i <= 'z'; i++, j++)
+        put_Map(pCLocale->toUpper, create_IntTObj(i), create_IntTObj(j));
+    
+    put_Map(pCLocale->mapGroups, _CS("upper"),
+        create_CTypeGroup(_CS("ABCDEFGHIJKLMNOPQRSTUVWXYZ")));
+    
+    put_Map(pCLocale->mapGroups, _CS("lower"),
+        create_CTypeGroup(_CS("abcdefghijklmnopqrstuvwxyz")));
+    
+    tgrp = create_CTypeGroup(NULL);
+    put_Map(pCLocale->mapGroups, _CS("alpha"), tgrp);
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("upper")));
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("lower")));
+    
+    put_Map(pCLocale->mapGroups, _CS("digit"),
+        create_CTypeGroup(_CS("0123456789")));
+    
+    tgrp = create_CTypeGroup(NULL);
+    put_Map(pCLocale->mapGroups, _CS("alnum"), tgrp);
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("alpha")));
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("digit")));
+    
+    put_Map(pCLocale->mapGroups, _CS("space"),
+        create_CTypeGroup(_CS(" \t\n\r")));// TODO: +<form-feed> +<vertical-tab>
+    
+    put_Map(pCLocale->mapGroups, _CS("cntrl"), create_CTypeGroup(NULL));
+    
+    put_Map(pCLocale->mapGroups, _CS("punct"), create_CTypeGroup(NULL));
+    
+    tgrp = create_CTypeGroup(NULL);
+    put_Map(pCLocale->mapGroups, _CS("graph"), tgrp);
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("alpha")));
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("digit")));
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("punct")));
+    
+    tgrp = create_CTypeGroup(NULL);
+    put_Map(pCLocale->mapGroups, _CS("print"), tgrp);
+    include_CTypeGroup(tgrp, get_Map(pCLocale->mapGroups, _CS("graph")));
+    
+    put_Map(pCLocale->mapGroups, _CS("punct"), create_CTypeGroup(NULL));
+    
+    put_Map(pCLocale->mapGroups, _CS("xdigit"),
+        create_CTypeGroup(_CS("0123456789abcdefABCDEF")));
+        
+    put_Map(pCLocale->mapGroups, _CS("blank"),
+        create_CTypeGroup(_CS(" \t")));
+}
+
+CString* getLocale_Locale(CallContext context, IntT category)
+{
+    LocaleSelector* ls;
+    LocaleT locale = getThreadLocaleSelector(context);
+
+    if(!equals_VoidTPtr(locale, SUT_LC_GLOBAL_LOCALE))
+    {
+        ls = (LocaleSelector*)getObjectInMemory(locale);
+        
+        assertion(ls != NULL, "getLocale_Locale: ls is NULL!");
+        
+        return getLocale_LocaleSelector(ls, category);
+    }
+    
+    ls = getProcessLocaleSelector(context);
+    
+    assertion(ls != NULL, "getLocale_Locale: process ls is NULL!");
+    
+    if(!equals(getLocale_LocaleSelector(ls, category), _CS("")))
+        return getLocale_LocaleSelector(ls, category);
+    
+    switch(category)
+    {
+    case SUT_LC_ALL:       return getEnv_CallContext(context, _CS("SUT_LC_ALL"));
+    case SUT_LC_COLLATE:   return getEnv_CallContext(context, _CS("SUT_LC_COLLATE"));
+    case SUT_LC_CTYPE:     return getEnv_CallContext(context, _CS("SUT_LC_CTYPE"));
+    case SUT_LC_MESSAGES:  return getEnv_CallContext(context, _CS("SUT_LC_MESSAGES"));
+    case SUT_LC_MONETARY:  return getEnv_CallContext(context, _CS("SUT_LC_MONETARY"));
+    case SUT_LC_NUMERIC:   return getEnv_CallContext(context, _CS("SUT_LC_NUMERIC"));
+    case SUT_LC_TIME:      return getEnv_CallContext(context, _CS("SUT_LC_TIME"));
+    }
+    
+    assertion(false, "getLocale_Locale: invalid category");
+    
+    return NULL;
+}
+
+LocaleInfo* createLocale_Locale(CallContext context, CString* locName, LocaleInfo* pBase)
+{
+    SystemState* ss = getSystemState_CallContext(context);
+    LocaleInfo* li = (pBase != NULL ? clone(pBase) : create_LocaleInfo());
+    
+    if(ss == NULL) return NULL;
+    
+    if(containsKey_Map(ss->locInfoMap, locName)) return NULL;
+    
+    put_Map(ss->locInfoMap, locName, li);
+    
+    return li;
+}
+
+bool nameLocale_Locale(CallContext context, CString* locName, CString* newName)
+{
+    SystemState* ss = getSystemState_CallContext(context);
+    LocaleInfo* li = getLocaleInfo_Locale(context, locName);
+    
+    if(li == NULL) return false;
+    
+    put_Map(ss->locInfoMap, newName, li);
+
+    return true;
+}
+
+LocaleInfo* getCurrLocaleInfo_Locale(CallContext context, IntT category)
+{
+    CString* locName = getLocale_Locale(context, category);
+    LocaleInfo* li;
+    
+    assertion(locName != NULL, "getCurrLocaleInfo_Locale: locName is NULL!");
+    
+    li = getLocaleInfo_Locale(context, locName);
+    
+    return li;
+}
+
+LocaleInfo* getLocaleInfo_Locale(CallContext context, CString* locName)
+{
+    SystemState* ss = getSystemState_CallContext(context);
+    LocaleInfo* li;
+    
+    assertion(locName != NULL, "locName is NULL");
+    assertion(ss->locInfoMap != NULL, "getLocaleInfo_Locale: ss->locInfoMap is NULL");
+    
+    li = get_Map(ss->locInfoMap, locName);
+    
+    return li;
+}
+
+Object* get_Locale(CallContext context, CString* locName, IntT locVar)
+{
+    LocaleInfo* li = getLocaleInfo_Locale(context, locName);
+    LConv* localeConv;
+    
+    assertion(li != NULL, "get_Locale: li is NULL!");
+    assertion(li->mapNLLangInfo != NULL, "get_Locale: li->mapNLLangInfo is NULL!");
+    
+    localeConv = li->localeConv;
+
+    switch(locVar)
+    {
+    case SUT_CRNCYSTR:
+    case SUT_RADIXCHAR:
+    case SUT_THOUSEP:
+    case SUT_D_T_FMT:
+    case SUT_D_FMT:
+    case SUT_T_FMT:
+    case SUT_T_FMT_AMPM:
+    case SUT_ERA:
+    case SUT_ERA_D_FMT:
+    case SUT_ALT_DIGITS:
+    case SUT_ERA_D_T_FMT:
+    case SUT_ERA_T_FMT:
+    case SUT_AM_STR:
+    case SUT_PM_STR:
+    
+    case SUT_ABDAY_1: case SUT_ABDAY_2: case SUT_ABDAY_3: case SUT_ABDAY_4: case SUT_ABDAY_5: case SUT_ABDAY_6: case SUT_ABDAY_7:
+    
+    case SUT_DAY_1: case SUT_DAY_2: case SUT_DAY_3: case SUT_DAY_4: case SUT_DAY_5: case SUT_DAY_6: case SUT_DAY_7:
+    
+    case SUT_MON_1: case SUT_MON_2: case SUT_MON_3: case SUT_MON_4: case SUT_MON_5: case SUT_MON_6:
+    case SUT_MON_7: case SUT_MON_8: case SUT_MON_9: case SUT_MON_10: case SUT_MON_11: case SUT_MON_12:
+    
+    case SUT_ABMON_1: case SUT_ABMON_2: case SUT_ABMON_3: case SUT_ABMON_4: case SUT_ABMON_5: case SUT_ABMON_6:
+    case SUT_ABMON_7: case SUT_ABMON_8: case SUT_ABMON_9: case SUT_ABMON_10: case SUT_ABMON_11: case SUT_ABMON_12:
+    
+    case SUT_CODESET:
+    case SUT_YESEXPR:
+    case SUT_NOEXPR:
+        if(!containsKey_Map(li->mapNLLangInfo, create_NlItemTObj(locVar))) return _CS("");
+        return get_Map(li->mapNLLangInfo, create_NlItemTObj(locVar));
+
+    case SUT_LV_DECIMAL_POINT: return localeConv->decimal_point;
+    case SUT_LV_THOUSANDS_SEP: return localeConv->thousands_sep;
+    case SUT_LV_GROUPING: return localeConv->grouping;
+    case SUT_LV_INT_CURR_SYMBOL: return localeConv->int_curr_symbol;
+    case SUT_LV_CURRENCY_SYMBOL: return localeConv->currency_symbol;
+    case SUT_LV_MON_DECIMAL_POINT: return localeConv->mon_decimal_point;
+    case SUT_LV_MON_THOUSANDS_SEP: return localeConv->mon_thousands_sep;
+    case SUT_LV_MON_GROUPING: return localeConv->mon_grouping;
+    case SUT_LV_POSITIVE_SIGN: return localeConv->positive_sign;
+    case SUT_LV_NEGATIVE_SIGN: return localeConv->negative_sign;
+
+    case SUT_LV_INT_FRAC_DIGITS: return create_CharTObj(localeConv->int_frac_digits);
+    case SUT_LV_FRAC_DIGITS: return create_CharTObj(localeConv->frac_digits);
+    case SUT_LV_P_CS_PRECEDES: return create_CharTObj(localeConv->p_cs_precedes);
+    case SUT_LV_P_SEP_BY_SPACE: return create_CharTObj(localeConv->p_sep_by_space);
+    case SUT_LV_N_CS_PRECEDES: return create_CharTObj(localeConv->n_cs_precedes);
+    case SUT_LV_N_SEP_BY_SPACE: return create_CharTObj(localeConv->n_sep_by_space);
+    case SUT_LV_P_SIGN_POSN: return create_CharTObj(localeConv->p_sign_posn);
+    case SUT_LV_N_SIGN_POSN: return create_CharTObj(localeConv->n_sign_posn);
+    case SUT_LV_INT_P_CS_PRECEDES: return create_CharTObj(localeConv->int_p_cs_precedes);
+    case SUT_LV_INT_N_CS_PRECEDES: return create_CharTObj(localeConv->int_n_cs_precedes);
+    case SUT_LV_INT_P_SEP_BY_SPACE: return create_CharTObj(localeConv->int_p_sep_by_space);
+    case SUT_LV_INT_N_SEP_BY_SPACE: return create_CharTObj(localeConv->int_n_sep_by_space);
+    case SUT_LV_INT_P_SIGN_POSN: return create_CharTObj(localeConv->int_p_sign_posn);
+    case SUT_LV_INT_N_SIGN_POSN: return create_CharTObj(localeConv->int_n_sign_posn);
+    }
+    
+    assertion(false, "get_Locale: locVar is invalid!");
+
+    return NULL;
+}
+
+bool set_Locale(CallContext context, CString* locName, IntT locVar, Object* value)
+{
+    LConv* localeConv;
+    LocaleInfo* li = getLocaleInfo_Locale(context, locName);
+    
+    assertion(li != NULL, "set_Locale: li is NULL!");
+    assertion(li->mapNLLangInfo != NULL, "get_Locale: li->mapNLLangInfo is NULL!");
+    
+    localeConv = li->localeConv;
+
+    switch(locVar)
+    {
+    case SUT_CRNCYSTR:
+    case SUT_RADIXCHAR:
+    case SUT_THOUSEP:
+    case SUT_D_T_FMT:
+    case SUT_D_FMT:
+    case SUT_T_FMT:
+    case SUT_T_FMT_AMPM:
+    case SUT_ERA:
+    case SUT_ERA_D_FMT:
+    case SUT_ALT_DIGITS:
+    case SUT_ERA_D_T_FMT:
+    case SUT_ERA_T_FMT:
+    case SUT_AM_STR:
+    case SUT_PM_STR:
+    
+    case SUT_ABDAY_1: case SUT_ABDAY_2: case SUT_ABDAY_3: case SUT_ABDAY_4: case SUT_ABDAY_5: case SUT_ABDAY_6: case SUT_ABDAY_7:
+    
+    case SUT_DAY_1: case SUT_DAY_2: case SUT_DAY_3: case SUT_DAY_4: case SUT_DAY_5: case SUT_DAY_6: case SUT_DAY_7:
+    
+    case SUT_MON_1: case SUT_MON_2: case SUT_MON_3: case SUT_MON_4: case SUT_MON_5: case SUT_MON_6:
+    case SUT_MON_7: case SUT_MON_8: case SUT_MON_9: case SUT_MON_10: case SUT_MON_11: case SUT_MON_12:
+    
+    case SUT_ABMON_1: case SUT_ABMON_2: case SUT_ABMON_3: case SUT_ABMON_4: case SUT_ABMON_5: case SUT_ABMON_6:
+    case SUT_ABMON_7: case SUT_ABMON_8: case SUT_ABMON_9: case SUT_ABMON_10: case SUT_ABMON_11: case SUT_ABMON_12:
+    
+    case SUT_CODESET:
+    case SUT_YESEXPR:
+    case SUT_NOEXPR:
+        put_Map(li->mapNLLangInfo, create_NlItemTObj(locVar), value);
+        break;
+
+    case SUT_LV_DECIMAL_POINT: localeConv->decimal_point = value; break;
+    case SUT_LV_THOUSANDS_SEP: localeConv->thousands_sep = value; break;
+    case SUT_LV_GROUPING: localeConv->grouping = value; break;
+    case SUT_LV_INT_CURR_SYMBOL: localeConv->int_curr_symbol = value; break;
+    case SUT_LV_CURRENCY_SYMBOL: localeConv->currency_symbol = value; break;
+    case SUT_LV_MON_DECIMAL_POINT: localeConv->mon_decimal_point = value; break;
+    case SUT_LV_MON_THOUSANDS_SEP: localeConv->mon_thousands_sep = value; break;
+    case SUT_LV_MON_GROUPING: localeConv->mon_grouping = value; break;
+    case SUT_LV_POSITIVE_SIGN: localeConv->positive_sign = value; break;
+    case SUT_LV_NEGATIVE_SIGN: localeConv->negative_sign = value; break;
+
+    case SUT_LV_INT_FRAC_DIGITS: localeConv->int_frac_digits = *((CharTObj*)value); break;
+    case SUT_LV_FRAC_DIGITS: localeConv->frac_digits = *((CharTObj*)value); break;
+    case SUT_LV_P_CS_PRECEDES: localeConv->p_cs_precedes = *((CharTObj*)value); break;
+    case SUT_LV_P_SEP_BY_SPACE: localeConv->p_sep_by_space = *((CharTObj*)value); break;
+    case SUT_LV_N_CS_PRECEDES: localeConv->n_cs_precedes = *((CharTObj*)value); break;
+    case SUT_LV_N_SEP_BY_SPACE: localeConv->n_sep_by_space = *((CharTObj*)value); break;
+    case SUT_LV_P_SIGN_POSN: localeConv->p_sign_posn = *((CharTObj*)value); break;
+    case SUT_LV_N_SIGN_POSN: localeConv->n_sign_posn = *((CharTObj*)value); break;
+    case SUT_LV_INT_P_CS_PRECEDES: localeConv->int_p_cs_precedes = *((CharTObj*)value); break;
+    case SUT_LV_INT_N_CS_PRECEDES: localeConv->int_n_cs_precedes = *((CharTObj*)value); break;
+    case SUT_LV_INT_P_SEP_BY_SPACE: localeConv->int_p_sep_by_space = *((CharTObj*)value); break;
+    case SUT_LV_INT_N_SEP_BY_SPACE: localeConv->int_n_sep_by_space = *((CharTObj*)value); break;
+    case SUT_LV_INT_P_SIGN_POSN: localeConv->int_p_sign_posn = *((CharTObj*)value); break;
+    case SUT_LV_INT_N_SIGN_POSN: localeConv->int_n_sign_posn = *((CharTObj*)value); break;
+    
+    default:
+        assertion(false, "set_Locale: locVar is invalid!");
+        return false;
+    }
+
+    return true;
+}
+
+bool isKnown_Locale(CallContext context, CString* locName)
+{
+    SystemState* ss = getSystemState_CallContext(context);
+    
+    assertion(locName != NULL, "isKnown_Locale: locName is NULL!");
+    assertion(ss->locInfoMap != NULL, "isKnown_Locale: ss->locInfoMap is NULL");
+
+    return get_Map(ss->locInfoMap, locName) != NULL;
+}
+
+Bool3 equals_Locale(CallContext context, CString* locName, IntT locVar, Object* value)
+{
+    return isKnown_Locale(context, locName) ?
+        (Bool3)equals(get_Locale(context, locName, locVar), value) :
+        Unknown_Bool3;
+}
+
+Bool3 equalsCurrent_Locale(CallContext context, IntT locVar, Object* value)
+{
+    CString* locName;
+    IntT category = -1;
+
+    if (
+        (locVar >= SUT_DAY_1 && locVar <= SUT_DAY_7) ||
+        (locVar >= SUT_ABDAY_1 && locVar <= SUT_ABDAY_7) ||
+        (locVar >= SUT_MON_1 && locVar <= SUT_MON_12) ||
+        (locVar >= SUT_ABMON_1 && locVar <= SUT_ABMON_12) ||
+        SUT_AM_STR ||
+        SUT_PM_STR ||
+        SUT_D_T_FMT ||
+        SUT_D_FMT ||
+        SUT_T_FMT ||
+        SUT_T_FMT_AMPM ||
+        SUT_ERA ||
+        SUT_ERA_D_FMT ||
+        SUT_ALT_DIGITS ||
+        SUT_ERA_D_T_FMT ||
+        SUT_ERA_T_FMT
+       )
+    {
+        category = SUT_LC_TIME;
+    } else
+    if(locVar == SUT_RADIXCHAR || locVar == SUT_THOUSEP)
+    {
+        category = SUT_LC_NUMERIC;
+    } else
+    if(locVar == SUT_YESEXPR || locVar == SUT_NOEXPR)
+    {
+        category = SUT_LC_MESSAGES;
+    } else
+    if(locVar == SUT_CRNCYSTR)
+    {
+        category = SUT_LC_MONETARY;
+    } else
+    if (
+        locVar == SUT_LV_INT_CURR_SYMBOL ||
+        locVar == SUT_LV_CURRENCY_SYMBOL ||
+        locVar == SUT_LV_MON_DECIMAL_POINT ||
+        locVar == SUT_LV_MON_THOUSANDS_SEP ||
+        locVar == SUT_LV_MON_GROUPING ||
+        locVar == SUT_LV_POSITIVE_SIGN ||
+        locVar == SUT_LV_NEGATIVE_SIGN ||
+        locVar == SUT_LV_FRAC_DIGITS ||
+        locVar == SUT_LV_INT_FRAC_DIGITS ||
+        locVar == SUT_LV_P_CS_PRECEDES ||
+        locVar == SUT_LV_P_SEP_BY_SPACE ||
+        locVar == SUT_LV_N_CS_PRECEDES ||
+        locVar == SUT_LV_N_SEP_BY_SPACE ||
+        locVar == SUT_LV_P_SIGN_POSN ||
+        locVar == SUT_LV_N_SIGN_POSN ||
+        locVar == SUT_LV_INT_P_CS_PRECEDES ||
+        locVar == SUT_LV_INT_N_CS_PRECEDES ||
+        locVar == SUT_LV_INT_P_SEP_BY_SPACE ||
+        locVar == SUT_LV_INT_N_SEP_BY_SPACE ||
+        locVar == SUT_LV_INT_P_SIGN_POSN ||
+        locVar == SUT_LV_INT_N_SIGN_POSN
+       )
+    {
+        category = SUT_LC_MONETARY;
+    } else
+    if (
+        locVar == SUT_LV_DECIMAL_POINT ||
+        locVar == SUT_LV_THOUSANDS_SEP ||
+        locVar == SUT_LV_GROUPING
+       )
+    {
+        category = SUT_LC_NUMERIC;
+    }
+    
+    assertion(category != -1, "equalsCurrent_Locale: invalid locVar");
+
+    locName = getLocale_Locale(context, category);
+    
+    if(locName == NULL) return Unknown_Bool3;
+    
+    return isKnown_Locale(context, locName) ?
+        (Bool3)equals(get_Locale(context, locName, locVar), value) :
+        Unknown_Bool3;
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool isValid_Category(int category)
+{
+    return (category >= SUT_MIN_LC && category <= SUT_MAX_LC);
+}
+
+LSPlace whatIs_LocaleSelector(CallContext context, IntT category)
+{
+    LocaleSelector* ls;
+    LocaleT locale = getThreadLocaleSelector(context);
+
+    if(!equals_VoidTPtr(locale, SUT_LC_GLOBAL_LOCALE))
+        return ThreadSelector;
+    
+    ls = getProcessLocaleSelector(context);
+    
+    assertion(ls != NULL, "whatIs_LocaleSelector: process ls is NULL!");
+    
+    if(!equals(getLocale_LocaleSelector(ls, category), _CS("")))
+        return ProcessSelector;
+    
+    return EnvironSelector;
+}
+
+LocaleSelector* getProcessLocaleSelector(CallContext context)
+{
+    LocaleSelector* localeSelector =
+        (LocaleSelector*)getProcessStaticData(context, _CS("LocaleSel"));
+
+    if(localeSelector == NULL) {
+        registerProcessStaticData(context, _CS("LocaleSel"),
+            create_LocaleSelector(NULL));
+
+        return (LocaleSelector*)getProcessStaticData(context, _CS("LocaleSel"));
+    }
+
+    return localeSelector;
+}
+
+LocaleT getThreadLocaleSelector(CallContext context)
+{
+    ThreadState* ts = getThreadState_CallContext(context);
+
+    assertion(ts != NULL, "getThreadLocaleSelector: ts is NULL");
+
+    return ts->currentLocale;
+}
+
+CString* selectLocale_LocaleSelector (  LocaleSelector* localeSelector,
+                                        IntT category,
+                                        CString* val
+                                     )
+{
+    CString* old;
+    CString** var;
+
+    assertion(localeSelector != NULL,
+        "selectLocale_LocaleSelector: localeSelector is NULL");
+
+    switch(category)
+    {
+    case SUT_LC_ALL: var = &localeSelector->All; break;
+    case SUT_LC_COLLATE: var = &localeSelector->Collate; break;
+    case SUT_LC_CTYPE: var = &localeSelector->CType; break;
+    case SUT_LC_MESSAGES: var = &localeSelector->Messages; break;
+    case SUT_LC_MONETARY: var = &localeSelector->Monetary; break;
+    case SUT_LC_NUMERIC: var = &localeSelector->Numeric; break;
+    case SUT_LC_TIME: var = &localeSelector->Time; break;
+
+    default:
+        assertion(false, "selectProcessLocale: category is undefined");
+    }
+
+    old = *var;
+    *var = val;
+
+    return old;
+}
+
+CString* getLocale_LocaleSelector(LocaleSelector* ls, IntT category)
+{
+    switch(category)
+    {
+    case SUT_LC_ALL: return ls->All;
+    case SUT_LC_COLLATE: return ls->Collate;
+    case SUT_LC_CTYPE: return ls->CType;
+    case SUT_LC_MESSAGES: return ls->Messages;
+    case SUT_LC_MONETARY: return ls->Monetary;
+    case SUT_LC_NUMERIC: return ls->Numeric;
+    case SUT_LC_TIME: return ls->Time;
+    }
+    
+    return NULL;
+}
+
+CString* selectProcessLocale(CallContext context, IntT category, CString* val)
+{
+    LocaleSelector* localeSelector = getProcessLocaleSelector(context);
+
+    return selectLocale_LocaleSelector(localeSelector, category, val);
+}
+
+LocaleT selectThreadLocale(CallContext context, LocaleT locale)
+{
+    LocaleT oldLocale;
+    ThreadState* ts = getThreadState_CallContext(context);
+
+    oldLocale = ts->currentLocale;
+    ts->currentLocale = locale;
+
+    return oldLocale;
+}

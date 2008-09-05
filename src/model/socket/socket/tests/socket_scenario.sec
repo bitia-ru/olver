@@ -1,0 +1,763 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "socket/socket/tests/socket_scenario.seh"
+
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+#include "socket/socket/socket_model.seh"
+
+/********************************************************************/
+/**                         Tests Local Data                       **/
+/********************************************************************/
+
+#define MAX_SIZE 30
+#define NUM_DATA_ARRAYS 7
+#define WRITE_SIZE 100
+
+static CallContext context, serverContext;
+static FileDescId  clientSock, serverSock;
+static FileDescId  udpClientSock, udpServerSock;
+static SockaddrT*  udpServerAddress, *udpClientAddress;
+static List*       readIov, *writeIov;
+static CByteArray* writeByteArray, *readByteArray;
+
+static CByteArray* dataArrays[NUM_DATA_ARRAYS];
+static IntT        curArray;
+static bool        isUDP;
+static IntT        recieveLength[NUM_DATA_ARRAYS]={20, 30, 100, 50, 10, 15, 70};
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+specification typedef struct SocketSendState
+{
+    IntT curArray;
+    bool isUDP;
+}SocketSendState;
+
+SocketSendState * create_SocketSendState(
+    IntT curArray,
+    bool isUDP
+)
+{
+    return create(&type_SocketSendState,  curArray, isUDP);
+}
+
+specification typedef struct SocketSendState SocketSendState = {};
+
+static Object* getSocketSendState(void)
+{
+    return create_SocketSendState( curArray, isUDP);
+}
+
+static Object* getSocketState(void)
+{
+    return create_Integer(0);
+}
+
+/********************************************************************/
+/**                  Test Scenarios Initialization                 **/
+/********************************************************************/
+
+static bool init_socket_scenario(int argc,char** argv)
+{
+    context = createProcess();
+    initPathSystemConfiguration();
+    
+    serverContext = createProcess();
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME);
+
+    initReqFilters();
+
+    return true;
+}
+
+static bool init_socket_msg_scenario(int argc,char** argv)
+{
+    context = createProcess();
+    initPathSystemConfiguration();
+    
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+        
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(100);
+    
+    {
+        int nsize = 25;
+        VoidTPtr buf1=allocateMemoryBlock(context, nsize);
+        VoidTPtr buf2=allocateMemoryBlock(context, nsize);
+        IntT i=0;
+        UCharT refBuff[MAX_SIZE];
+        
+        for(i=0;i<MAX_SIZE;i++)
+        {
+            refBuff[i] = (CharT)i;
+        }
+        
+        readIov=create_List(&type_IOvec);
+        append_List(readIov, create_IOvec(allocateMemoryBlock(context, 5), (SizeT)5));
+        append_List(readIov, create_IOvec(allocateMemoryBlock(context, 15), (SizeT)15));
+        writeIov=create_List(&type_IOvec);
+        writeCByteArray_VoidTPtr(buf1, create_CByteArray(refBuff, nsize));
+        writeCByteArray_VoidTPtr(buf2, create_CByteArray(refBuff, nsize));
+        append_List(writeIov, create_IOvec(buf1, (SizeT)20));
+        append_List(writeIov, create_IOvec(buf2, (SizeT)5));
+        
+        writeByteArray = create_CByteArray(refBuff, 3);
+        readByteArray = create_CByteArray(refBuff, 3);
+    }
+    
+    
+    return true;
+}
+
+static bool init_socket_send_scenario(int argc,char** argv)
+{
+    SockaddrT* serverAddress=create_SockaddrT_Inet(74, 0);
+    int i, j;
+    
+    context = createProcess();
+    initPathSystemConfiguration();
+    
+    serverContext = createProcess();
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(SERIALIZATION_TIME);
+    
+    initReqFilters();
+    
+    clientSock=socket_spec(context, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    serverSock=socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    bind_spec(serverContext, serverSock, serverAddress, requestErrorCode());
+    listen_spec(serverContext, serverSock, 10, requestErrorCode());
+    connect_spec(context, clientSock, serverAddress);
+    accept_spec(serverContext, serverSock);
+    
+    udpServerAddress=create_SockaddrT_Inet(75, 0);
+    udpClientSock=socket_spec(context, SUT_PF_INET, SUT_SOCK_DGRAM, SUT_IPPROTO_UDP, requestErrorCode());
+    udpServerSock=socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_DGRAM, SUT_IPPROTO_UDP, requestErrorCode());
+    bind_spec(serverContext, udpServerSock, udpServerAddress, requestErrorCode());
+    connect_spec(context, udpClientSock, udpServerAddress);
+    
+    
+    for (i=0;i<NUM_DATA_ARRAYS;i++)
+    {
+        IntT sizeArray=20+i*5;
+        dataArrays[i]=create_CByteArray(NULL, sizeArray);
+        for (j=0;j<sizeArray;j++)
+        {
+            setByteAt_CByteArray(dataArrays[i], j, (ByteT)(i*5+j));
+        }
+    }
+    
+    curArray = 0;
+    isUDP = false;
+    return true;
+}
+
+static bool init_socket_read_write_scenario(int argc,char** argv)
+{
+    SockaddrT* serverAddress=create_SockaddrT_Inet(56, 0);
+    GetSockNameReturnType* sockName;
+    
+    context = createProcess();
+    initPathSystemConfiguration();
+    
+    serverContext = createProcess();
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(100);
+    
+    initReqFilters();
+    
+    clientSock=socket_spec(context, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    serverSock=socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    bind_spec(serverContext, serverSock, serverAddress, requestErrorCode());
+    listen_spec(serverContext, serverSock, 10, requestErrorCode());
+    connect_spec(context, clientSock, serverAddress);
+    accept_spec(serverContext, serverSock);
+    
+    
+    udpServerAddress=create_SockaddrT_Inet(57, 0);
+    udpClientAddress=create_SockaddrT_Inet(58, 0);
+    udpClientSock=socket_spec(context, SUT_PF_INET, SUT_SOCK_DGRAM, SUT_IPPROTO_UDP, requestErrorCode());
+    udpServerSock=socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_DGRAM, SUT_IPPROTO_UDP, requestErrorCode());
+    bind_spec(serverContext, udpServerSock, udpServerAddress, requestErrorCode());
+    connect_spec(context, udpClientSock, udpServerAddress);
+    sockName = getsockname_spec(context, udpClientSock, requestErrorCode());
+    connect_spec(serverContext, udpServerSock, sockName->address);
+    
+    return true;
+}
+
+/********************************************************************/
+/**                  Test Scenarios Finalization                   **/
+/********************************************************************/
+
+static void finish_socket_read_write_scenario(void)
+{
+    close_spec(context, clientSock, requestErrorCode());
+    close_spec(serverContext, serverSock, requestErrorCode());
+    close_spec(context, udpClientSock, requestErrorCode());
+    close_spec(serverContext, udpServerSock, requestErrorCode());
+}
+
+
+static void finish_socket_scenario(void)
+{
+    close_spec(context, clientSock, requestErrorCode());
+    close_spec(serverContext, serverSock, requestErrorCode());
+    close_spec(context, udpClientSock, requestErrorCode());
+    close_spec(serverContext, udpServerSock, requestErrorCode());
+
+    TEST_SCENARIO_VERDICT_VERBOSE(socket_scenario);
+
+}
+
+static void finish_socket_msg_scenario(void)
+{
+}
+
+
+static void finish_socket_send_scenario(void)
+{
+    IntT i=0;
+    if(!isThreadBlocked(context))
+    {
+        for (i=0;i<NUM_DATA_ARRAYS;i++)
+        {
+            send_spec(context, clientSock, dataArrays[i], false, false, NULL);
+            send_spec(context, udpClientSock, dataArrays[i], false, false, udpServerAddress);
+        }
+    }
+    close_spec(context, clientSock, requestErrorCode());
+    close_spec(serverContext, serverSock, requestErrorCode());
+    close_spec(context, udpClientSock, requestErrorCode());
+    close_spec(serverContext, udpServerSock, requestErrorCode());
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool adv_send_scen()
+{
+    if (!isUDP)
+    {
+        if(!isThreadBlocked(context))
+            send_spec(context, clientSock, dataArrays[curArray], false, false, udpServerAddress);
+        isUDP=true;
+    }
+    else
+    {
+        if(!isThreadBlocked(context))
+            send_spec(context, udpClientSock, dataArrays[curArray], false, false, NULL);
+        isUDP=false;
+    }
+
+    curArray++;
+
+    if (curArray>=NUM_DATA_ARRAYS)
+    {
+        curArray=NUM_DATA_ARRAYS-1;
+    }
+    return true;
+}
+
+scenario
+bool adv_recv_scen()
+{
+    SocketFileDescriptor* desc=getDescriptor_FileDescId(serverSock);
+
+    if (!isUDP)
+    {
+        if(!isThreadBlocked(serverContext))
+            recv_spec(serverContext, desc->lastAccepted, recieveLength[curArray], true, false, false, false);
+
+        if(!isThreadBlocked(serverContext))
+            recv_spec(serverContext, desc->lastAccepted, recieveLength[curArray], false, false, false, false);
+
+        isUDP=true;
+    }
+    else
+    {
+        if(!isThreadBlocked(serverContext))
+            recv_spec(serverContext, udpServerSock, recieveLength[curArray], false, false, false, false);
+
+
+        isUDP=false;
+    }
+
+    curArray--;
+
+    if (curArray<0)
+    {
+        curArray=0;
+    }
+    
+    return true;
+}
+
+scenario
+bool sockatmark_scen()
+{
+    FileDescId  clientSockTmp;
+
+    clientSockTmp=socket_spec(context, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    sockatmark_spec(context, clientSockTmp, requestErrorCode());
+
+    return true;
+}
+
+
+scenario
+bool socket_scen()
+{
+    SockaddrT* serverAddress=create_SockaddrT_Inet(10, 0);
+    SockaddrT* serverAddress1=create_SockaddrT_Inet(32, 0);
+    SocketFileDescriptor* orig;
+    FileDescId servSock1;
+    clientSock=socket_spec(context, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    serverSock=socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    bind_spec(serverContext, serverSock, serverAddress, requestErrorCode());
+    listen_spec(serverContext, serverSock, 10, requestErrorCode());
+ 
+    connect_spec(context, clientSock, serverAddress);
+
+    accept_spec(serverContext, serverSock);
+
+
+    servSock1 = socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    bindresvport_spec(serverContext, servSock1, serverAddress1, requestErrorCode());
+
+    udpServerAddress=create_SockaddrT_Inet(50, 0);
+    udpClientSock=socket_spec(context, SUT_PF_INET, SUT_SOCK_DGRAM, SUT_IPPROTO_UDP, requestErrorCode());
+    udpServerSock=socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_DGRAM, SUT_IPPROTO_UDP, requestErrorCode());
+
+    bind_spec(serverContext, udpServerSock, udpServerAddress, requestErrorCode());
+
+
+    return true;
+}
+
+scenario
+bool sockopt_scen()
+{
+    FileDescId optSock = socket_spec(serverContext, SUT_PF_INET, SUT_SOCK_STREAM, SUT_IPPROTO_TCP, requestErrorCode());
+    
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_DEBUG, create_SocketOptionValue_Int(true), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_DEBUG, requestErrorCode());
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_OOBINLINE, create_SocketOptionValue_Int(true), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_OOBINLINE, requestErrorCode());
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_LINGER, create_SocketOptionValue_Linger(1, 1), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_LINGER, requestErrorCode());
+    
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_REUSEADDR, create_SocketOptionValue_Int(true), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_REUSEADDR, requestErrorCode());
+
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_DONTROUTE, create_SocketOptionValue_Int(false), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_DONTROUTE, requestErrorCode());
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_BROADCAST, create_SocketOptionValue_Int(false), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_BROADCAST, requestErrorCode());
+
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_SNDBUF, create_SocketOptionValue_Int(3000), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_SNDBUF, requestErrorCode());
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_RCVBUF, create_SocketOptionValue_Int(4000), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_RCVBUF, requestErrorCode());
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_KEEPALIVE, create_SocketOptionValue_Int(true), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_KEEPALIVE, requestErrorCode());
+
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_RCVLOWAT, create_SocketOptionValue_Int(2), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_RCVLOWAT, requestErrorCode());
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_SNDLOWAT, create_SocketOptionValue_Int(2), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_SNDLOWAT, requestErrorCode());
+
+
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_RCVTIMEO, create_SocketOptionValue_Time(2, 2000), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_RCVTIMEO, requestErrorCode());
+    
+    setsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_SNDTIMEO, create_SocketOptionValue_Time(1, 100), requestErrorCode());
+    getsockopt_spec(serverContext, optSock, SUT_SOL_SOCKET, SUT_SO_SNDTIMEO, requestErrorCode());
+
+    return true;
+}
+
+scenario
+bool send_scen()
+{
+    SocketFileDescriptor* desc=getDescriptor_FileDescId(serverSock);
+    int i;
+    CByteArray* data = create_CByteArray(NULL, 10);
+
+    for (i=0;i<10;i++)
+    {
+        setByteAt_CByteArray(data, i, (ByteT)('a'+i));
+    }
+    getpeername_spec(context, clientSock, requestErrorCode());
+
+    getsockname_spec(serverContext, serverSock, requestErrorCode());
+    getsockname_spec(context, clientSock, requestErrorCode());
+
+    send_spec(context, clientSock, data, false, false, NULL);
+
+    send_spec(context, udpClientSock, data, false, false, udpServerAddress);
+
+    for (i=0;i<10;i++)
+    {
+        setByteAt_CByteArray(data, i, (ByteT)('q'+i));
+    }
+
+    send_spec(context, udpClientSock, data, false, false, udpServerAddress);
+
+    {
+        IfConfT* argp = create_IfConfT();
+        IntT i=0;
+        SockIoReturnType* rval;
+
+        append_List(argp->ifcu_reqs, create_IfReqT(create_CString("")));
+        append_List(argp->ifcu_reqs, create_IfReqT(create_CString("")));
+        append_List(argp->ifcu_reqs, create_IfReqT(create_CString("")));
+        append_List(argp->ifcu_reqs, create_IfReqT(create_CString("")));
+        rval=sockio_spec(context, clientSock, SUT_SIOCGIFCONF, argp, requestErrorCode());
+        for (i=0;i<size_List(rval->argpRes->ifcu_reqs);i++)
+        {
+            IfConfT* argp1 = create_IfConfT();
+            IfReqT*  ifr=get_List(rval->argpRes->ifcu_reqs, i);
+
+            append_List(argp1->ifcu_reqs, clone(ifr));
+            sockio_spec(context, clientSock, SUT_SIOCGIFADDR, argp1, requestErrorCode());
+        }
+    }
+
+    shutdown_spec(context, clientSock, SUT_SHUT_WR, requestErrorCode());
+
+    return true;
+}
+
+scenario
+bool recv_scen()
+{
+    SocketFileDescriptor* desc=getDescriptor_FileDescId(serverSock);
+    getpeername_spec(serverContext, desc->lastAccepted, requestErrorCode());
+    recv_spec(serverContext, desc->lastAccepted, 5, false, false, false, true);
+
+    recv_spec(serverContext, desc->lastAccepted, 10, false, false, false, false);
+
+    getpeername_spec(context, clientSock, requestErrorCode());
+
+    recv_spec(serverContext, udpServerSock, 5, false, false, false, false);
+    recv_spec(serverContext, udpServerSock, 10, false, false, false, true);
+    
+    return true;
+}
+
+scenario
+bool send_recv_msg_scen()
+{
+    SocketPairReturnType* sret = socketpair_spec(context,  SUT_AF_UNIX, SUT_SOCK_STREAM, SUT_IPPROTO_IP, requestErrorCode());
+    SocketPairReturnType* sret2 = socketpair_spec(context,  SUT_AF_UNIX, SUT_SOCK_DGRAM, SUT_IPPROTO_IP, requestErrorCode());
+ 
+    CallContext chproc = createThreadInContext(context);
+
+    sendmsg_spec(chproc, sret->sock2, create_SocketMsgHdr(NULL, writeIov, SUT_SOL_SOCKET, SUT_SCM_RIGHTS, writeByteArray, 0), 
+       false, false, requestErrorCode());
+    ts_sleep_msec(300); 
+
+    recvmsg_spec(context, sret->sock1, create_SocketMsgHdr(NULL, readIov, SUT_SOL_SOCKET, SUT_SCM_RIGHTS, readByteArray, 0),  
+       true, false, false);
+    ts_sleep_msec(300); 
+
+    recvmsg_spec(context, sret->sock1, create_SocketMsgHdr(NULL, readIov, SUT_SOL_SOCKET, SUT_SCM_RIGHTS, readByteArray, 0),  
+       false, false, false);
+    ts_sleep_msec(300); 
+
+    sendmsg_spec(chproc, sret2->sock2, create_SocketMsgHdr(NULL, writeIov, SUT_SOL_SOCKET, SUT_SCM_RIGHTS, writeByteArray, 0), 
+        false, false, requestErrorCode());
+    ts_sleep_msec(300); 
+
+    recvmsg_spec(context, sret2->sock1, create_SocketMsgHdr(NULL, readIov, SUT_SOL_SOCKET, SUT_SCM_RIGHTS, readByteArray, 0),  
+        true, false, false);
+    ts_sleep_msec(300); 
+
+   recvmsg_spec(context, sret2->sock1, create_SocketMsgHdr(NULL, readIov, SUT_SOL_SOCKET, SUT_SCM_RIGHTS, readByteArray, 0),  
+       false, false, false);
+   ts_sleep_msec(300); 
+
+    close_spec(context, sret->sock1, requestErrorCode());
+    close_spec(context, sret->sock2, requestErrorCode());
+    
+    return true;
+}
+
+scenario
+bool read_write_scen()
+{
+    SocketFileDescriptor* desc=getDescriptor_FileDescId(serverSock);
+    VoidTPtr buf=allocateMemoryBlock(context, WRITE_SIZE);
+    IntT i=0;
+    UCharT refBuff[WRITE_SIZE];
+    for(i=0;i<WRITE_SIZE;i++)
+    {
+        refBuff[i] = (CharT)i;
+    }
+    
+    writeCByteArray_VoidTPtr(buf, create_CByteArray(refBuff, WRITE_SIZE) );
+
+    write_socket_spec(context, clientSock, buf, WRITE_SIZE);
+    recv_spec(serverContext, desc->lastAccepted, WRITE_SIZE-5, false, false, false, false);
+    write_socket_spec(context, clientSock, buf, WRITE_SIZE);
+    recv_spec(serverContext, desc->lastAccepted, WRITE_SIZE+10, false, false, false, false);
+
+    send_spec(serverContext, desc->lastAccepted, create_CByteArray(refBuff, WRITE_SIZE), false, false, NULL);
+    read_socket_spec(context, clientSock, WRITE_SIZE-5);
+    send_spec(serverContext, desc->lastAccepted, create_CByteArray(refBuff, WRITE_SIZE), false, false, NULL);
+    read_socket_spec(context, clientSock, WRITE_SIZE+30);
+
+    write_socket_spec(context, udpClientSock, buf, WRITE_SIZE);
+    recv_spec(serverContext, udpServerSock, WRITE_SIZE-5, false, false, false, false);
+    write_socket_spec(context, udpClientSock, buf, WRITE_SIZE);
+    recv_spec(serverContext, udpServerSock, WRITE_SIZE+10, false, false, false, false);
+
+    send_spec(serverContext, udpServerSock, create_CByteArray(refBuff, WRITE_SIZE), false, false, NULL);
+    read_socket_spec(context, udpClientSock, WRITE_SIZE-3);
+    send_spec(serverContext, udpServerSock, create_CByteArray(refBuff, WRITE_SIZE), false, false, NULL);
+    read_socket_spec(context, udpClientSock, WRITE_SIZE+30);
+
+    return true;
+}
+
+scenario
+bool readv_writev_scen()
+{
+    VoidTPtr buf1=allocateMemoryBlock(context, WRITE_SIZE+5);
+    VoidTPtr buf2=allocateMemoryBlock(context, WRITE_SIZE+5);
+    List* readIov=create_List(&type_IOvec);
+    List* writeIov=create_List(&type_IOvec);
+    IntT i=0;
+    UCharT refBuff[WRITE_SIZE];
+    SocketFileDescriptor* desc=getDescriptor_FileDescId(serverSock);
+    for(i=0;i<WRITE_SIZE;i++)
+    {
+        refBuff[i] = (CharT)i;
+    }
+
+    append_List(readIov, create_IOvec( allocateMemoryBlock(context, 5), (SizeT)5));
+    append_List(readIov, create_IOvec( allocateMemoryBlock(context, 25), (SizeT)20));
+    writeCByteArray_VoidTPtr(buf1, create_CByteArray(refBuff, WRITE_SIZE));
+    writeCByteArray_VoidTPtr(buf2, create_CByteArray(refBuff, WRITE_SIZE));
+    append_List(writeIov, create_IOvec( buf1, (SizeT)15));
+    append_List(writeIov, create_IOvec( buf2, (SizeT)10));
+
+    writev_socket_spec(context,  clientSock, writeIov);
+    recv_spec(serverContext, desc->lastAccepted, WRITE_SIZE, false, false, false, false);
+    writev_socket_spec(context,  clientSock, writeIov);
+    recv_spec(serverContext, desc->lastAccepted, 10, false, false, false, false);
+
+    send_spec(serverContext, desc->lastAccepted, create_CByteArray(refBuff, 20), false, false, NULL);
+    readv_socket_spec(context, clientSock, readIov);
+    send_spec(serverContext, desc->lastAccepted, create_CByteArray(refBuff, 40), false, false, NULL);
+    readv_socket_spec(context, clientSock, readIov);
+
+    recv_spec(serverContext, desc->lastAccepted, 2*WRITE_SIZE, false, false, false, false);
+
+    writev_socket_spec(context, udpClientSock, writeIov);
+    recv_spec(serverContext, udpServerSock, WRITE_SIZE, false, false, false, false);
+    writev_socket_spec(context, udpClientSock, writeIov);
+    recv_spec(serverContext, udpServerSock, 10, false, false, false, false);
+    
+    send_spec(serverContext, udpServerSock, create_CByteArray(refBuff, WRITE_SIZE), false, false, NULL);
+    readv_socket_spec(context, udpClientSock, readIov);
+    send_spec(serverContext, udpServerSock, create_CByteArray(refBuff, 10), false, false, NULL);
+    readv_socket_spec(context, udpClientSock, readIov);
+    
+
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+Map* saveSocketModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreSocketModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+static bool isSocketModelStateStationary(void)
+{
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenarios Definitions                  **/
+/********************************************************************/
+
+scenario dfsm socket_scenario =
+{
+    .init = init_socket_scenario,
+    .finish = finish_socket_scenario,
+    .getState = getSocketState,
+    .saveModelState = (PtrSaveModelState)saveSocketModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreSocketModelState,
+    .isStationaryState=(PtrIsStationaryState)isSocketModelStateStationary,
+    .actions = {
+            socket_scen,
+            send_scen,
+            recv_scen,
+            sockopt_scen,
+	     sockatmark_scen,
+            NULL
+    }
+
+};
+
+scenario dfsm advanced_socket_send_scenario =
+{
+        .init = init_socket_send_scenario,
+        .finish = finish_socket_send_scenario,
+        .getState = getSocketSendState,
+        .saveModelState = (PtrSaveModelState)saveSocketModelState,
+        .restoreModelState = (PtrRestoreModelState)restoreSocketModelState,
+        .isStationaryState=(PtrIsStationaryState)isSocketModelStateStationary,
+        .actions = {
+            adv_send_scen,
+            adv_recv_scen,
+            NULL
+    }
+    
+};
+
+
+scenario dfsm socket_msg_scenario =
+{
+    .init = init_socket_msg_scenario,
+        .finish = finish_socket_msg_scenario,
+        .getState = getSocketState,
+        .saveModelState = (PtrSaveModelState)saveSocketModelState,
+        .restoreModelState = (PtrRestoreModelState)restoreSocketModelState,
+        .isStationaryState=(PtrIsStationaryState)isSocketModelStateStationary,
+        .actions = {
+            send_recv_msg_scen,
+            NULL
+    }
+    
+};
+
+
+scenario dfsm socket_read_write_scenario =
+{
+        .init              =    init_socket_read_write_scenario,
+        .finish            =    finish_socket_read_write_scenario,
+        .getState          =    getSocketState,
+        .saveModelState    =    (PtrSaveModelState)saveSocketModelState,
+        .restoreModelState =    (PtrRestoreModelState)restoreSocketModelState,
+        .isStationaryState =    (PtrIsStationaryState)isSocketModelStateStationary,
+        .actions = {
+            read_write_scen,
+            readv_writev_scen,
+            NULL
+    }
+};
+
+
+#ifdef SOCKET_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+    
+    initIoFileSubsystem();
+    initSocketSocketSubsystem();
+}
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    trace_all_requirements = true;
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile("test.xml");
+
+    // Run test scenario
+
+   socket_scenario(argc,argv);
+ //  socket_msg_scenario(argc,argv);
+ //  advanced_socket_send_scenario(argc, argv);
+ //  socket_read_write_scenario(argc, argv);
+
+
+    //  unloadSUT();
+    return 0;
+}
+#endif

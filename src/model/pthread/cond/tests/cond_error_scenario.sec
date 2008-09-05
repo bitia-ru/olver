@@ -1,0 +1,492 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "pthread/cond/cond_config.h"
+#include "pthread/cond/tests/cond_scenario.seh"
+#include "pthread/cond/cond_model.seh"
+#include "system/system/system_model.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "atl/integer.h"
+
+#include "common/explicit_fsm.h"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/* number of threads */
+#define THREAD_NUM 2
+
+/* number of conditional variables */
+#define COND_NUM 6
+
+#define MUTEX_UNLOCK_HARD(mutex, size, threads_list) \
+    { \
+        int t_list[size] = { /threads_list/ }; \
+        int t_list_sz = sizeof(t_list) / sizeof(int); \
+        int t_index, t_index_chk; \
+        for (t_index = 0; t_index < t_list_sz; ++t_index) \
+        { \
+            Mutex* mutexObj = getMutex(mutex); \
+            for (t_index_chk = 0; t_index_chk < t_list_sz; ++t_index_chk) \
+            { \
+                if (equals_ThreadId(mutexObj->owner, context_array[t_list[t_index_chk]])) \
+                { \
+                    pthread_mutex_unlock_spec(mutexObj->owner, mutex); \
+                    serialize(); \
+                    break; \
+                } \
+            } \
+            if (t_index_chk == t_list_sz) \
+            { \
+                Error = true; \
+                setBadVerdict("Incorrect Mutex owner!"); \
+                return; \
+            } \
+        } \
+    }
+
+#define MUTEX_UNLOCK_SOFT(mutex) \
+    { \
+        Mutex* mutexObj = getMutex(mutex); \
+        while (!equals_ThreadId(mutexObj->owner, WrongThreadId)) \
+        { \
+            pthread_mutex_unlock_spec(mutexObj->owner, mutex); \
+            serialize(); \
+            mutexObj = getMutex(mutex); \
+        } \
+    }
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static CallContext context_array[THREAD_NUM];
+static VoidTPtr    memory_blocks[COND_NUM];
+
+#define CONDITION_NOT_INITIALIZED (-1)
+static List* condInitList = NULL;
+
+static int Error = false;
+ 
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+specification typedef struct ErrorsModelState
+{
+    Map* systems;
+    List* condInitList;
+} ErrorsModelState = {};
+
+ErrorsModelState * create_ErrorsModelState(
+    Map* systems,
+    List* condInitList
+)
+{
+    return create(&type_ErrorsModelState, systems, condInitList);
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+void cleanup_cond_errors_scenario()
+{
+    int i;
+    CallContext context1 = getSystemContext(context.system, context.process);
+
+
+    /* delete threads */
+    for(i = 1; i < THREAD_NUM; i++)
+    {
+        if(!isWrong_ThreadId(context_array[i]))
+        {
+            // TODO: delete thread
+        }
+    }    
+
+    /* deallocate memory */
+    for(i = 0; i < COND_NUM; i++)
+    {
+        if (!isNULL_VoidTPtr(memory_blocks[i]))
+        {
+            deallocateMemoryBlock(context1, memory_blocks[i]);
+        }
+    }
+}
+
+bool init_cond_errors_scenario(int argc, char** argv)
+{
+    int i;
+    
+    bool result = true;
+
+    /* initialize arrays */
+    for(i = 0; i < THREAD_NUM; i++)
+    {
+        context_array[i].system = WrongId;
+    }
+
+    for(i = 0; i < COND_NUM; i++)
+    {
+        memory_blocks[i] = NULL_VoidTPtr;
+    }
+
+    /* create threads */
+    context = getContext();
+    context_array[0] = context;
+
+    for(i = 1; i < THREAD_NUM; i++)
+    {
+        context_array[i] = createThread();
+        
+        if(isWrong_ThreadId(context_array[i]))
+        {
+            result = false;
+            break;
+        }
+    }
+
+    if (result)
+    {
+        /* allocate memory */
+        for(i = 0; i < COND_NUM; i++)
+        {
+            memory_blocks[i] = allocateMemoryBlock(context, 1024);
+            if (isNULL_VoidTPtr(memory_blocks[i]))
+            {
+                result = false;
+                break;
+            }
+        }
+    }
+
+    if (!result)
+    {
+        cleanup_cond_errors_scenario();
+        return false;
+    }
+    
+    /* fill model state */
+    condInitList = create_List(&type_Integer);
+    for(i = 0; i < COND_NUM; i++)
+    {
+        append_List(condInitList, create_Integer(CONDITION_NOT_INITIALIZED));
+    }
+    
+    //setTSTimeModel(NotUseTSTime);
+    //initFibers(doScen);
+
+    return true;
+}
+
+void finish_cond_errors_scenario(void)
+{
+    cleanup_cond_errors_scenario();
+    TEST_SCENARIO_VERDICT_VERBOSE(sc_errors_scen);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+List* get_ErrorsState(void)
+{
+    return clone(condInitList);
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+ErrorsModelState* saveErrorsState(void)
+{
+    return create_ErrorsModelState( systems, condInitList);
+}
+
+void restoreErrorsState(ErrorsModelState* modelState)
+{
+    systems = modelState->systems;
+    condInitList = modelState->condInitList;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+void doErrorsScen(void)
+{
+    // ..._id - a variable that was initialized then destroyed
+    // ..._ni - a variable that was not initialized at all
+    PThreadCondTPtr condattr_id = memory_blocks[0];
+    PThreadCondTPtr condattr_ni = memory_blocks[1];
+    PThreadCondTPtr cond_id = memory_blocks[2];
+    PThreadCondTPtr cond_ni = memory_blocks[3];
+    PThreadMutexTPtr mutex_id = memory_blocks[4];
+    PThreadMutexTPtr mutex_ni = memory_blocks[5];
+
+    pthread_condattr_init_spec(context_array[0], condattr_id);
+    pthread_condattr_destroy_spec(context_array[0], condattr_id);
+
+    pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+    pthread_cond_destroy_spec(context_array[0], cond_id);
+
+    pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+    pthread_mutex_destroy_spec(context_array[0], mutex_id);
+
+    serialize();
+
+    
+    //pthread_cond_destroy()::EBUSY
+    if(POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EBUSY)
+    {
+        pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+        pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+        serialize();
+
+        pthread_mutex_lock_spec(context_array[1], mutex_id);
+        serialize();
+
+        pthread_cond_timedwait_spec(context_array[1], cond_id, mutex_id, 2 * MILLIARD);
+        serialize();
+
+        pthread_cond_destroy_spec(context_array[0], cond_id);                  // error
+        serialize();
+
+        pthread_cond_signal_spec(context_array[0], cond_id);
+        serialize();
+
+        pthread_cond_wait_spec(context_array[1], cond_id, mutex_id);
+        serialize();
+
+        pthread_cond_destroy_spec(context_array[0], cond_id);                  // error
+        serialize();
+
+        pthread_cond_signal_spec(context_array[0], cond_id);
+
+        pthread_mutex_unlock_spec(context_array[1], mutex_id);
+        serialize();
+
+        pthread_mutex_destroy_spec(context_array[0], mutex_id);
+        pthread_cond_destroy_spec(context_array[0], cond_id);
+    }
+
+
+    //pthread_cond_destroy()::EINVAL
+    if(POSIX_PTHREAD_COND_DESTROY_FAILS_WITH_EINVAL)
+    {
+        pthread_cond_destroy_spec(context_array[0], cond_ni);                  // error 1 (not initialized)
+        pthread_cond_destroy_spec(context_array[0], cond_id);                  // error 2 (init, destroy)
+    }
+
+
+    //pthread_cond_init()::EAGAIN (-)
+
+
+    //pthread_cond_init()::ENOMEM (-)
+
+
+    //pthread_cond_init()::EBUSY
+    if(POSIX_PTHREAD_COND_INIT_FAILS_WITH_EBUSY)
+    {
+        pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+        pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);      // error
+        pthread_cond_destroy_spec(context_array[0], cond_id);
+    }
+
+
+    //pthread_cond_init()::EINVAL
+    if(POSIX_PTHREAD_COND_INIT_FAILS_WITH_EINVAL)
+    {
+        pthread_cond_init_spec(context_array[0], cond_id, condattr_ni);        // error 1 (not initialized)
+        pthread_cond_init_spec(context_array[0], cond_id, condattr_id);        // error 2 (init, destroy)
+    }
+
+
+    //pthread_cond_signal()::EINVAL
+    if(PTHREAD_COND_SIGNAL_FAILS_WITH_EINVAL)
+    {
+        pthread_cond_signal_spec(context_array[0], cond_ni);                   // error 1 (not initialized)
+        pthread_cond_signal_spec(context_array[0], cond_id);                   // error 2 (init, destroy)
+    }
+
+
+    //pthread_cond_broadcast()::EINVAL
+    if(PTHREAD_COND_BROADCAST_FAILS_WITH_EINVAL)
+    {
+        pthread_cond_broadcast_spec(context_array[0], cond_ni);                // error 1 (not initialized)
+        pthread_cond_broadcast_spec(context_array[0], cond_id);                // error 2 (init, destroy)
+    }
+
+
+    //pthread_cond_timedwait()::ETIMEDOUT
+    pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+    pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+    serialize();
+
+    pthread_mutex_lock_spec(context_array[0], mutex_id);
+    serialize();
+
+    // timedwait for 0,1 sec
+    pthread_cond_timedwait_spec(context_array[0], cond_id, mutex_id, MILLIARD / 10);    // error (later a timeout will occur)
+    serialize();
+
+    // wait for 0,3 sec
+    ts_sleep_msec(300);
+    pthread_mutex_unlock_spec(context_array[0], mutex_id);
+    serialize();
+
+    pthread_mutex_destroy_spec(context_array[0], mutex_id);
+    pthread_cond_destroy_spec(context_array[0], cond_id);
+
+
+    //pthread_cond_timedwait()::EINVAL::timeout
+    pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+    pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+    serialize();
+
+    pthread_mutex_lock_spec(context_array[0], mutex_id);
+    serialize();
+
+    pthread_cond_timedwait_bad_spec(context_array[0], cond_id, mutex_id, -1);               // error
+    pthread_cond_timedwait_bad_spec(context_array[0], cond_id, mutex_id, MILLIARD + 10);    // error
+    serialize();
+
+    pthread_mutex_unlock_spec(context_array[0], mutex_id);
+    serialize();
+
+    pthread_mutex_destroy_spec(context_array[0], mutex_id);
+    pthread_cond_destroy_spec(context_array[0], cond_id);
+
+
+    //pthread_cond_wait()::EINVAL::cond
+    if(PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_COND)
+    {
+        pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+        serialize();
+
+        pthread_mutex_lock_spec(context_array[0], mutex_id);
+        serialize();
+
+        pthread_cond_wait_spec(context_array[0], cond_ni, mutex_id);           // error 1 (not initialized)
+        pthread_cond_wait_spec(context_array[0], cond_id, mutex_id);           // error 2 (init, destroy)
+        serialize();
+
+        pthread_mutex_unlock_spec(context_array[0], mutex_id);
+        serialize();
+
+        pthread_mutex_destroy_spec(context_array[0], mutex_id);
+    }
+
+
+    //pthread_cond_wait()::EINVAL::mutex
+    if(PTHREAD_COND_WAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX)
+    {
+        pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+        serialize();
+
+        pthread_cond_wait_spec(context_array[0], cond_id, mutex_ni);           // error 1 (not initialized)
+        pthread_cond_wait_spec(context_array[0], cond_id, mutex_id);           // error 2 (init, destroy)
+        serialize();
+
+        pthread_cond_destroy_spec(context_array[0], cond_id);
+    }
+
+
+    //pthread_cond_wait()::EPERM
+    if(PTHREAD_COND_WAIT_FAILS_WITH_EPERM)
+    {
+        pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+        pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+        pthread_cond_wait_spec(context_array[0], cond_id, mutex_id);           // error
+        pthread_mutex_destroy_spec(context_array[0], mutex_id);
+        pthread_cond_destroy_spec(context_array[0], cond_id);
+    }
+
+
+    //pthread_cond_timedwait()::EINVAL::cond
+    if(PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_COND)
+    {
+        pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+        serialize();
+
+        pthread_mutex_lock_spec(context_array[0], mutex_id);
+        serialize();
+
+        pthread_cond_timedwait_spec(context_array[0], cond_ni, mutex_id, MILLIARD / 10);    // error 1 (not initialized)
+        pthread_cond_timedwait_spec(context_array[0], cond_id, mutex_id, MILLIARD / 10);    // error 2 (init, destroy)
+        serialize();
+
+        pthread_mutex_unlock_spec(context_array[0], mutex_id);
+        serialize();
+
+        pthread_mutex_destroy_spec(context_array[0], mutex_id);
+    }
+
+
+    //pthread_cond_timedwait()::EINVAL::mutex
+    if(PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EINVAL_ON_BAD_MUTEX)
+    {
+        pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+        serialize();
+
+        pthread_cond_timedwait_spec(context_array[0], cond_id, mutex_ni, MILLIARD / 10);    // error 1 (not initialized)
+        pthread_cond_timedwait_spec(context_array[0], cond_id, mutex_id, MILLIARD / 10);    // error 2 (init, destroy)
+        serialize();
+
+        pthread_cond_destroy_spec(context_array[0], cond_id);
+    }
+
+
+    //pthread_cond_timedwait()::EPERM
+    if(PTHREAD_COND_TIMEDWAIT_FAILS_WITH_EPERM)
+    {
+        pthread_cond_init_spec(context_array[0], cond_id, NULL_VoidTPtr);
+        pthread_mutex_init_spec(context_array[0], mutex_id, NULL_VoidTPtr);
+        pthread_cond_timedwait_spec(context_array[0], cond_id, mutex_id, MILLIARD / 10);    // error
+        pthread_mutex_destroy_spec(context_array[0], mutex_id);
+        pthread_cond_destroy_spec(context_array[0], cond_id);
+    }
+
+}
+
+scenario
+bool sc_errors_scen()
+{
+    EXECUTE_EXPLICIT_FSM(doErrorsScen);
+    return !Error;
+}
+
+scenario dfsm cond_errors_scenario =
+{
+    .init = init_cond_errors_scenario,
+    .finish = finish_cond_errors_scenario,
+//    .getState = (PtrGetState)get_ErrorsState,
+    .saveModelState = (PtrSaveModelState)saveErrorsState,
+    .restoreModelState = (PtrRestoreModelState)restoreErrorsState,
+    .isStationaryState = (PtrIsStationaryState)isCondModelStateStationary,
+    .actions = {
+            sc_errors_scen,
+            NULL
+    }
+};
+

@@ -1,0 +1,349 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "ncurses/terminal/terminfo_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initNcursesTerminalTerminfoSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_del_curterm_spec(del_curterm_media);
+    set_mediator_putp_spec(putp_media);
+//    set_mediator_restartterm_spec(restartterm_media);
+    set_mediator_set_curterm_spec(set_curterm_media);
+    set_mediator_setupterm_spec(setupterm_media);
+    set_mediator_termname_spec(termname_media);
+    set_mediator_tigetflag_spec(tigetflag_media);
+    set_mediator_tigetnum_spec(tigetnum_media);
+    set_mediator_tigetstr_spec(tigetstr_media);
+    set_mediator_tparm_spec(tparm_media);
+//    set_mediator_tputs_spec(tputs_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** del_curterm_spec **/
+mediator del_curterm_media for specification
+IntT del_curterm_spec(CallContext context, TerminalTPtr oterm)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res=0;
+
+        format_TSCommand(&command, "del_curterm:$(ptr)", create_VoidTPtrObj(oterm));
+
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        onDelCurTerm(context, oterm, del_curterm_spec);
+    }
+}
+
+
+/** putp_spec **/
+//This mediator refers to: putp, tputs
+mediator putp_media for specification
+IntT putp_spec(CallContext context, CString* str, IntT affcnt, bool putfunc, IntT standardKey)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res=0;
+
+
+        if (standardKey == PUTP_CR)
+        {
+            str = getItem_NCursesTerminfo(context, create_CString("cr"));
+        }
+        else if (standardKey == PUTP_CLEAR)
+        {
+            str = getItem_NCursesTerminfo(context, create_CString("clear"));
+        }
+        else if (standardKey == PUTP_HOME)
+        {
+            str = getItem_NCursesTerminfo(context, create_CString("home"));
+        }
+
+        if (putfunc)
+        {
+            format_TSCommand(&command, "tputs:$(str)$(int)", str, create_IntTObj(affcnt));
+        }
+        else
+        {
+            format_TSCommand(&command, "putp:$(str)", str);
+        }
+
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** set_curterm_spec **/
+mediator set_curterm_media for specification
+SetCurTermReturnType* set_curterm_spec(CallContext context, TerminalTPtr new_term)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        SetCurTermReturnType* res=NULL;
+        TerminalTPtr oldTerm;
+        VoidTPtr stdscr;
+
+        format_TSCommand(&command, "set_curterm:$(ptr)", create_VoidTPtrObj(new_term));
+
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            oldTerm = readPointer_TSStream(context, &command.response);
+            stdscr = readPointer_TSStream(context, &command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return create_SetCurTermReturnType(oldTerm, stdscr);
+    }
+    state
+    {
+        onSetCurterm(context, new_term, set_curterm_spec);
+    }
+}
+
+
+/** setupterm_spec **/
+//This mediator refers to: restartterm, setupterm
+mediator setupterm_media for specification
+SetupTermReturnType* setupterm_spec(CallContext context, CString* term, bool restart)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        SetupTermReturnType* res=NULL;
+        IntT retVal;
+        IntT errret;
+        CString* returnedType;
+        bool isTERMempty;
+
+        if (!restart)
+        {
+            if (term!=NULL)
+            {
+                format_TSCommand(&command, "setupterm:$(int)$(str)", create_IntTObj(0), term);
+            }
+            else
+            {
+                format_TSCommand(&command, "setupterm:$(int)", create_IntTObj(1));
+            }
+        }
+        else
+        {
+            if (term!=NULL)
+            {
+                format_TSCommand(&command, "restartterm:$(int)$(str)", create_IntTObj(0), term);
+            }
+            else
+            {
+                format_TSCommand(&command, "restartterm:$(int)", create_IntTObj(1));
+            }
+        }
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            retVal=readInt_TSStream(&command.response);
+            errret=readInt_TSStream(&command.response);
+            returnedType=readCString_TSStream(&command.response);
+            isTERMempty=readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return create_SetupTermReturnType(retVal, errret, returnedType, isTERMempty);
+    }
+    state
+    {
+        onSetupterm(context, term, setupterm_spec);
+    }
+}
+
+
+/** termname_spec **/
+mediator termname_media for specification
+CString* termname_spec(CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        CString* res;
+
+        format_TSCommand(&command, "termname");
+
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readCString_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+
+/** tigetflag_spec **/
+mediator tigetflag_media for specification
+IntT tigetflag_spec(CallContext context, CString* capname)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "tigetflag:$(str)",
+                                    capname
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+
+/** tigetnum_spec **/
+mediator tigetnum_media for specification
+IntT tigetnum_spec(CallContext context, CString* capname)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "tigetnum:$(str)",
+                                    capname
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+
+/** tigetstr_spec **/
+mediator tigetstr_media for specification
+StringTPtr tigetstr_spec(CallContext context, CString* capname)
+{
+    call
+    {
+        StringTPtr res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "tigetstr:$(str)",
+                                    capname
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+
+/** tparm_spec **/
+mediator tparm_media for specification
+StringTPtr tparm_spec(CallContext context, CString* cap, LongT p1, LongT p2, LongT p3,
+                      LongT p4, LongT p5, LongT p6, LongT p7, LongT p8, LongT p9)
+{
+    call
+    {
+        StringTPtr res;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "tparm:$(str)$(long)$(long)$(long)$(long)$(long)$(long)$(long)$(long)$(long)",
+                                    cap,
+                                    create_LongTObj(p1),
+                                    create_LongTObj(p2),
+                                    create_LongTObj(p3),
+                                    create_LongTObj(p4),
+                                    create_LongTObj(p5),
+                                    create_LongTObj(p6),
+                                    create_LongTObj(p7),
+                                    create_LongTObj(p8),
+                                    create_LongTObj(p9)
+                        );
+        executeCommandInContext(context, &command);
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+

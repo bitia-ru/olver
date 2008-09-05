@@ -1,0 +1,574 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#define NEWREQ
+
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "process/process/process_model.seh"
+#include "util/dl/tests/dl_scenario.seh"
+#include "util/dl/dl_media.seh"
+#include "util/dl/tests/dl_syms.seh"
+#include "config/test_system_config.h"
+
+static CallContext context;
+static Map* mapObjects;
+static Map* mapErrObjects;
+static Map* mapMyObjects;
+static Set* setStdSyms;
+/********************************************************************/
+/**                       SCENARIO FUNCTIONS                       **/
+/********************************************************************/
+static bool init_scen(int argc, char* argv[])
+{
+    context = getContext();
+    DLLoadStandardLibrarySymbols();
+    getTestDataStdSymbols();
+
+    return true;
+}
+
+static void finish_scen(void)
+{
+}
+
+scenario
+static bool dl_scen(void)
+{
+    int i, j, dladdrRes, dlcloseRes;
+    Map* curMap;
+
+    DLInfo* dlip;
+    CString *libName, *symName;
+    VoidTPtr dlopenRes, dlsymRes, hRootObj;
+
+    dlip = create_DLInfo();    
+
+    /***************************************************************************
+     * opening predefined existing objects,
+     * dlsyming all symbols, dladdring
+     */
+    for(i = 0; i < size_Map(mapObjects) + size_Map(mapMyObjects); i++)
+    {
+        libName = i < size_Map(mapObjects) ? key_Map(mapObjects, i) : key_Map(mapMyObjects, i-size_Map(mapObjects));
+        curMap = i < size_Map(mapObjects) ? get_Map(mapObjects, libName) : get_Map(mapMyObjects, libName);
+
+        dlopenRes = dlopen_spec(context, libName, SUT_RTLD_NOW | SUT_RTLD_LOCAL);
+
+        if(isFileNamePath(libName))
+        {
+            /*
+             * The file argument is used to construct a pathname to the object file.
+             *
+             * If file contains a slash character, the file argument is used as the pathname 
+             * for the file.
+             */
+            REQ("dlopen.06.01", "file contains a slash character", !isNULL_VoidTPtr(dlopenRes));
+        }
+        else
+            /*
+             * If the file argument does not contain a slash character, then the system shall 
+             * look for a library of that name in at least the following directories, and use 
+             * the first one which is found:
+             *
+             * The directories specified by the DT_RPATH dynamic entry.
+             */
+            /*
+             * If the file argument does not contain a slash character, then the system shall 
+             * look for a library of that name in at least the following directories, and use 
+             * the first one which is found:
+             *
+             * The directories specified in the LD_LIBRARY_PATH environment variable (which is 
+             * a colon separated list of pathnames).
+             */
+            REQ("dlopen.lsb.02.01;dlopen.lsb.02.02", "correct lib not found", !isNULL_VoidTPtr(dlopenRes));
+
+        dlerror_spec(context);
+
+        for(j = 0; j < size_Map(curMap); j++)
+        {
+            symName = key_Map(curMap, j);
+
+            dlsymRes = dlsym_spec(context, dlopenRes, symName);
+
+            /*
+             * The dlsym() function shall search for the named symbol in all objects loaded 
+             * automatically as a result of loading the object referenced by handle (see 
+             * dlopen()).
+             */
+            REQ("dlsym.03", "correct symbol not found", !isNULL_VoidTPtr(dlsymRes));
+
+            dlerror_spec(context);
+
+            dladdrRes = dladdr_spec(context, dlsymRes, dlip);
+
+            /*
+             * On success, dladdr() shall return non-zero, and the structure referenced by 
+             * dlip shall be filled in as described.
+             */
+            REQ("dladdr.lsb.05", "shall return non-zero", dladdrRes != 0);
+
+            dlerror_spec(context);
+        }
+    }
+
+    /***************************************************************************
+     * opening predefined not existing objects,
+     * dlsyming all not existing symbols, dladdring
+     */
+    for(i = 0; i < size_Map(mapErrObjects); i++)
+    {
+        libName = key_Map(mapErrObjects, i);
+        curMap = get_Map(mapErrObjects, libName);
+
+        if(!containsKey_Map(mapObjects, libName))
+        {
+
+            dlopenRes = dlopen_spec(context, libName, SUT_RTLD_NOW | SUT_RTLD_LOCAL);
+
+            /*
+             * If file cannot be found, cannot be opened for reading, is not of an appropriate 
+             * object format for processing by dlopen(), or if an error occurs during the 
+             * process of loading file or relocating its symbolic references, dlopen() shall 
+             * return NULL.
+             */
+            REQ("dlopen.18", "file can't be found", isNULL_VoidTPtr(dlopenRes));
+
+            if(isFileNamePath(libName))
+            {
+                /*
+                 * The file argument is used to construct a pathname to the object file.
+                 *
+                 * If file contains a slash character, the file argument is used as the pathname 
+                 * for the file.
+                 */
+                REQ("dlopen.06.01", "file contains a slash character", isNULL_VoidTPtr(dlopenRes));
+            }
+
+            dlerror_spec(context);
+        }
+
+        for(j = 0; j < size_Map(curMap); j++)
+        {
+            symName = key_Map(curMap, j);
+
+            dlsymRes = dlsym_spec(context, dlopenRes, symName);
+
+            /*
+             * If handle does not refer to a valid object opened by dlopen(), or if the named 
+             * symbol cannot be found within any of the objects associated with handle, dlsym() 
+             * shall return NULL.
+             */
+            REQ("dlsym.07", "if the named symbol can't be found shall return NULL",
+                isNULL_VoidTPtr(dlsymRes));
+
+            dlerror_spec(context);
+
+            dladdrRes = dladdr_spec(context, dlsymRes, dlip);
+
+            /*
+             * Otherwise, dladdr() shall return zero, and the cause of the error can be 
+             * fetched with dlerror().
+             */
+            REQ("dladdr.lsb.06", "shall return zero", dladdrRes == 0);
+
+            /* bug (431): REQ("dladdr.lsb.06", "the cause of error", dlerror_spec(context) != NULL); */
+
+            dlerror_spec(context);
+        }
+    }
+
+    /***************************************************************************
+     * opening the global symbols object,
+     * dlsyming all not existing symbols
+     */
+    dlopenRes = dlopen_spec(context, NULL, SUT_RTLD_NOW | SUT_RTLD_LOCAL);
+
+    for(i = 0; i < size_Map(mapMyObjects) + size_Map(mapErrObjects); i++)
+    {
+        libName = i < size_Map(mapMyObjects) ? key_Map(mapMyObjects, i) : key_Map(mapErrObjects, i - size_Map(mapMyObjects));
+        curMap = i < size_Map(mapMyObjects) ? get_Map(mapMyObjects, libName) : get_Map(mapErrObjects, libName);
+
+        for(j = 0; j < size_Map(curMap); j++)
+        {
+            symName = key_Map(curMap, j);
+
+            dlsymRes = dlsym_spec(context, dlopenRes, symName);
+
+            /*
+             * If handle does not refer to a valid object opened by dlopen(), or if the named 
+             * symbol cannot be found within any of the objects associated with handle, dlsym() 
+             * shall return NULL.
+             */
+            /*
+             * The mode parameter describes how dlopen() shall operate upon file with respect 
+             * to the processing of relocations and the scope of visibility of the symbols 
+             * provided within file.
+             *
+             * To determine the scope of visibility for the symbols loaded with a dlopen() 
+             * invocation, the mode parameter should be a bitwise-inclusive OR with one of the 
+             * following values:
+             *
+             * RTLD_LOCAL The object's symbols shall not be made available for the relocation 
+             * processing of any other object.
+             */
+            if(i < size_Map(mapMyObjects))
+            {
+                REQ("dlsym.07;dlopen.09.02.02", "symbols shall not be made available", isNULL_VoidTPtr(dlsymRes));
+            }
+            else
+                REQ("dlsym.07", "if the named symbol can't be found shall return NULL", isNULL_VoidTPtr(dlsymRes));
+
+            dlerror_spec(context);
+        }
+    }
+
+    /***************************************************************************
+     * opening the global symbols object,
+     * checking, that predefined symbols not found
+     */
+    hRootObj = dlopenRes = dlopen_spec(context, NULL, SUT_RTLD_NOW | SUT_RTLD_GLOBAL);
+
+    for(i = 0; i < size_Map(mapMyObjects) + size_Map(mapErrObjects); i++)
+    {
+        libName = i < size_Map(mapMyObjects) ? key_Map(mapMyObjects, i) : key_Map(mapErrObjects, i - size_Map(mapMyObjects));
+        curMap = i < size_Map(mapMyObjects) ? get_Map(mapMyObjects, libName) : get_Map(mapErrObjects, libName);
+
+        for(j = 0; j < size_Map(curMap); j++)
+        {
+            symName = key_Map(curMap, j);
+
+            dlsymRes = dlsym_spec(context, dlopenRes, symName);
+
+            /*
+             * If handle does not refer to a valid object opened by dlopen(), or if the named 
+             * symbol cannot be found within any of the objects associated with handle, dlsym() 
+             * shall return NULL.
+             */
+            /*
+             * The mode parameter describes how dlopen() shall operate upon file with respect 
+             * to the processing of relocations and the scope of visibility of the symbols 
+             * provided within file.
+             *
+             * To determine the scope of visibility for the symbols loaded with a dlopen() 
+             * invocation, the mode parameter should be a bitwise-inclusive OR with one of the 
+             * following values:
+             *
+             * RTLD_LOCAL The object's symbols shall not be made available for the relocation 
+             * processing of any other object.
+             */
+            if(i < size_Map(mapMyObjects))
+            {
+                REQ("dlsym.07;dlopen.09.02.02", "symbols shall not be made available", isNULL_VoidTPtr(dlsymRes));
+            }
+            else
+                REQ("dlsym.07", "if the named symbol can't be found shall return NULL", isNULL_VoidTPtr(dlsymRes));
+
+            dlerror_spec(context);
+        }
+    }
+
+    /***************************************************************************
+     * opening few objects as GLOBAL
+     * and checking, that it objects may accessed by
+     * the global symbols object
+     */
+    
+    for(i = 0; i < size_Map(mapMyObjects); i++)
+    {
+        libName = key_Map(mapMyObjects, i);
+        curMap = get_Map(mapMyObjects, libName);
+
+        if(i%3 == 0)
+        {
+            dlopenRes = dlopen_spec(context, libName, SUT_RTLD_NOW | SUT_RTLD_GLOBAL);
+
+            if(isFileNamePath(libName))
+            {
+                /*
+                 * The file argument is used to construct a pathname to the object file.
+                 *
+                 * If file contains a slash character, the file argument is used as the pathname 
+                 * for the file.
+                 */
+                REQ("dlopen.06.01", "file contains a slash character", !isNULL_VoidTPtr(dlopenRes));
+            }
+            else
+                /*
+                 * If the file argument does not contain a slash character, then the system shall 
+                 * look for a library of that name in at least the following directories, and use 
+                 * the first one which is found:
+                 *
+                 * The directories specified by the DT_RPATH dynamic entry.
+                 */
+                /*
+                 * If the file argument does not contain a slash character, then the system shall 
+                 * look for a library of that name in at least the following directories, and use 
+                 * the first one which is found:
+                 *
+                 * The directories specified in the LD_LIBRARY_PATH environment variable (which is 
+                 * a colon separated list of pathnames).
+                 */
+                REQ("dlopen.lsb.02.01;dlopen.lsb.02.02", "correct lib not found", !isNULL_VoidTPtr(dlopenRes));
+
+            dlerror_spec(context);
+        }
+
+        for(j = 0; j < size_Map(curMap); j++)
+        {
+            symName = key_Map(curMap, j);
+
+            dlsymRes = dlsym_spec(context, hRootObj, symName);
+
+            if(i%3 == 0)
+            {
+                /*
+                 * The dlsym() function shall search for the named symbol in all objects loaded 
+                 * automatically as a result of loading the object referenced by handle (see 
+                 * dlopen()).
+                 */
+                REQ("dlsym.03", "correct symbol not found", !isNULL_VoidTPtr(dlsymRes));
+            }
+            else
+            {
+                /*
+                 * If handle does not refer to a valid object opened by dlopen(), or if the named 
+                 * symbol cannot be found within any of the objects associated with handle, dlsym() 
+                 * shall return NULL.
+                 */
+                REQ("dlsym.07", "if the named symbol can't be found shall return NULL",
+                    isNULL_VoidTPtr(dlsymRes));
+            }
+
+            dlerror_spec(context);
+        }
+    }
+    
+    for(i = 0; i < size_Set(setStdSyms); i++)
+    {
+        symName = get_Set(setStdSyms, i);
+
+        dlsymRes = dlsym_spec(context, hRootObj, symName);
+
+        /*
+         * The dlsym() function shall search for the named symbol in all objects loaded 
+         * automatically as a result of loading the object referenced by handle (see 
+         * dlopen()).
+         */
+        REQ("dlsym.03", "correct symbol not found", !isNULL_VoidTPtr(dlsymRes));
+
+        dlerror_spec(context);
+    }
+
+    /***************************************************************************
+     * closing all objects
+     * checking, that symbols are lost
+     */
+    dlcloseRes = dlclose_spec(context, hRootObj);
+
+    dlerror_spec(context);
+
+    /*
+     * If the referenced object was successfully closed, dlclose() shall return 0.
+     */
+    REQ("dlclose.05", "shall return 0", dlcloseRes == 0);
+    
+    for(i = 0; i < size_Map(mapMyObjects); i++)
+    {
+        VoidTPtr handle;
+
+        libName = key_Map(mapMyObjects, i);
+        curMap = get_Map(mapMyObjects, libName);
+
+        handle = getDLObjectHandleByName(context, libName);
+        /* erase line when implementation bug (418) fixed: */if(isNULL_VoidTPtr(handle)) dlcloseRes = 1; else
+        dlcloseRes = dlclose_spec(context, handle);
+
+        if(!isNULL_VoidTPtr(handle))
+        {
+            /*
+             * If the referenced object was successfully closed, dlclose() shall return 0.
+             */
+            REQ("dlclose.05", "shall return 0", dlcloseRes == 0);
+        }
+        else
+        {
+            /*
+             * If the object could not be closed, or if handle does not refer to an open 
+             * object, dlclose() shall return a non-zero value.
+             */
+            REQ("dlclose.06", "shall return a non-zero value", dlcloseRes != 0);
+
+            /*
+             * More detailed diagnostic information shall be available through dlerror().
+             */
+            REQ("dlclose.07", "shall return a non-zero value", dlerror_spec(context) != NULL);
+        }
+    }
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                       SCENARIO DEFINITION                      **/
+/********************************************************************/
+
+scenario dfsm dl_scenario =
+{
+    .init = init_scen
+,   .finish = finish_scen
+,   .actions = {
+        dl_scen,
+        NULL
+    }
+};
+
+/********************************************************************/
+/**                           GLOBAL MAIN                          **/
+/********************************************************************/
+#ifdef UTIL_DL_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+
+/********************************************************************/
+/**                           LOCAL MAIN                           **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+    
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initUtilDlSubsystem();
+}
+
+int main(int argc, char* argv[])
+{
+    initTestSystem();
+    loadSUT();
+
+    addTraceToFile("trace.xml");
+
+    dl_scenario(argc, argv) == 0 ? verbose("FAIL\n") : verbose("PASS\n");
+
+    return 0;
+}
+
+#endif
+
+/********************************************************************/
+/**                        HELPER FUNCTIONS                        **/
+/********************************************************************/
+
+void getTestDataStdSymbols()
+{
+    int i;
+
+    setStdSyms = create_Set(&type_CString);
+
+    for(i = 0; i < stdSymsListNum; i++)
+        add_Set(setStdSyms, format_CString("%s", stdSymsList[i]));
+}
+
+void DLLoadStandardLibrarySymbols(void)
+{
+    Map* libdlMap;
+    Map* libcryptMap;
+    Map* libzMap;
+    Map* libncursesMap;
+    Map* libutilMap;
+    Map* libpthreadMap;
+    Map* librtMap;
+    Map* libpamMap;
+    Map* libgccMap;
+
+    Map* libO_O;
+    Map* libdle;
+    Map* libMy;
+
+    VoidTPtrObj* NullObj = create_VoidTPtrObj(NULL_VoidTPtr);
+
+    libdlMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    put_Map(libdlMap, _CS("dlopen"), NullObj);
+    put_Map(libdlMap, _CS("dlclose"), NullObj);
+    put_Map(libdlMap, _CS("dlerror"), NullObj);
+    put_Map(libdlMap, _CS("dlsym"), NullObj);
+    put_Map(libdlMap, _CS("dladdr"), NullObj);
+    libcryptMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    put_Map(libcryptMap, _CS("crypt"), NullObj);
+    put_Map(libcryptMap, _CS("encrypt"), NullObj);
+    put_Map(libcryptMap, _CS("setkey"), NullObj);
+    libzMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    libncursesMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    libutilMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    put_Map(libutilMap, _CS("forkpty"), NullObj);
+    put_Map(libutilMap, _CS("login_tty"), NullObj);
+    put_Map(libutilMap, _CS("logwtmp"), NullObj);
+    put_Map(libutilMap, _CS("login"), NullObj);
+    put_Map(libutilMap, _CS("logout"), NullObj);
+    put_Map(libutilMap, _CS("openpty"), NullObj);
+
+    libpthreadMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    librtMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    libpamMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    libgccMap = create_Map(&type_CString, &type_VoidTPtrObj);
+    
+    libO_O = create_Map(&type_CString, &type_VoidTPtrObj);
+    put_Map(libO_O, _CS("funcO_O"), NullObj);
+    put_Map(libO_O, _CS("varO_O"), NullObj);
+
+    libdle = create_Map(&type_CString, &type_VoidTPtrObj);
+    put_Map(libdle, _CS("__dlabracadabra__"), NullObj);
+
+    mapObjects = create_Map(&type_CString, &type_Map);
+    put_Map(mapObjects, _CS("libdl.so.2"),                      libdlMap);
+    put_Map(mapObjects, _CS("libcrypt.so.1"),                   libcryptMap);
+    put_Map(mapObjects, _CS("libz.so.1"),                       libzMap);
+    put_Map(mapObjects, _CS("libncurses.so.5"),                 libncursesMap);
+    put_Map(mapObjects, _CS("libutil.so.1"),                    libutilMap);
+    put_Map(mapObjects, _CS("libpthread.so.0"),                 libpthreadMap);
+    put_Map(mapObjects, _CS("librt.so.1"),                      librtMap);
+    put_Map(mapObjects, _CS("libpam.so.0"),                     libpamMap);
+    put_Map(mapObjects, _CS("libgcc_s.so.1"),                   libgccMap);
+
+    mapErrObjects = create_Map(&type_CString, &type_Map);
+    put_Map(mapErrObjects, _CS("libO_O.so"), libO_O);
+    put_Map(mapErrObjects, _CS("libdl.so.2"), libdle);
+
+    mapMyObjects = create_Map(&type_CString, &type_Map);
+    libMy = create_Map(&type_CString, &type_VoidTPtrObj);
+    put_Map(libMy, _CS("func"), NullObj);
+    put_Map(mapMyObjects, format_CString("%s/util.dl/libmy.so", TEST_DATA_PATH), libMy);
+}

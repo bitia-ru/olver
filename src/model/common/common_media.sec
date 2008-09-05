@@ -1,0 +1,843 @@
+/*
+* Copyright (c) 2005-2006 Institute for System Programming
+* Russian Academy of Sciences
+* All rights reserved.
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
+
+
+#include "atl/char.h"
+#include "atl/integer.h"
+#include "atl/long.h"
+#include "atl/void_ast.h"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_model.seh"
+
+// Tmp
+static Map* formatters;
+static Map* dr_processors;
+static Map* threadId2Channel;
+
+
+/********************************************************************/
+/**                       Common Formatters                        **/
+/********************************************************************/
+static void wint_formatter(TSStream* stream, WIntTObj* value)
+{
+  VERIFY_TYPE(wint_formatter, &type_WIntTObj, value);
+
+  writeUInt_TSStream(stream, *value);
+}
+
+static void byte_array_formatter(TSStream* stream,CByteArray* value)
+{
+    VERIFY_TYPE( byte_array_formatter, &type_CByteArray, value );
+
+    writeCByteArray_TSStream( stream, value );
+}
+
+static void wchar_array_formatter(TSStream* stream,WCharArray* value)
+{
+    VERIFY_TYPE( wchar_array_formatter, &type_WCharArray, value );
+
+    writeWCharArray_TSStream( stream, value );
+}
+
+static void string_formatter(TSStream* stream,Object* str)
+{
+    if ((str == NULL) || (type(str) == &type_CString))
+    {
+        writeCString_TSStream( stream, str );
+        return;
+    }
+
+    VERIFY_TYPE( string_formatter, &type_String, str );
+
+    writeString_TSStream( stream, str );
+}
+
+static void char_formatter(TSStream* stream,CharTObj* value)
+{
+    //  VERIFY_TYPE( char_formatter, &type_CharTObj, value );
+
+    writeChar_TSStream( stream, *value );
+}
+
+static void schar_formatter(TSStream* stream,SCharTObj* value)
+{
+    //  VERIFY_TYPE( schar_formatter, &type_SCharTObj, value );
+
+    writeSChar_TSStream( stream, *value );
+}
+
+static void uchar_formatter(TSStream* stream,UCharTObj* value)
+{
+    //  VERIFY_TYPE( uchar_formatter, &type_UCharTObj, value );
+
+    writeUChar_TSStream( stream, *value );
+}
+
+static void short_formatter(TSStream* stream,ShortTObj* value)
+{
+    //  VERIFY_TYPE( short_formatter, &type_ShortTObj, value );
+
+    writeShort_TSStream( stream, *value );
+}
+
+static void ushort_formatter(TSStream* stream,UShortTObj* value)
+{
+    //  VERIFY_TYPE( ushort_formatter, &type_UShortTObj, value );
+
+    writeUShort_TSStream( stream, *value );
+}
+
+static void int_formatter(TSStream* stream,IntTObj* value)
+{
+    //  VERIFY_TYPE( int_formatter, &type_IntTObj, value );
+
+    writeInt_TSStream( stream, *value );
+}
+
+static void uint16_formatter(TSStream* stream,UInt16TObj* value)
+{
+    //  VERIFY_TYPE( uint16_formatter, &type_UInt16TObj, value );
+
+    writeUInt16_TSStream( stream, *value );
+}
+
+static void uint_formatter(TSStream* stream,UIntTObj* value)
+{
+    //  VERIFY_TYPE( uint_formatter, &type_UIntTObj, value );
+
+    writeUInt_TSStream( stream, *value );
+}
+
+static void uint32_formatter(TSStream* stream,UInt32TObj* value)
+{
+    //  VERIFY_TYPE( uint32_formatter, &type_UInt32TObj, value );
+
+    writeUInt32_TSStream( stream, *value );
+}
+
+static void long_formatter(TSStream* stream,LongTObj* value)
+{
+    //  VERIFY_TYPE( long_formatter, &type_LongTObj, value );
+
+    writeLong_TSStream( stream, *value );
+}
+
+static void ulong_formatter(TSStream* stream,ULongTObj* value)
+{
+    //  VERIFY_TYPE( ulong_formatter, &type_ULongTObj, value );
+
+    writeULong_TSStream( stream, *value );
+}
+
+static void llong_formatter(TSStream* stream,LLongTObj* value)
+{
+    //  VERIFY_TYPE( llong_formatter, &type_LLongTObj, value );
+
+    writeLLong_TSStream( stream, *value );
+}
+
+static void ullong_formatter(TSStream* stream,ULLongTObj* value)
+{
+    //  VERIFY_TYPE( ullong_formatter, &type_ULLongTObj, value );
+
+    writeULLong_TSStream( stream, *value );
+}
+
+static void wchar_formatter(TSStream* stream,WCharTObj* value)
+{
+    VERIFY_TYPE( wchar_formatter, &type_WCharTObj, value );
+
+    writeWChar_TSStream( stream, *value );
+}
+
+static void size_formatter(TSStream* stream,SizeTObj* value)
+{
+    VERIFY_TYPE( size_formatter, &type_SizeTObj, value );
+
+    writeSize_TSStream( stream, *value );
+}
+
+static void ssize_formatter(TSStream* stream,SSizeTObj* value)
+{
+    VERIFY_TYPE( ssize_formatter, &type_SSizeTObj, value );
+
+    writeSSize_TSStream( stream, *value );
+}
+
+static void intmax_formatter(TSStream* stream,IntMaxTObj* value)
+{
+    VERIFY_TYPE( intmax_formatter, &type_IntMaxTObj, value );
+
+    writeIntMaxT_TSStream( stream, *value );
+}
+
+static void intptr_formatter(TSStream* stream,IntPtrTObj* value)
+{
+    VERIFY_TYPE( intptr_formatter, &type_IntPtrTObj, value );
+
+    writeIntPtrT_TSStream( stream, *value );
+}
+
+static void ptr_formatter(TSStream* stream,VoidTPtrObj* value)
+{
+    VERIFY_TYPE( ptr_formatter, &type_VoidTPtrObj, value );
+
+    writePointer_TSStream( stream, *value );
+}
+
+static void timeunit_formatter(TSStream* stream,TimeUnitObj* value)
+{
+    VERIFY_TYPE( timeunit_formatter, &type_TimeUnitObj, value );
+
+    writeTimeUnit_TSStream( stream, *value );
+}
+
+static void flags_formatter(TSStream* stream,List* flags)
+{
+    VERIFY_TYPE( flags_formatter, &type_List, flags );
+
+    writeFlags_TSStream( stream, flags );
+}
+
+// wstring formatter should be registered separately if needed
+// void writeWString_TSStream(TSStream* stream, WString* wstr)
+// moved to tsstream
+
+void wstring_formatter(TSStream* stream, Object* wstr)
+{
+    VERIFY_TYPE(wstring_formatter, &type_WString, wstr);
+
+    writeWString_TSStream(stream, wstr);
+}
+
+/********************************************************************/
+/**                   Common Media Initialization                  **/
+/********************************************************************/
+void initCommonMedia(void)
+{
+    // Set up mediators
+    formatters = create_Map( NULL, NULL );
+    // Set up common formatters
+    registerTSFormatter("ba",(TSFormatterFuncType)byte_array_formatter);
+    registerTSFormatter("wchararray",(TSFormatterFuncType)wchar_array_formatter);
+    registerTSFormatter("str",(TSFormatterFuncType)string_formatter);
+    registerTSFormatter("char",(TSFormatterFuncType)char_formatter);
+    registerTSFormatter("schar",(TSFormatterFuncType)schar_formatter);
+    registerTSFormatter("uchar",(TSFormatterFuncType)uchar_formatter);
+    registerTSFormatter("short",(TSFormatterFuncType)short_formatter);
+    registerTSFormatter("ushort",(TSFormatterFuncType)ushort_formatter);
+    registerTSFormatter("int",(TSFormatterFuncType)int_formatter);
+    registerTSFormatter("uint16",(TSFormatterFuncType)uint16_formatter);
+    registerTSFormatter("uint",(TSFormatterFuncType)uint_formatter);
+    registerTSFormatter("uint32",(TSFormatterFuncType)uint32_formatter);
+    registerTSFormatter("long",(TSFormatterFuncType)long_formatter);
+    registerTSFormatter("ulong",(TSFormatterFuncType)ulong_formatter);
+    registerTSFormatter("llong",(TSFormatterFuncType)llong_formatter);
+    registerTSFormatter("ullong",(TSFormatterFuncType)ullong_formatter);
+    registerTSFormatter("wchar",(TSFormatterFuncType)wchar_formatter);
+    registerTSFormatter("size",(TSFormatterFuncType)size_formatter);
+    registerTSFormatter("ssize",(TSFormatterFuncType)ssize_formatter);
+    registerTSFormatter("intmax",(TSFormatterFuncType)intmax_formatter);
+    registerTSFormatter("intptr",(TSFormatterFuncType)intptr_formatter);
+    registerTSFormatter("ptr",(TSFormatterFuncType)ptr_formatter);
+    registerTSFormatter("timeunit",(TSFormatterFuncType)timeunit_formatter);
+    registerTSFormatter("flags",(TSFormatterFuncType)flags_formatter);
+    registerTSFormatter("wint", (TSFormatterFuncType)wint_formatter);
+
+    dr_processors = create_Map( &type_String, NULL );
+
+    threadId2Channel = create_Map( NULL, &type_Long );
+}
+
+
+/********************************************************************/
+/**                            Formatter                            **/
+/********************************************************************/
+void registerTSFormatter(const char* name,TSFormatterFuncType formatter)
+{
+    put_Map( formatters, create_String(name), create_VoidAst(formatter) );
+}
+
+TSFormatterFuncType findTSFormatter(const char* name)
+{
+    String* key;
+
+    key = create_String(name);
+    if (!containsKey_Map( formatters, key ))
+    {
+        assertion( false, "formatter for '%s' not found", name );
+        return NULL;
+    }
+    return (TSFormatterFuncType)value_VoidAst( get_Map( formatters, key ) );
+}
+
+
+/********************************************************************/
+/**                     Exception Messages                         **/
+/********************************************************************/
+bool processExceptionMessage( TSBuffer* message, bool is_in_call )
+{
+    char* excp_message;
+    TSStream stream;
+
+    initTSStream( &stream, message );
+    if (!startsWith_TSStream(&stream,"$excp:"))
+        return false;
+    verifyType_TSStream(&stream,"$excp");
+    excp_message = readStringAsCharArray_TSStream(&stream);
+    if (is_in_call)
+        setBadVerdict( excp_message );
+    else
+        registerWrongReaction( excp_message );
+    return true;
+}
+
+
+/********************************************************************/
+/**                       Deferred Reactions                       **/
+/********************************************************************/
+ChannelID getThreadChannelID(ThreadId threadid)
+{
+    ChannelID channel;
+    ThreadIdObj* key = create_ThreadIdObj(threadid);
+
+    if (containsKey_Map( threadId2Channel, key ))
+    {
+        Long* channelId = get_Map( threadId2Channel, key );
+        return *channelId;
+    }
+    channel = getChannelID();
+    put_Map( threadId2Channel, key, create_Long(channel) );
+    return channel;
+}
+
+void registerDRProcessor(const char* name,DRProcessorFuncType processor)
+{
+    put_Map( dr_processors, create_String(name), create_VoidAst(processor) );
+}
+
+DRProcessorFuncType findDRProcessor(const char* name)
+{
+    VoidAst* processor;
+
+    processor = get_Map( dr_processors, create_String(name) );
+    if (processor == NULL)
+        return NULL;
+    return (DRProcessorFuncType)value_VoidAst( processor );
+}
+
+void processDeferredReaction( const char* name, ThreadId threadId, TSStream* stream, TSMetaData* meta )
+{
+    DRProcessorFuncType processor;
+
+    processor = findDRProcessor(name);
+    if (processor == NULL)
+    {
+        registerWrongReaction(name);
+        return;
+    }
+    processor(threadId,stream,meta);
+}
+
+bool processDeferredReactionMessage(ThreadId threadId,TSBuffer* message,TSMetaData* meta)
+{
+    char* drname;
+    TSStream stream;
+
+    initTSStream( &stream, message );
+    if (!startsWith_TSStream(&stream,"$dr:"))
+        return false;
+    verifyType_TSStream(&stream,"$dr");
+    drname = readStringAsCharArray_TSStream(&stream);
+    processDeferredReaction( drname, threadId, &stream, meta );
+    return true;
+}
+
+void checkForDeferredReactions( TestAgentDesc* agent )
+{
+    ConnectionStatus status;
+    TSBuffer message;
+    TSMetaData meta;
+
+    for(;;)
+    {
+        status = getConnectionStatus(agent->socket);
+        if (status == Empty_ConnectionStatus)
+            return;
+        if ((status == Closed_ConnectionStatus) || (status == Error_ConnectionStatus))
+        {
+            unregisterTestAgent(agent);
+            return;
+        }
+        // Process the following message
+        message.data = NULL;
+        message.memory_available = 0;
+        message.length = 0;
+        meta.timestamp = overallTimeInterval;
+        // status = receiveTSMessage( agent->socket, &message );
+        status = receiveTAResponse( agent, &message, &meta );
+
+        if ((status == Closed_ConnectionStatus) || (status == Error_ConnectionStatus))
+        {
+            if (status == Error_ConnectionStatus)
+                registerWrongReaction("receiveTSMessage failed");
+            unregisterTestAgent(agent);
+            return;
+        }
+        if (!processDeferredReactionMessage( agent->threadid, &message, &meta ))
+        {
+            if (!processExceptionMessage(&message,false))
+            {
+ //               TRACE_OBJECT( create_CByteArray( (ByteT*)message.data, message.length ) );
+  //              TRACE_OBJECT( create_CString( message.data+3 ) );
+                registerWrongReaction("deferred reactions expected");
+            }
+        }
+        destroy_TSBuffer(&message);
+    }
+}
+
+bool registerDeferredReactions(void* dummy)
+{
+    TestAgentDesc* agent;
+    int i,size,size2;
+
+    size = size_Map( taMap );
+    for( i = 0; i < size; i++ )
+    {
+        agent = get_Map( taMap, key_Map( taMap, i ) );
+        checkForDeferredReactions( agent );
+        size2 = size_Map( taMap );
+        if (size > size2)
+        {
+            i--;
+            size = size2;
+        }
+    }
+    // Reason: if long message was sent by the last agent,
+    //         message sent by the first agent can be not received
+    for( i = 0; i < size; i++ )
+    {
+        agent = get_Map( taMap, key_Map( taMap, i ) );
+        checkForDeferredReactions( agent );
+        size2 = size_Map( taMap );
+        if (size > size2)
+        {
+            i--;
+            size = size2;
+        }
+    }
+    return true;
+}
+
+
+/********************************************************************/
+/**                  Deferred Accept of Test Agent                 **/
+/********************************************************************/
+ThreadId acceptTestAgent(bool blocking);
+
+static
+bool acceptTestAgentCatcher(void* unique_mark)
+{
+    acceptTestAgent(false);
+    unregisterReactionCatcher( acceptTestAgentCatcher, unique_mark );
+    free(unique_mark);
+    return true;
+}
+
+void deferredAcceptTestAgent(void)
+{
+    registerReactionCatcher( acceptTestAgentCatcher, malloc(1) );
+}
+
+
+/********************************************************************/
+/**                 Test Model Initialization Commands             **/
+/********************************************************************/
+bool initTestModel( CallContext context )
+{
+    SystemState*  systemState  = getSystemState_CallContext(context);
+    ProcessState* processState = getProcessState_CallContext(context);
+    TSCommand command = create_TSCommand();
+    bool verdict;
+
+    assertion( systemState != NULL,  "initTestModel: System not found" );
+    assertion( processState != NULL, "initTestModel: Process not found" );
+
+    format_TSCommand( &command, "test_model_init" );
+    verdict = executeCommandInContext( context, &command );
+    if (!verdict)
+    {
+        traceUserInfo( "TEST MODEL INITIALIZATION FAILED" );
+        destroy_TSCommand(&command);
+        return false;
+    }
+
+    // Read response
+    // 1. System Configuration
+    // Byte Order
+    // systemState->configuration->byte_order = readByteOrder_TSStream(&command.response);
+
+    // 2. Process meta info
+    // Parent
+    processState->meta.parent.system = context.system;
+    processState->meta.parent.process = readInt_TSStream(&command.response);
+    // Process Group
+    processState->meta.pgroup.system  = context.system;
+    processState->meta.pgroup.process = readInt_TSStream(&command.response);
+    // Session
+    processState->meta.session.system  = context.system;
+    processState->meta.session.process = readInt_TSStream(&command.response);
+    // Controlling Terminal
+    {
+        CString* cterm = readCString_TSStream(&command.response);
+        if (length_CString(cterm) > 0)
+        {
+            processState->meta.cterm = cterm;
+        }
+    }
+    // User Attributes
+    processState->meta.real_userid       = readUInt_TSStream(&command.response);
+    processState->meta.real_groupid      = readUInt_TSStream(&command.response);
+    processState->meta.effective_userid  = readUInt_TSStream(&command.response);
+    processState->meta.effective_groupid = readUInt_TSStream(&command.response);
+    // Floating-Point Environment
+    processState->fe_dfl_env             = readPointer_TSStream(context, &command.response);
+
+    destroy_TSCommand(&command);
+
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Model Initialization                   **/
+/********************************************************************/
+void onTestSystemInitialization( CallContext context )
+{
+    // Initialize test model on base of interactions with test agent
+    initTestModel(context);
+}
+
+void onProcessInitialization( CallContext context )
+{
+    // Initialize process state model on base of interactions with test agent
+    initTestModel(context);
+    // TODO: Use different commands test_model_init and test_process_init
+}
+
+
+/********************************************************************/
+/**                      Test Agent Descriptor                     **/
+/********************************************************************/
+specification typedef struct TestAgentDesc TestAgentDesc = {};
+
+TestAgentDesc* create_TestAgentDesc(TSSocket socket,ThreadId threadid)
+{
+    return create( &type_TestAgentDesc, socket, threadid );
+}
+
+ThreadId registerTestAgent( TSSocket socket, TSBuffer* desc )
+{
+    bool testSystemInitialization = false;
+    bool processInitialization = false;
+    TSStream stream;
+    ThreadId threadid;
+    CString* kind;
+    VoidTPtr pthread_arg = NULL_VoidTPtr;
+    List*    process_arg;
+    List*    process_env;
+
+    initTSStream( &stream, desc );
+
+    threadid.system = 0;
+
+    // Read Process attributes
+    // 1. pid
+    threadid.process = readInt_TSStream( &stream );
+
+    // Read Thread attributes
+    // 2. pthread_t identifier
+    threadid.thread = readULong_TSStream( &stream );
+
+    // 3. routine argument
+    kind = readCString_TSStream( &stream );
+    if (equals(kind,create_CString("NEW_THREAD")))
+    {
+        pthread_arg = readPointer_TSStream( threadid, &stream );
+    }
+    else if (equals(kind,create_CString("NEW_PROCESS")))
+    {
+        IntT i,argc,envc;
+
+        process_arg = create_List(&type_CString);
+        process_env = create_List(&type_CString);
+        argc = readInt_TSStream( &stream );
+        for( i = 0; i < argc; i++ )
+        {
+            append_List( process_arg, readCString_TSStream( &stream ) );
+        }
+        envc = readInt_TSStream( &stream );
+        for( i = 0; i < envc; i++ )
+        {
+            append_List( process_env, readCString_TSStream( &stream ) );
+        }
+    }
+
+    // Register TestAgent information
+    put_Map( taMap, create_Long(getThreadChannelID(threadid)), create_TestAgentDesc(socket,threadid) );
+
+    // Update model
+    {
+        SystemState* systemState;
+        ProcessState* processState;
+        Long* key;
+        ProcessId processid;
+
+        key = create_Long(threadid.system);
+        if (!containsKey_Map(systems,key))
+        {
+            testSystemInitialization = true;
+            put_Map( systems, key, create_SystemState( threadid.system, create_SystemConfiguration() ) );
+        }
+        systemState = getSystemState(threadid.system);
+
+        // key = create_Long(threadid.process);
+        processid = create_ProcessId(threadid.system,threadid.process);
+        if (!containsKey_Map(systemState->processes,create_ProcessIdObj(processid)))
+        {
+            processInitialization = true;
+            registerProcess( processid );
+        }
+        // processState = get_Map( systemState->processes, key );
+        //
+
+        if (areDeferredReactionsEnabled() && isInScenario() && equals(kind,create_CString("NEW_THREAD")))
+        {
+            registerReaction(
+                getThreadChannelID(threadid),
+                NULL,
+                pthread_started_event,
+                create_PThreadStartedEventType( threadid, pthread_arg )
+                );
+        }
+        else if (areDeferredReactionsEnabled() && isInScenario() && equals(kind,create_CString("NEW_PROCESS")))
+        {
+            registerReaction(
+                getThreadChannelID(threadid),
+                NULL,
+                execNewProcess_return,
+                create_ExecReturnType( threadid, 0, NULL /* path */, process_arg, process_env, NULL )
+                );
+        }
+        else
+        {
+            registerDefaultThread(threadid);
+            if (testSystemInitialization)
+            {
+                onTestSystemInitialization(threadid);
+            }
+            else if (processInitialization)
+            {
+                onProcessInitialization(threadid);
+            }
+        }
+    }
+
+    return threadid;
+}
+
+void unregisterTestAgent( TestAgentDesc* agent )
+{
+    closeTSSocket(agent->socket);
+    // Unregister TestAgent information
+    remove_Map( taMap, create_Long(getThreadChannelID(agent->threadid)) );
+    remove_Map( threadId2Channel, create_ThreadIdObj(agent->threadid) );
+}
+
+
+/********************************************************************/
+/**                     Test Agent Response                        **/
+/********************************************************************/
+TimeMark getModelTimeMark( TestAgentDesc* agent, LongT secs, LongT nanosecs )
+{
+    TimeMark res;
+
+    res.frame = agent->threadid.system;
+    res.timemark = ((uint64_t)secs)*1000000000UL + ((uint64_t)nanosecs);
+    return res;
+}
+
+ConnectionStatus receiveTAResponse( TestAgentDesc* agent, TSBuffer* message, TSMetaData* meta )
+{
+    ConnectionStatus status;
+    TSStream stream;
+    LongT secs,nanosecs;
+
+    status = receiveTSMessage( agent->socket, message );
+    if (status != Available_ConnectionStatus)
+        return status;
+
+    initTSStream( &stream, message );
+    if (startsWith_TSStream(&stream,"$tms:"))
+    {
+        verifyType_TSStream(&stream,"$tms");
+        secs = readLong_TSStream(&stream);
+        nanosecs = readLong_TSStream(&stream);
+        meta->timestamp.minMark = getModelTimeMark( agent, secs, nanosecs );
+    }
+    if (startsWith_TSStream(&stream,"$tme:"))
+    {
+        verifyType_TSStream(&stream,"$tme");
+        secs = readLong_TSStream(&stream);
+        nanosecs = readLong_TSStream(&stream);
+        meta->timestamp.maxMark = getModelTimeMark( agent, secs, nanosecs );
+    }
+    if (stream.cursor > 0)
+    {
+        shift_TSBuffer( message, stream.cursor );
+    // shift cursor according to timemarks and alignment
+        // shift_TSBuffer( message, ((stream.cursor-1) + sizeof_LongT)%sizeof_LongT );
+    }
+    return status;
+}
+
+
+/********************************************************************/
+/**                       TSCommand Execution                      **/
+/********************************************************************/
+bool sendCommand_TestAgent( TestAgentDesc* agent, TSCommand* command )
+{
+    ConnectionStatus status;
+
+    if (!sendTSMessage( agent->socket, command->command.buffer.data, command->command.buffer.length ))
+    {
+        return false;
+    }
+    for(;;)
+    {
+        status = receiveTAResponse( agent, &command->response.buffer, &command->meta );
+        if (status != Available_ConnectionStatus)
+        {
+            if (status == Closed_ConnectionStatus)
+            {
+                setBadVerdict( "Connection closed" );
+                return false;
+            }
+        }
+        if (!processDeferredReactionMessage( agent->threadid, &command->response.buffer, &command->meta ))
+            break;
+        destroy_TSBuffer(&command->response.buffer);
+        command->response.buffer.data = NULL;
+        command->response.buffer.memory_available = 0;
+        command->response.buffer.length = 0;
+        command->meta.timestamp = overallTimeInterval;
+    }
+    return true;
+}
+
+bool executeCommandInContext( CallContext context, TSCommand* command )
+{
+    ChannelID channel;
+    TestAgentDesc* agent;
+
+    channel = getThreadChannelID( context );
+    setStimulusChannel( channel );
+    agent = get_Map( taMap, create_Long(channel) );
+    if (agent == NULL)
+    {
+        setBadVerdict( "Invalid call context" );
+        return false;
+    }
+    if (!sendCommand_TestAgent( agent, command ))
+    {
+        setBadVerdict( "Execution failed" );
+        return false;
+    }
+    if (processExceptionMessage(&command->response.buffer,true))
+        return false;
+    return true;
+}
+
+
+/********************************************************************/
+/**                          Auxiliary Commands                    **/
+/********************************************************************/
+#include "memory/heap/heap_model.seh"
+
+VoidTPtr allocateMemoryBlock(CallContext context,SizeT size)
+{
+    VoidTPtr res = NULL_VoidTPtr;
+    TSCommand command = create_TSCommand();
+    bool verdict;
+
+    format_TSCommand( &command, "allocate:$(size)", create_SizeTObj(size) );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        res = readPointer_TSStream( context, &command.response );
+        onMalloc( context, size, res );
+    }
+
+    destroy_TSCommand(&command);
+    return res;
+}
+
+void deallocateMemoryBlock(CallContext context,VoidTPtr ptr)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+
+    format_TSCommand( &command, "deallocate:$(ptr)", create_VoidTPtrObj(ptr) );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        String* code = readString_TSStream(&command.response);
+        verdict = equals( code, create_String("Ok") );
+        if (!verdict)
+            traceUserInfo( toCharArray_String(code) );
+    }
+    onFree( context, ptr );
+
+    destroy_TSCommand(&command);
+}
+
+SizeT getSizeOfType(CallContext context,const char* type)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+    SizeT res = 0;
+
+    format_TSCommand( &command, "sizeof_type:$(str)", create_CString((CharT*)type) );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        res = readSize_TSStream(&command.response);
+    }
+    destroy_TSCommand(&command);
+
+    return res;
+}
+
+/********************************************************************/
+/**                            Time Delay                          **/
+/********************************************************************/

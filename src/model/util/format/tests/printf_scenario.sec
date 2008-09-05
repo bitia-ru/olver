@@ -1,0 +1,440 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_media.seh"
+#include "process/meta/user_media.seh"
+#include "io/fstream/fstream_media.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "fs/dir/dir_media.seh"
+#include "process/process/process_media.seh"
+#include "process/meta/fs_media.seh"
+#include "util/format/tests/printf_scenario.seh"
+#include "util/format/tests/format_sheafs.seh"
+#include "util/format/tests/printf_scenario_data.seh"
+#include "util/format/printf_model.seh"
+#include "util/format/printf_media.seh"
+#include "config/test_system_config.h"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static bool needOnlyFirstPriority;
+static bool needConformanceTestQuality;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static List /* NULL */ * functionData = NULL;
+
+/********************************************************************/
+/**                      Helper Functions                       **/
+/********************************************************************/
+
+static List * createContexts( void ) { return createProcesses( true ); }
+
+static String * testingFuncName;
+
+enum CallSpecCode { asprintfCode ,               fprintfCode , printfCode , snprintfCode , sprintfCode ,
+                    vasprintfCode, vdprintfCode, vfprintfCode, vprintfCode, vsnprintfCode, vsprintfCode
+                  };
+
+static void callSpec( CallContext context, CString * s, SizeT n, PrintedSheaf * sheaf ) {
+    enum CallSpecCode callSpecCode;
+    ErrorCode * errno = requestErrorCode();
+    CString * expectedResult;
+    CString * fn;
+    CString * fm;
+    FILETPtr stream;
+    CString * output;
+    FilePermission * all;
+    FilePermissions * fileMode;
+    OpenFlags ff = { ReadWrite, Blocking, true, false, false, false, false, false };
+    FileDescId fd;
+    StringTPtr ptr;
+    if      ( equals( create_String( "asprintf"  ), testingFuncName ) ) { callSpecCode = asprintfCode ; }
+    else if ( equals( create_String( "fprintf"   ), testingFuncName ) ) { callSpecCode = fprintfCode  ; }
+    else if ( equals( create_String( "printf"    ), testingFuncName ) ) { callSpecCode = printfCode   ; }
+    else if ( equals( create_String( "snprintf"  ), testingFuncName ) ) { callSpecCode = snprintfCode ; }
+    else if ( equals( create_String( "sprintf"   ), testingFuncName ) ) { callSpecCode = sprintfCode  ; }
+    else if ( equals( create_String( "vasprintf" ), testingFuncName ) ) { callSpecCode = vasprintfCode; }
+    else if ( equals( create_String( "vdprintf"  ), testingFuncName ) ) { callSpecCode = vdprintfCode ; }
+    else if ( equals( create_String( "vfprintf"  ), testingFuncName ) ) { callSpecCode = vfprintfCode ; }
+    else if ( equals( create_String( "vprintf"   ), testingFuncName ) ) { callSpecCode = vprintfCode  ; }
+    else if ( equals( create_String( "vsnprintf" ), testingFuncName ) ) { callSpecCode = vsnprintfCode; }
+    else if ( equals( create_String( "vsprintf"  ), testingFuncName ) ) { callSpecCode = vsprintfCode ; }
+    else {
+        assertion( false, "callSpec : unknown testingFuncName" );
+    }
+    // pre-call
+    switch ( callSpecCode ) {
+        case asprintfCode :
+        case sprintfCode  :
+        case vasprintfCode:
+        case vsprintfCode :
+            expectedResult = sheaf->result;
+            break;
+        case fprintfCode :
+        case vfprintfCode:
+            fn = getTestScenarioSandboxPathCh( "fprintf_vfprintfOutput.txt" );
+            fm = create_CString( "w" );
+            stream = fopen_spec( context, fn, fm, errno, false );
+            expectedResult = sheaf->result;
+            break;
+        case printfCode :
+        case vprintfCode:
+            output = create_CString( "" );
+            expectedResult = sheaf->result;
+            break;
+        case snprintfCode :
+        case vsnprintfCode:
+            if ( n == 0 ) {
+                expectedResult = s;
+            } else if ( length_CString( sheaf->result ) <= (int)n - 1 ) { // 1 - for 0 on end
+                expectedResult = sheaf->result;
+            } else {
+                expectedResult = substring_CString( sheaf->result, 0, (int)n - 1 ); // 1 - for 0 on end
+            }
+            break;
+        case vdprintfCode :
+            fn = getTestScenarioSandboxPathCh( "vdprintfOutput.txt" );
+            all = create_FilePermission( true, true, true );
+            fileMode = create_FilePermissions( all, all, all, Unknown_Bool3, Unknown_Bool3, Unknown_Bool3 );
+            ff.creat  = true ;
+            ff.trunc  = true ;
+            ff.append = false;
+            fd = open_spec( context, fn, ff, fileMode, errno, false );
+            expectedResult = sheaf->result;
+            break;
+    }
+    setExpectedResultAndReqIds( toCharArray_String( testingFuncName ), expectedResult, sheaf->reqIds );
+    // call
+    dotPrint( 10, 100 );
+    switch ( callSpecCode ) {
+        case asprintfCode : asprintf_spec ( context, & ptr,    sheaf->format, sheaf->data,         errno         ); break;
+        case fprintfCode  : fprintf_spec  ( context, & stream, sheaf->format, sheaf->data,         errno, fn, fm ); break;
+        case printfCode   : printf_spec   ( context,           sheaf->format, sheaf->data, output, errno         ); break;
+        case snprintfCode : snprintf_spec ( context, s, n,     sheaf->format, sheaf->data,         errno         ); break;
+        case sprintfCode  : sprintf_spec  ( context, s,        sheaf->format, sheaf->data,         errno         ); break;
+        case vasprintfCode: vasprintf_spec( context, & ptr,    sheaf->format, sheaf->data,         errno         ); break;
+        case vdprintfCode : vdprintf_spec ( context, & fd,     sheaf->format, sheaf->data,         errno, fn, ff ); break;
+        case vfprintfCode : vfprintf_spec ( context, & stream, sheaf->format, sheaf->data,         errno, fn, fm ); break;
+        case vprintfCode  : vprintf_spec  ( context,           sheaf->format, sheaf->data, output, errno         ); break;
+        case vsnprintfCode: vsnprintf_spec( context, s, n,     sheaf->format, sheaf->data,         errno         ); break;
+        case vsprintfCode : vsprintf_spec ( context, s,        sheaf->format, sheaf->data,         errno         ); break;
+    }
+    // post-call
+    switch ( callSpecCode ) {
+        case asprintfCode : case vasprintfCode: deallocateMemoryBlock( context, ptr ); break;
+                            case vdprintfCode : close_spec ( context, fd    , errno ); break;
+        case fprintfCode  : case vfprintfCode : fclose_spec( context, stream, errno ); break;
+        case printfCode   : case vprintfCode  :                                        break;
+        case snprintfCode : case vsnprintfCode:                                        break;
+        case sprintfCode  : case vsprintfCode :                                        break;
+    }
+} // callSpec
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_scenario( char * name )
+{
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir( getContext() ) );
+
+    SKIP_OPEN_CHECK = 1;
+
+    //needOnlyFirstPriority = false;
+    needOnlyFirstPriority = true;
+    needConformanceTestQuality = false;
+    //needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    if ( ( functionData = createContexts() ) == NULL ) { return false; }
+    if ( ( printedSheafs = create12PrintedSheafs() ) == NULL ) { return false; }
+    initReqFilters();
+    setFinishMode( UNTIL_END );
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    removeTestScenarioSandboxDir( getContext() ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+    terminateProcesses( functionData ); \
+}
+
+static bool init_asprintf_scenario ( int argc, char ** argv ) { return init_scenario( "asprintf"  ); }
+static bool init_fprintf_scenario  ( int argc, char ** argv ) { return init_scenario( "fprintf"   ); }
+static bool init_printf_scenario   ( int argc, char ** argv ) { return init_scenario( "printf"    ); }
+static bool init_snprintf_scenario ( int argc, char ** argv ) { return init_scenario( "snprintf"  ); }
+static bool init_sprintf_scenario  ( int argc, char ** argv ) { return init_scenario( "sprintf"   ); }
+static bool init_vasprintf_scenario( int argc, char ** argv ) { return init_scenario( "vasprintf" ); }
+static bool init_vdprintf_scenario ( int argc, char ** argv ) { return init_scenario( "vdprintf"  ); }
+static bool init_vfprintf_scenario ( int argc, char ** argv ) { return init_scenario( "vfprintf"  ); }
+static bool init_vprintf_scenario  ( int argc, char ** argv ) { return init_scenario( "vprintf"   ); }
+static bool init_vsnprintf_scenario( int argc, char ** argv ) { return init_scenario( "vsnprintf" ); }
+static bool init_vsprintf_scenario ( int argc, char ** argv ) { return init_scenario( "vsprintf"  ); }
+
+static void finish_asprintf_scenario ( void ) finish_scenario( asprintf  )
+static void finish_fprintf_scenario  ( void ) finish_scenario( fprintf   )
+static void finish_printf_scenario   ( void ) finish_scenario( printf    )
+static void finish_snprintf_scenario ( void ) finish_scenario( snprintf  )
+static void finish_sprintf_scenario  ( void ) finish_scenario( sprintf   )
+static void finish_vasprintf_scenario( void ) finish_scenario( vasprintf )
+static void finish_vdprintf_scenario ( void ) finish_scenario( vdprintf  )
+static void finish_vfprintf_scenario ( void ) finish_scenario( vfprintf  )
+static void finish_vprintf_scenario  ( void ) finish_scenario( vprintf   )
+static void finish_vsnprintf_scenario( void ) finish_scenario( vsnprintf )
+static void finish_vsprintf_scenario ( void ) finish_scenario( vsprintf  )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool print_scen()
+{
+    int maxContextI = ( needOnlyFirstPriority || needConformanceTestQuality ? 0 : size_List( functionData ) - 1 );
+    iterate ( int contextI = 0; contextI <= maxContextI; contextI++; )
+    {
+        ThreadIdObj * contextObj = get_List( functionData, contextI );
+        int minSnI;
+        if ( equals( create_String( "snprintf"  ), testingFuncName ) ||
+             equals( create_String( "vsnprintf" ), testingFuncName )
+           ) {
+            minSnI = 1;
+        } else {
+            minSnI = 5;
+        }
+        iterate ( int snI = minSnI; snI <= 5; snI++; )
+        // iterate ( int snI = 4; snI <= 5; snI++; )
+        {
+            CString * s;
+            SizeT     n;
+            int maxPrintedSheafI;
+            switch ( snI ) {
+                case 1: s = NULL                                   ; n =  0; break;
+                case 2: s = create_CString( "###################" ); n =  0; break;
+                case 3: s = create_CString( ""                    ); n =  1; break;
+                case 4: s = create_CString( "#####"               ); n =  6; break;
+                case 5: s = create_CString( "###################" ); n = 20; break;
+            }
+            maxPrintedSheafI = ( needConformanceTestQuality ? 199 : size_List( printedSheafs ) - 1 );
+            //maxPrintedSheafI = ( needConformanceTestQuality ? 0 : size_List( printedSheafs ) - 1 );
+            iterate ( int printedSheafI = 0; printedSheafI <= maxPrintedSheafI; printedSheafI++; )
+            {
+                PrintedSheaf * printedSheaf = get_List( printedSheafs, printedSheafI );
+                callSpec( * contextObj, s, n, printedSheaf );
+            } // iterate printedSheafI
+        } // iterate snI
+    } // iterate contextI
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm asprintf_scenario =
+{
+    .init              = init_asprintf_scenario  ,
+    .finish            = finish_asprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm fprintf_scenario =
+{
+    .init              = init_fprintf_scenario  ,
+    .finish            = finish_fprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm printf_scenario =
+{
+    .init              = init_printf_scenario  ,
+    .finish            = finish_printf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm snprintf_scenario =
+{
+    .init              = init_snprintf_scenario  ,
+    .finish            = finish_snprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm sprintf_scenario =
+{
+    .init              = init_sprintf_scenario  ,
+    .finish            = finish_sprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vasprintf_scenario =
+{
+    .init              = init_vasprintf_scenario  ,
+    .finish            = finish_vasprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vdprintf_scenario =
+{
+    .init              = init_vdprintf_scenario  ,
+    .finish            = finish_vdprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vfprintf_scenario =
+{
+    .init              = init_vfprintf_scenario  ,
+    .finish            = finish_vfprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vprintf_scenario =
+{
+    .init              = init_vprintf_scenario  ,
+    .finish            = finish_vprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vsnprintf_scenario =
+{
+    .init              = init_vsnprintf_scenario  ,
+    .finish            = finish_vsnprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+scenario dfsm vsprintf_scenario =
+{
+    .init              = init_vsprintf_scenario  ,
+    .finish            = finish_vsprintf_scenario,
+    .actions           = { print_scen,
+                           NULL
+                         }
+};
+
+#ifdef UTIL_FORMAT_PRINTF_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initIoFileSubsystem();
+    initProcessMetaFsSubsystem();
+    initFsDirSubsystem();
+    initProcessProcessSubsystem();
+    initIoFstreamSubsystem();
+
+    initUtilFormatPrintfSubsystem();
+}
+
+bool util_format_printf_local( int argc, char ** argv )
+{/**/
+    asprintf_scenario ( argc, argv );
+    fprintf_scenario  ( argc, argv );
+    printf_scenario   ( argc, argv );
+    snprintf_scenario ( argc, argv );
+    sprintf_scenario  ( argc, argv );
+    vasprintf_scenario( argc, argv );
+    vdprintf_scenario ( argc, argv );
+    vfprintf_scenario ( argc, argv );
+    vprintf_scenario  ( argc, argv );
+    vsnprintf_scenario( argc, argv );
+    vsprintf_scenario ( argc, argv );/**/
+    return true;
+}
+
+int main( int argc, char ** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    util_format_printf_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

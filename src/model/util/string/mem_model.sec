@@ -1,0 +1,1979 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "util/string/mem_model.seh"
+#include "config/system_config.seh"
+
+
+#pragma SEC subsystem string "util.string"
+
+/*
+   The group of functions 'util.string.mem' consists of:
+       __mempcpy [1]
+       __rawmemchr [1]
+       bcmp [2]
+       bcopy [2]
+       bzero [2]
+       memccpy [2]
+       memchr [2]
+       memcmp [2]
+       memcpy [2]
+       memmem [1]
+       memmove [2]
+       memrchr [1]
+       memset [2]
+       swab [2]
+ */
+
+
+/********************************************************************/
+/**                       Interface Functions                      **/
+/********************************************************************/
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    __mempcpy -- copy given number of bytes of source to destination
+
+SYNOPSIS
+
+    #include <string.h> 
+    ptr_t __mempcpy(ptr_t restrict dest, const ptr_t restrict src, size_t n);
+
+DESCRIPTION
+
+    __mempcpy() copies n bytes of source to destination, returning pointer to 
+    bytes after the last written byte.
+
+    __mempcpy() is not in the source standard; it is only in the binary 
+    standard.
+*/
+
+specification
+VoidTPtr __mempcpy_spec( CallContext context, VoidTPtr dest, VoidTPtr src,
+                        SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "src is not NULL", !isNULL_VoidTPtr(src) );
+        REQ("", "dest is not NULL", !isNULL_VoidTPtr(dest) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by src is available in the context",
+                isValidPointer(context,src) );
+        REQ("", "Memory pointed to by dest is available in the context",
+                isValidPointer(context,dest) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by src is enough",
+            sizeRMemoryAvailable(src) >= n );
+        REQ("", "Memory pointed to by dest is enough",
+            sizeWMemoryAvailable(dest) >= n );
+        
+       /*
+        * [ "restrict" keyword before src and dest means that objects shall
+        *  not overlap, so if copying takes place between objects that overlap,
+        * the behavior is undefined. ]
+        */
+        REQ("", "Objects are not overlapped",
+            !areObjectsOverlapped(src,n,dest,n) );
+        
+        return true;
+    }
+    coverage C
+    {
+        if (n == 0)
+            return { Zero, "Copy zero byte" };
+        else
+            return { NonZero, "Copy more than zero bytes" };
+    }
+    ALIGNMENT_COVERAGE(src)
+    ALIGNMENT_COVERAGE(dest)
+    post
+    {
+        /*
+         * __mempcpy() copies n bytes of source to destination
+         */
+        REQ("__mempcpy.01", "dst contain n bytes from src",
+            equals(
+                readCByteArray_VoidTPtr(dest,n),
+                @readCByteArray_VoidTPtr(src,n) )
+            );
+        
+        
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+                equals(
+                    readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(dest), dest, n ),
+                    @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(dest), dest, n )
+                    )
+            );
+        
+        /* [Nothing shall be changed in src] */
+        REQ("", "Nothing shall be changed in src",
+            equals(
+                readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(src), dest, n),
+                @readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(src), dest, n)
+                )
+            );
+        
+        /*
+         * returning pointer to bytes after the last written byte. 
+         */
+        REQ("__mempcpy.02",
+            "__mempcpy() shall return pointer to bytes after the last"
+            " written byte",
+            diff_VoidTPtr(__mempcpy_spec, dest)==n);
+        
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+
+NAME
+
+    __rawmemchr -- scan memory
+
+SYNOPSIS
+
+    #include <string.h> 
+    ptr_t __rawmemchr(const ptr_t s, int c);
+
+DESCRIPTION
+
+    __rawmemchr() searches in s for c.
+
+    __rawmemchr() is a weak alias to rawmemchr(). It is similar to memchr(), 
+    but it has no length limit. 
+
+    __rawmemchr() is not in the source standard; it is only in the binary 
+    standard.
+*/
+
+specification
+VoidTPtr __rawmemchr_spec(CallContext context, VoidTPtr s, IntT c)
+{
+    SizeT memSize;
+    VoidTPtr bytePt;
+    VoidTPtr lastCharPt;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s is not NULL", !isNULL_VoidTPtr(s) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s is available in the context",
+            isValidPointer(context,s) );
+
+        /* [ Init specification local data ] */
+        memSize=sizeRMemoryAvailable(s);
+        bytePt=memchr_model(s, c, memSize);
+        lastCharPt=memrchr_model(s, c, memSize);
+
+        /* [Implicit precondition] */
+        REQ("", "Character c shall occur in s", !isNULL_VoidTPtr(bytePt));
+
+        return true;
+    }
+    coverage C
+    {
+        if(equals_VoidTPtr(bytePt, lastCharPt)) 
+        {
+            if((SCharT)c==(UCharT)c)
+                return { OnlyOneFoundUnsNot,
+                "The byte occurs only once in the object, unsigned char"
+                " is not important" };
+            else /* if((CharT)c!=(UCharT)c) */
+                return { OnlyOneFoundUnsImp,
+                "The byte occurs only once in the object, unsigned"
+                " char is important" };
+        }
+        else /* if(!equals_VoidTPtr(bytePt, lastCharPt))  */
+        {
+            return { SeveralFound,
+                "The byte occurs several times in the object" };
+        }
+
+    }
+    UNSIGNED_CHAR_COVERAGE(c)
+    ALIGNMENT_COVERAGE(s)
+    post
+    {
+
+        /* [The __rawmemchr() function shall return a pointer to
+            the located byte]*/
+        REQ("", "The __rawmemchr() function shall return a pointer to the"
+            " located byte", equals_VoidTPtr(__rawmemchr_spec, bytePt));
+
+
+        /* [Nothing shall be changed in s] */
+        REQ("", "Nothing shall be changed in s",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(s)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(s)))
+            );
+
+       
+
+        return true;
+    }
+
+}
+  
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    bcmp - memory operations (LEGACY)
+
+SYNOPSIS
+
+    #include <strings.h>
+    int bcmp(const void *s1, const void *s2, size_t n);
+
+DESCRIPTION
+
+    The bcmp() function shall compare the first n bytes of the area pointed to
+    by s1 with the area pointed to by s2.
+
+RETURN VALUE
+
+    The bcmp() function shall return 0 if s1 and s2 are identical; otherwise,
+    it shall return non-zero. Both areas are assumed to be n bytes long. If the
+    value of n is 0, bcmp() shall return 0.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT bcmp_spec( CallContext context, VoidTPtr s1, VoidTPtr s2, SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s1 is not NULL", !isNULL_VoidTPtr(s1) );
+        REQ("", "s2 is not NULL", !isNULL_VoidTPtr(s2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s1 is available in the context",
+            isValidPointer(context,s1) );
+        REQ("", "Memory pointed to by s2 is available in the context",
+            isValidPointer(context,s2) );
+
+        /*
+         * Both areas are assumed to be n bytes long. 
+         */
+        REQ("bcmp.04", "Memory pointed to by s1 is enough",
+            sizeRMemoryAvailable(s1) >= n );
+        REQ("bcmp.04", "Memory pointed to by s2 is enough",
+            sizeRMemoryAvailable(s2) >= n );
+
+        return true;
+    }
+    coverage C
+    {
+        if(n == 0)
+            return {Zero, "n == 0 case"};
+        else if(equals_VoidTPtr(s1, s2))
+            return {Same, "s1 and s2 are the same"};
+        else if(equals(readCByteArray_VoidTPtr(s1, n),
+                    readCByteArray_VoidTPtr(s2, n)))
+            return {EQ, "s1 and s2 are identical"};
+        else
+            return {NEQ, "s1 and s2 are not identical"};
+
+    }
+    ALIGNMENT_COVERAGE(s1)
+    ALIGNMENT_COVERAGE(s2)
+    post
+    {
+        if(n==0)
+        {
+            /*
+             * If the value of n is 0, bcmp() shall return 0.
+             */
+            REQ("bcmp.05", "bcmp() function must return 0 in the case of n==0",
+                    bcmp_spec == 0);
+        }
+        else if(equals(@readCByteArray_VoidTPtr(s1, n),
+                    @readCByteArray_VoidTPtr(s2, n)))
+        {
+            /*
+             * The bcmp() function shall return 0 if s1 and s2 are identical
+             */
+            REQ("bcmp.02",
+                "bcmp() function must return 0 if s1 and s2 are identical",
+                bcmp_spec == 0);
+        }
+        else
+        {
+            /*
+             * otherwise, it shall return non-zero
+             */
+            REQ("bcmp.03",
+                "bcmp() function must not return 0 if s1 and s2 are not"
+                " identical", bcmp_spec != 0);
+        }
+
+        /* [Nothing shall be changed in s1] */
+        REQ("", "Nothing shall be changed in s1",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(s1)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(s1)))
+            );
+
+        /* [Nothing shall be changed in s2] */
+        REQ("", "Nothing shall be changed in s2",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(s2)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(s2)))
+            );
+
+      
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    bcopy - memory operations (LEGACY)
+
+SYNOPSIS
+
+    #include <strings.h>
+    void bcopy(const void *s1, void *s2, size_t n);
+
+
+DESCRIPTION
+
+    The bcopy() function shall copy n bytes from the area pointed to by s1 to
+    the area pointed to by s2.
+
+    The bytes are copied correctly even if the area pointed to by s1 overlaps
+    the area pointed to by s2.
+
+RETURN VALUE
+
+    The bcopy() function shall not return a value.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+
+specification
+void bcopy_spec( CallContext context, VoidTPtr s1, VoidTPtr s2, SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s1 is not NULL", !isNULL_VoidTPtr(s1) );
+        REQ("", "s2 is not NULL", !isNULL_VoidTPtr(s2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s1 is available in the context",
+            isValidPointer(context,s1) );
+        REQ("", "Memory pointed to by s2 is available in the context",
+            isValidPointer(context,s2) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s1 is enough",
+            sizeRMemoryAvailable(s1) >= n );
+        REQ("", "Memory pointed to by s2 is enough",
+            sizeWMemoryAvailable(s2) >= n );
+
+        return true;
+    }
+    coverage C
+    {
+        if(n==0)
+            return { Zero, "Copy zero bytes"};
+        else if(areObjectsOverlapped(s1,n,s2,n))
+        {
+            if(diff_VoidTPtr(s1, s2)>0)
+                return {OG12, "overlapped, s1 greater than s2"};
+            else if(diff_VoidTPtr(s1, s2)<0)
+                return {OG21, "overlapped, s2 greater than s1"};
+            else /*if(diff_VoidTPtr(s1, s2)==0)*/
+                return {OE12, "overlapped, s2 equals to s1"};
+        }
+        else
+        {
+            if(diff_VoidTPtr(s1, s2)>0)
+                return {G12, "s1 greater than s2"};
+            else /*if(diff_VoidTPtr(s1, s2)<0)*/
+                return {G21, "s2 greater than s1"};
+        }
+    }
+    ALIGNMENT_COVERAGE(s1)
+    ALIGNMENT_COVERAGE(s2)
+    post
+    {
+        /*
+         * The bcopy() function shall copy n bytes from the area pointed
+         * to by s1 to the area pointed to by s2.
+         */
+        REQ("bcopy.01", "s2 contains n bytes from s1",
+            equals(@readCByteArray_VoidTPtr(s1, n),
+                    readCByteArray_VoidTPtr(s2, n)));
+
+        /* [Only n bytes in s2 are changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(s2), s2, n ),
+                    @readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(s2), s2, n ))
+            );
+
+        /* [Nothing changed in s1 except the overlapping part] */
+        REQ("", "Other memory shall not be changed",
+            equals(     readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s2, n ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s2, n ))
+            );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    bzero - memory operations (LEGACY)
+
+SYNOPSIS
+
+    #include <strings.h>
+    void bzero(void *s, size_t n);
+
+
+DESCRIPTION
+
+    The bzero() function shall place n zero-valued bytes in the area pointed
+    to by s.
+
+RETURN VALUE
+
+    The bzero() function shall not return a value.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+void bzero_spec(CallContext context, VoidTPtr s, SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s is not NULL", !isNULL_VoidTPtr(s) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s is available in the context",
+            isValidPointer(context,s) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s is enough",
+            sizeWMemoryAvailable(s) >= n );
+
+        return true;
+    }
+    coverage C
+    {
+        if(n==0)
+            return { Zero, "Place zero bytes"};
+        if(isZeroArray(s, n))
+        {
+            return { AlreadyZeroed, "Area pointed to by s was zeroed" };
+        }
+        else
+        {
+            return { NotZeroed, "Area pointed to by s was not zeroed" };
+        }
+    }
+    ALIGNMENT_COVERAGE(s)
+    post{
+        /*
+         * The bzero() function shall place n zero-valued bytes in
+         * the area pointed to by s.
+         */
+        REQ("bzero.01",
+            "The bzero() function shall place n zero-valued bytes in  s",
+            isZeroArray(s, n));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+              equals( readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(s), s, n ),
+                     @readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(s), s, n )
+                    )
+           );
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    memccpy - copy bytes in memory
+
+SYNOPSIS
+
+    #include <string.h>
+    void *memccpy(void *restrict s1, const void *restrict s2, int c, size_t n);
+
+DESCRIPTION
+
+    The memccpy() function shall copy bytes from memory area s2 into s1,
+    stopping after the first occurrence of byte c (converted to an unsigned
+    char) is copied, or after n bytes are copied, whichever comes first. If
+    copying takes place between objects that overlap, the behavior is
+    undefined.
+
+RETURN VALUE
+
+    The memccpy() function shall return a pointer to the byte after the copy
+    of c in s1, or a null pointer if c was not found in the first n bytes
+    of s2.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+
+specification
+VoidTPtr memccpy_spec( CallContext context, VoidTPtr s1, VoidTPtr s2,
+                        IntT c, SizeT n )
+{
+    VoidTPtr result;
+    IntT diff;
+    
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s1 is not NULL", !isNULL_VoidTPtr(s1) );
+        REQ("", "s2 is not NULL", !isNULL_VoidTPtr(s2) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s1 is available in the context",
+            isValidPointer(context,s1) );
+        REQ("", "Memory pointed to by s2 is available in the context",
+            isValidPointer(context,s2) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s1 is enough",
+            sizeWMemoryAvailable(s1) >= n );
+        REQ("", "Memory pointed to by s2 is enough",
+            sizeRMemoryAvailable(s2) >= n );
+
+        /*
+         * If copying takes place between objects that overlap,
+         * the behavior is undefined.
+         */
+        REQ("app.memccpy.02", "Objects are not overlapped",
+            !areObjectsOverlapped(s1,n,s2,n) );        
+        
+        /* [ Init specification local data ] */
+        result=memchr_model(s2, c,  n);
+        diff=-1;
+        if(!isNULL_VoidTPtr(result))
+            diff=diff_VoidTPtr(result, s2);
+
+        return true;
+    }
+    coverage C
+    {
+        if (n == 0)
+            return { Zero, "Copy zero byte" };
+        else
+        {
+            if(isNULL_VoidTPtr(result))
+            {
+                return { LengthReached,
+                    "Character c does not occur in the area s2" };
+            }
+            else // Something found
+            {
+                return { CharOccured, "Character c found in the area s2" };
+            }
+        }
+    }
+    UNSIGNED_CHAR_COVERAGE(c)
+    
+    post
+    {
+        if(diff!=-1)
+        {
+            /*
+             * The memccpy() function shall copy bytes from memory area s2
+             * into s1, stopping
+             * 
+             * after the first occurrence of byte c (converted to an
+             * unsigned char) is copied
+             */
+            REQ("memccpy.01.01", "s1 shall contain bytes from s2, stopping"
+                " after the first occurrence of byte c",
+                equals( readCByteArray_VoidTPtr(s1, diff+1),
+                        @readCByteArray_VoidTPtr(s2, diff+1)));
+            
+            /* [Other memory shall not be changed] */
+            REQ("", "Other memory shall not be changed",
+                equals( readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, diff+1 ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, diff+1 )  )
+                );
+         
+            /*
+             * The memccpy() function shall return
+             * 
+             * a pointer to the byte after the copy of c in s1
+             */
+            REQ("memccpy.03.01", "The memccpy() function shall return a"
+                " pointer to the byte in s1 after the copy of c",
+                diff_VoidTPtr(memccpy_spec, s1)==diff+1);
+        }
+        else
+        {
+            /*
+             * The memccpy() function shall copy bytes from memory area s2
+             * into s1, stopping
+             * 
+             * or after n bytes are copied, whichever comes first
+             */
+            REQ("memccpy.01.02", "s1 shall contain  n bytes from s2",
+                equals( readCByteArray_VoidTPtr(s1, n),
+                        @readCByteArray_VoidTPtr(s2, n)));
+         
+            /* [Other memory shall not be changed] */
+            REQ("", "Other memory shall not be changed",
+                equals( readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, n ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, n )  )
+                );
+
+            /*
+             * The memccpy() function shall return
+             * 
+             * a null pointer if c was not found in the first n bytes of s2.
+             */
+            REQ("memccpy.03.02", "The memccpy() function shall return a null"
+                " pointer if c was not found", isNULL_VoidTPtr(memccpy_spec));            
+        }
+        
+        /* [The object pointed to by s2 shall not be changed] */
+        REQ("", "s2 shall not be changed",
+            equals( readCByteArray_VoidTPtr(s2,n),
+                    @readCByteArray_VoidTPtr(s2,n) )
+            );
+        
+        
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    memchr - find byte in memory
+
+SYNOPSIS
+
+    #include <string.h>
+    void *memchr(const void *s, int c, size_t n);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here
+    and the ISO C standard is unintentional. This volume of
+    IEEE Std 1003.1-2001 defers to the ISO C standard.
+
+    The memchr() function shall locate the first occurrence of c (converted
+    to an unsigned char) in the initial n bytes (each interpreted as unsigned
+    char) of the object pointed to by s.
+
+RETURN VALUE
+
+    The memchr() function shall return a pointer to the located byte, or a
+    null pointer if the byte does not occur in the object.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+
+specification
+VoidTPtr memchr_spec(CallContext context, VoidTPtr s, IntT c, SizeT n )
+{
+    VoidTPtr bytePt;
+    VoidTPtr lastCharPt;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s is not NULL", !isNULL_VoidTPtr(s) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s is available in the context",
+                isValidPointer(context,s) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s is enough",
+                sizeRMemoryAvailable(s) >= n );
+
+
+        /* [ Init specification local data ] */
+        bytePt=memchr_model(s, c, n);
+        lastCharPt=memrchr_model(s, c, n);
+
+        return true;
+    }
+    coverage C
+    {
+        if(n == 0)
+        {
+            return {Zero, "n == 0 case"};
+        }
+        else if(isNULL_VoidTPtr(bytePt))
+        {
+            return { NotFound, "The byte does not occur in the object" };
+        }
+        else if(equals_VoidTPtr(bytePt, lastCharPt)) 
+        {
+            if((SCharT)c==(UCharT)c)
+                return { OnlyOneFoundUnsNot, "The byte occurs only once in"
+                            " the object, unsigned char is not important" };
+            else /* if((CharT)c!=(UCharT)c) */
+                return { OnlyOneFoundUnsImp, "The byte occurs only once in"
+                                " the object, unsigned char is important" };
+        }
+        else /* if(!equals_VoidTPtr(bytePt, lastCharPt))  */
+        {
+            return { SeveralFound,
+                        "The byte occurs several times in the object" };
+        }
+
+
+    }
+    UNSIGNED_CHAR_COVERAGE(c)
+    post
+    {
+        if(!isNULL_VoidTPtr(bytePt))
+        {
+            /*
+             * The memchr() function shall return
+             * 
+             * a pointer to the located byte
+             */
+            REQ("memchr.02.01", "The memchr() function shall return a pointer"
+                " to the located byte", equals_VoidTPtr(memchr_spec, bytePt));
+        }
+        else
+        {
+            /*
+             * The memchr() function shall return
+             * 
+             * a null pointer if the byte does not occur in the object
+             */
+            REQ("memchr.02.02", "The memchr() function shall return a null"
+                " pointer if the byte does not occur in the object",
+                isNULL_VoidTPtr(memchr_spec));
+        }
+
+        /* [Nothing shall be changed in s] */
+        REQ("", "Nothing shall be changed in s",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(s)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(s)))
+            );
+
+
+
+        return true;
+    }
+
+}
+
+VoidTPtr memchr_model(VoidTPtr s, IntT c, SizeT n)
+{
+    CByteArray* ar;
+    UCharT b;
+    UCharT search=(UCharT)c;
+
+    SizeT i;
+
+    /*
+     * The memchr() function shall locate the first occurrence of c
+     * (converted to an unsigned char) in the initial n bytes (each
+     * interpreted as unsigned char) of the object pointed to by s.
+     */
+    IMPLEMENT_REQ("memchr.01");
+
+    ar=readCByteArray_VoidTPtr(s, n);
+
+    for(i=0; i<n; i++)
+    {
+        b=byteAt_CByteArray(ar, i);
+        if(b==search)
+        {
+            return add_VoidTPtr(s, i);
+        }
+    }
+    return NULL_VoidTPtr;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    memcmp - compare bytes in memory
+
+SYNOPSIS
+
+    #include <string.h>
+    int memcmp(const void *s1, const void *s2, size_t n);
+
+DESCRIPTION
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The memcmp() function shall compare the first n bytes (each interpreted
+    as unsigned char) of the object pointed to by s1 to the first n bytes
+    of the object pointed to by s2.
+
+    The sign of a non-zero return value shall be determined by the sign of
+    the difference between the values of the first pair of bytes (both
+    interpreted as type unsigned char) that differ in the objects being
+    compared.
+
+RETURN VALUE
+
+    The memcmp() function shall return an integer greater than, equal to,
+    or less than 0, if the object pointed to by s1 is greater than,
+    equal to, or less than the object pointed to by s2, respectively.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+IntT memcmp_spec(CallContext context, VoidTPtr s1, VoidTPtr s2, SizeT n )
+{
+    IntT result;
+    IntT signedDiff;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s1 is not NULL", !isNULL_VoidTPtr(s1) );
+        REQ("", "s2 is not NULL", !isNULL_VoidTPtr(s2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s1 is available in the context",
+                isValidPointer(context,s1) );
+        REQ("", "Memory pointed to by s2 is available in the context",
+                isValidPointer(context,s2) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s1 is enough",
+                sizeRMemoryAvailable(s1) >= n );
+        REQ("", "Memory pointed to by s2 is enough",
+                sizeRMemoryAvailable(s2) >= n );
+
+        /* [ Init specification local data ] */
+        result=memcmp_model(s1, s2, n, &signedDiff);
+
+        return true;
+    }
+    coverage C
+    {
+        if(n == 0)
+        {
+            return {Zero, "n == 0 case"};
+        }
+        else if(equals_VoidTPtr(s1, s2))
+        {
+            return {Same, "s1 and s2 are the same"};
+        }
+        else
+        {
+            if( signedDiff != result )
+            {
+                if(result>0)
+                {
+                    return {G12U, "s1 greater than s2, unsigned important"};
+                }
+                else /* if(result<0) */
+                {
+                    return {G21U, "s2 greater than s1, unsigned important"};
+                }
+            } else /*signedDiff == result*/{
+                if(result==0)
+                {
+                    return {EQ,
+                        "s1 and s2 are identical, unsigned not important"};
+                }
+                else if(result>0)
+                {
+                    return {G12, "s1 greater than s2, unsigned not important"};
+                }
+                else /* if(result<0) */
+                {
+                    return {G21, "s2 greater than s1, unsigned not important"};
+                }
+            }
+        }
+    }
+    ALIGNMENT_COVERAGE(s1)
+    ALIGNMENT_COVERAGE(s2)
+    post
+    {
+        if(result==0)
+        {
+            REQ("",
+                "memcmp() function shall return 0 if s1 and s2 are identical",
+                memcmp_spec == 0);
+        }
+        else if(result>0)
+        {
+            REQ("", "memcmp() function shall return integer greater than 0"
+                " if s1 > s2", memcmp_spec > 0);
+        }
+        else /* if(result<0) */
+        {
+            REQ("", "memcmp() function shall return integer less than 0"
+                " if s1 < s2", memcmp_spec < 0);
+        }
+
+
+        /* [Nothing shall be changed in s1] */
+        REQ("", "Nothing shall be changed in s1",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(s1)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(s1)))
+            );
+
+        /* [Nothing shall be changed in s2] */
+        REQ("", "Nothing shall be changed in s2",
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(s2)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(s2)))
+            );
+
+
+        return true;
+    }
+}
+
+IntT memcmp_model(VoidTPtr s1, VoidTPtr s2, SizeT n, IntT* signedDiff )
+{
+    CByteArray* ar1, *ar2;
+    UCharT b1, b2;
+    SizeT i;
+
+    *signedDiff = 0;
+
+    ar1=readCByteArray_VoidTPtr(s1, n);
+    ar2=readCByteArray_VoidTPtr(s2, n);
+
+    /*
+     * The memcmp() function shall compare the first n bytes (each
+     * interpreted as unsigned char) of the object pointed to by s1
+     * to the first n bytes of the object pointed to by s2.
+     */
+    IMPLEMENT_REQ("memcmp.01");
+
+    for(i=0; i<n; i++)
+    {
+        b1=byteAt_CByteArray(ar1, i);
+        b2=byteAt_CByteArray(ar2, i);
+        if(b1!=b2)
+        {
+            /*
+             * The sign of a non-zero return value shall be determined by the
+             * sign of the difference between the values of the first pair of
+             * bytes (both interpreted as type unsigned char) that differ in the
+             * objects being compared.
+             */
+            /*
+             * The memcmp() function shall return an integer greater than, equal
+             * to, or less than 0, if the object pointed to by s1 is greater than,
+             * equal to, or less than the object pointed to by s2, respectively.
+             */
+            IMPLEMENT_REQ("memcmp.02;memcmp.03");
+
+            *signedDiff = (SCharT)b1 - (SCharT)b2;
+            return b1-b2;
+        }
+    }
+    return 0;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved
+
+NAME
+
+    memcpy - copy bytes in memory
+
+SYNOPSIS
+
+    #include <string.h>
+    void *memcpy(void *restrict s1, const void *restrict s2, size_t n);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with
+    the ISO C standard. Any conflict between the requirements described
+    here and the ISO C standard is unintentional. This volume of
+    IEEE Std 1003.1-2001 defers to the ISO C standard.
+
+    The memcpy() function shall copy n bytes from the object pointed to
+    by s2 into the object pointed to by s1. If copying takes place between
+    objects that overlap, the behavior is undefined.
+
+RETURN VALUE
+
+    The memcpy() function shall return s1; no return value is reserved
+    to indicate an error.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+VoidTPtr memcpy_spec( CallContext context, VoidTPtr s1, VoidTPtr s2, SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s1 is not NULL", !isNULL_VoidTPtr(s1) );
+        REQ("", "s2 is not NULL", !isNULL_VoidTPtr(s2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s1 is available in the context",
+            isValidPointer(context,s1) );
+        REQ("", "Memory pointed to by s2 is available in the context",
+            isValidPointer(context,s2) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s1 is enough",
+            sizeWMemoryAvailable(s1) >= n );
+        REQ("", "Memory pointed to by s2 is enough",
+            sizeRMemoryAvailable(s2) >= n );
+
+        /*
+         * If copying takes place between objects that overlap,
+         * the behavior is undefined.
+         */
+        REQ("app.memcpy.02", "Objects are not overlapped",
+            !areObjectsOverlapped(s1,n,s2,n) );
+
+        return true;
+    }
+    coverage C
+    {
+        if (n == 0)
+            return { Zero, "Copy zero byte" };
+        else
+            return { NonZero, "Copy more than zero bytes" };
+    }
+    ALIGNMENT_COVERAGE(s1)
+    ALIGNMENT_COVERAGE(s2)
+    post
+    {
+        /*
+         * The memcpy() function shall copy n bytes from the object
+         * pointed to by s2 into the object pointed to by s1.
+         */
+        REQ("memcpy.01", "s1 contain n bytes from s2",
+              equals(   readCByteArray_VoidTPtr(s1,n),
+                        @readCByteArray_VoidTPtr(s2,n) )
+           );
+
+        /* [The object pointed to by s2 shall not be changed] */
+        REQ("", "s2 shall not be changed",
+              equals(   readCByteArray_VoidTPtr(s2,n),
+                        @readCByteArray_VoidTPtr(s2,n) )
+           );
+
+        /*
+         * The memcpy() function shall return s1;
+         */
+        REQ("memcpy.03", "memcpy() function shall return s1",
+                equals_VoidTPtr(memcpy_spec,s1) );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+              equals(   readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, n ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, n )  )
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    memmem - locate bytes
+
+SYNOPSIS
+
+    #define _GNU_SOURCE
+    #include <string.h>
+
+    void * memmem(  const void * haystack, size_t haystacklen,
+                    const void * needle, size_t needlelen);
+
+DESCRIPTION
+
+    memmem() finds the start of the first occurrence of the byte array
+    referenced by needle of length needlelen in the memory area haystack of
+    length haystacklen.
+
+RETURN VALUE
+
+    memmem() returns a pointer to the beginning of the byte array, or NULL if
+    the byte array is not found.
+
+ERRORS
+
+    Earlier versions of the C library (prior to glibc 2.1) contained a memmem()
+    with various problems, and application developers should treat this
+    function with care.
+*/
+
+specification VoidTPtr memmem_spec( CallContext context, VoidTPtr haystack,
+                                   SizeT haystacklen, VoidTPtr needle,
+                                   SizeT needlelen)
+{
+    VoidTPtr res, fullRes;
+    SizeT haystackMemSize;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "haystack is not NULL", !isNULL_VoidTPtr(haystack) );
+        REQ("", "needle is not NULL", !isNULL_VoidTPtr(needle) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by haystack is available in the context",
+                isValidPointer(context,haystack) );
+        REQ("", "Memory pointed to by needle is available in the context",
+                isValidPointer(context,needle) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by haystack is enough",
+                sizeRMemoryAvailable(haystack) >= haystacklen );
+        REQ("", "Memory pointed to by needle is enough",
+                sizeRMemoryAvailable(needle) >= needlelen );
+       
+        /* [Implicit precondition] */
+        REQ("", "The situation haystacklen==0 is not covered in standard",
+                haystacklen>0);
+        REQ("", "The situation needlelen==0 is not covered in standard",
+                needlelen>0);
+
+        /* [ Init specification local data ] */
+        res = memmem_model(haystack, haystacklen, needle, needlelen);
+        haystackMemSize = sizeRMemoryAvailable(haystack);
+        fullRes = memmem_model(haystack, haystackMemSize, needle, needlelen);
+
+        return true;
+    }
+    coverage C
+    {
+        if(!isNULL_VoidTPtr(res))
+        {
+            return {NeedleFound, "Needle found"};
+        } else {
+            if(     !isNULL_VoidTPtr(fullRes)
+                &&  diff_VoidTPtr(fullRes, haystack)<haystacklen )
+                return {NeeldeCrosses, "Needle crosses haystack boundaries" };
+            if(haystacklen<needlelen)
+                return {NeedleMore, "Not found, haystacklen<needlelen"};
+            else /*if(haystacklen>=needle)*/
+                return {NeedleLess, "Not found, haystacklen>=needlelen"};
+        }
+    }
+    ALIGNMENT_COVERAGE(haystack)
+    ALIGNMENT_COVERAGE(needle)
+    post
+    {
+        /*
+         * memmem() returns a pointer to the beginning of the byte array,
+         * or NULL if the byte array is not found.
+         */
+        REQ("memmem.02", "memmem() returns correct result",
+                equals_VoidTPtr(memmem_spec, res));
+
+        /* [Nothing changed in haystack] */
+        REQ( "",
+            "haystack memory shall not be changed", 
+            equals(  
+                readCByteArray_MemoryBlock(getTopMemoryBlock(haystack)),
+                @readCByteArray_MemoryBlock(getTopMemoryBlock(haystack))
+                )
+            );
+        
+        /* [Nothing changed in needle] */
+        REQ("", "needle memory shall not be changed", 
+            equals(  readCByteArray_MemoryBlock(getTopMemoryBlock(needle)),
+              @readCByteArray_MemoryBlock(getTopMemoryBlock(needle))
+              )
+            );
+
+        
+        return true;
+    }
+}
+
+VoidTPtr memmem_model( VoidTPtr haystack, SizeT haystacklen, VoidTPtr needle,
+                        SizeT needlelen )
+{
+    SizeT i;
+    SizeT j;
+
+    VoidTPtr result;
+    CByteArray *haystackArr, *needleArr;
+
+    haystackArr = readCByteArray_VoidTPtr( haystack, haystacklen );
+    needleArr   = readCByteArray_VoidTPtr( needle, needlelen );
+
+    if(needlelen>haystacklen) 
+        return NULL_VoidTPtr;
+
+    /*
+     * memmem() finds the start of the first occurrence of the byte
+     * array referenced by needle of length needlelen in the memory
+     * area haystack of length haystacklen.
+     */
+    IMPLEMENT_REQ("memmem.01");
+
+    for(i=0;i<(haystacklen-needlelen+1);i++)
+    {
+        for(j=0;j<needlelen;j++)
+        {
+            if(     byteAt_CByteArray(haystackArr, i+j)
+                !=  byteAt_CByteArray(needleArr,  j) )
+                break; // break the loop
+
+            if (j==needlelen-1) // last iteration
+            {
+                return add_VoidTPtr(haystack, i);
+            }
+        }
+    }
+
+    return NULL_VoidTPtr;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    memmove - copy bytes in memory with overlapping areas
+
+SYNOPSIS
+
+    #include <string.h>
+    void *memmove(void *s1, const void *s2, size_t n);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The memmove() function shall copy n bytes from the object pointed to by
+    s2 into the object pointed to by s1. Copying takes place as if the n
+    bytes from the object pointed to by s2 are first copied into a temporary
+    array of n bytes that does not overlap the objects pointed to by s1 and
+    s2, and then the n bytes from the temporary array are copied into the
+    object pointed to by s1.
+
+RETURN VALUE
+
+    The memmove() function shall return s1; no return value is reserved to
+    indicate an error.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+
+specification
+VoidTPtr memmove_spec( CallContext context, VoidTPtr s1, VoidTPtr s2, SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s1 is not NULL", !isNULL_VoidTPtr(s1) );
+        REQ("", "s2 is not NULL", !isNULL_VoidTPtr(s2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s1 is available in the context",
+                isValidPointer(context,s1) );
+        REQ("", "Memory pointed to by s2 is available in the context",
+                isValidPointer(context,s2) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s1 is enough",
+                sizeWMemoryAvailable(s1) >= n );
+        REQ("", "Memory pointed to by s2 is enough",
+                sizeRMemoryAvailable(s2) >= n );
+
+        return true;
+    }
+    coverage C
+    {
+        if(n==0)
+            return { Zero, "Copy zero bytes"};
+        else if(areObjectsOverlapped(s1,n,s2,n))
+        {
+            if(diff_VoidTPtr(s1, s2)>0)
+                return {OG12, "Overlapped, s1 greater than s2"};
+            else if(diff_VoidTPtr(s1, s2)<0)
+                return {OG21, "Overlapped, s2 greater than s1"};
+            else /*if(diff_VoidTPtr(s1, s2)==0)*/
+                return {OE12, "Overlapped, s2 equals to s1"};
+        }
+        else
+        {
+            if(diff_VoidTPtr(s1, s2)>0)
+                return {G12, "Not overlapped, s1 greater than s2"};
+            else /*if(diff_VoidTPtr(s1, s2)<0)*/
+                return {G21, "Not overlapped, s2 greater than s1"};
+        }
+    }
+    ALIGNMENT_COVERAGE(s1)
+    ALIGNMENT_COVERAGE(s2)
+    post
+    {
+        /*
+         * The memmove() function shall return s1;
+         */
+        REQ("memmove.03", "The memmove() function shall return s1",
+                equals_VoidTPtr(memmove_spec, s1));
+
+        /*
+         * The memmove() function shall copy n bytes from the object
+         * pointed to by s2 into the object pointed to by s1.
+         */
+        REQ("memmove.01", "s1 contains n bytes from s2",
+                equals( @readCByteArray_VoidTPtr(s2, n),
+                        readCByteArray_VoidTPtr(s1, n)));
+
+        /* [Only n bytes in s1 are changed] */
+        REQ("", "Other memory shall not be changed",
+                equals( readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, n ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s1), s1, n ))
+            );
+
+        /* [Nothing changed in s2 except the overlapping part] */
+        REQ("", "Other memory shall not be changed",
+                equals( readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s2), s1, n ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s2), s1, n ))
+            );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+
+NAME
+
+    memrchr - scan memory for a character
+
+SYNOPSIS
+
+    #include <string.h>
+    void * memrchr(const void * s, int c, size_t n);
+
+DESCRIPTION
+
+    The memrchr() function shall locate the last occurence of c (converted
+    to an unsigned char) in the initial n bytes (each interpreted as an
+    unsigned char) of the object pointed to by s.
+
+RETURN VALUE
+
+    The memrchr() shall return a pointer to the located byte, or a null
+    pointer if the byte does not occur in the object.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+VoidTPtr memrchr_spec(CallContext context, VoidTPtr s, IntT c, SizeT n )
+{
+    VoidTPtr firstCharPt;
+    VoidTPtr lastCharPt;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s is not NULL", !isNULL_VoidTPtr(s) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s is available in the context",
+            isValidPointer(context,s) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s is enough",
+                sizeRMemoryAvailable(s) >= n );
+
+        /* [ Init specification local data ] */
+        firstCharPt=memchr_model(s, c, n);
+        lastCharPt=memrchr_model(s, c, n);
+
+        return true;
+    }
+    coverage C
+    {
+        if(n == 0)
+        {
+            return {Zero, "n == 0 case"};
+        }
+        else if(isNULL_VoidTPtr(firstCharPt))
+        {
+            return { NotFound, "The byte does not occur in the object" };
+        }
+        else if(equals_VoidTPtr(firstCharPt, lastCharPt)) 
+        {
+            return { OnlyOneFound, "The byte occurs only once in the object" };
+        }
+        else /* if(!equals_VoidTPtr(firstCharPt, lastCharPt))  */
+        {
+            return { SeveralFound,
+                        "The byte occurs several times in the object" };
+        }
+    }
+    UNSIGNED_CHAR_COVERAGE(c)
+    post
+    {
+        if(!isNULL_VoidTPtr(lastCharPt))
+        {
+            /*
+             * The memrchr() shall return
+             * 
+             * a pointer to the located byte
+             */
+            REQ("memrchr.02.01", "The memrchr() function shall return a"
+                " pointer to the located byte",
+                equals_VoidTPtr(memrchr_spec, lastCharPt));
+        }
+        else
+        {
+            /*
+             * The memrchr() shall return
+             * 
+             * a null pointer if the byte does not occur in the object.
+             */
+            REQ("memrchr.02.02", "The memrchr() function shall return a null"
+                " pointer if the byte does not occur in the object",
+                isNULL_VoidTPtr(memrchr_spec));
+        }
+
+        /* [Nothing shall be changed in s] */
+        REQ("", "Nothing shall be changed in s", 
+            equals( readCByteArray_MemoryBlock(getTopMemoryBlock(s)),
+                    @readCByteArray_MemoryBlock(getTopMemoryBlock(s)))
+            );
+
+
+        return true;
+    }
+}
+
+VoidTPtr memrchr_model(VoidTPtr s, IntT c, SizeT n)
+{
+
+    CByteArray* ar;
+    UCharT b;
+    UCharT search=(UCharT)c;
+
+    SizeT i;
+
+    ar=readCByteArray_VoidTPtr(s, n);
+
+    /*
+     * The memrchr() function shall locate the last occurence of c
+     * (converted to an unsigned char) in the initial n bytes (each
+     * interpreted as an unsigned char) of the object pointed to by s.
+     */
+    IMPLEMENT_REQ("memrchr.01");
+
+    for(i=0; i<n; i++)
+    {
+
+        b=byteAt_CByteArray(ar, n-1-i);
+        if(b==search)
+        {
+            return add_VoidTPtr(s, n-1-i);
+        }
+    }
+    return NULL_VoidTPtr;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    memset - set bytes in memory
+
+SYNOPSIS
+
+    #include <string.h>
+    void *memset(void *s, int c, size_t n);
+
+DESCRIPTION 
+
+    The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here 
+    and the ISO C standard is unintentional. This volume of IEEE Std 
+    1003.1-2001 defers to the ISO C standard. 
+
+    The memset() function shall copy c (converted to an unsigned char) into 
+    each of the first n bytes of the object pointed to by s.
+
+RETURN VALUE
+
+    The memset() function shall return s; no return value is reserved to 
+    indicate an error.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+VoidTPtr memset_spec(CallContext context, VoidTPtr s, IntT c, SizeT n )
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s is not NULL", !isNULL_VoidTPtr(s) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s is available in the context",
+                isValidPointer(context,s) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s is enough",
+                sizeWMemoryAvailable(s) >= n );
+
+        return true;
+    }
+    coverage C
+    {
+        int cnum=countArrayChars(s, c, n);
+
+        if(n == 0)
+        {
+            return {Zero, "n == 0 case"};
+        }
+        else if(cnum==n)
+        {
+            return { Filled, "Array is already filled with the byte c" };
+        }
+        else /* if(cnum!=n) */
+        {
+            return { NotFilled, "Array is not yet filled with the byte c" };
+        }
+    }
+    UNSIGNED_CHAR_COVERAGE(c)
+    post
+    {
+
+
+        /*
+         * The memset() function shall copy c (converted to an
+         * unsigned char) into each of the first n bytes of the
+         * object pointed to by s.
+         */
+        REQ("memset.01", "The memset() function shall copy c into each of"
+            " the first n bytes of s", countArrayChars(s, c, n) == n);
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed", 
+              equals(   readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s), s, n ),
+                        @readCByteArray_MemoryBlockExceptFor(
+                            getTopMemoryBlock(s), s, n )   )
+           );
+
+        /*
+         * The memset() function shall return s
+         */
+        REQ("memset.02", "The memset() function shall return s",
+            equals_VoidTPtr(memset_spec, s));
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+
+NAME
+
+    swab - swap bytes
+
+SYNOPSIS
+
+    #include <unistd.h>
+    void swab(const void *restrict src, void *restrict dest,
+       ssize_t nbytes); 
+
+DESCRIPTION
+
+    The swab() function shall copy nbytes bytes, which are pointed to by src, 
+    to the object pointed to by dest, exchanging adjacent bytes. The nbytes 
+    argument should be even. If nbytes is odd, swab() copies and exchanges 
+    nbytes-1 bytes and the disposition of the last byte is unspecified. If 
+    copying takes place between objects that overlap, the behavior is 
+    undefined. If nbytes is negative, swab() does nothing.
+
+RETURN VALUE
+
+    None.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+void swab_spec(CallContext context, VoidTPtr src, VoidTPtr dest, SSizeT nbytes)
+{
+    int numGetBytes= nbytes;
+    
+    if(numGetBytes < 0) 
+        numGetBytes = 0;
+    
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "src is not NULL", !isNULL_VoidTPtr(src) );
+        REQ("", "dest is not NULL", !isNULL_VoidTPtr(dest) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by src is available in the context",
+                isValidPointer(context,src) );
+        REQ("", "Memory pointed to by dest is available in the context",
+                isValidPointer(context,dest) );
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by src is enough",
+                sizeRMemoryAvailable(src) >= numGetBytes );
+        REQ("", "Memory pointed to by dest is enough",
+                sizeWMemoryAvailable(dest) >= numGetBytes );
+
+        /*
+         * If copying takes place between objects that overlap,
+         * the behavior is undefined.
+         */
+        REQ("swab.04", "Objects are not overlapped",
+                !areObjectsOverlapped(src, numGetBytes, dest, numGetBytes) );
+
+        return true;
+    }
+    coverage C
+    {
+        if(nbytes==0)
+        {
+            return {Zero, "nbytes == 0 case"};
+        }
+        else if (nbytes<0)
+        {
+            return {Negative, "nbytes is negative"};
+        }
+        else if (nbytes%2==0)
+        {
+            return {Even, "nbytes is even"};
+        }
+        else /* if (nbytes%2!=0) */
+        {
+            return {Odd, "nbytes is odd"};
+        }
+    }
+    post
+    {
+        if(nbytes<0)
+        {
+            /*
+             * If nbytes is negative, swab() does nothing.
+             */
+            REQ("swab.05", "Nothing shall be changed in dest",
+                equals( readCByteArray_MemoryBlock(getTopMemoryBlock(dest)),
+                        @readCByteArray_MemoryBlock(getTopMemoryBlock(dest)) )
+                );
+        }
+        else /* if(nbytes>=0) */
+        {
+            if(nbytes%2==0)
+            {
+                /*
+                 * The nbytes argument should be even.
+                 */
+                REQ_UNCHECKABLE("swab.02",
+                    "Due to bad specification: see TestTrack note number #13");
+
+                /*
+                 * The swab() function shall copy nbytes bytes, which are
+                 * pointed to by src, to the object pointed to by dest,
+                 * exchanging adjacent bytes.
+                 */
+                REQ("swab.01", "Bytes in dest shall be exchanged",
+                        isExchangedBytes(src, dest, nbytes) );
+
+            }
+            else /* if(nbytes%2!=0) */
+            {
+                /*
+                 * If nbytes is odd, swab() copies and exchanges nbytes-1
+                 * bytes and the disposition of the last byte is unspecified.
+                 */
+                REQ("swab.03", "nbytes-1 bytes in dest shall be exchanged",
+                    isExchangedBytes(src, dest, nbytes-1) );
+            }
+
+            /* [Other memory shall not be changed] */
+            REQ("", "Other memory shall not be changed", 
+                  equals(   readCByteArray_MemoryBlockExceptFor(
+                                getTopMemoryBlock(dest), dest, numGetBytes ),
+                            @readCByteArray_MemoryBlockExceptFor(
+                                getTopMemoryBlock(dest), dest, numGetBytes )
+                        )
+               );
+        }
+
+        /* [Nothing shall be changed in src] */
+        REQ("", "Nothing shall be changed in src",
+            equals( readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(src), dest, numGetBytes),
+                    readCByteArray_MemoryBlockExceptFor(
+                        getTopMemoryBlock(src), dest, numGetBytes)  )
+            );
+
+
+        return true;
+    }
+}
+
+  
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+SizeT countArrayChars(VoidTPtr s, IntT c,  SizeT n)
+{
+    CByteArray* ar;
+    SizeT i;
+    SizeT counter=0;
+    UCharT b=(UCharT) c;
+    UCharT cur;
+
+
+    ar=readCByteArray_VoidTPtr(s, n);
+    for(i=0; i<n; i++)
+    {
+        cur=byteAt_CByteArray(ar, i);
+        if(cur==b)
+            counter++;
+    }
+    return counter;
+}
+
+bool isExchangedBytes(VoidTPtr src, VoidTPtr dest, SSizeT n) 
+{
+    CByteArray* ar1, *ar2;
+    UCharT b1, b2, exb1, exb2;
+    SizeT i;
+
+    ar1=readCByteArray_VoidTPtr(src, n);
+    ar2=readCByteArray_VoidTPtr(dest, n);
+
+    for(i=0; i<n; i+=2)
+    {
+        b1=byteAt_CByteArray(ar1, i);
+        b2=byteAt_CByteArray(ar1, i+1);
+        exb1=byteAt_CByteArray(ar2, i);
+        exb2=byteAt_CByteArray(ar2, i+1);
+
+        if(b1!=exb2 || b2!=exb1)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+

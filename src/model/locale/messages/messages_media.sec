@@ -1,0 +1,116 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "locale/messages/messages_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initLocaleMessagesSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_perror_spec(perror_media);
+    set_mediator_strerror_spec(strerror_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** perror_spec **/
+
+mediator perror_media for specification
+void perror_spec(CallContext context, CString* s, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand(&command, "perror:$(str)$(int)", s, create_IntTObj(*errno));
+        executeCommandInContext(context, &command);
+        if(!isBadVerdict())
+        {
+            PCString* StdErr = getStdErr(context);
+            timestamp = command.meta.timestamp;
+            *StdErr = clone(readCString_TSStream(&command.response));
+        }
+
+        destroy_TSCommand(&command);
+    }
+}
+
+
+/** strerror_spec **/
+//This mediator refers to: strerror_r, strerror
+mediator strerror_media for specification
+CString* strerror_spec(CallContext context, IntT errnum, CString** strerrbuf,
+    SizeT buflen, ErrorCode* errno)
+{
+    call
+    {
+        CString* res;
+        VoidTPtr ptr;
+        TSCommand command = create_TSCommand();
+
+
+        if(strerrbuf == NULL)
+            format_TSCommand(&command, "strerror:$(int)", create_IntTObj(errnum));
+        else
+        {
+            ptr = allocateMemoryBlock(context, buflen+5);
+
+            assertion(!isNULL_VoidTPtr(ptr), "strerror_media: memory not allocated");
+
+            format_TSCommand(&command, "strerror_r:$(int)$(ptr)$(int)",
+                create_IntTObj(errnum), create_VoidTPtrObj(ptr), create_IntTObj(buflen));
+        }
+
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            if(strerrbuf == NULL)
+            {
+                res = clone(readCString_TSStream(&command.response));
+                *errno = readInt_TSStream(&command.response);
+            }
+            else
+            {
+                res = clone(readCString_TSStream(&command.response));
+                *strerrbuf = clone(readLimitedCString_VoidTPtr(ptr, buflen));
+                *errno = readInt_TSStream(&command.response);
+                deallocateMemoryBlock(context, ptr);
+            }
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+
+    state
+    {
+        onStrError(context, errnum, strerrbuf, buflen, errno, strerror_spec);
+    }
+}

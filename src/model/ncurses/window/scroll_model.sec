@@ -1,0 +1,262 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/window/scroll_model.seh"
+
+
+#pragma SEC subsystem window "ncurses.window"
+
+
+
+/*
+   The group of functions 'ncurses.window.scroll' consists of:
+       scrl [1]
+       scroll [1]
+       wscrl [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX (R) Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    scrl, scroll, wscrl - scroll a Curses window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int scrl(int n);
+
+    int scroll(WINDOW *win);
+
+    int wscrl(WINDOW *win, int n);
+
+DESCRIPTION
+
+    The scroll() function scrolls win one line in the direction of the first line.
+
+
+    The scrl() and wscrl() functions scroll the current or specified window.
+    If n is positive, the window scrolls n lines toward the first line.
+    Otherwise, the window scrolls -n lines toward the last line.
+
+    These functions do not change the cursor position. If scrolling is disabled
+    for the current or specified window, these functions have no effect. The
+    interaction of these functions with setscrreg() is currently unspecified.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they return
+    ERR.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+//This specification refers to: scrl, wscrl
+specification
+IntT scrl_spec(CallContext context, WindowTPtr* win, IntT n)
+{
+    NCursesWindow* curWin = getWindowMayNULL(context, win);
+    NCursesWindow* localWin = createNCursesWindow_Local(curWin);
+
+    if (win == NULL)
+    {
+        FILTER("scrl");
+    }
+    else
+    {
+        FILTER("wscrl");
+    }
+
+    pre
+    {
+        scrl_model(localWin, n);
+
+        /*
+         * The interaction of these functions with setscrreg() is currently unspecified.
+         */
+        REQ("app.scrl.05;app.wscrl.05", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        if (scrl_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("scrl.06.02;wscrl.06.02", "", TODO_REQ());
+        }
+
+        /*
+         * These functions do not change the cursor position.
+         */
+        REQ("scrl.03;wscrl.03", "cursor position should not change", equals(curWin->cursorPos, localWin->cursorPos));
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("scrl.06.01;wscrl.06.01", "return value should be OK", scrl_spec == SUT_OK);
+
+        REQ("", "check all", check_NCursesWindows(curWin, localWin, CH_ALL, 5));
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+void scrl_model(NCursesWindow* curWnd, IntT n)
+{
+    ChTypeT bkgd = getWindowBkgd(curWnd);
+    int i, j;
+
+    /*
+     * If scrolling is disabled for the current or specified window, these functions
+     * have no effect.
+     */
+    IMPLEMENT_REQ("scrl.04;wscrl.04;scroll.04");
+
+    if (!(curWnd->scroll) || (n == 0))
+        return;
+
+    /*
+     * The scrl() and wscrl() functions scroll the current or specified window.
+     */
+    IMPLEMENT_REQ("scrl.01;wscrl.01");
+
+    for (i=0; i<curWnd->ncols; ++i)
+    {
+        if (n > 0)
+        {
+            /*
+             * If n is positive, the window scrolls n lines toward the first line.
+             */
+            IMPLEMENT_REQ("scrl.02.01;wscrl.02.01");
+
+            for (j=curWnd->regtop; j<=curWnd->regbottom - n; ++j)
+            {
+                setElement_NCursesWindow_YX(curWnd, j, i, getElement_NCursesWindow_YX(curWnd, j + n, i));
+            }
+            for (j=curWnd->regbottom - n + 1; j<=curWnd->regbottom; ++j)
+            {
+                setElement_NCursesWindow_YX(curWnd, j, i, bkgd);
+            }
+        }
+        else
+        {
+            /*
+             * Otherwise, the window scrolls -n lines toward the last line.
+             */
+            IMPLEMENT_REQ("scrl.02.02;wscrl.02.02");
+
+            for (j=curWnd->regbottom; j>=curWnd->regtop - n; --j)
+            {
+                setElement_NCursesWindow_YX(curWnd, j, i, getElement_NCursesWindow_YX(curWnd, j + n, i));
+            }
+            for (j=curWnd->regtop; j<curWnd->regtop - n; ++j)
+            {
+                setElement_NCursesWindow_YX(curWnd, j, i, bkgd);
+            }
+        }
+    }
+    pushNCursesWindow(curWnd);
+}
+
+specification
+IntT scroll_spec(CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curWin = getWindowMayNULL(context, win);
+    NCursesWindow* localWin = createNCursesWindow_Local(curWin);
+
+    pre
+    {
+        scroll_model(localWin);
+
+        /* [Impicit precondition.] */
+        REQ("", "win should not be NULL", win != NULL);
+
+        /*
+         * The interaction of these functions with setscrreg() is currently unspecified.
+         */
+        REQ("app.scroll.05", "", TODO_REQ());
+
+        return true;
+    }
+    coverage C
+    {
+        return { ScrollWindowOneLineToFirstLine, "Scroll win one line in the direction of the first line" };
+    }
+    post
+    {
+        if (scroll_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("scroll.06.02", "", TODO_REQ());
+        }
+
+        /*
+         * These functions do not change the cursor position.
+         */
+        REQ("scroll.03", "cursor position should not change", equals(curWin->cursorPos, localWin->cursorPos));
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("scroll.06.01", "return value should be OK", scroll_spec == SUT_OK);
+
+        REQ("", "check all", check_NCursesWindows(curWin, localWin, CH_ALL, 40));
+
+        return true;
+    }
+}
+
+void scroll_model(NCursesWindow* curWnd)
+{
+    /*
+     * The scroll() function scrolls win one line in the direction of the first line.
+     */
+    IMPLEMENT_REQ("scroll.01");
+
+    scrl_model(curWnd, 1);
+}

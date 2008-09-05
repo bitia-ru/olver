@@ -1,0 +1,231 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "common/common_media.seh"
+#include "common/coverages.seh"
+#include "process/process/process_common.seh"
+#include "signal/sigstr/sigstr_model.seh"
+#include "system/system/system_model.seh"
+
+#pragma SEC subsystem sigstr "signal.sigstr"
+
+/*
+   The group of functions 'signal.sigstr' consists of:
+       psignal [1]
+       strsignal [1]
+ */
+
+coverage CoverageForSignal( CallContext context, IntT s ) {
+    if ( signalToCString( context, s ) != NULL ) { return { KnownSignal   }; }
+                                            else { return { UnknownSignal }; }
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    psignal -- print signal message
+
+SYNOPSIS
+
+    #include <signal.h>
+    void psignal(int sig, const char * s);
+    extern const char *const sys_siglist[]
+
+DESCRIPTION
+
+    The psignal() function shall display a message on the stderr stream. If s
+    is not the null pointer, and does not point to an empty string (e.g. "\0"),
+    the message shall consist of the string s, a colon, a space, and a
+    string describing the signal number sig; otherwise psignal() shall display
+    only a message describing the signal number sig. If sig is invalid, the
+    message displayed shall indicate an unknown signal.
+
+    The array sys_siglist holds the signal description strings indexed by
+    signal number.
+
+RETURN VALUE
+
+    psignal() returns no value.
+*/
+specification
+void psignal_spec( CallContext context, IntT sig, CString * s, CString * errput, CString * stderrAsFile )
+{
+    pre
+    {
+        return true;
+    }
+    coverage psignal_coverage = CoverageForSignal( context, sig ) * CoverageForCString( s );
+    post
+    {
+        verbose( "psignal_spec : sid is %2d, ", sig );
+        printC_String( "s is ", s );
+        printC_String( "errput is ", errput );
+        /*
+         * The psignal() function shall display a message on the stderr stream
+         */
+        REQ( "psignal.01", "psignal() display a message on the stderr", errput != NULL );
+
+        if ( psignal_coverage[ 0 ] != CoverageForSignal.UnknownSignal ) {
+            CString * signalAsCString = signalToCString( context, sig );
+            if ( psignal_coverage[ 1 ] == CoverageForCString.NullString  ||
+                 psignal_coverage[ 1 ] == CoverageForCString.EmptyString
+               ) {
+                CString * expectedErrput1 = signalAsCString                                          ;
+                CString * expectedErrput2 = concat_CString( expectedErrput1, create_CString( "\n" ) );
+                /*
+                 * otherwise psignal() shall display only a message describing the signal number
+                 * sig
+                 */
+                REQ( "psignal.03", "display only a message describing the signal",
+                                   equals( errput, expectedErrput1 ) || equals( errput, expectedErrput2 )
+                   );
+            } else {
+                CString * expectedErrput1 = concat_CString( concat_CString( s, create_CString( ": " ) ), signalAsCString );
+                CString * expectedErrput2 = concat_CString( expectedErrput1, create_CString( "\n" ) )                     ;
+                /*
+                 * If s is not the null pointer, and does not point to an empty string (e.g. "\0"),
+                 * the message shall consist of the string s, a colon, a space, and a string
+                 * describing the signal number sig
+                 */
+                REQ( "psignal.02", "display the string s, a colon, a space, and a string describing the signal",
+                                   equals( errput, expectedErrput1 ) || equals( errput, expectedErrput2 )
+                   );
+            }
+        } else {
+            bool checkResult = true;
+            IntT i;
+            for ( i = 1; signalToCString( context, i ) != NULL && checkResult; i++ ) {
+                if ( indexOfCStringC_String( errput, signalToCString( context, i ) ) != -1 ) { checkResult = false; }
+            }
+            /*
+             * If sig is invalid, the message displayed shall indicate an unknown signal
+             */
+            REQ( "psignal.04", "the message displayed shall indicate an unknown signal", checkResult );
+        }
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    strsignal -- return string describing signal
+
+SYNOPSIS
+
+    #define _GNU_SOURCE
+    #include <string.h>
+
+    char * strsignal(int sig);
+
+    extern const char * const sys_siglist[];
+
+DESCRIPTION
+
+    The strsignal() function shall return a pointer to a string describing the
+    signal number sig. The string can only be used until the next call to
+    strsignal().
+
+    The array sys_siglist holds the signal description strings indexed by
+    signal number. This array should not be accessed directly by applications.
+
+RETURN VALUE
+
+    If sig is a valid signal number, strsignal() shall return a pointer to the
+    appropriate description string. Otherwise, strsignal() shall return either
+    a pointer to the string "unknown signal", or a null pointer.
+
+    Although the function is not declared as returning a pointer to a constant
+    character string, applications shall not modify the returned string.
+*/
+
+specification
+CString * strsignal_spec( CallContext context, IntT sig )
+{
+    pre
+    {
+        return true;
+    }
+    coverage strsignal_coverage = CoverageForSignal( context, sig );
+    post
+    {
+        // verbose( "strsignal_spec : sid is %2d, ", sig );
+        // printC_String( "strsignal_spec is ", strsignal_spec );
+        if ( strsignal_coverage != CoverageForSignal.UnknownSignal ) {
+            CString * signalAsCString = signalToCString( context, sig );
+            /*
+             * The strsignal() function shall return a pointer to a string describing the
+             * signal number sig
+             */
+            REQ( "strsignal.01", "strsignal() shall return a pointer to a string", strsignal_spec != NULL );
+
+            /*
+             * If sig is a valid signal number, strsignal() shall return a pointer to the
+             * appropriate description string
+             */
+            REQ( "strsignal.07", "strsignal() shall return a pointer to the appropriate description string",
+                                 equals( strsignal_spec, signalAsCString )
+               );
+        } else {
+            /*
+             * Otherwise, strsignal() shall return either a pointer to the string "unknown
+             * signal", or a null pointer
+             */
+            REQ( "strsignal.08", "either a pointer to the string \"unknown signal\", or a null pointer",
+                                 strsignal_spec == NULL || equals( strsignal_spec, create_CString( "unknown signal" ) )
+               );
+        }
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+CString * signalToCString( CallContext context, IntT s ) {
+    IntTObj * sObj = create_IntTObj( s );
+    SystemState * systemState = getSystemState_CallContext( context );
+    assertion( systemState->signalToString != NULL, "signalToCString : systemState->signalToString is NULL\n" );
+    if ( containsKey_Map( systemState->signalToString, sObj ) ) { return get_Map( systemState->signalToString, sObj ); }
+                                                           else { return NULL                                        ; }
+}

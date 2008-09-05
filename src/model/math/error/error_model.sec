@@ -1,0 +1,750 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "math/error/error_model.seh"
+#include "math/error/error_config.h"
+
+#pragma SEC subsystem error "math.error"
+
+
+
+/* 
+   The group of functions 'math.error' consists of: 
+       erf [2]
+       erfc [2]
+       erfcf [2]
+       erfcl [2]
+       erff [2]
+       erfl [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    erf, erff, erfl - error functions 
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double erf(double x);
+
+    float erff(float x);
+
+    long double erfl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and 
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 
+    defers to the ISO C standard. These functions shall compute the error 
+    function of their argument x, defined as: 
+
+    An application wishing to check for error situations should set errno to 
+    zero and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. 
+    On return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO | 
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+    RETURN VALUE
+
+    Upon successful completion, these functions shall return the value of the 
+    error function.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, ±0 shall be returned.
+
+    If x is ±Inf, ±1 shall be returned.
+
+    If x is subnormal, a range error may occur, and 2 * x/ sqrt() should be 
+    returned. 
+
+ERRORS
+
+    These functions may fail if:
+
+    Range Error [MX] The result underflows.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression (math_errhandling 
+    & amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point 
+    exception shall be raised.
+*/
+
+//This specification refers to: erff, erf, erfl
+specification
+Unifloat* erf_spec( CallContext context, Unifloat* x, ErrorCode* errno )
+{
+    Unifloat* One = createOne_Unifloat(x->type);
+    char type[3][10] = {"erff", "erf", "erfl"};
+    
+    FILTER(type[x->type]);
+    
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+    }
+    coverage C
+    {
+        if(!isZero_Unifloat(x) && (x->sign == 1) && !isSubnormal_Unifloat(x) && 
+           isNormal_Unifloat(x))
+            return {X_IS_NORMAL_POSITIVE, "X IS NORMAL POSITIVE" };
+
+        if((x->sign == -1) && isNormal_Unifloat(x) && !isZero_Unifloat(x))
+            return {X_IS_NORMAL_NEGATIVE, "X IS NORMAL NEGATIVE" };
+        
+        if(isZero_Unifloat(x))
+            return {X_IS_ZERO, "X IS ZERO" };
+
+        if(isNan_Unifloat(x))
+            return {X_IS_NAN, "X IS NAN" };
+
+        if(isInfinity_Unifloat(x))
+            return {X_IS_INFINITY, "X IS INFINITY" };
+
+        if(isSubnormal_Unifloat(x))
+            return {X_IS_SUBNORMAL, "X IS SUBNORMAL" };
+    }
+    post
+    {
+        IntT mant = digMant_Unifloat(x->type);
+
+        /*[Calculate model function]*/
+        Unifloat* model_res;
+
+        model_res = erf_model(x);
+        
+        round_Unifloat(model_res, mant);
+        round_Unifloat(erf_spec, mant);
+        
+        model_res = checkRange_Unifloat(model_res);
+        
+        /*
+         * These functions may fail if:
+         *
+         * Range Error [MX] The result underflows.
+         */
+        ERROR_BEGIN(POSIX_ERF, 
+            "erf.09.01.01;erff.09.01.01;erfl.09.01.01", 
+            *errno, *errno)
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is 
+             * non-zero, then errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_ERF, ERANGE, 
+            "erf.09.01.01;erff.09.01.01;erfl.09.01.01", 
+            isUnderflow_Unifloat(model_res))
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error [MX] The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERREXCEPT) 
+             * is non-zero, then the underflow floating-point exception shall 
+             * be raised.
+             */
+        ERROR_END()
+
+        if(!isZero_Unifloat(x) && isNormal_Unifloat(x) && 
+           !isSubnormal_Unifloat(x))
+        {
+            /*
+             * Upon successful completion, these functions shall return the 
+             * value of the error function.
+             */
+            REQ("erf.04;erff.04;erfl.04", 
+                "Functions shall return the value of the error function", 
+                 compareWithPrecision_Unifloat(model_res, erf_spec, mant) == 0);
+        }
+
+#if NAN_SUPPORT == 1
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("erf.05;erff.05;erfl.05", 
+            "If x is NaN, a NaN shall be returned", 
+            isNan_Unifloat(erf_spec));
+        }
+#endif
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, ±0 shall be returned.
+             */
+            REQ("erf.06;erff.06;erfl.06", 
+            "If x is ±0, ±0 shall be returned", 
+             isZero_Unifloat(erf_spec) && (erf_spec->sign == x->sign));
+        }
+
+        if(isInfinity_Unifloat(x))
+        {
+            /*
+             * If x is ±Inf, ±1 shall be returned.
+             */
+            REQ("erf.07;erff.07;erfl.07", 
+            "If x is ±Inf, ±1 shall be returned", 
+            (compare_Unifloat(One, abs_Unifloat(erf_spec)) == 0) && 
+            (erf_spec->sign == x->sign));
+        }
+
+        if(isSubnormal_Unifloat(x))
+        {
+            /*
+             * If x is subnormal, a range error may occur, and 2 * x/ sqrt() 
+             * should be returned.
+             */
+            REQ("erf.08;erff.08;erfl.08", 
+            "If x is subnormal, a range error may occur, and 2 * x/ sqrt() "
+            "should be returned", 
+             compareWithPrecision_Unifloat(model_res, erf_spec, mant) == 0);
+        }
+
+ 
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* erf_model(Unifloat* x)
+{
+    Unifloat* res, *pi, *Two;
+    Unifloat* limit = convertString_Unifloat(create_CString("1.5"), x->type);
+
+    Two = createOne_Unifloat(x->type);
+    Two->exp++;
+    pi = convertBinaryString_Unifloat(create_CString(PI), x->type);
+
+    if(isNan_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = NaN;
+        return res;
+    }
+    if(isZero_Unifloat(x))
+    {
+        return clone(x);
+    }
+    if(isInfinity_Unifloat(x))
+    {
+        res = createOne_Unifloat(x->type);
+        res->sign = x->sign;
+        return res;
+    }
+    if(isSubnormal_Unifloat(x))
+    {
+        res = mul_Unifloat(x, Two);
+        res = div_Unifloat(res, sqrt_Unifloat(pi));
+        return res;
+    }
+
+    if(compare_Unifloat(abs_Unifloat(x), limit) == 1)
+        res = f_MethodErf_Unifloat(abs_Unifloat(x));
+    else
+        res = s_MethodErf_Unifloat(abs_Unifloat(x));
+    
+    res->sign = x->sign;
+    return res;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6 
+IEEE Std 1003.1, 2004 Edition 
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+NAME
+
+    erfc, erfcf, erfcl - complementary error functions 
+
+SYNOPSIS
+
+    #include <math.h>
+
+    double erfc(double x);
+
+    float erfcf(float x);
+
+    long double erfcl(long double x);
+
+DESCRIPTION
+
+    [CX] The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and 
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 
+    defers to the ISO C standard. These functions shall compute the 
+    complementary error function 1.0 - erf(x).
+
+    An application wishing to check for error situations should set errno to 
+    zero and call feclearexcept(FE_ALL_EXCEPT) before calling these functions. 
+    On return, if errno is non-zero or fetestexcept(FE_INVALID | FE_DIVBYZERO | 
+    FE_OVERFLOW | FE_UNDERFLOW) is non-zero, an error has occurred.
+
+    RETURN VALUE
+
+    Upon successful completion, these functions shall return the value of the 
+    complementary error function.
+
+    If the correct value would cause underflow and is not representable, a 
+    range error may occur and [MX] either 0.0 (if representable), or an 
+    implementation-defined value shall be returned.
+
+    [MX] If x is NaN, a NaN shall be returned.
+
+    If x is ±0, +1 shall be returned.
+
+    If x is -Inf, +2 shall be returned.
+
+    If x is +Inf, +0 shall be returned.
+
+    If the correct value would cause underflow and is representable, a range 
+    error may occur and the correct value shall be returned. 
+
+ERRORS
+
+    These functions may fail if:
+
+    Range Error The result underflows.
+
+    If the integer expression (math_errhandling & MATH_ERRNO) is non-zero, then 
+    errno shall be set to [ERANGE]. If the integer expression (math_errhandling 
+    & amp; MATH_ERREXCEPT) is non-zero, then the underflow floating-point 
+    exception shall be raised.
+*/
+
+//This specification refers to: erfcf, erfc, erfcl
+specification
+Unifloat* erfc_spec( CallContext context, Unifloat* x, ErrorCode* errno )
+{
+    Unifloat* One = createOne_Unifloat(x->type);
+    char type[3][10] = {"erfcf", "erfc", "erfcl"};
+    Unifloat* Two = createOne_Unifloat(x->type);
+    Two->exp++;
+
+    FILTER(type[x->type]);
+    
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "x shall not be NULL", x != NULL);
+    }
+    coverage C
+    {
+        if((x->sign == 1) && isNormal_Unifloat(x) && !isZero_Unifloat(x))
+            return {X_IS_NORMAL_POSITIVE, "X IS NORMAL POSITIVE" };
+
+        if((x->sign == -1) && isNormal_Unifloat(x) && !isZero_Unifloat(x))
+            return {X_IS_NORMAL_NEGATIVE, "X IS NORMAL NEGATIVE" };
+        
+        if(isZero_Unifloat(x))
+            return {X_IS_ZERO, "X IS ZERO" };
+        
+        if(isNan_Unifloat(x))
+            return {X_IS_NAN, "X IS NAN" };
+
+        if(isInfinity_Unifloat(x))
+            return {X_IS_INFINITY, "X IS INFINITY" };
+    }
+    post
+    {
+        IntT mant = digMant_Unifloat(x->type);
+
+        /*[Calculate model function]*/
+        Unifloat* model_res;
+
+        model_res = erfc_model(x);
+        
+        round_Unifloat(model_res, mant);
+        round_Unifloat(erfc_spec, mant);
+
+        model_res = checkRange_Unifloat(model_res);
+
+        if(isUnderflow_Unifloat(model_res) && 
+            !isRepresentable_Unifloat(model_res))
+        {
+            /*
+             * If the correct value would cause underflow and is not 
+             * representable, a range error may occur and [MX] either 0.0 
+             * (if representable), or an implementation-defined value shall be 
+             * returned.
+             */
+            REQ("erfc.05;erfcf.05;erfcl.05", 
+                "If the correct value would cause underflow and is not "
+                "representable 0 shall be returned", 
+                 isZero_Unifloat(erfc_spec));
+        }
+
+        if(isUnderflow_Unifloat(model_res) && 
+           isRepresentable_Unifloat(model_res))
+        {
+            /*
+             * If the correct value would cause underflow and is representable, 
+             * a range error may occur and the correct value shall be returned.
+             */
+            REQ("erfc.10;erfcf.10;erfcl.10", 
+            "If the correct value would cause underflow and is representable"
+            "the correct value shall be returned", 
+             compareWithPrecision_Unifloat(model_res, erfc_spec, mant) == 0);
+        }
+
+        /*
+         * These functions may fail if:
+         *
+         * Range Error The result underflows.
+         */
+        ERROR_BEGIN(POSIX_ERFC, 
+            "erfc.11.01.01;erfcf.11.01.01;erfcl.11.01.01", 
+            *errno,  *errno )
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERRNO) is 
+             * non-zero, then errno shall be set to [ERANGE].
+             */
+            ERROR_MAY(POSIX_ERFC, ERANGE, 
+            "erfc.11.01.01;erfcf.11.01.01;erfcl.11.01.01", 
+            isUnderflow_Unifloat(model_res))
+
+            /*
+             * These functions may fail if:
+             *
+             * Range Error The result underflows.
+             *
+             * If the integer expression (math_errhandling & MATH_ERREXCEPT) 
+             * is non-zero, then the underflow floating-point exception shall 
+             * be raised.
+             */
+        ERROR_END()
+
+        if(!isZero_Unifloat(x) && isNormal_Unifloat(x))
+        {
+            /*
+             * Upon successful completion, these functions shall return the 
+             * value of the complementary error function.
+             */
+            REQ("erfc.04;erfcf.04;erfcl.04", 
+                "Functions shall return the value of the complementary error "
+                "function", 
+                 compareWithPrecision_Unifloat(model_res, erfc_spec, mant) == 0);
+        }
+
+#if NAN_SUPPORT == 1
+        if(isNan_Unifloat(x))
+        {
+            /*
+             * [MX] If x is NaN, a NaN shall be returned.
+             */
+            REQ("erfc.06;erfcf.06;erfcl.06", 
+            "If x is NaN, a NaN shall be returned", 
+            isNan_Unifloat(erfc_spec));
+        }
+#endif
+
+        if(isZero_Unifloat(x))
+        {
+            /*
+             * If x is ±0, +1 shall be returned.
+             */
+            REQ("erfc.07;erfcf.07;erfcl.07", 
+            "If x is ±0, +1 shall be returned", 
+             compare_Unifloat(erfc_spec, One) == 0);
+        }
+
+        if(isInfinity_Unifloat(x) && (x->sign == -1))
+        {
+            /*
+             * If x is -Inf, +2 shall be returned.
+             */
+            REQ("erfc.08;erfcf.08;erfcl.08", 
+                "If x is -Inf, +2 shall be returned", 
+                 compare_Unifloat(erfc_spec, Two) == 0);
+        }
+
+        if(isInfinity_Unifloat(x) && (x->sign == 1))
+        {
+            /*
+             * If x is +Inf, +0 shall be returned.
+             */
+            REQ("erfc.09;erfcf.09;erfcl.09", 
+            "If x is +Inf, +0 shall be returned", 
+             isZero_Unifloat(erfc_spec) && (erfc_spec->sign == 1));
+        }
+
+   ;
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+Unifloat* erfc_model(Unifloat* x)
+{
+    Unifloat* res, *pi, *Two, *One;
+    Unifloat* limit = convertString_Unifloat(create_CString("1.5"), x->type);
+
+    One = createOne_Unifloat(x->type);;
+    Two = createOne_Unifloat(x->type);
+    Two->exp++;
+    pi = convertBinaryString_Unifloat(create_CString(PI), x->type);
+
+    if(isNan_Unifloat(x))
+    {
+        res = createZero_Unifloat(x->type);
+        res->kind = NaN;
+        return res;
+    }
+    if(isZero_Unifloat(x))
+    {
+        res = createOne_Unifloat(x->type);
+        res->sign = 1;
+        return res;
+    }
+    if(isInfinity_Unifloat(x) && (x->sign == 1))
+    {
+        res = createZero_Unifloat(x->type);
+        res->sign = 1;
+        return res;
+    }
+    if(isInfinity_Unifloat(x) && (x->sign == -1))
+    {
+        res = createOne_Unifloat(x->type);
+        res->exp++;
+        res->sign = 1;
+        return res;
+    }
+
+    if(compare_Unifloat(abs_Unifloat(x), limit) == 1)
+        res = f_MethodErfc_Unifloat(abs_Unifloat(x));
+    else
+        res = s_MethodErfc_Unifloat(abs_Unifloat(x));
+    
+    if(x->sign == -1)
+    {
+        res = sub_Unifloat(Two, res);
+    }
+
+    return res;
+}
+
+/********************************************************************/
+/**                     Unifloat Error Functions                   **/
+/********************************************************************/
+
+Unifloat* f_MethodErf_Unifloat(Unifloat* x)
+{
+    Unifloat* res, *A, *predA, *B, *predB, *tmp, *a, *b, *Half, *ind, *Two;
+    IntT i, NUM = 100;
+    UnifloatType type = x->type;
+    Unifloat* One = createOne_Unifloat(type);
+    Unifloat* pi = convertBinaryString_Unifloat(create_CString(PI), type);
+    Unifloat* new_x = mul_Unifloat(x, x);
+    
+    predA = createOne_Unifloat(type);
+    A = createZero_Unifloat(type);
+    predB = createZero_Unifloat(type);
+    B = createOne_Unifloat(type);
+    
+    Half = createOne_Unifloat(type);
+    Half->exp--;
+    Two = createOne_Unifloat(type);
+    Two->exp++;
+    a = createOne_Unifloat(type);
+    b = clone(new_x);
+    b = add_Unifloat(b, Half);
+    
+    for(i = 1; i < NUM + 1; i++)
+    {
+        tmp = clone(A);
+        A = add_Unifloat(mul_Unifloat(b, tmp), mul_Unifloat(a, predA));
+        predA = clone(tmp);
+
+        tmp = clone(B);
+        B = add_Unifloat(mul_Unifloat(b, tmp), mul_Unifloat(a, predB));
+        predB = clone(tmp);
+        
+        ind = convertInteger_Unifloat(i, type);
+        a = mul_Unifloat(ind, sub_Unifloat(ind, Half));
+        a->sign = -1;
+        
+        b = add_Unifloat(b, Two);
+    }
+    
+    res = div_Unifloat(A, B);
+    res = mul_Unifloat(res, x);
+    res = div_Unifloat(res, exp_Unifloat(new_x));
+    res = div_Unifloat(res, sqrt_Unifloat(pi));
+    res = sub_Unifloat(One, res);
+    return res;
+}
+
+Unifloat* s_MethodErf_Unifloat(Unifloat* x)
+{
+    Unifloat* res, * tmp, * One, * Two, * ind, * pi;
+    IntT i, NUM = 100;
+    UnifloatType type = x->type;
+    Unifloat* new_x = mul_Unifloat(x, x);
+    
+    pi = convertBinaryString_Unifloat(create_CString(PI), type);
+    res = createOne_Unifloat(type);
+    One = createOne_Unifloat(type);
+    Two = createOne_Unifloat(type);
+    Two->exp++;
+    tmp = mul_Unifloat(Two, new_x);
+    ind = convertInteger_Unifloat(NUM, type);
+    ind = mul_Unifloat(ind, Two);
+    ind = add_Unifloat(ind, One);
+    for(i = NUM; i > 0; i--)
+    {
+        res = mul_Unifloat(res, tmp);
+        res = div_Unifloat(res, ind);
+        res = add_Unifloat(One, res);
+        ind = sub_Unifloat(ind, Two);
+    }
+    res->exp++;
+    res = mul_Unifloat(res, x);
+    res = div_Unifloat(res, exp_Unifloat(new_x));
+    res = div_Unifloat(res, sqrt_Unifloat(pi));
+    
+    return res;
+}
+
+Unifloat* f_MethodErfc_Unifloat(Unifloat* x)
+{
+    Unifloat* res, *A, *predA, *B, *predB, *tmp, *a, *b, *Half, *ind, *Two;
+    IntT i, NUM = 100;
+    UnifloatType type = x->type;
+    Unifloat* One = createOne_Unifloat(type);
+    Unifloat* pi = convertBinaryString_Unifloat(create_CString(PI), type);
+    Unifloat* new_x = mul_Unifloat(x, x);
+        
+    predA = createOne_Unifloat(type);
+    A = createZero_Unifloat(type);
+    predB = createZero_Unifloat(type);
+    B = createOne_Unifloat(type);
+    
+    Half = createOne_Unifloat(type);
+    Half->exp--;
+    Two = createOne_Unifloat(type);
+    Two->exp++;
+    a = createOne_Unifloat(type);
+    b = clone(new_x);
+    b = add_Unifloat(b, Half);
+    
+    for(i = 1; i < NUM + 1; i++)
+    {
+        tmp = clone(A);
+        A = add_Unifloat(mul_Unifloat(b, tmp), mul_Unifloat(a, predA));
+        predA = clone(tmp);
+
+        tmp = clone(B);
+        B = add_Unifloat(mul_Unifloat(b, tmp), mul_Unifloat(a, predB));
+        predB = clone(tmp);
+        
+        ind = convertInteger_Unifloat(i, type);
+        a = mul_Unifloat(ind, sub_Unifloat(ind, Half));
+        a->sign = -1;
+        
+        b = add_Unifloat(b, Two);
+    }
+    
+    res = div_Unifloat(A, B);
+    res = mul_Unifloat(res, x);
+    res = div_Unifloat(res, exp_Unifloat(new_x));
+    res = div_Unifloat(res, sqrt_Unifloat(pi));
+    return res;
+}
+
+Unifloat* s_MethodErfc_Unifloat(Unifloat* x)
+{
+    Unifloat* res, * tmp, * One, * Two, * ind, * pi;
+    IntT i, NUM = 100;
+    UnifloatType type = x->type;
+    Unifloat* new_x = mul_Unifloat(x, x);
+    
+    pi = convertBinaryString_Unifloat(create_CString(PI), type);
+    res = createOne_Unifloat(type);
+    One = createOne_Unifloat(type);
+    Two = createOne_Unifloat(type);
+    Two->exp++;
+    tmp = mul_Unifloat(Two, new_x);
+    ind = convertInteger_Unifloat(NUM, type);
+    ind = mul_Unifloat(ind, Two);
+    ind = add_Unifloat(ind, One);
+    for(i = NUM; i > 0; i--)
+    {
+        res = mul_Unifloat(res, tmp);
+        res = div_Unifloat(res, ind);
+        res = add_Unifloat(One, res);
+        ind = sub_Unifloat(ind, Two);
+    }
+    res->exp++;
+    res = mul_Unifloat(res, x);
+    res = div_Unifloat(res, exp_Unifloat(new_x));
+    res = div_Unifloat(res, sqrt_Unifloat(pi));
+    
+    return sub_Unifloat(One, res);
+}

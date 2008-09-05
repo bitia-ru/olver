@@ -1,0 +1,1194 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "socket/socket/socket_model.seh"
+#include "socket/socket/socket_media.seh"
+
+
+/********************************************************************/
+/**                    Defered Reactions Processors                **/
+/********************************************************************/
+
+static void connect_return_processor(ThreadId threadId, TSStream* stream, 
+                                            TSMetaData* meta)
+{
+    IntT     res;
+    IntT    errno;
+    SockaddrT* peerAddr = NULL;
+    
+    res = readInt_TSStream(stream);
+    errno=readInt_TSStream(stream);
+
+    if (res!=-1)
+    {
+        peerAddr = readSockaddr_TSStream(stream);
+    }
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        connect_return,
+        create_ConnectReturnType(threadId, res, create_ErrorCode(errno), peerAddr),
+        meta->timestamp
+        );
+}
+
+static void accept_return_processor(ThreadId threadId, TSStream* stream, 
+                                     TSMetaData* meta)
+{
+    IntT     res;
+    IntT     errno;
+    SockaddrT*  acceptedAddr;
+
+    
+    acceptedAddr = readSockaddr_TSStream(stream);
+    res = readInt_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        accept_return,
+        create_AcceptReturnType(threadId,  acceptedAddr, create_FileDescId(threadId.system, threadId.process, res), create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+static void send_return_processor(ThreadId threadId, TSStream* stream, 
+                                    TSMetaData* meta)
+{
+    SSizeT     res;
+    IntT     errno;
+    
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        send_return,
+        create_SendReturnType(threadId,  res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+static void write_socket_return_processor(ThreadId threadId, TSStream* stream, 
+                                  TSMetaData* meta)
+{
+    SSizeT     res;
+    IntT       errno;
+    
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        write_socket_return,
+        create_WriteSocketReturnType(threadId,  res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+static void recv_return_processor(ThreadId threadId, TSStream* stream, 
+                                  TSMetaData* meta)
+{
+    SSizeT     res;
+    CByteArray* arr;
+    IntT       errno;
+    SockaddrT* addr;
+    
+
+    arr = readCByteArray_TSStream(stream);
+    addr =readSockaddr_TSStream(stream);
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        recv_return,
+        create_RecvReturnType(threadId,  res, arr, addr, create_ErrorCode(errno), NULL, NULL),
+        meta->timestamp
+        );
+}
+
+static void sendmsg_return_processor(ThreadId threadId, TSStream* stream, 
+                                  TSMetaData* meta)
+{
+    SSizeT     res;
+    IntT     errno;
+    
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        sendmsg_return,
+        create_SendMsgReturnType(threadId,  res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+static void recvmsg_return_processor(ThreadId threadId, TSStream* stream, 
+                                     TSMetaData* meta)
+{
+    SSizeT     res;
+    IntT     errno;
+    SocketMsgHdr* msg;
+    SSizeT      msgDataLength;
+    
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    msg=readSocketMsgHdr_TSStream(threadId, stream);
+    msgDataLength=readSSize_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        recvmsg_return,
+        create_RecvmsgReturnType(threadId,  res, create_ErrorCode(errno), msg, msgDataLength, NULL),
+        meta->timestamp
+        );
+}
+
+static void read_socket_return_processor(ThreadId threadId, TSStream* stream, 
+                                  TSMetaData* meta)
+{
+    SSizeT     res;
+    CByteArray* arr;
+    IntT       errno;
+    SockaddrT* addr;
+    
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    arr = readCByteArray_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        read_socket_return,
+        create_ReadSocketReturnType(threadId,  res,  create_ErrorCode(errno), NULL, NULL, arr),
+        meta->timestamp
+        );
+}
+
+static void writev_socket_return_processor(ThreadId threadId, TSStream* stream, 
+                                          TSMetaData* meta)
+{
+    SSizeT     res;
+    IntT       errno;
+    
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        writev_socket_return,
+        create_WritevSocketReturnType(threadId,  res, create_ErrorCode(errno)),
+        meta->timestamp
+        );
+}
+
+static void readv_socket_return_processor(ThreadId threadId, TSStream* stream, 
+                                           TSMetaData* meta)
+{
+    SSizeT     res;
+    IntT       errno;
+    
+    
+    res = readSSize_TSStream(stream);
+    errno=readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval
+        (
+        getThreadChannelID(threadId),
+        NULL,
+        readv_socket_return,
+        create_ReadvSocketReturnType(threadId,  res, create_ErrorCode(errno), NULL, NULL),
+        meta->timestamp
+        );
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initSocketSocketSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_accept_spec(accept_media);
+    set_mediator_accept_return(accept_return_media);
+
+    set_mediator_bind_spec(bind_media);
+    set_mediator_bindresvport_spec(bindresvport_media);
+    set_mediator_connect_spec(connect_media);
+    set_mediator_connect_return(connect_return_media);
+
+    set_mediator_getpeername_spec(getpeername_media);
+    set_mediator_getsockname_spec(getsockname_media);
+    set_mediator_getsockopt_spec(getsockopt_media);
+    set_mediator_listen_spec(listen_media);
+
+    set_mediator_recv_spec(recv_media);
+    set_mediator_recv_return(recv_return_media);
+
+    set_mediator_recvmsg_spec(recvmsg_media);
+    set_mediator_recvmsg_return(recvmsg_return_media);
+
+    set_mediator_send_spec(send_media);
+    set_mediator_send_return(send_return_media);
+
+
+    set_mediator_write_socket_spec(write_socket_media);
+    set_mediator_write_socket_return(write_socket_return_media);
+
+    set_mediator_writev_socket_spec(writev_socket_media);
+    set_mediator_writev_socket_return(writev_socket_return_media);
+
+    set_mediator_read_socket_spec(read_socket_media);
+    set_mediator_read_socket_return(read_socket_return_media);
+
+    set_mediator_readv_socket_spec(readv_socket_media);
+    set_mediator_readv_socket_return(readv_socket_return_media);
+    
+    set_mediator_sendmsg_spec(sendmsg_media);
+    set_mediator_sendmsg_return(sendmsg_return_media);
+
+//    set_mediator_sendto_spec(sendto_media);
+    set_mediator_setsockopt_spec(setsockopt_media);
+    set_mediator_shutdown_spec(shutdown_media);
+    set_mediator_sockatmark_spec(sockatmark_media);
+    set_mediator_socket_spec(socket_media);
+    set_mediator_socketpair_spec(socketpair_media);
+
+    set_mediator_sockio_spec(sockio_media);
+
+    // Set up defered rections processors
+    registerDRProcessor("connect_return", connect_return_processor);
+    registerDRProcessor("accept_return", accept_return_processor);
+    registerDRProcessor("send_return", send_return_processor);
+    registerDRProcessor("recv_return", recv_return_processor);
+    registerDRProcessor("sendmsg_return", sendmsg_return_processor);
+    registerDRProcessor("recvmsg_return", recvmsg_return_processor);
+    registerDRProcessor("write_socket_return", write_socket_return_processor);
+    registerDRProcessor("read_socket_return", read_socket_return_processor);
+    registerDRProcessor("writev_socket_return", writev_socket_return_processor);
+    registerDRProcessor("readv_socket_return", readv_socket_return_processor);
+
+
+    // Set up formatters
+    registerTSFormatter("sockaddr",(TSFormatterFuncType)sockaddr_formatter);
+    registerTSFormatter("sockoptionval",(TSFormatterFuncType)sockoptionval_formatter);
+    registerTSFormatter("socketmsg",(TSFormatterFuncType)socketmsg_formatter);
+}
+
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** accept_spec **/
+mediator accept_media for specification
+void accept_spec( CallContext context, FileDescId socket)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "accept:$(int)", create_IntTObj(socket.filedesc));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onAccept(context, socket);
+    }
+}
+
+
+mediator accept_return_media for reaction
+AcceptReturnType* accept_return(void)
+{
+    state
+    {
+        onAcceptReturn(accept_return->context, accept_return);
+    }
+}
+
+
+
+/** bind_spec **/
+mediator bind_media for specification
+IntT bind_spec( CallContext context, FileDescId socket, SockaddrT* address, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        
+        if (address!=NULL)
+        {
+            format_TSCommand( &command, "bind:$(int)$(int)$(sockaddr)", create_IntTObj(socket.filedesc), create_IntTObj(1), address );
+        }
+        else
+        {
+            format_TSCommand( &command, "bind:$(int)$(int)", create_IntTObj(socket.filedesc), create_IntTObj(0));
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+    state
+    {
+        onBind(context, socket, address, bind_spec);
+    }
+}
+
+
+/** bindresvport_spec **/
+mediator bindresvport_media for specification
+IntT bindresvport_spec( CallContext context, FileDescId sd, SockaddrT* addr, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        
+        format_TSCommand( &command, "bindresvport:$(int)$(sockaddr)", create_IntTObj(sd.filedesc), addr);
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+    state
+    {
+        onBindrescvport(context, sd, addr, bindresvport_spec);
+    }
+}
+
+
+/** connect_spec **/
+mediator connect_media for specification
+void connect_spec( CallContext context, FileDescId socket, SockaddrT* address)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        if (address!=NULL)
+        {
+            format_TSCommand( &command, "connect:$(int)$(int)$(sockaddr)", create_IntTObj(socket.filedesc), create_IntTObj(1), address );
+        }
+        else
+        {
+            format_TSCommand( &command, "connect:$(int)$(int)", create_IntTObj(socket.filedesc), create_IntTObj(0));
+        }
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onConnect(context, socket, address);
+    }
+}
+
+
+mediator connect_return_media for reaction
+ConnectReturnType* connect_return(void)
+{
+    state
+    {
+        onConnectReturn( connect_return->context,  connect_return, connect_return->errno);
+    }
+}
+
+
+
+
+/** getpeername_spec **/
+mediator getpeername_media for specification
+GetPeerNameReturnType* getpeername_spec( CallContext context, FileDescId socket, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        SockaddrT* addr;
+        
+        format_TSCommand( &command, "getpeername:$(int)", create_IntTObj(socket.filedesc));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            addr = readSockaddr_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_GetPeerNameReturnType(res, addr);   
+    }
+}
+
+
+/** getsockname_spec **/
+mediator getsockname_media for specification
+GetSockNameReturnType* getsockname_spec( CallContext context, FileDescId socket, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        SockaddrT* addr;
+        
+        format_TSCommand( &command, "getsockname:$(int)", create_IntTObj(socket.filedesc));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            addr = readSockaddr_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_GetSockNameReturnType(res, addr);   
+    }
+    state
+    {
+        onGetSockName(context, socket, getsockname_spec);
+    }
+}
+
+
+/** getsockopt_spec **/
+mediator getsockopt_media for specification
+GetSockOptReturnType* getsockopt_spec( CallContext context, FileDescId socket, IntT level, IntT option_name, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        SocketOptionValue* val;
+        
+        format_TSCommand( &command, "getsockopt:$(int)$(int)$(int)", create_IntTObj(socket.filedesc), 
+            create_IntTObj(level), create_IntTObj(option_name));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            val = readSocketOption_TSStream(&command.response);
+
+            if (res!=-1)
+            {
+                *errno=0;
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_GetSockOptReturnType( res, val);   
+    }
+}
+
+
+
+/** listen_spec **/
+mediator listen_media for specification
+IntT listen_spec( CallContext context, FileDescId socket, IntT backlog, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        
+        format_TSCommand( &command, "listen:$(int)$(int)", create_IntTObj(socket.filedesc), create_IntTObj(backlog));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+    state
+    {
+        onListen(context, socket, backlog, listen_spec);
+    }
+}
+
+
+/** recv_spec **/
+//This mediator refers to: recv, recvfrom
+mediator recv_media for specification
+void recv_spec( CallContext context, FileDescId socket, SizeT length, bool peek, bool oob, bool waitall, bool from)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        if (!from)
+        {
+            format_TSCommand( &command, "recv:$(int)$(size)$(int)$(int)$(int)", create_IntTObj(socket.filedesc), create_SizeTObj(length), 
+                create_IntTObj(peek), create_IntTObj(oob), create_IntTObj(waitall));
+        }
+        else
+        {
+            format_TSCommand( &command, "recvfrom:$(int)$(size)$(int)$(int)$(int)", create_IntTObj(socket.filedesc), create_SizeTObj(length), 
+                create_IntTObj(peek), create_IntTObj(oob), create_IntTObj(waitall));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onRecv(context, socket, length, peek, oob, waitall, from);
+    }
+}
+
+
+mediator recv_return_media for reaction
+RecvReturnType* recv_return(void)
+{
+    state
+    {
+        onRecvReturn(recv_return->context, recv_return);
+    }
+}
+
+/** recvmsg_spec **/
+mediator recvmsg_media for specification
+void recvmsg_spec(CallContext context, FileDescId socket, SocketMsgHdr* msg,  
+                  bool peek, bool oob, bool waitall)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "recvmsg:$(int)$(socketmsg)$(int)$(int)$(int)", create_IntTObj(socket.filedesc), msg, 
+            create_IntTObj(peek), create_IntTObj(oob), create_IntTObj(waitall));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onRecvMsg(context, socket, msg,  peek, oob, waitall);
+    }
+}
+
+mediator recvmsg_return_media for 
+reaction RecvmsgReturnType* recvmsg_return(void)
+{
+    state
+    {
+        onRecvMsgReturn(recvmsg_return->context, recvmsg_return);
+    }
+}
+
+
+/** send_spec **/
+//This mediator refers to: send, sendto
+mediator send_media for specification
+void send_spec( CallContext context, FileDescId socket, CByteArray* data, bool MSG_EOR_FLAG, bool MSG_OOB_FLAG, SockaddrT* dest_addr)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        if (dest_addr==NULL)
+        {
+            format_TSCommand( &command, "send:$(int)$(ba)$(int)$(int)", create_IntTObj(socket.filedesc), data, 
+                create_IntTObj(MSG_EOR_FLAG), create_IntTObj(MSG_OOB_FLAG));
+        }
+        else
+        {
+            format_TSCommand( &command, "sendto:$(int)$(ba)$(int)$(int)$(sockaddr)", create_IntTObj(socket.filedesc), data, 
+                create_IntTObj(MSG_EOR_FLAG), create_IntTObj(MSG_OOB_FLAG), dest_addr);
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onSend(context, socket, data, MSG_EOR_FLAG, MSG_OOB_FLAG, dest_addr);
+    }
+}
+
+
+mediator send_return_media for reaction
+SendReturnType* send_return(void)
+{
+    state
+    {
+        onSendReturn(send_return->context, send_return);
+    }
+}
+
+
+/** sendmsg_spec **/
+mediator sendmsg_media for specification
+void sendmsg_spec(CallContext context, FileDescId socket, SocketMsgHdr* msg, 
+                  bool flag_MSG_EOR, bool flag_MSG_OOB, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "sendmsg:$(int)$(socketmsg)$(int)$(int)", create_IntTObj(socket.filedesc), msg, 
+            create_IntTObj(flag_MSG_EOR), create_IntTObj(flag_MSG_OOB));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onSendMsg(context, socket, msg, flag_MSG_EOR, flag_MSG_OOB);
+    }
+}
+
+
+mediator sendmsg_return_media for reaction
+SendMsgReturnType* sendmsg_return(void)
+{
+    state
+    {
+        onSendMsgReturn(sendmsg_return->context, sendmsg_return);
+    }
+}
+
+
+/** setsockopt_spec **/
+mediator setsockopt_media for specification
+IntT setsockopt_spec(CallContext context, FileDescId socket, IntT level, SocketOption option,
+                     SocketOptionValue* value, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        
+        format_TSCommand( &command, "setsockopt:$(int)$(int)$(int)$(sockoptionval)", create_IntTObj(socket.filedesc), 
+            create_IntTObj(level), create_IntTObj(option), value);
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+            if (res!=-1)
+            {
+                *errno=0;
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+    state
+    {
+        onSetsockopt(context, socket, level, option, value, setsockopt_spec);
+    }
+}
+
+
+/** shutdown_spec **/
+mediator shutdown_media for specification
+IntT shutdown_spec( CallContext context, FileDescId socket, ShutdownType how, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        
+        format_TSCommand( &command, "shutdown:$(int)$(int)", create_IntTObj(socket.filedesc), 
+            create_IntTObj(how));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+    state
+    {
+        onShutdown(context, socket, how, shutdown_spec);
+    }
+}
+
+
+/** sockatmark_spec **/
+mediator sockatmark_media for specification
+IntT sockatmark_spec( CallContext context, FileDescId s, ErrorCode* errno)
+{
+    call
+    {
+        IntT res; 
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "sockatmark:$(int)", create_IntTObj(s.filedesc));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+}
+
+
+/** socket_spec **/
+mediator socket_media for specification
+FileDescId socket_spec( CallContext context, SocketDomain  domain, SocketType type, SocketProtocol protocol, ErrorCode* errno)
+{
+    call
+    {
+        FileDescId res = create_FileDescId(context.system, context.process, -1); 
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "socket:$(int)$(int)$(int)", create_IntTObj(domain), create_IntTObj(type),
+            create_IntTObj(protocol));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res.filedesc=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+    state
+    {
+       onSocket(context, domain, type, protocol, socket_spec);
+    }
+}
+
+
+/** socketpair_spec **/
+mediator socketpair_media for specification
+SocketPairReturnType* socketpair_spec( CallContext context,  SocketDomain  domain, SocketType type, SocketProtocol protocol, ErrorCode* errno)
+{
+    call
+    {
+        IntT funcRes;
+        FileDescId sock1= create_FileDescId(context.system, context.process, -1); 
+        FileDescId sock2= create_FileDescId(context.system, context.process, -1); 
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "socketpair:$(int)$(int)$(int)", create_IntTObj(domain), create_IntTObj(type),
+            create_IntTObj(protocol));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            funcRes=readInt_TSStream(&command.response);
+            sock1.filedesc=readInt_TSStream(&command.response);
+            sock2.filedesc=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_SocketPairReturnType( funcRes, sock1, sock2);   
+    }
+    state
+    {
+        onSocketpair(context, domain, type, protocol, socketpair_spec);
+    }
+}
+
+
+/** write_socket_spec **/
+mediator write_socket_media for specification
+void write_socket_spec(CallContext context, FileDescId socket, VoidTPtr buf, SizeT nbyte)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "write_socket:$(int)$(ptr)$(size)", create_IntTObj(socket.filedesc), 
+            create_VoidTPtrObj(buf), create_SizeTObj(nbyte));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onWriteSocket(context, socket, buf, nbyte);
+    }
+}
+
+
+mediator write_socket_return_media for reaction
+WriteSocketReturnType* write_socket_return(void)
+{
+    state
+    {
+        onWriteSocketReturn(write_socket_return->context, write_socket_return);
+    }
+}
+
+
+/** read_socket_spec **/
+mediator read_socket_media for specification
+void read_socket_spec(CallContext context, FileDescId socket, SizeT nbyte)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "read_socket:$(int)$(size)", create_IntTObj(socket.filedesc), 
+            create_SizeTObj(nbyte));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onReadSocket(context, socket, nbyte);
+
+    }
+}
+
+
+mediator read_socket_return_media for reaction
+ReadSocketReturnType* read_socket_return(void)
+{
+    state
+    {
+        onReadSocketReturn(read_socket_return->context, read_socket_return);
+    }
+}
+
+
+/** writev_socket_spec **/
+mediator writev_socket_media for specification
+void writev_socket_spec(CallContext context,  FileDescId  socket, List *iov)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT i;
+        
+        format_TSCommand( &command, "writev_socket:$(int)$(size)", create_IntTObj(socket.filedesc), 
+            create_SizeTObj(size_List(iov)));
+        
+        for (i=0;i<size_List(iov);i++)
+        {
+            IOvec* curElement=(IOvec*)get_List(iov, i);
+            writePointer_TSStream(&command.command, curElement->iov_base);
+            writeSize_TSStream(&command.command, curElement->iov_len);
+        }
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onWritevSocket(context, socket, iov);
+    }
+}
+
+
+mediator writev_socket_return_media for reaction
+WritevSocketReturnType* writev_socket_return(void)
+{
+    state
+    {
+        onWritevSocketReturn(writev_socket_return->context, writev_socket_return);
+    }
+}
+
+
+
+/** readv_socket_spec **/
+mediator readv_socket_media for specification
+void readv_socket_spec(CallContext context,  FileDescId  socket, List *iov)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT i;
+        
+        format_TSCommand( &command, "readv_socket:$(int)$(size)", create_IntTObj(socket.filedesc), 
+            create_SizeTObj(size_List(iov)));
+        
+        for (i=0;i<size_List(iov);i++)
+        {
+            IOvec* curElement=(IOvec*)get_List(iov, i);
+            writePointer_TSStream(&command.command, curElement->iov_base);
+            writeSize_TSStream(&command.command, curElement->iov_len);
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;   
+    }
+    state
+    {
+        onReadvSocket(context, socket, iov);
+    }
+}
+
+
+mediator readv_socket_return_media for reaction
+ReadvSocketReturnType* readv_socket_return(void)
+{
+    state
+    {
+        onReadvSocketReturn(readv_socket_return->context, readv_socket_return);
+    }
+}
+
+
+/** sockio_spec **/
+mediator sockio_media for specification
+SockIoReturnType* sockio_spec(CallContext context, FileDescId socket, IntT request, IfConfT* argp, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT i;
+     
+        IntT funcRes;
+        IfConfT* argpRes = NULL;
+        IntT FIONREADRes;
+
+        format_TSCommand( &command, "ioctl:$(int)$(int)$(int)", create_IntTObj(socket.filedesc), 
+            create_IntTObj(request), create_IntTObj(size_List(argp->ifcu_reqs)));
+        
+        for (i=0;i<size_List(argp->ifcu_reqs);i++)
+        {
+            IfReqT* curElement=(IfReqT*)get_List(argp->ifcu_reqs, i);
+            writeCByteArray_TSStream(&command.command, curElement->ifrn_name);
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            funcRes=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+            if (request==SUT_FIONREAD)
+            {
+                FIONREADRes=readInt_TSStream(&command.response);
+            }
+            else
+            {
+                IntT sz=readInt_TSStream(&command.response);
+                argpRes=create_IfConfT();
+                for (i=0;i<sz;i++)
+                {
+                    CByteArray* ifrn_name = readCByteArray_TSStream(&command.response);
+                    CByteArray* ifru_data = readCByteArray_TSStream(&command.response);
+                    IfReqT*  crr = create_IfReqT_Full(ifrn_name, ifru_data);
+                    append_List(argpRes->ifcu_reqs, crr);
+                }
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_SockIoReturnType(funcRes, argpRes, FIONREADRes);   
+    }
+
+}

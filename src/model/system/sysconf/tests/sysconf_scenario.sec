@@ -1,0 +1,443 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "system/sysconf/sysconf_config.h"
+#include "system/sysconf/tests/sysconf_scenario.seh"
+#include "system/sysconf/sysconf_model.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "config/interpretation.seh"
+#include "io/file/file_model.seh"
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+static VoidTPtr buf;
+static int maxSize = 32800;
+
+FileDescId fildes;
+
+/* [We shall check these values first to find out what extensions are supported] */
+/* [If some extensions are not supported, we switch off the checking of 
+ corresponding parameters in the mediator] */
+static IntT sc_exts[] = {
+                            SUT_SC_ADVISORY_INFO, 
+                            SUT_SC_ASYNCHRONOUS_IO,
+                            SUT_SC_BARRIERS,
+                            SUT_SC_CLOCK_SELECTION,
+                            SUT_SC_CPUTIME,
+                            SUT_SC_FSYNC,
+                            SUT_SC_MAPPED_FILES,
+                            SUT_SC_MEMLOCK,
+                            SUT_SC_MEMLOCK_RANGE,
+                            SUT_SC_MEMORY_PROTECTION,
+                            SUT_SC_MESSAGE_PASSING,
+                            SUT_SC_MONOTONIC_CLOCK,
+                            SUT_SC_PRIORITIZED_IO,
+                            SUT_SC_PRIORITY_SCHEDULING,
+                            SUT_SC_REALTIME_SIGNALS,
+                            SUT_SC_SEMAPHORES,
+                            SUT_SC_SHARED_MEMORY_OBJECTS,
+                            SUT_SC_SPAWN,
+                            SUT_SC_SPIN_LOCKS,
+                            SUT_SC_SPORADIC_SERVER,
+                            SUT_SC_SYNCHRONIZED_IO,
+                            SUT_SC_THREAD_ATTR_STACKADDR,
+                            SUT_SC_THREAD_ATTR_STACKSIZE,
+                            SUT_SC_THREAD_CPUTIME,
+                            SUT_SC_THREAD_PRIO_INHERIT,
+                            SUT_SC_THREAD_PRIO_PROTECT,
+                            SUT_SC_THREAD_PRIORITY_SCHEDULING,
+                            SUT_SC_THREAD_PROCESS_SHARED,
+                            SUT_SC_THREAD_SAFE_FUNCTIONS,
+                            SUT_SC_THREAD_SPORADIC_SERVER,
+                            SUT_SC_THREADS,
+                            SUT_SC_TIMEOUTS,
+                            SUT_SC_TIMERS,
+                            SUT_SC_TRACE,
+                            SUT_SC_TRACE_EVENT_FILTER,
+                            SUT_SC_TRACE_INHERIT,
+                            SUT_SC_TRACE_LOG,
+                            SUT_SC_TYPED_MEMORY_OBJECTS,
+                            SUT_SC_2_C_DEV,
+                            SUT_SC_2_FORT_DEV,
+                            SUT_SC_2_FORT_RUN,
+                            SUT_SC_2_SW_DEV,
+                            SUT_SC_2_UPE,
+                            SUT_SC_XOPEN_UNIX
+                            // the following names do not exist in LSB, but exist in Posix
+                            //??? SUT_SC_2_PBS,
+                            //??? SUT_SC_RAW_SOCKETS, 
+                        };
+
+static int num_sc_exts = sizeof(sc_exts) / sizeof(sc_exts[0]);
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/ 
+
+static bool init_sysconf_scenario(int argc, char** argv)
+{
+    char * path_str = "/usr";
+    struct OpenFlags fl= { ReadOnly, Nonblocking, false, false, false, false, false, false};
+    CString * path=create_CString(path_str); // root dir
+    FilePermission* owner = create_FilePermission(false, false, false);
+    FilePermission* group = create_FilePermission(false, false, false);
+    FilePermission* other = create_FilePermission(false, false, false);//Maybe must change to NULL???
+    FilePermissions *perms = create_FilePermissions(owner, group, other, Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+    
+    /* Init test scenario data */
+    context = getContext();
+
+    /* [Init buf] */
+    buf = allocateMemoryBlock(context,maxSize);
+    if (isNULL_VoidTPtr(buf))
+        return false;
+
+    /* [Init FilDes] */
+    /*FIXME: fildes = */
+    initPathSystemConfiguration();//added by aram
+    open_spec(context, path, fl, perms, requestErrorCode(), false );
+    if(fildes.filedesc == -1)
+    {
+        VERBOSE("Unable to open file or dir: %s", path_str);
+        return false;
+    }
+
+    return true;
+}
+
+static void finish_sysconf_scenario(void)
+{
+    /*FIXME: fildes */
+    //close_spec(context,fildes, requestErrorCode());
+    deallocateMemoryBlock(context,buf);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool sysconf_scen_exts()
+{
+    iterate(int i=0; i<num_sc_exts ;i++;)
+    {
+        sysconf_spec(context,sc_exts[i],requestErrorCode());
+    }
+    return true;
+}
+
+scenario
+bool sysconf_scen()
+{ 
+    IntT j;
+    SCData * data;
+    
+    iterate(int i=0; i < SC_MAX_NAME; i++;)
+    {
+        j = i;
+        data = getSCData(i);
+        if(!POSIX_SYSCONF_SCENARIO_34SKIP || (i!=34)) // fails on 34
+        {
+            if(data!=NULL && data->cmp_type!=CMPT_SKIP)
+                sysconf_spec(context, j, requestErrorCode());
+        }
+    }
+    
+    return true;
+}
+
+scenario
+bool sysconf_scen2()
+{ 
+    iterate(int i=0;i<4;i++;)
+    switch(i)
+    {
+        case 0: sysconf_spec(context, SC_MAX_NAME+1 , requestErrorCode());
+            break;
+        case 1: sysconf_spec(context, max_IntT , requestErrorCode());
+            break;
+        case 2: sysconf_spec(context, -1 , requestErrorCode()); /* [LSB - 18.1.1] */
+            break;
+        case 3: sysconf_spec(context, min_IntT , requestErrorCode());    
+            break;
+    }
+  
+    return true;
+}
+
+
+scenario
+bool __sysconf_scen()
+{ 
+    IntT j;
+    SCData * data;
+    
+    iterate(int i=0; i < SC_MAX_NAME; i++;)
+    {
+        j = i;
+        data = getSCData(i);
+        if(!POSIX_SYSCONF_SCENARIO_34SKIP || (i!=34))
+        {
+            if(data!=NULL && data->cmp_type!=CMPT_SKIP)
+                __sysconf_spec(context, j, requestErrorCode());
+        }
+    }
+    
+    return true;
+}
+
+scenario
+bool __sysconf_scen2()
+{ 
+    iterate(int i=0;i<4;i++;)
+    switch(i)
+    {
+        case 0: __sysconf_spec(context, SC_MAX_NAME+1 , requestErrorCode());
+            break;
+        case 1: __sysconf_spec(context, max_IntT , requestErrorCode());
+            break;
+        case 2: __sysconf_spec(context, -1 , requestErrorCode());
+            break;
+        case 3: __sysconf_spec(context, min_IntT , requestErrorCode());    
+            break;
+    }    
+    return true;
+}
+
+scenario
+bool confstr_scen_getlen()
+{
+    IntTObj * key;
+    iterate(int i=0; i < size_Map(cs_name_map); i++;)
+    {
+        key = key_Map(cs_name_map,i);
+        confstr_spec(context, *key, NULL_VoidTPtr, 0, requestErrorCode());
+    }  
+    return true;
+}
+
+scenario
+bool confstr_scen_getstr()
+{
+    VoidTPtr tmpBuf;
+    CSData * val;
+    IntTObj * key;
+    iterate(int i=0; i < size_Map(cs_name_map); i++;)
+    {
+        key = key_Map(cs_name_map,i);
+        val = get_Map(cs_name_map,key);
+        if(val->str_size>0)
+        {
+            if(val->str_size<=maxSize)
+            {
+                confstr_spec(context, *key, buf, val->str_size, requestErrorCode() );
+            }
+            else
+            {
+                tmpBuf = allocateMemoryBlock(context,val->str_size);
+                if (isNULL_VoidTPtr(tmpBuf))
+                    return false;  
+
+                confstr_spec(context, *key, tmpBuf, val->str_size, requestErrorCode());
+                deallocateMemoryBlock(context,tmpBuf);
+            }
+        }
+    }   
+    return true;
+}
+
+scenario
+bool confstr_scen_cut()
+{
+    IntTObj * key;
+    CSData * val;
+    iterate(int i=0; i < size_Map(cs_name_map); i++;)
+    {
+        key = key_Map(cs_name_map,i);
+        val = get_Map(cs_name_map,key);
+        if( val->str_size > 1 )
+        {
+            confstr_spec(context, *key, buf, val->str_size-1, requestErrorCode());
+        }
+    }
+    return true;
+}
+
+scenario
+bool confstr_scen_cut1()
+{
+    IntTObj * key;
+    CSData * val;
+    iterate(int i=0; i < size_Map(cs_name_map); i++;)
+    {
+        key = key_Map(cs_name_map,i);
+        val = get_Map(cs_name_map,key);
+        if( val->str_size > 1 )
+        {
+            confstr_spec(context, *key, buf, 1, requestErrorCode());
+        }
+    }  
+    return true;
+}
+
+scenario
+bool confstr_scen_illegal()
+{
+    iterate(int i=0;i<8;i++;)
+    switch(i)
+    {
+        case 0: confstr_spec(context, max_IntT, buf, 10, requestErrorCode());
+            break;
+        case 1: confstr_spec(context, max_IntT, NULL_VoidTPtr, 0, requestErrorCode());
+            break;
+        case 2: confstr_spec(context, -1, buf, 10, requestErrorCode()); /* [LSB: 18.1.1] */
+            break;
+        case 3: confstr_spec(context, -1, NULL_VoidTPtr, 0, requestErrorCode()); /* [LSB: 18.1.1] */
+            break;
+        case 4: confstr_spec(context, min_IntT, buf, 10, requestErrorCode());
+            break;
+        case 5: confstr_spec(context, min_IntT, NULL_VoidTPtr, 0, requestErrorCode());
+            break;
+        case 6: confstr_spec(context, 12345, buf, 10, requestErrorCode());
+            break;
+        case 7: confstr_spec(context, 999, NULL_VoidTPtr, 0, requestErrorCode());
+            break;
+    };    
+    return true;
+}
+
+scenario
+bool getpagesize_scen()
+{
+    getpagesize_spec(context,requestErrorCode());
+    return true;
+}
+
+scenario
+bool __getpagesize_scen()
+{
+    __getpagesize_spec(context,requestErrorCode());
+    return true;
+}
+
+scenario
+bool pathconf_scen()
+{
+    CString * path = create_CString("/usr");
+    pathconf_spec(context, path, SUT_PC_NAME_MAX, requestErrorCode());
+    return true;
+}
+
+scenario
+bool fpathconf_scen()
+{
+    fpathconf_spec(context, fildes, SUT_PC_NAME_MAX, requestErrorCode());
+    return true;
+}
+
+/* ToDo: [LSB - 18.1.1: check -1 parameter in the pathconf_scen] */
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm sysconf_scenario =
+{
+    .init = init_sysconf_scenario,
+    .finish = finish_sysconf_scenario,
+    .actions = {
+        sysconf_scen_exts,
+        sysconf_scen,
+        sysconf_scen2,
+        __sysconf_scen,
+        __sysconf_scen2,
+        confstr_scen_getlen,
+        confstr_scen_getstr,
+        confstr_scen_cut,
+        confstr_scen_cut1,
+        confstr_scen_illegal,
+        getpagesize_scen,
+        __getpagesize_scen,
+        pathconf_scen,
+        fpathconf_scen,
+        NULL
+    }
+};
+
+#ifdef SYSTEM_SYSCONF_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initFsFsSubsystem();
+    initIoFileSubsystem();
+    initPathSystemConfiguration();
+
+    initSystemSysconfSubsystem();
+}
+
+
+bool main_system_sysconf(int argc, char** argv)
+{
+    sysconf_scenario(argc,argv);
+    return true;
+}
+
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    /* Set up tracer */
+    /*setTraceEncoding("windows-1251");
+     */
+
+    /* Run test scenario */
+    addTraceToFile("trace.xml");
+    main_system_sysconf(argc,argv);
+
+    /*  unloadSUT(); */
+    return 0;
+}
+#endif

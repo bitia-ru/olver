@@ -1,0 +1,3547 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "pthread/attr/attr_config.h"
+#include "pthread/attr/attr_model.seh"
+#include "data/errno_model.seh"
+#include "config/interpretation.seh"
+#include "atl/integer.h"
+#include "config/system_config.seh"
+
+
+#pragma SEC subsystem attr "pthread.attr"
+
+
+/* 
+   The group of functions 'pthread.attr' consists of: 
+       pthread_attr_destroy [2]             +
+       pthread_attr_getdetachstate [2]      +
+       pthread_attr_getguardsize [2]        +
+       pthread_attr_getinheritsched [1]     +
+       pthread_attr_getschedparam [2]       + 
+       pthread_attr_getschedpolicy [1]      +
+       pthread_attr_getscope [1]            +
+       pthread_attr_getstack [2]            +
+       pthread_attr_getstackaddr [2]        +
+       pthread_attr_getstacksize [2]        +
+       pthread_attr_init [2]                +
+       pthread_attr_setdetachstate [2]      +
+       pthread_attr_setguardsize [2]        +
+       pthread_attr_setinheritsched [1]     +
+       pthread_attr_setschedparam [2]       +
+       pthread_attr_setschedpolicy [1]      +
+       pthread_attr_setscope [1]            +
+       pthread_attr_setstack [2]            +
+       pthread_attr_setstackaddr [2]        +
+       pthread_attr_setstacksize [2]        +
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_destroy, pthread_attr_init - destroy and initialize the thread
+                                              attributes object
+
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_destroy(pthread_attr_t *attr);
+    int pthread_attr_init(pthread_attr_t *attr); 
+
+DESCRIPTION
+
+    The pthread_attr_destroy() function shall destroy a thread attributes 
+    object. An implementation may cause pthread_attr_destroy() to set attr to 
+    an implementation-defined invalid value. A destroyed attr attributes object
+    can be reinitialized using pthread_attr_init(); the results of otherwise 
+    referencing the object after it has been destroyed are undefined.
+
+    The pthread_attr_init() function shall initialize a thread attributes 
+    object attr with the default value for all of the individual attributes 
+    used by a given implementation.
+
+    The resulting attributes object (possibly modified by setting individual 
+    attribute values) when used by pthread_create() defines the attributes of 
+    the thread created. A single attributes object can be used in multiple 
+    simultaneous calls to pthread_create(). Results are undefined if 
+    pthread_attr_init() is called specifying an already initialized attr 
+    attributes object.
+
+RETURN VALUE
+
+    Upon successful completion, pthread_attr_destroy() and pthread_attr_init() 
+    shall return a value of 0; otherwise, an error number shall be returned 
+    to indicate the error.
+
+ERRORS
+
+    The pthread_attr_init() function shall fail if:
+
+    [ENOMEM] 
+    Insufficient memory exists to initialize the thread attributes object. 
+    The pthread_attr_destroy() function may fail if:
+
+    [EINVAL] 
+    The value specified by attr does not refer to an initialized thread 
+    attribute object. 
+
+    The pthread_attr_init() function may fail if:
+
+    [EBUSY] 
+    The implementation has detected an attempt to reinitialize the thread 
+    attribute referenced by attr, a previously initialized, but not yet 
+    destroyed, thread attribute. 
+    
+    These functions shall not return an error code
+    of [EINTR].
+*/
+
+
+
+specification
+IntT pthread_attr_init_spec( CallContext context, VoidTPtr attr)
+{
+    PThreadAttr* pattr;
+    pre
+    {
+        
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeWMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+
+        if(!IS_REINITIALIZE_BEHAVIOUR_KNOWN)
+    {
+            /* Results are undefined if pthread_attr_init() is called specifying an 
+            already initialized attr attributes object. */
+            REQ("app.pthread_attr_init.01", "Memory pointed to by attr is free", 
+                pattr == NULL );
+        }
+        
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "Reinitialize behaviour is not known" };
+    }
+#ifdef IS_REINITIALIZE_BEHAVIOUR_KNOWN
+    coverage C_Init
+    {
+            if(pattr!=NULL)
+                return { AfterInit, "Attribute is already initialized" };
+            else /* if(pattr==NULL) */
+                return { NotInit, "Attribute is not initialized" };
+    }
+#endif
+    
+    post
+    {
+        
+        /*
+        * otherwise,
+        * an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_INIT, "pthread_attr_init.07", 
+            pthread_attr_init_spec!=0,
+            pthread_attr_init_spec)
+            
+            /*
+            * The pthread_attr_init() function shall fail if:
+            *
+            * [ENOMEM]
+            *
+            * Insufficient memory exists to initialize the thread attributes object.
+            *
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_INIT, ENOMEM, 
+            "pthread_attr_init.08.01", "Can not check insufficient memory")
+            
+            if(IS_REINITIALIZE_BEHAVIOUR_KNOWN)
+            {
+                /*
+                * The pthread_attr_init() function may fail if:
+                *
+                * [EBUSY]
+                *
+                * The implementation has detected an attempt to reinitialize the thread 
+                * attribute referenced by attr, a previously
+                * initialized, but not yet destroyed, thread attribute.
+                *
+                */
+                ERROR_MAY(POSIX_PTHREAD_ATTR_INIT, EBUSY, "pthread_attr_init.09.01", 
+                pattr!=NULL)
+            }
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_INIT, EINTR, "pthread_attr_init.10")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_attr_destroy() and 
+        * pthread_attr_init() shall return a value of 0;
+        */
+        REQ("pthread_attr_init.06", 
+            "Upon successful completion, shall return 0", 
+            pthread_attr_init_spec==0);
+    
+        /*
+        * The resulting attributes object (possibly modified by setting 
+        * individual attribute values) when used by pthread_create() defines 
+        * the attributes of the thread created.
+        */
+        IMPLEMENT_REQ("pthread_attr_init.02");
+        
+        /*
+        * A single attributes
+        * object can be used in multiple simultaneous calls to pthread_create().
+        */
+        REQ("pthread_attr_init.03", "", TODO_REQ());
+        
+        return true;
+    }
+}
+
+
+void onPThreadAttrInit(VoidTPtr pattr, CallContext context, 
+                       IntT pthread_attr_init_spec )
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    Map* isInit;
+    if(attr==NULL && pthread_attr_init_spec==0)
+    {
+        registerPThreadAttr(context, pattr);
+        attr=getPThreadAttr(pattr);
+        isInit=attr->isInitialized;
+        attr->detachstate=SUT_PTHREAD_CREATE_JOINABLE;
+        put_Map(isInit, create_Integer(DETACHSTATE), create_Integer(true));
+        attr->guardsize=
+            getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+        put_Map(isInit, create_Integer(GUARDSIZE), create_Integer(true));           
+        put_Map(isInit, create_Integer(INHERITSCHED), create_Integer(false));
+        put_Map(isInit, create_Integer(SHEDPAR), create_Integer(false));
+        put_Map(isInit, create_Integer(POLICY), create_Integer(false));
+        put_Map(isInit, create_Integer(CONTENTIONSCOPE), create_Integer(false));
+        put_Map(isInit, create_Integer(STACKADDR), create_Integer(false));
+        put_Map(isInit, create_Integer(STACKSIZE), create_Integer(false));
+        
+        /*
+        * The pthread_attr_init() function shall initialize a thread attributes 
+        * object attr with the default value for all
+        * of the individual attributes used by a given implementation.
+        */
+        IMPLEMENT_REQ("pthread_attr_init.01");
+        
+        
+        /*
+        * The default value of
+        * the detachstate attribute shall be PTHREAD_CREATE_JOINABLE.
+        */
+        IMPLEMENT_REQ("pthread_attr_setdetachstate.05");
+        
+        
+        /*
+        * The default value of the guardsize attribute is {PAGESIZE} bytes. 
+        * The actual value of {PAGESIZE} is
+        * implementation-defined.
+        */
+        IMPLEMENT_REQ("pthread_attr_setguardsize.04");
+        
+    }
+}
+
+specification
+IntT pthread_attr_destroy_spec( CallContext context, PThreadAttrTPtr attr)
+{
+    PThreadAttr* pattr;
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("","Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        /*
+        * the results of otherwise referencing the object after it has been
+        * destroyed are undefined.
+        */
+        REQ("app.pthread_attr_destroy.01", 
+            "The results of otherwise referencing the object after "
+            "it has been destroyed are undefined", 
+            true);
+        return true;
+    }
+    coverage C
+    { 
+        if(pattr!=NULL)
+            return { AfterInit, "Attribute is already initialized" };
+        else /* if(pattr==NULL) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    
+    post
+    {
+        /*
+        * otherwise,
+        * an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_DESTROY, "pthread_attr_destroy.04", 
+            pthread_attr_destroy_spec!=0, pthread_attr_destroy_spec)
+            /*
+            * The pthread_attr_destroy() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized 
+            * thread attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_DESTROY, EINVAL, 
+            "pthread_attr_destroy.05.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_DESTROY, EINTR, 
+            "pthread_attr_destroy.06")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_attr_destroy() and 
+        * pthread_attr_init() shall return a value of 0;
+        */
+        REQ("pthread_attr_destroy.03", 
+            "Upon successful completion, shall return 0", 
+            pthread_attr_destroy_spec==0);
+    
+        /*
+        * The pthread_attr_destroy() function shall destroy a thread 
+        * attributes object.
+        */
+        REQ("?pthread_attr_destroy.01", 
+            "Shall destroy a thread attributes object", 
+            getPThreadAttr(attr)==NULL);
+        
+        /*
+        * A destroyed attr attributes
+        * object can be reinitialized using pthread_attr_init();
+        */
+        REQ("pthread_attr_destroy.02", "", TODO_REQ());
+        
+        return true;
+    }
+}
+
+
+void onPThreadAttrDestroy(PThreadAttrTPtr pattr, 
+                          IntT pthread_attr_destroy_spec )
+{
+    if(pthread_attr_destroy_spec==0)
+    {
+        unregisterPThreadAttr(pattr);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getdetachstate, pthread_attr_setdetachstate - get and set the 
+    detachstate attribute
+
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getdetachstate(const pthread_attr_t *attr,
+       int *detachstate);
+    int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate); 
+
+DESCRIPTION
+
+    The detachstate attribute controls whether the thread is created in a 
+    detached state. If the thread is created detached, then use of the ID of 
+    the newly created thread by the pthread_detach() or pthread_join() function
+    is an error.
+
+    The pthread_attr_getdetachstate() and pthread_attr_setdetachstate() 
+    functions, respectively, shall get and set the detachstate attribute in the
+    attr object.
+
+    For pthread_attr_getdetachstate(), detachstate shall be set to either 
+    PTHREAD_CREATE_DETACHED or PTHREAD_CREATE_JOINABLE.
+
+    For pthread_attr_setdetachstate(), the application shall set detachstate to
+    either PTHREAD_CREATE_DETACHED or PTHREAD_CREATE_JOINABLE.
+
+    A value of PTHREAD_CREATE_DETACHED shall cause all threads created with 
+    attr to be in the detached state, whereas using a value of 
+    PTHREAD_CREATE_JOINABLE shall cause all threads created with attr to be in 
+    the joinable state. The default value of the detachstate attribute shall be
+    PTHREAD_CREATE_JOINABLE.
+
+RETURN VALUE
+
+    Upon successful completion, pthread_attr_getdetachstate() and 
+    pthread_attr_setdetachstate() shall return a value of 0; otherwise, an 
+    error number shall be returned to indicate the error.
+
+    The pthread_attr_getdetachstate() function stores the value of the 
+    detachstate attribute in detachstate if successful.
+
+ERRORS
+
+    The pthread_attr_setdetachstate() function shall fail if:
+
+    [EINVAL] 
+    The value of detachstate was not valid 
+    These functions may fail if:
+    
+    [EINVAL] 
+    The value specified by attr does not refer to an initialized thread 
+    attribute object. 
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification
+GetStateFunctionResult* pthread_attr_getdetachstate_spec( 
+                                                         CallContext context, 
+                                                         PThreadAttrTPtr attr)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= 
+            sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr!=NULL)
+        {
+            return { AfterInit, 
+                "Attribute is already initialized" };
+        }
+        else /* if(pattr==NULL) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETDETACHSTATE, 
+            "pthread_attr_getdetachstate.06.02", 
+            pthread_attr_getdetachstate_spec->functionResult!=0, 
+            pthread_attr_getdetachstate_spec->functionResult)
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized thread 
+            * attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETDETACHSTATE, EINVAL, 
+            "pthread_attr_getdetachstate.08.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETDETACHSTATE, EINTR, 
+            "pthread_attr_getdetachstate.09")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_attr_getdetachstate() and 
+        * pthread_attr_setdetachstate() shall return a value
+        * of 0;
+        */
+        REQ("pthread_attr_getdetachstate.06.01", 
+            "Upon successful completion, shall return 0", 
+            pthread_attr_getdetachstate_spec->functionResult==0);
+    
+        /*
+        * The detachstate attribute controls whether the thread is created in a 
+        * detached state. If the thread is created detached,
+        * then use of the ID of the newly created thread by the pthread_detach() 
+        * or pthread_join() function is an error.
+        */
+        REQ("pthread_attr_getdetachstate.01", "", TODO_REQ());
+        
+        
+        /*
+        * A value of PTHREAD_CREATE_DETACHED shall cause all threads created 
+        * with attr to be in the detached state, whereas using a
+        * value of PTHREAD_CREATE_JOINABLE shall cause all threads created with 
+        * attr to be in the joinable state.
+        */
+        REQ("pthread_attr_getdetachstate.04", "", TODO_REQ());
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(DETACHSTATE)), 
+            create_Integer(true)))
+        {
+            /*
+            * For pthread_attr_getdetachstate(), detachstate shall be set to 
+            * either 
+            * PTHREAD_CREATE_DETACHED or
+            * PTHREAD_CREATE_JOINABLE.
+            */
+            REQ("pthread_attr_getdetachstate.03", "Set detachstate", 
+                pthread_attr_getdetachstate_spec->detachState==
+                SUT_PTHREAD_CREATE_DETACHED
+                ||
+                pthread_attr_getdetachstate_spec->detachState==
+                SUT_PTHREAD_CREATE_JOINABLE);
+            
+            
+            /*
+            * The pthread_attr_getdetachstate() and pthread_attr_setdetachstate() 
+            * functions, respectively, shall get and set the
+            * detachstate attribute in the attr object.
+            */
+            /*
+            * The pthread_attr_getdetachstate() function stores the value of the 
+            * detachstate attribute in detachstate if
+            * successful.
+            */
+            REQ("pthread_attr_getdetachstate.02;pthread_attr_getdetachstate.07", 
+                "Detach state shall be valid", 
+                pthread_attr_getdetachstate_spec->detachState == 
+                pattr->detachstate);
+        }
+        return true;
+    }
+}
+
+
+specification
+IntT pthread_attr_setdetachstate_spec( CallContext context, 
+                                      PThreadAttrTPtr attr, 
+                                      IntT detachstate)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= 
+            sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    coverage C_ValidParam
+    {
+        if(detachstate==SUT_PTHREAD_CREATE_DETACHED) 
+            return {ValidParamDetached, 
+            "Parameter of the function is valid and set to PTHREAD_CREATE_DETACHED"};
+        else if(detachstate==SUT_PTHREAD_CREATE_JOINABLE)
+            return {ValidParamJoinable, 
+            "Parameter of the function is valid and set to PTHREAD_CREATE_JOINABLE"};
+        else /* if parameter has invalid value */
+            return {InvalidParam, "Parameter of the function is not valid"};
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETDETACHSTATE, 
+            "pthread_attr_setdetachstate.06.02", 
+            pthread_attr_setdetachstate_spec!=0, 
+            pthread_attr_setdetachstate_spec)
+            /*
+            * The pthread_attr_setdetachstate() function shall fail if:
+            *
+            * [EINVAL]
+            *
+            * The value of detachstate was not valid
+            *
+            */
+            ERROR_SHALL(POSIX_PTHREAD_ATTR_SETDETACHSTATE, EINVAL, 
+            "pthread_attr_setdetachstate.07.01", 
+            detachstate!=SUT_PTHREAD_CREATE_DETACHED &&
+            detachstate!=SUT_PTHREAD_CREATE_JOINABLE)
+            
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized thread 
+            * attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETDETACHSTATE, EINVAL, 
+            "pthread_attr_setdetachstate.08.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETDETACHSTATE, EINTR, 
+            "pthread_attr_setdetachstate.09")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_attr_getdetachstate() and 
+        * pthread_attr_setdetachstate() shall return a value
+        * of 0;
+        */
+        REQ("pthread_attr_setdetachstate.06.01", 
+            "Upon successful completion, shall return 0", 
+            pthread_attr_setdetachstate_spec==0);      
+        
+        
+        /*
+        * The detachstate attribute controls whether the thread is created in a 
+        * detached state. If the thread is created detached,
+        * then use of the ID of the newly created thread by the 
+        * pthread_detach() or pthread_join() function is an error.
+        */
+        REQ("pthread_attr_setdetachstate.01", "", TODO_REQ());
+        
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(DETACHSTATE)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getdetachstate() and pthread_attr_setdetachstate() 
+            * functions, respectively, shall get and set the
+            * detachstate attribute in the attr object.
+            */
+            REQ("?pthread_attr_setdetachstate.02", 
+                "Shall set the detachstate attribute in the attr object", 
+                pattr->detachstate==detachstate);
+        }
+        
+        /*
+        * For pthread_attr_setdetachstate(), the application shall set 
+        * detachstate to either PTHREAD_CREATE_DETACHED or
+        * PTHREAD_CREATE_JOINABLE.
+        */
+        REQ("pthread_attr_setdetachstate.03", "Set detachstate", 
+            detachstate==SUT_PTHREAD_CREATE_JOINABLE
+            || detachstate==SUT_PTHREAD_CREATE_DETACHED);
+        
+        
+        /*
+        * A value of PTHREAD_CREATE_DETACHED shall cause all threads created 
+        * with attr to be in the detached state, whereas using a
+        * value of PTHREAD_CREATE_JOINABLE shall cause all threads created 
+        * with attr to be in the joinable state.
+        */
+        REQ("pthread_attr_setdetachstate.04", "", TODO_REQ());
+        
+        
+        return true;
+    }
+}
+
+void onPThreadAttrSetdetachstate(PThreadAttrTPtr pattr, IntT detachstate,
+                                 IntT pthread_attr_setdetachstate_spec )
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setdetachstate_spec==0)
+    {
+        attr->detachstate=detachstate;
+        put_Map(attr->isInitialized, create_Integer(DETACHSTATE), 
+            create_Integer(true));
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getguardsize, pthread_attr_setguardsize - get and set the 
+                                                    thread guardsize attribute
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getguardsize(const pthread_attr_t *restrict attr,
+           size_t *restrict guardsize);
+    int pthread_attr_setguardsize(pthread_attr_t *attr,
+           size_t guardsize); 
+
+DESCRIPTION
+
+    The pthread_attr_getguardsize() function shall get the guardsize attribute 
+    in the attr object. This attribute shall be returned in the guardsize 
+    parameter.
+
+    The pthread_attr_setguardsize() function shall set the guardsize attribute 
+    in the attr object. The new value of this attribute shall be obtained from 
+    the guardsize parameter. If guardsize is zero, a guard area shall not be 
+    provided for threads created with attr. If guardsize is greater than zero, 
+    a guard area of at least size guardsize bytes shall be provided for each 
+    thread created with attr.
+
+    The guardsize attribute controls the size of the guard area for the created
+    thread's stack. The guardsize attribute provides protection against 
+    overflow of the stack pointer. If a thread's stack is created with guard 
+    protection, the implementation allocates extra memory at the overflow end 
+    of the stack as a buffer against stack overflow of the stack pointer. If an
+    application overflows into this buffer an error shall result (possibly in a
+    SIGSEGV signal being delivered to the thread).
+
+    A conforming implementation may round up the value contained in guardsize 
+    to a multiple of the configurable system variable {PAGESIZE} 
+    (see <sys/mman.h>). If an implementation rounds up the value of guardsize 
+    to a multiple of {PAGESIZE}, a call to pthread_attr_getguardsize() 
+    specifying attr shall store in the guardsize parameter the guard size 
+    specified by the previous pthread_attr_setguardsize() function call.
+
+    The default value of the guardsize attribute is {PAGESIZE} bytes. The 
+    actual value of {PAGESIZE} is implementation-defined.
+
+    If the stackaddr or stack attribute has been set (that is, the caller is 
+    allocating and managing its own thread stacks), the guardsize attribute 
+    shall be ignored and no protection shall be provided by the implementation.
+    It is the responsibility of the application to manage stack overflow along 
+    with stack allocation and management in this case.
+
+RETURN VALUE
+
+    If successful, the pthread_attr_getguardsize() and 
+    pthread_attr_setguardsize() functions shall return zero; otherwise, an 
+    error number shall be returned to indicate the error.
+
+ERRORS
+
+    These functions shall fail if:
+
+        [EINVAL] 
+        The parameter guardsize is invalid. 
+        These functions may fail if:
+
+        [EINVAL] 
+        The value specified by attr does not refer to an initialized thread 
+        attribute object. 
+        These functions shall not return an error code of [EINTR].
+*/
+
+specification
+GetStateFunctionResult* pthread_attr_getguardsize_spec( CallContext context,
+                                                       PThreadAttrTPtr attr)
+                                                       
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, 
+                "Attribute is already initialized" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETGUARDSIZE, 
+            "pthread_attr_getguardsize.05.02", 
+            pthread_attr_getguardsize_spec->functionResult!=0,
+            pthread_attr_getguardsize_spec->functionResult)
+            /*
+            * These functions shall fail if:
+            *
+            * [EINVAL]
+            *
+            * The parameter guardsize is invalid.
+            *
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_GETGUARDSIZE, EINVAL, 
+            "pthread_attr_getguardsize.06.01", 
+            "There is no way to check if guardsize is valid")
+            
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized 
+            * thread attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETGUARDSIZE, EINVAL, 
+            "pthread_attr_getguardsize.07.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETGUARDSIZE, EINTR, 
+            "pthread_attr_getguardsize.08")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getguardsize() and 
+        * pthread_attr_setguardsize() functions shall return zero;
+        */
+        REQ("pthread_attr_getguardsize.05.01", 
+            "If successful, shall return zero", 
+            pthread_attr_getguardsize_spec->functionResult==0);
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(GUARDSIZE)), 
+            create_Integer(true)))
+        {
+            /*  The pthread_attr_getguardsize() function shall get the 
+            guardsize attribute in the attr object. This attribute 
+            shall be returned in the guardsize parameter.
+            */
+            REQ("pthread_attr_getguardsize.01", "Guard size shall be valid", 
+                pthread_attr_getguardsize_spec->guardSize == 
+                pattr->guardsize);
+        }
+        
+        /*
+        * If a thread's stack is created with guard protection, the
+        * implementation allocates extra memory at the overflow end of the stack
+        * as a buffer against stack overflow of the stack pointer. If
+        * an application overflows into this buffer an error shall result
+        * (possibly in a SIGSEGV signal being delivered to the thread).
+        */
+        REQ_UNCHECKABLE("pthread_attr_getguardsize.02", 
+            "Can not check stack overflow");
+        
+        /*
+        * If an implementation rounds up the
+        * value of guardsize to a multiple of {PAGESIZE}, a call to 
+        * pthread_attr_getguardsize() specifying attr shall
+        * store in the guardsize parameter the guard size specified by the 
+        * previous pthread_attr_setguardsize() function
+        * call.
+        */
+        REQ("pthread_attr_getguardsize.03", "", TODO_REQ());
+        
+        
+        return true;
+    }
+}
+
+
+specification
+IntT pthread_attr_setguardsize_spec( CallContext context, PThreadAttrTPtr attr, 
+                                    SizeT  guardsize)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, create_Integer(STACKADDR)),
+                create_Integer(true)) ||
+                equals(get_Map(pattr->isInitialized, create_Integer(STACKSIZE)),
+                create_Integer(true)))
+            {
+                return {StackAddrSet, 
+                    "The stackaddr or stack attribute has been set"};
+            }
+            else /* if one of these attributes was not set*/
+            {
+                return {StackAddrNotSet, 
+                    "The stackaddr and stack attribute has not been set"};
+            }
+            
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    coverage C_ZeroParam
+    {
+        if(guardsize==0)
+            return {ZeroParam, "Parameter of the function is zero"};
+        else /* if(guardsize!=0) */
+            return {NotZeroParam, "Parameter of the function is not zero"};
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETGUARDSIZE, 
+            "pthread_attr_setguardsize.06.02", 
+            pthread_attr_setguardsize_spec!=0, 
+            pthread_attr_setguardsize_spec)
+            
+            /*
+            * These functions shall fail if:
+            *
+            * [EINVAL]
+            *
+            * The parameter guardsize is invalid.
+            *
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETGUARDSIZE, EINVAL, 
+            "pthread_attr_setguardsize.07.01", "Can not validate guardsize")
+            
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized thread 
+            * attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETGUARDSIZE, EINVAL, 
+            "pthread_attr_setguardsize.08.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETGUARDSIZE, EINTR, 
+            "pthread_attr_setguardsize.09")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getguardsize() and 
+        * pthread_attr_setguardsize() functions shall return zero;
+        */
+        REQ("pthread_attr_setguardsize.06.01", 
+            "If successful, shall return zero", 
+            pthread_attr_setguardsize_spec==0);
+    
+    
+        /*
+        * If guardsize is zero, a guard area shall not
+        * be provided for threads created with attr.
+        */
+        REQ_UNCHECKABLE("pthread_attr_setguardsize.02.01", 
+            "Can not determine guard area");
+        
+            /*
+            * If guardsize is greater than zero, a guard area of at least size
+            * guardsize bytes shall be provided for each thread created with attr.
+        */
+        REQ_UNCHECKABLE("pthread_attr_setguardsize.02.02", 
+            "Can not determine guard area");
+        
+            /*
+            * If a thread's stack is created with guard protection, the
+            * implementation allocates extra memory at the overflow end of the stack
+            * as a buffer against stack overflow of the stack pointer. If
+            * an application overflows into this buffer an error shall result
+            * (possibly in a SIGSEGV signal being delivered to the thread).
+        */
+        REQ_UNCHECKABLE("pthread_attr_setguardsize.03", 
+            "Can not check stack overflow");
+        
+            /*
+            * If the stackaddr or stack attribute has been set (that is, the caller 
+            * is allocating and managing its own thread
+            * stacks), the guardsize attribute shall be ignored and no protection 
+            * shall be provided by the implementation. It is the
+            * responsibility of the application to manage stack overflow along with 
+            * stack allocation and management in this case.
+        */
+        REQ_UNCHECKABLE("pthread_attr_setguardsize.05", 
+            "Impossible to check guard size protection");
+        
+        return true;
+    }
+    
+}
+
+
+void onPThreadAttrSetguardsize(PThreadAttrTPtr pattr, SizeT  guardsize,
+                               IntT pthread_attr_setguardsize_spec)
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setguardsize_spec==0)
+    {
+        attr->guardsize=guardsize;
+        put_Map(attr->isInitialized, create_Integer(GUARDSIZE), 
+            create_Integer(true));
+        /*
+        * The pthread_attr_setguardsize() function shall set the guardsize 
+        * attribute in the attr object. The new
+        * value of this attribute shall be obtained from the guardsize parameter.
+        */
+        IMPLEMENT_REQ("pthread_attr_setguardsize.01");
+        
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+  
+-------------------------------------------------------------------------------
+    
+NAME
+
+    pthread_attr_getinheritsched, pthread_attr_setinheritsched - get and set 
+    the inheritsched attribute (REALTIME THREADS)
+    
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getinheritsched(const pthread_attr_t *restrict attr,
+        int *restrict inheritsched);
+    int pthread_attr_setinheritsched(pthread_attr_t *attr,  int inheritsched); 
+
+
+DESCRIPTION
+
+    The pthread_attr_getinheritsched(), and pthread_attr_setinheritsched() 
+    functions, respectively, shall get and set the inheritsched attribute in 
+    the attr argument.
+
+    When the attributes objects are used by pthread_create(), the inheritsched 
+    attribute determines how the other scheduling attributes of the created 
+    thread shall be set.
+
+    The supported values of inheritsched shall be:
+
+    PTHREAD_INHERIT_SCHED 
+    Specifies that the thread scheduling attributes shall be inherited from the
+    creating thread, and the scheduling attributes in this attr argument shall 
+    be ignored. 
+
+    PTHREAD_EXPLICIT_SCHED 
+    Specifies that the thread scheduling attributes shall be set to the 
+    corresponding values from this attributes object. The symbols 
+    PTHREAD_INHERIT_SCHED and PTHREAD_EXPLICIT_SCHED are defined in the 
+    <pthread.h> header.
+
+    The following thread scheduling attributes defined by IEEE Std 1003.1-2001 
+    are affected by the inheritsched attribute: scheduling policy 
+    (schedpolicy), scheduling parameters ( schedparam), and scheduling 
+    contention scope ( contentionscope).
+
+RETURN VALUE
+
+    If successful, the pthread_attr_getinheritsched() and 
+    pthread_attr_setinheritsched() functions shall return zero; otherwise, an 
+    error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_attr_getinheritsched() function may fail if:
+
+    [EINVAL] 
+    The value specified by attr does not refer to an initialized thread 
+    attribute object. 
+
+    The pthread_attr_setinheritsched() function may fail if:
+
+    [EINVAL] 
+    The value of inheritsched is not valid. 
+
+    [EINVAL] 
+    The value specified by attr does not refer to an initialized thread 
+    attribute object. 
+
+    [ENOTSUP] 
+    An attempt was made to set the attribute to an unsupported value. 
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification
+GetStateFunctionResult* pthread_attr_getinheritsched_spec( CallContext context,
+                                                          PThreadAttrTPtr attr
+                                                          )
+                                                          
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, create_Integer(INHERITSCHED)),
+                create_Integer(true)))
+            {
+                return { AfterInitSet, 
+                    "Attribute is already initialized, value was set" };
+            }
+            else /* if(!equals(get_Map(pattr->isInitialized, 
+                create_Integer(INHERITSCHED)), create_Integer(true))) */
+                return { AfterInitNotSet, 
+                "Attribute is already initialized, value was not set" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETINHERITSCHED, 
+            "pthread_attr_getinheritsched.05.02", 
+            pthread_attr_getinheritsched_spec->functionResult!=0, 
+            pthread_attr_getinheritsched_spec->functionResult)
+            /*
+            * The pthread_attr_getinheritsched() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized thread 
+            * attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETINHERITSCHED, EINVAL, 
+            "pthread_attr_getinheritsched.06.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETINHERITSCHED, EINTR, 
+            "pthread_attr_getinheritsched.07")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getinheritsched() and 
+        * pthread_attr_setinheritsched() functions shall return zero;
+        */
+        REQ("pthread_attr_getinheritsched.05.01", 
+            "If successful, shall return zero", 
+            pthread_attr_getinheritsched_spec->functionResult==0);
+        
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(INHERITSCHED)), 
+            create_Integer(true)))
+        {
+        /*  The pthread_attr_getinheritsched(), and 
+        pthread_attr_setinheritsched() functions, respectively, 
+        shall get and set the inheritsched attribute in the attr 
+        argument.
+            */
+            REQ("pthread_attr_getinheritsched.01",
+                "Inherited schedule shall be valid", 
+                pthread_attr_getinheritsched_spec->inheritedSched == 
+                pattr->inheritsched);
+        }
+        
+        
+        /*
+        * When the attributes objects are used by pthread_create(), the
+        * inheritsched attribute determines how the other scheduling attributes 
+        * of the created thread shall be set.
+        */
+        REQ("pthread_attr_getinheritsched.02", "", TODO_REQ());
+        
+        
+        /*
+        * The supported values of inheritsched shall be:
+        *
+        * PTHREAD_INHERIT_SCHED
+        *
+        *
+        * Specifies that the thread scheduling attributes shall be inherited from
+        * the creating thread, and the scheduling attributes in this
+        * attr argument shall be ignored.
+        *
+        */
+        REQ("pthread_attr_getinheritsched.03.01", "", TODO_REQ());
+        
+        
+        /*
+        * The supported values of inheritsched shall be:
+        *
+        * PTHREAD_EXPLICIT_SCHED
+        *
+        *
+        * Specifies that the thread scheduling attributes shall be set to the 
+        * corresponding values from this attributes object.
+        *
+        */
+        REQ("pthread_attr_getinheritsched.03.02", "", TODO_REQ());
+        
+        
+        /*
+        * The following thread scheduling attributes defined by IEEE 
+        * Std 1003.1-2001 are affected by the inheritsched
+        * attribute: scheduling policy ( schedpolicy), scheduling parameters 
+        * ( schedparam), and scheduling contention scope (
+        * contentionscope).
+        */
+        REQ("pthread_attr_getinheritsched.04", "", TODO_REQ());
+        
+        return true;
+    }
+}
+
+specification
+IntT pthread_attr_setinheritsched_spec( CallContext context, 
+                                       PThreadAttrTPtr attr, 
+                                       IntT  inheritsched)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!attr->afterInit) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    coverage C_ValidParam
+    {
+        if(inheritsched==SUT_PTHREAD_INHERIT_SCHED)
+            return {ValidParamInh, 
+            "Parameter of the function is valid and set to PTHREAD_INHERIT_SCHED"};
+        else if(inheritsched==SUT_PTHREAD_EXPLICIT_SCHED)
+            return {ValidParamExpl, 
+            "Parameter of the function is valid and set to PTHREAD_EXPLICIT_SCHED"};
+        else /* if parameter has invalid value */
+            return {InvalidParam, "Parameter of the function is not valid"};
+    }
+    post
+    {        
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETINHERITSCHED, 
+                "pthread_attr_setinheritsched.05.02", 
+                pthread_attr_setinheritsched_spec!=0, 
+                pthread_attr_setinheritsched_spec)
+            /*
+            * The pthread_attr_setinheritsched() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value of inheritsched is not valid.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETINHERITSCHED, EINVAL, 
+                "pthread_attr_setinheritsched.06.01", 
+                inheritsched!=SUT_PTHREAD_INHERIT_SCHED &&
+                inheritsched!=SUT_PTHREAD_EXPLICIT_SCHED)
+            
+            /*
+            * The pthread_attr_setinheritsched() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized 
+            * thread attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETINHERITSCHED, EINVAL, 
+                "pthread_attr_setinheritsched.06.02", pattr==NULL)
+            
+            /*
+            * The pthread_attr_setinheritsched() function may fail if:
+            *
+            * [ENOTSUP]
+            *
+            * An attempt was made to set the attribute to an unsupported value.
+            *
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETINHERITSCHED, ENOTSUP, 
+                "pthread_attr_setinheritsched.06.03", 
+                "Can not check weather attribute has unsupported value")
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETINHERITSCHED, EINTR, 
+                "pthread_attr_setinheritsched.07")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getinheritsched() and 
+        * pthread_attr_setinheritsched() functions shall return zero;
+        */
+        REQ("pthread_attr_setinheritsched.05.01", 
+            "If successful, shall return zero", 
+            pthread_attr_setinheritsched_spec==0);
+        
+        return true;
+    }
+}
+
+
+void onPThreadAttrSetinheritsched(PThreadAttrTPtr pattr,IntT  inheritsched,
+                                  IntT pthread_attr_setinheritsched_spec )
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setinheritsched_spec==0)
+    {
+        attr->inheritsched=inheritsched;
+        put_Map(attr->isInitialized, create_Integer(INHERITSCHED), 
+            create_Integer(true));
+        /*
+        * The pthread_attr_getinheritsched(), and pthread_attr_setinheritsched() 
+        * functions, respectively, shall get and set
+        * the inheritsched attribute in the attr argument.
+        */
+        IMPLEMENT_REQ("pthread_attr_setinheritsched.01");
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getschedparam, pthread_attr_setschedparam - get and set the 
+                                                        schedparam attribute
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getschedparam(const pthread_attr_t *restrict attr,
+        struct sched_param *restrict param);
+    int pthread_attr_setschedparam(pthread_attr_t *restrict attr,
+        const struct sched_param *restrict param); 
+
+DESCRIPTION
+
+    The pthread_attr_getschedparam(), and pthread_attr_setschedparam() 
+    functions, respectively, shall get and set the scheduling parameter 
+    attributes in the attr argument. The contents of the param structure are 
+    defined in the <sched.h> header. For the SCHED_FIFO and SCHED_RR policies, 
+    the only required member of param is sched_priority.
+
+    For the SCHED_SPORADIC policy, the required members of the param 
+    structure are sched_priority, sched_ss_low_priority, sched_ss_repl_period, 
+    sched_ss_init_budget, and sched_ss_max_repl. The specified 
+    sched_ss_repl_period must be greater than or equal to the specified 
+    sched_ss_init_budget for the function to succeed; if it is not, then the 
+    function shall fail. The value of sched_ss_max_repl shall be within the 
+    inclusive range [1, {SS_REPL_MAX}] for the function to succeed; if not, the
+    function shall fail. 
+
+RETURN VALUE
+
+    If successful, the pthread_attr_getschedparam() and 
+    pthread_attr_setschedparam() functions shall return zero; otherwise, an 
+    error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_attr_getschedparam() function may fail if:
+
+        [EINVAL] 
+        The value specified by attr does not refer to an initialized thread 
+        attribute object. 
+
+    The pthread_attr_setschedparam() function may fail if:
+
+        [EINVAL] 
+        The value of param is not valid, or the value specified by attr does 
+        not refer to an initialized thread attribute object. 
+
+        [ENOTSUP] 
+        An attempt was made to set the attribute to an unsupported value. 
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification
+GetStateFunctionResult* pthread_attr_getschedparam_spec( CallContext context, 
+                                                        PThreadAttrTPtr attr)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, create_Integer(SHEDPAR)), 
+                create_Integer(true)))
+            {
+                return { AfterInitSet, 
+                    "Attribute is already initialized, value was set" };
+            }
+            else /* if(!equals(get_Map(pattr->isInitialized, 
+                create_Integer(SHEDPAR)), create_Integer(true))) */
+                return { AfterInitNotSet, 
+                "Attribute is already initialized, value was not set" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETSCHEDPARAM, 
+            "pthread_attr_getschedparam.04.02", 
+            pthread_attr_getschedparam_spec->functionResult!=0,
+            pthread_attr_getschedparam_spec->functionResult)
+            /*
+            * The pthread_attr_getschedparam() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value specified by attr does not refer to an initialized thread 
+            * attribute object.
+            *
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETSCHEDPARAM, EINVAL, 
+            "pthread_attr_getschedparam.05.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETSCHEDPARAM, EINTR, 
+            "pthread_attr_getschedparam.06")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getschedparam() and 
+        * pthread_attr_setschedparam() functions shall return zero;
+        */
+        REQ("pthread_attr_getschedparam.04.01", "Function shall return zero", 
+        pthread_attr_getschedparam_spec->functionResult==0);      
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(SHEDPAR)), 
+            create_Integer(true)))
+        {
+            if (getSystemConfigurationValue(context,SUT_SC_SPORADIC_SERVER)
+                != SC_VALUE_UNKNOWN && 
+                getSystemConfigurationValue(context,SUT_SC_SPORADIC_SERVER)
+                !=SC_VALUE_NO_LIMIT)
+            {
+                /*
+                * For the SCHED_SPORADIC policy, the required members of the 
+                * param structure are sched_priority,
+                * sched_ss_low_priority, sched_ss_repl_period, 
+                * sched_ss_init_budget,  and sched_ss_max_repl.
+                */
+                IMPLEMENT_REQ("pthread_attr_getschedparam.03");
+                
+                /* The pthread_attr_getschedparam(), and 
+                pthread_attr_setschedparam() functions, respectively, 
+                shall get and set the scheduling parameter attributes in
+                the attr argument.
+                */
+                REQ("pthread_attr_getschedparam.01",
+                    "ShedParam shall be valid", 
+                    equals(pthread_attr_getschedparam_spec->shedPar, 
+                    pattr->shedPar));
+            }
+            else /* if SUT_SC_SPORADIC_SERVER is not properly defined */
+            {
+                /*
+                * For the SCHED_FIFO and SCHED_RR policies, the only 
+                * required member of
+                * param is sched_priority.
+                */
+                IMPLEMENT_REQ("pthread_attr_getschedparam.02");
+                
+                /* The pthread_attr_getschedparam(), and 
+                pthread_attr_setschedparam() functions, respectively, 
+                shall get and set the scheduling parameter attributes in
+                the attr argument.
+                */
+                REQ("pthread_attr_getschedparam.01",
+                    "ShedParam shall be valid", 
+                    pthread_attr_getschedparam_spec->shedPar->sched_priority== 
+                    pattr->shedPar->sched_priority);
+            }
+        }
+        return true;
+    }
+}
+
+
+specification
+IntT pthread_attr_setschedparam_spec( CallContext context, 
+                                     PThreadAttrTPtr attr, 
+                                     ShedParam* param)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!attr->afterInit) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        
+        
+        if (getSystemConfigurationValue(context,SUT_SC_SPORADIC_SERVER) != 
+            SC_VALUE_UNKNOWN && 
+            getSystemConfigurationValue(context,SUT_SC_SPORADIC_SERVER)!=
+            SC_VALUE_NO_LIMIT)
+        {
+            if (param->sched_ss_repl_period < param->sched_ss_init_budget)
+            {
+                /*  The specified sched_ss_repl_period must be greater than 
+                or equal to the specified sched_ss_init_budget for the 
+                function to succeed; if it is not, then the function 
+                shall fail. 
+                */
+                REQ("pthread_attr_setschedparam.04","Function shall fail", 
+                    pthread_attr_setschedparam_spec!=0);
+            }
+            
+            if (param->sched_ss_repl_period->sec < 1 || 
+                param->sched_ss_repl_period->sec > SUT_SS_REPL_MAX)
+            {
+                /*  The value of sched_ss_max_repl shall be within the 
+                inclusive range [1, {SS_REPL_MAX}] for the function to 
+                succeed; if not, the function shall fail. */
+                REQ("pthread_attr_setschedparam.05", "Function shall fail", 
+                    pthread_attr_setschedparam_spec!=0);
+            }
+        }
+        
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETSCHEDPARAM, 
+            "pthread_attr_setschedparam.06.02", 
+            pthread_attr_setschedparam_spec!=0, 
+            pthread_attr_setschedparam_spec)
+            /*
+            * The pthread_attr_setschedparam() function may fail if:
+            *
+            * [EINVAL]
+            *
+            * The value of param is not valid, or the value specified by attr 
+            * does not refer to an initialized thread attribute
+            * object.
+            *
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETSCHEDPARAM, EINVAL, 
+            "pthread_attr_setschedparam.07.01", 
+            "Can not determine wheather param is valid")
+            
+            /*
+            * The pthread_attr_setschedparam() function may fail if:
+            *
+            * [ENOTSUP]
+            *
+            * An attempt was made to set the attribute to an unsupported value.
+            *
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETSCHEDPARAM, ENOTSUP, 
+            "pthread_attr_setschedparam.07.02",
+            "Can not determine wheather value is valid")
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETSCHEDPARAM, EINTR, 
+            "pthread_attr_setschedparam.08")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getschedparam() and 
+        * pthread_attr_setschedparam()
+        * functions shall return zero;
+        */
+        REQ("pthread_attr_setschedparam.06.01", "Function shall return zero", 
+        pthread_attr_setschedparam_spec==0);
+        
+        return true;
+    }
+}
+
+
+
+
+void onPThreadAttrSetschedparam(PThreadAttrTPtr pattr, ShedParam* param,
+                                IntT pthread_attr_setschedparam_spec )
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setschedparam_spec==0)
+    {
+        
+        attr->shedPar=clone(param);
+        put_Map(attr->isInitialized, create_Integer(SHEDPAR), 
+            create_Integer(true));
+            /*
+            * The pthread_attr_getschedparam(), and pthread_attr_setschedparam() 
+            * functions, respectively, shall get and set the scheduling parameter 
+            * attributes in the attr argument.
+        */
+        IMPLEMENT_REQ("pthread_attr_setschedparam.01");
+        
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getschedpolicy, pthread_attr_setschedpolicy - get and set the 
+         schedpolicy attribute (REALTIME THREADS)
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getschedpolicy(const pthread_attr_t *restrict attr,
+        int *restrict policy);
+    int pthread_attr_setschedpolicy(pthread_attr_t *attr, int policy); 
+
+DESCRIPTION
+
+    The pthread_attr_getschedpolicy() and pthread_attr_setschedpolicy() 
+    functions, respectively, shall get and set the schedpolicy attribute in 
+    the attr argument.
+
+    The supported values of policy shall include SCHED_FIFO, SCHED_RR, and 
+    SCHED_OTHER, which are defined in the <sched.h> header. When threads 
+    executing with the scheduling policy SCHED_FIFO, SCHED_RR, [TSP]   or 
+    SCHED_SPORADIC  are waiting on a mutex, they shall acquire the mutex in 
+    priority order when the mutex is unlocked.
+
+RETURN VALUE
+
+    If successful, the pthread_attr_getschedpolicy() and 
+    pthread_attr_setschedpolicy() functions shall return zero; otherwise, an 
+    error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_attr_getschedpolicy() function may fail if:
+
+        [EINVAL] 
+        The value specified by attr does not refer to an initialized thread 
+        attribute object. 
+    
+    The pthread_attr_setschedpolicy() function may fail if:
+
+        [EINVAL] 
+        The value of policy is not valid, or the value specified by attr does 
+        not refer to an initialized thread attribute object. 
+
+        [ENOTSUP] 
+        An attempt was made to set the attribute to an unsupported value. 
+    
+    These functions shall not return an error code of [EINTR].
+*/
+
+
+specification
+GetStateFunctionResult* pthread_attr_getschedpolicy_spec(CallContext context,
+                                                         PThreadAttrTPtr attr)
+                                                         
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, create_Integer(POLICY)), 
+                create_Integer(true)))
+            {
+                return { AfterInitSet, 
+                    "Attribute is already initialized, value was set" };
+            }
+            else /* if(!equals(get_Map(pattr->isInitialized, 
+                create_Integer(POLICY)), create_Integer(true))) */
+                return { AfterInitNotSet, 
+                "Attribute is already initialized, value was not set" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETSCHEDPOLICY, 
+            "pthread_attr_getschedpolicy.04.02", 
+            pthread_attr_getschedpolicy_spec->functionResult!=0, 
+            pthread_attr_getschedpolicy_spec->functionResult)
+            /*
+            * The pthread_attr_getschedpolicy() function may fail if:
+            *
+            * [EINVAL]
+            * The value specified by attr does not refer to an initialized thread
+            * attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETSCHEDPOLICY, EINVAL, 
+            "pthread_attr_getschedpolicy.05.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETSCHEDPOLICY, EINTR, 
+            "pthread_attr_getschedpolicy.06")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getschedpolicy() and
+        * pthread_attr_setschedpolicy() functions shall return zero;
+        */
+        REQ("pthread_attr_getschedpolicy.04.01", "Function shall return zero", 
+        pthread_attr_getschedpolicy_spec->functionResult==0);
+        
+        
+        /*
+        * When threads executing with the scheduling policy SCHED_FIFO,SCHED_RR,
+        * [TSP]  
+        * or SCHED_SPORADIC are waiting on a mutex, they shall acquire the mutex 
+        * in priority order when the mutex is unlocked.
+        */
+        REQ("pthread_attr_getschedpolicy.03", "", TODO_REQ());
+        
+        
+        if(pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(POLICY)), 
+            create_Integer(true)))
+        {
+            /*  The pthread_attr_getschedpolicy() and 
+            pthread_attr_setschedpolicy() functions, respectively, 
+            shall get and set the schedpolicy attribute in the attr 
+            argument.
+            */
+            REQ("pthread_attr_getschedpolicy.01", "Policy shall be valid", 
+                pthread_attr_getschedpolicy_spec->policy == 
+                pattr->policy);
+        }
+        
+        return true;
+    }
+}
+
+specification
+IntT pthread_attr_setschedpolicy_spec( CallContext context, 
+                                      PThreadAttrTPtr attr,
+                                      IntT  policy)
+{
+    bool isValidSporadic=false;
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    coverage C_ValidParam
+    {
+        if(policy==SUT_SCHED_FIFO)
+            return {ValidParamFifo, 
+            "Parameter of the function is valid and set to SCHED_FIFO"};
+        else if(policy==SUT_SCHED_RR)
+            return {ValidParamRR, 
+            "Parameter of the function is valid and set to SCHED_RR"};
+        else if(policy==SUT_SCHED_OTHER)
+            return {ValidParamOther, 
+            "Parameter of the function is valid and set to SCHED_OTHER"};
+        else if(policy==SUT_SCHED_SPORADIC)
+            return {ValidParamSporadic, 
+            "Parameter of the function is valid and set to SCHED_SPORADIC"};
+        else /* if parameter has invalid value */
+            return {InvalidParam, "Parameter of the function is not valid"};
+    }
+    post
+    {
+        if (getSystemConfigurationValue(context,SUT_SC_SPORADIC_SERVER) != 
+            SC_VALUE_UNKNOWN && 
+            getSystemConfigurationValue(context,SUT_SC_SPORADIC_SERVER)!=
+            SC_VALUE_NO_LIMIT && 
+            policy==SUT_SCHED_SPORADIC)
+            isValidSporadic=true;
+        
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETSCHEDPOLICY, 
+            "pthread_attr_setschedpolicy.04.02", 
+            pthread_attr_setschedpolicy_spec!=0, 
+            pthread_attr_setschedpolicy_spec)
+            /*
+            * The pthread_attr_setschedpolicy() function may fail if:
+            *
+            * [EINVAL]
+            * The value of policy is not valid, or the value specified by attr
+            * does not refer to an initialized threadattribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETSCHEDPOLICY, EINVAL, 
+            "pthread_attr_setschedpolicy.05.01", 
+            !pattr || (policy!=SUT_SCHED_FIFO &&
+            policy!=SUT_SCHED_RR && policy!=SUT_SCHED_OTHER && 
+            !isValidSporadic))
+            
+            /*
+            * The pthread_attr_setschedpolicy() function may fail if:
+            *
+            * [ENOTSUP]
+            * An attempt was made to set the attribute to an unsupported value.
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETSCHEDPOLICY, ENOTSUP, 
+            "pthread_attr_setschedpolicy.05.02",
+            "Can not check weather attribute has unsupported value")
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETSCHEDPOLICY, EINTR, 
+            "pthread_attr_setschedpolicy.06")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getschedpolicy() and
+        * pthread_attr_setschedpolicy() functions shall return zero;
+        */
+        REQ("pthread_attr_setschedpolicy.04.01", 
+        "Function shall return zero", 
+        pthread_attr_setschedpolicy_spec==0);
+        
+        
+        /*
+        * When threads executing with the scheduling policy SCHED_FIFO,SCHED_RR, 
+        * [TSP]  
+        * or SCHED_SPORADIC are waiting on a mutex, theyshall acquire the 
+        * mutex in priority order when the mutex is unlocked.
+        */
+        REQ("pthread_attr_setschedpolicy.03", "", TODO_REQ());
+        
+        
+        pattr=getPThreadAttr(attr);
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(POLICY)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getschedpolicy() and pthread_attr_setschedpolicy() 
+            * functions, respectively, shall get and set the schedpolicy attribute
+            * in the attr argument.
+            */
+            REQ("?pthread_attr_setschedpolicy.01", 
+                "Shall set the schedpolicy attribute in the attr argument", 
+                pattr->policy==policy);
+        }
+        
+        return true;
+    }
+}
+
+
+
+
+
+void onPThreadAttrSetschedpolicy(PThreadAttrTPtr pattr, IntT  policy,
+                                 IntT pthread_attr_setschedpolicy_spec )
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setschedpolicy_spec==0)
+    {
+        attr->policy=policy;
+        put_Map(attr->isInitialized, create_Integer(POLICY), 
+            create_Integer(true));
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getscope, pthread_attr_setscope - get and set the 
+        contentionscope attribute (REALTIME THREADS)
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getscope(const pthread_attr_t *restrict attr,
+        int *restrict contentionscope);
+    int pthread_attr_setscope(pthread_attr_t *attr, int contentionscope); 
+
+DESCRIPTION
+
+    The pthread_attr_getscope() and pthread_attr_setscope() functions, 
+    respectively, shall get and set the contentionscope attribute in the attr 
+    object.
+
+    The contentionscope attribute may have the values PTHREAD_SCOPE_SYSTEM, 
+    signifying system scheduling contention scope, or PTHREAD_SCOPE_PROCESS, 
+    signifying process scheduling contention scope. The symbols 
+    PTHREAD_SCOPE_SYSTEM and PTHREAD_SCOPE_PROCESS are defined in the 
+    <pthread.h> header.
+
+RETURN VALUE
+
+    If successful, the pthread_attr_getscope() and pthread_attr_setscope() 
+    functions shall return zero; otherwise, an error number shall be returned 
+    to indicate the error.
+
+ERRORS
+
+    The pthread_attr_getscope() function may fail if:
+
+        [EINVAL] 
+        The value specified by attr does not refer to an initialized thread 
+        attribute object. 
+
+    The pthread_attr_setscope() function may fail if:
+
+        [EINVAL] 
+        The value of contentionscope is not valid, or the value specified by 
+        attr does not refer to an initialized thread attribute object. 
+
+        [ENOTSUP] 
+        An attempt was made to set the attribute to an unsupported value. 
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification
+GetStateFunctionResult* pthread_attr_getscope_spec( CallContext context, 
+                                                   PThreadAttrTPtr attr )
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, 
+                create_Integer(CONTENTIONSCOPE)), create_Integer(true)))
+            {
+                return { AfterInitSet, 
+                    "Attribute is already initialized, value was set" };
+            }
+            else /* if(!equals(get_Map(pattr->isInitialized, 
+                create_Integer(CONTENTIONSCOPE)), create_Integer(true)))*/
+                return { AfterInitNotSet, 
+                "Attribute is already initialized, value was not set" };
+        }
+        else /* if(!attr->afterInit) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+    /*
+    * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETSCOPE, "pthread_attr_getscope.02.02", 
+            pthread_attr_getscope_spec->functionResult!=0,
+            pthread_attr_getscope_spec->functionResult)
+            /*
+            * The pthread_attr_getscope() function may fail if:
+            *
+            * [EINVAL]
+            * The value specified by attr does not refer to an initialized thread
+            * attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETSCOPE, EINVAL, 
+            "pthread_attr_getscope.03.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETSCOPE, EINTR, 
+            "pthread_attr_getscope.05")
+            
+            ERROR_END()
+            
+            /*
+            * If successful, the pthread_attr_getscope() and pthread_attr_setscope()
+            * functions shall return zero;
+            */
+            REQ("pthread_attr_getscope.02.01", "Function shall return zero", 
+            pthread_attr_getscope_spec->functionResult==0);
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, 
+            create_Integer(CONTENTIONSCOPE)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getscope() and pthread_attr_setscope() functions, 
+            * respectively, shall get and set the contentionscope attribute in 
+            * the attr object.
+            */
+            REQ("pthread_attr_getscope.01", "Contention scope shall be valid", 
+                pthread_attr_getscope_spec->contentionscope == 
+                pattr->contentionscope);
+        }
+        
+        return true;
+    }
+}
+
+specification
+IntT pthread_attr_setscope_spec( CallContext context, PThreadAttrTPtr attr, 
+                                IntT contentionscope)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!attr->afterInit) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    coverage C_ValidParam
+    {
+        if(contentionscope==SUT_PTHREAD_SCOPE_SYSTEM)
+            return {ValidParamSys, 
+            "Parameter of the function is valid and set to PTHREAD_SCOPE_SYSTEM"};
+        else if(contentionscope==SUT_PTHREAD_SCOPE_PROCESS)
+            return {ValidParamProc, 
+            "Parameter of the function is valid and set to PTHREAD_SCOPE_PROCESS"};
+        else /* if parameter has invalid value */
+            return {InvalidParam, "Parameter of the function is not valid"};
+    }
+    post
+    {
+        
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETSCOPE, "pthread_attr_setscope.03.02", 
+            pthread_attr_setscope_spec!=0, 
+            pthread_attr_setscope_spec)
+            /*
+            * The pthread_attr_setscope() function may fail if:
+            *
+            * [EINVAL]
+            * The value of contentionscope is not valid, or the value specified by
+            * attr does not refer to an initialized thread attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETSCOPE, EINVAL, 
+            "pthread_attr_setscope.04.01", pattr==NULL || 
+            contentionscope!=SUT_PTHREAD_SCOPE_SYSTEM && 
+            contentionscope!=SUT_PTHREAD_SCOPE_PROCESS)
+            
+            /*
+            * The pthread_attr_setscope() function may fail if:
+            *
+            * [ENOTSUP]
+            * An attempt was made to set the attribute to an unsupported value.
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETSCOPE, ENOTSUP, 
+            "pthread_attr_setscope.04.02",
+            "Can not check weather attribute has unsupported value")
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETSCOPE, EINTR, 
+            "pthread_attr_setscope.05")
+            
+        ERROR_END()
+        
+        /*
+        * If successful, the pthread_attr_getscope() and pthread_attr_setscope()
+        * functions shall return zero;
+        */
+        REQ("pthread_attr_setscope.03.01", "Function shall return zero",
+        pthread_attr_setscope_spec==0);
+    
+        
+        pattr=getPThreadAttr(attr);
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, 
+            create_Integer(CONTENTIONSCOPE)), 
+            create_Integer(true)))
+        {
+            /*
+            * The contentionscope attribute may have the values 
+            * PTHREAD_SCOPE_SYSTEM,
+            * signifying system scheduling contention scope, or 
+            * PTHREAD_SCOPE_PROCESS,
+            * signifying process scheduling contention scope.
+            */
+            REQ("pthread_attr_setscope.02", "The value of contentionscope",  
+                contentionscope==SUT_PTHREAD_SCOPE_SYSTEM || 
+                contentionscope==SUT_PTHREAD_SCOPE_PROCESS);
+            
+            /*
+            * The pthread_attr_getscope() and pthread_attr_setscope() functions,
+            * respectively,
+            * shall get and set the contentionscope attribute in the attr object.
+            */
+            REQ("?pthread_attr_setscope.01", 
+                "Function shall set contention scope", 
+                pattr->contentionscope==contentionscope);
+        }
+        
+        return true;
+    }
+}
+
+
+
+void onPThreadAttrSetscope(PThreadAttrTPtr pattr, IntT  contentionscope,
+                           IntT pthread_attr_setscope_spec )
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setscope_spec==0)
+    {
+        attr->contentionscope=contentionscope;
+        put_Map(attr->isInitialized, create_Integer(CONTENTIONSCOPE), 
+            create_Integer(true));
+        
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getstackaddr, pthread_attr_setstackaddr - get and set the 
+        stackaddr attribute
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getstackaddr(const pthread_attr_t *restrict attr,
+        void **restrict stackaddr);
+    int pthread_attr_setstackaddr(pthread_attr_t *attr, void *stackaddr); 
+
+DESCRIPTION
+
+    The pthread_attr_getstackaddr() and pthread_attr_setstackaddr() functions, 
+    respectively, shall get and set the thread creation stackaddr attribute in 
+    the attr object.
+
+    The stackaddr attribute specifies the location of storage to be used for 
+    the created thread's stack. The size of the storage shall be at least 
+    {PTHREAD_STACK_MIN}.
+
+RETURN VALUE
+
+    Upon successful completion, pthread_attr_getstackaddr() and 
+    pthread_attr_setstackaddr() shall return a value of 0; otherwise, an error 
+    number shall be returned to indicate the error.
+
+    The pthread_attr_getstackaddr() function stores the stackaddr attribute 
+    value in stackaddr if successful.
+
+ERRORS
+
+    These functions may fail if:
+
+        [EINVAL] 
+        The value specified by attr does not refer to an initialized thread 
+        attribute object. 
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+
+specification
+GetStateFunctionResult* pthread_attr_getstackaddr_spec( CallContext context,
+                                                       PThreadAttrTPtr attr)
+                                                       
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, create_Integer(STACKADDR)), 
+                create_Integer(true)))
+            {
+                return { AfterInitSet, 
+                    "Attribute is already initialized, value was set" };
+            }
+            else /* if(!equals(get_Map(pattr->isInitialized, 
+                create_Integer(STACKADDR)), create_Integer(true))) */
+                return { AfterInitNotSet, 
+                "Attribute is already initialized, value was not set" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETSTACKADDR, 
+            "pthread_attr_getstackaddr.02.02", 
+            pthread_attr_getstackaddr_spec->functionResult!=0, 
+            pthread_attr_getstackaddr_spec->functionResult)
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            * The value specified by attr does not refer to an initialized thread
+            * attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETSTACKADDR, EINVAL, 
+            "pthread_attr_getstackaddr.04.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETSTACKADDR, EINTR, 
+            "pthread_attr_getstackaddr.05")
+            
+        ERROR_END()
+            
+            /*
+            * Upon successful completion, pthread_attr_getstackaddr() and
+            * pthread_attr_setstackaddr() shall return a value of 0;
+            */
+            REQ("pthread_attr_getstackaddr.02.01", "Function shall return zero", 
+            pthread_attr_getstackaddr_spec->functionResult==0);
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, 
+            create_Integer(STACKADDR)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getstackaddr() and pthread_attr_setstackaddr() 
+            * functions, respectively, shall get and set the 
+            * thread creation stackaddr attribute in the
+            * attr object.
+            */
+            REQ("pthread_attr_getstackaddr.01", 
+                "Shall get the thread creation stackaddr attribute", 
+                equals_VoidTPtr(pthread_attr_getstackaddr_spec->stackaddr,  
+                pattr->stackaddr));
+            
+                /*
+                * The pthread_attr_getstackaddr() function stores the stackaddr 
+                * attribute value
+                * in stackaddr if successful.
+            */
+            
+            REQ("pthread_attr_getstackaddr.03",
+                "Address of the stack shall be valid", 
+                equals_VoidTPtr(pthread_attr_getstackaddr_spec->stackaddr,  
+                pattr->stackaddr));
+        }
+        
+        return true;
+    }
+}
+
+
+
+specification
+IntT pthread_attr_setstackaddr_spec(CallContext context, PThreadAttrTPtr attr, 
+                                    VoidTPtr stackaddr)
+{
+    
+    SizeT minSize = getSystemConfigurationValue(context,SUT_SC_THREAD_STACK_MIN);
+    
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        /* [Implicit precondition] */
+        REQ("","Memory pointed to by stackaddr is not NULL", 
+            !isNULL_VoidTPtr(stackaddr));
+        
+        /* [Implicit precondition] */
+        REQ("","Memory pointed to by stackaddr is available in the context", 
+            isValidPointer(context, stackaddr));
+        
+            /*
+            * The size of the storage shall be at least {PTHREAD_STACK_MIN}.
+        */
+        REQ("app.pthread_attr_setstackaddr.02","Memory shall be enough for stack", 
+            sizeRWMemoryAvailable(stackaddr) >= minSize);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!attr->afterInit) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETSTACKADDR, 
+            "pthread_attr_setstackaddr.03.02", 
+            pthread_attr_setstackaddr_spec!=0, 
+            pthread_attr_setstackaddr_spec)
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            * The value specified by attr does not refer to an initialized thread
+            * attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETSTACKADDR, EINVAL, 
+            "pthread_attr_setstackaddr.04.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETSTACKADDR, EINTR, 
+            "pthread_attr_setstackaddr.05")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_attr_getstackaddr() and
+        * pthread_attr_setstackaddr() shall return a value of 0;
+        */
+        REQ("pthread_attr_setstackaddr.03.01", "Function shall return zero", 
+        pthread_attr_setstackaddr_spec==0);
+    
+        /*
+        * The size of the storage shall be at least {PTHREAD_STACK_MIN}.
+        */
+        REQ("app.pthread_attr_setstackaddr.02", "", TODO_REQ());
+        
+        
+        pattr=getPThreadAttr(attr);
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, 
+            create_Integer(STACKADDR)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getstackaddr() and pthread_attr_setstackaddr() 
+            * functions,
+            * respectively, shall get and set the thread creation stackaddr 
+            * attribute in the attr object.
+            */
+            REQ("?pthread_attr_setstackaddr.01", "Attribute shall be set", 
+                equals_VoidTPtr(pattr->stackaddr, stackaddr));
+        }
+        return true;
+    }
+    
+}
+
+
+
+void onPThreadAttrSetstackaddr(PThreadAttrTPtr pattr, VoidTPtr stackaddr,
+                               IntT pthread_attr_setstackaddr_spec)
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setstackaddr_spec==0)
+    {
+        attr->stackaddr=stackaddr;
+        put_Map(attr->isInitialized, create_Integer(STACKADDR), 
+            create_Integer(true));
+        
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getstacksize, pthread_attr_setstacksize - get and set the 
+                                                           stacksize attribute
+
+SYNOPSIS
+    #include <pthread.h>
+    int pthread_attr_getstacksize(const pthread_attr_t *restrict attr,
+        size_t *restrict stacksize);
+    int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize); 
+
+DESCRIPTION
+
+    The pthread_attr_getstacksize() and pthread_attr_setstacksize() functions, 
+    respectively, shall get and set the thread creation stacksize attribute in 
+    the attr object.
+
+    The stacksize attribute shall define the minimum stack size (in bytes) 
+    allocated for the created threads stack.
+
+RETURN VALUE
+
+    Upon successful completion, pthread_attr_getstacksize() and 
+    pthread_attr_setstacksize() shall return a value of 0; otherwise, an error 
+    number shall be returned to indicate the error.
+
+    The pthread_attr_getstacksize() function stores the stacksize attribute 
+    value in stacksize if successful.
+
+ERRORS
+
+    The pthread_attr_setstacksize() function shall fail if:
+
+        [EINVAL] 
+        The value of stacksize is less than {PTHREAD_STACK_MIN} or exceeds a 
+        system-imposed limit. 
+
+    These functions may fail if:
+
+        [EINVAL] 
+        The value specified by attr does not refer to an initialized thread 
+        attribute object. 
+
+    These functions shall not return an error code of [EINTR].
+*/
+
+
+specification
+IntT pthread_attr_setstacksize_spec(CallContext context, PThreadAttrTPtr attr,
+                                    SizeT stacksize)
+{
+    SizeT minSize = getSystemConfigurationValue(context,SUT_SC_THREAD_STACK_MIN);
+    
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!attr->afterInit) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    coverage C_Values
+    {
+        if (stacksize<minSize)
+        {
+            return { SizeLess, 
+                "The value of stacksize is less than {PTHREAD_STACK_MIN}" };
+        }
+        else /* if (stacksize>=minSize) */
+        {
+            return { SizeMore, 
+                "The value of stacksize is not less than {PTHREAD_STACK_MIN}" };
+        }
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETSTACKSIZE, 
+            "pthread_attr_setstacksize.02.02", 
+            pthread_attr_setstacksize_spec!=0, 
+            pthread_attr_setstacksize_spec)
+            /*
+            * The pthread_attr_setstacksize() function shall fail if:
+            *
+            * [EINVAL]
+            * The value of stacksize is less than {PTHREAD_STACK_MIN} or exceeds a
+            * system-imposed limit.
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETSTACKSIZE, EINVAL, 
+                "pthread_attr_setstacksize.03.01",
+                "Do not know system-imposed limit")
+            
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            * The value specified by attr does not refer to an initialized thread
+            * attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETSTACKSIZE, EINVAL, 
+                "pthread_attr_setstacksize.04.01", TODO_ERR(EINVAL))
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETSTACKSIZE, EINTR, 
+            "pthread_attr_setstacksize.05")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_attr_getstacksize() and
+        * pthread_attr_setstacksize() shall return a value of 0;
+        */
+        REQ("pthread_attr_setstacksize.02.01", "Function shall return zero", 
+        pthread_attr_setstacksize_spec==0);
+        
+        
+        pattr=getPThreadAttr(attr);
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, 
+            create_Integer(STACKSIZE)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getstacksize() and pthread_attr_setstacksize() 
+            * functions,
+            * respectively, shall get and set the thread creation stacksize 
+            * attribute in the attr object.
+            */
+            REQ("?pthread_attr_setstacksize.01", "Stacksize shall be valid", 
+                pattr->stacksize==stacksize);
+        }
+        
+        return true;
+    }
+}
+
+
+void onPThreadAttrSetstacksize(PThreadAttrTPtr pattr, SizeT stacksize,
+                               IntT pthread_attr_setstacksize_spec)
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setstacksize_spec==0)
+    {
+        attr->stacksize=stacksize;
+        put_Map(attr->isInitialized, create_Integer(STACKSIZE), 
+            create_Integer(true));
+    }
+}
+
+
+
+specification
+GetStateFunctionResult* pthread_attr_getstacksize_spec( CallContext context, 
+                                                       PThreadAttrTPtr attr)
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, create_Integer(STACKSIZE)), 
+                create_Integer(true)))
+            {
+                return { AfterInitSet, 
+                    "Attribute is already initialized, value was set" };
+            }
+            else /* if(!equals(get_Map(pattr->isInitialized, 
+                create_Integer(STACKSIZE)), create_Integer(true))) */
+                return { AfterInitNotSet, 
+                "Attribute is already initialized, value was not set" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETSTACKSIZE, 
+            "pthread_attr_getstacksize.02.02", 
+            pthread_attr_getstacksize_spec->functionResult!=0, 
+            pthread_attr_getstacksize_spec->functionResult)
+            /*
+            * These functions may fail if:
+            *
+            * [EINVAL]
+            * The value specified by attr does not refer to an initialized thread
+            * attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETSTACKSIZE, EINVAL, 
+            "pthread_attr_getstacksize.04.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETSTACKSIZE, EINTR, 
+            "pthread_attr_getstacksize.05")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, pthread_attr_getstacksize() and
+        * pthread_attr_setstacksize() shall return a value of 0;
+        */
+        REQ("pthread_attr_getstacksize.02.01", "Function shall return zero", 
+        pthread_attr_getstacksize_spec->functionResult==0);
+        
+        
+        if (pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, 
+            create_Integer(STACKSIZE)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getstacksize() and pthread_attr_setstacksize() 
+            * functions, respectively, shall get and set the thread creation 
+            * stacksize attribute in the
+            * attr object.
+            */
+            REQ("pthread_attr_getstacksize.01", "Size shall be set", 
+                pthread_attr_getstacksize_spec->stacksize== 
+                pattr->stacksize);
+            
+                /*
+                * The pthread_attr_getstacksize() function stores the stacksize 
+                * attribute value
+                * in stacksize if successful.
+            */
+            REQ("pthread_attr_getstacksize.03", "Size of the stack shall be valid",
+                pthread_attr_getstacksize_spec->stacksize== 
+                pattr->stacksize);
+        }
+        return true;
+    }
+}
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    pthread_attr_getstack, pthread_attr_setstack - get and set stack attributes
+
+SYNOPSIS
+
+    #include <pthread.h>
+    int pthread_attr_getstack(const pthread_attr_t *restrict attr,
+        void **restrict stackaddr, size_t *restrict stacksize);
+    int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr,
+        size_t stacksize);  
+
+DESCRIPTION
+
+    The pthread_attr_getstack() and pthread_attr_setstack() functions, 
+    respectively, shall get and set the thread creation stack attributes 
+    stackaddr and stacksize in the attr object.
+
+    The stack attributes specify the area of storage to be used for the created
+    thread's stack. The base (lowest addressable byte) of the storage shall be 
+    stackaddr, and the size of the storage shall be stacksize bytes. The 
+    stacksize shall be at least {PTHREAD_STACK_MIN}. The stackaddr shall be 
+    aligned appropriately to be used as a stack; for example, 
+    pthread_attr_setstack() may fail with [EINVAL] if ( stackaddr & 0x7) is not
+    0. All pages within the stack described by stackaddr and stacksize shall be
+    both readable and writable by the thread.
+
+RETURN VALUE
+
+    Upon successful completion, these functions shall return a value of 0; 
+    otherwise, an error number shall be returned to indicate the error.
+
+    The pthread_attr_getstack() function shall store the stack attribute values
+    in stackaddr and stacksize if successful.
+
+ERRORS
+
+    The pthread_attr_setstack() function shall fail if:
+
+        [EINVAL] 
+        The value of stacksize is less than {PTHREAD_STACK_MIN} or exceeds an 
+        implementation-defined limit. 
+
+    The pthread_attr_getstack() function may fail if:
+
+        [EINVAL] 
+        The value specified by addr does not refer to an initialized thread 
+        attribute object. 
+
+    The pthread_attr_setstack() function may fail if:
+
+        [EINVAL] 
+        The value of stackaddr does not have proper alignment to be used as a 
+        stack, or (stackaddr + stacksize) lacks proper alignment, or the value
+        specified by attr does not refer to an initialized thread attribute 
+        object. 
+
+        [EACCES] 
+        The stack page(s) described by stackaddr and stacksize are not both 
+        readable and writable by the thread. 
+    
+    These functions shall not return an error code of [EINTR].
+*/
+
+specification
+IntT pthread_attr_setstack_spec(CallContext context, PThreadAttrTPtr attr, 
+                                VoidTPtr stackaddr, SizeT stacksize)
+{
+    
+    LongT stackSizeConfigurationValue = getSystemConfigurationValue(context,SUT_SC_THREAD_STACK_MIN);
+    SizeT minSize = stackSizeConfigurationValue!=SC_VALUE_UNKNOWN? stackSizeConfigurationValue: 0;
+    IntT  stackAlignVal=getStackAlignmentValue(context);
+    bool  stackAligned= ((stackaddr.address % stackAlignVal) ==0)
+        && (((stackaddr.address+stacksize) % stackAlignVal)==0);
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by stackaddr is not NULL", 
+            !isNULL_VoidTPtr(stackaddr));
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by stackaddr is available in the context", 
+            isValidPointer(context, stackaddr));
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            return { AfterInit, "Attribute is already initialized" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    coverage C_Values
+    {
+        if (stacksize<minSize)
+        {
+            return { SizeLess, 
+                "The value of stacksize is less than {PTHREAD_STACK_MIN}" };
+        }
+        else /* if (stacksize>=minSize) */
+        {
+            return { SizeMore, 
+                "The value of stacksize is not less than {PTHREAD_STACK_MIN}" };
+        }
+    }
+    coverage C_Alignment
+    {
+        if (stackAligned)
+        {
+            return { StackAligned, "Stack is aligned" };
+        }
+        else /* if (!stackAligned) */
+        {
+            return { StackNotAligned, "Stack is not aligned" };
+        }
+    }
+    post
+    {
+        /*
+        * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_SETSTACK, "pthread_attr_setstack.06.02", 
+            pthread_attr_setstack_spec!=0, 
+            pthread_attr_setstack_spec)
+
+
+            /*
+             * [ As far as "UNCHECKABLE" case below covers all the cases when error
+             *   is present, we need to do backward checks only (i.e. no error
+             *   while SHALL condition is met)  ]
+             */
+            if(!hasError)
+            {
+                /*
+                * The pthread_attr_setstack() function may fail if:
+                *
+                * [EINVAL]
+                * The value of stackaddr does not have proper alignment to be used as
+                * a stack, or ( stackaddr + stacksize) lacks proper alignment, or the 
+                * value specified by attr does not refer to an initialized thread 
+                * attribute object.
+                */
+                ERROR_MAY(POSIX_PTHREAD_ATTR_SETSTACK, EINVAL, 
+                    "pthread_attr_setstack.08.01", pattr==NULL || !stackAligned)
+
+                /*
+                * The pthread_attr_setstack() function shall fail if:
+                *
+                * [EINVAL]
+                * The value of stacksize is less than {PTHREAD_STACK_MIN} or exceeds
+                * an implementation-defined limit.
+                */
+                ERROR_SHALL(POSIX_PTHREAD_ATTR_SETSTACK, EINVAL, 
+                    "pthread_attr_setstack.07.01",
+                    stacksize<minSize)
+
+            }
+
+            /*
+            * The pthread_attr_setstack() function shall fail if:
+            *
+            * [EINVAL]
+            * The value of stacksize [...] exceeds
+            * an implementation-defined limit.
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_ATTR_SETSTACK, EINVAL, 
+                "pthread_attr_setstack.07.01",
+                "Do not know implementation-defined limit")
+
+            /*
+            * The pthread_attr_setstack() function may fail if:
+            *
+            * [EACCES]
+            * The stack page(s) described by stackaddr and stacksize are not both
+            * readable and writable by the thread.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_SETSTACK, EACCES, 
+                "pthread_attr_setstack.08.02", 
+                sizeRWMemoryAvailable(stackaddr) < stacksize)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_SETSTACK, EINTR, 
+            "pthread_attr_setstack.09")
+            
+        ERROR_END()
+        
+        /*
+        * Upon successful completion, these functions shall return a value of 0;
+        */
+        REQ("pthread_attr_setstack.06.01", "Function shall return zero",
+        pthread_attr_setstack_spec==0);
+        
+        /*
+        * The stacksize shall be at least {PTHREAD_STACK_MIN}.
+        */
+        REQ("pthread_attr_setstack.03", 
+            "The stacksize shall be at least {PTHREAD_STACK_MIN}",
+            stacksize>=minSize);
+        
+        if(POSIX_PTHREAD_ATTR_SETSTACK_FAILS_WITH_EINVAL)
+        {
+            /*
+            * The stackaddr shall be aligned appropriately to be used as a stack;
+            */
+            REQ("pthread_attr_setstack.04", "Stack shall be aligned",
+                stackAligned==true);
+        }
+        
+        if(POSIX_PTHREAD_ATTR_SETSTACK_FAILS_WITH_EACCES)
+        {
+            /*
+            * All pages within the stack described by stackaddr and stacksize shall 
+            * be both readable and writable by the thread.
+            */
+            REQ("pthread_attr_setstack.05", 
+                "Readable and writable by the thread", 
+                sizeRWMemoryAvailable(stackaddr) >= stacksize);
+        
+            /*
+            * The stack attributes specify the area of storage to be used for the 
+            * created thread's stack. The base (lowest addressable byte)of the 
+            * storage shall be stackaddr, and the size of the storage shall be 
+            * stacksize bytes.
+            */
+            REQ("pthread_attr_setstack.02", 
+                "The base of the storage shall be stackaddr", 
+                sizeRWMemoryAvailable(stackaddr) >= stacksize);
+        }
+        
+        pattr=getPThreadAttr(attr);
+        
+        if(pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(STACKADDR)), 
+            create_Integer(true)) && 
+            equals(get_Map(pattr->isInitialized, create_Integer(STACKSIZE)), 
+            create_Integer(true)))
+        {
+            /*
+            * The pthread_attr_getstack() and pthread_attr_setstack() functions, 
+            * respectively,
+            * shall get and set the thread creation stack attributes 
+            * stackaddr and stacksize in the attr object.
+            */
+            REQ("?pthread_attr_setstack.01", "Stack shall be valid",
+                pattr->stacksize==stacksize
+                && equals_VoidTPtr(pattr->stackaddr,stackaddr));
+        }
+        
+        return true;
+    }
+  
+}
+
+
+
+void onPThreadAttrSetstack(PThreadAttrTPtr pattr, VoidTPtr stackaddr, 
+                           SizeT stacksize, IntT pthread_attr_setstack_spec)
+{
+    PThreadAttr* attr=getPThreadAttr(pattr);
+    
+    if(attr && pthread_attr_setstack_spec==0)
+    {
+        attr->stacksize=stacksize;
+        attr->stackaddr=stackaddr;
+        put_Map(attr->isInitialized, create_Integer(STACKSIZE), 
+            create_Integer(true));
+        put_Map(attr->isInitialized, create_Integer(STACKADDR), 
+            create_Integer(true));
+        
+    }
+}
+
+
+
+specification
+GetStateFunctionResult* pthread_attr_getstack_spec( CallContext context,
+                                                   PThreadAttrTPtr attr)
+                                                   
+{
+    PThreadAttr* pattr;
+    pre 
+    {
+        /* [Implicit precondition] */
+        REQ("", "attr is not NULL", !isNULL_VoidTPtr(attr) );
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by attr is available in the context", 
+            isValidPointer(context, attr) );
+        
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by attr is enough", 
+            sizeRMemoryAvailable(attr) >= sizeof_Type(context,"pthread_attr_t"));
+        
+        pattr=getPThreadAttr(attr);
+        
+        return true;
+    }
+    coverage C
+    {
+        if(pattr)
+        {
+            if(equals(get_Map(pattr->isInitialized, create_Integer(STACKADDR)), 
+                create_Integer(true)) && 
+                equals(get_Map(pattr->isInitialized, create_Integer(STACKSIZE)), 
+                create_Integer(true)))
+            {
+                return { AfterInitSet, 
+                    "Attribute is already initialized, values were set" };
+            }
+            else /* if both attributes are undefined */
+                return { AfterInitNotSet, 
+                "Attribute is already initialized, values were not set" };
+        }
+        else /* if(!pattr) */
+            return { NotInit, "Attribute is not initialized" };
+    }
+    post
+    {
+    /*
+    * otherwise, an error number shall be returned to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_PTHREAD_ATTR_GETSTACK, "pthread_attr_getstack.02.02", 
+            pthread_attr_getstack_spec->functionResult!=0, 
+            pthread_attr_getstack_spec->functionResult)
+            /*
+            * The pthread_attr_getstack() function may fail if:
+            *
+            * [EINVAL]
+            * The value specified by addr does not refer to an initialized thread
+            * attribute object.
+            */
+            ERROR_MAY(POSIX_PTHREAD_ATTR_GETSTACK, EINVAL, 
+            "pthread_attr_getstack.04.01", pattr==NULL)
+            
+            /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_ATTR_GETSTACK, EINTR, 
+            "pthread_attr_getstack.05")
+            
+            ERROR_END()
+            
+            /*
+            * Upon successful completion, these functions shall return a value of 0;
+            */
+            REQ("pthread_attr_getstack.02.01", 
+                "Upon successful completion, shall return 0", 
+                pthread_attr_getstack_spec->functionResult==0);
+        
+        if(pattr!=NULL && 
+            equals(get_Map(pattr->isInitialized, create_Integer(STACKADDR)), 
+            create_Integer(true)) && 
+            equals(get_Map(pattr->isInitialized, create_Integer(STACKSIZE)), 
+            create_Integer(true)))
+        {
+        /*
+        * The pthread_attr_getstack() and pthread_attr_setstack() 
+        * functions, respectively,
+        * shall get and set the thread creation stack attributes stackaddr
+        * and stacksize in the attr object.
+            */
+            REQ("pthread_attr_getstack.01", 
+                "Shall get stackaddr and stacksize in the attr object", 
+                equals_VoidTPtr(pthread_attr_getstack_spec->stackaddr,  
+                pattr->stackaddr) && pthread_attr_getstack_spec->stacksize
+                == pattr->stacksize);
+            
+                /*
+                * The pthread_attr_getstack() function shall store the stack 
+                * attribute values in stackaddr and stacksize if successful.
+            */
+            REQ("pthread_attr_getstack.03", 
+                "Address and size of the stack shall be valid", 
+                equals_VoidTPtr(pthread_attr_getstack_spec->stackaddr,  
+                pattr->stackaddr) && pthread_attr_getstack_spec->stacksize
+                == pattr->stacksize);
+        }
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       PThreadAttr Types                        **/
+/********************************************************************/
+
+specification typedef struct PThreadAttr PThreadAttr = {};
+
+PThreadAttr *create_PThreadAttr(
+                                    PThreadAttrTPtr    pattr,
+                                    Map*               isInitialized,   
+                                    IntT               detachstate,        
+                                    SizeT              guardsize,           
+                                    IntT               inheritsched,
+                                    ShedParam*         shedPar,
+                                    IntT               policy,
+                                    IntT               contentionscope,
+                                    VoidTPtr           stackaddr,
+                                    SizeT              stacksize
+                                    )
+{
+    PThreadAttr *res = create(&type_PThreadAttr,
+        pattr,
+        isInitialized,   
+        detachstate,        
+        guardsize,           
+        inheritsched,
+        shedPar,
+        policy,
+        contentionscope,
+        stackaddr,
+        stacksize
+        );
+    return res;
+}
+
+specification typedef struct GetStateFunctionResult 
+GetStateFunctionResult = {};
+
+GetStateFunctionResult *create_GetStateFunctionResult(
+                                                      IntT               functionResult,
+                                                      IntT               detachState,
+                                                      SizeT              guardSize,
+                                                      IntT               inheritedSched,
+                                                      VoidTPtr           stackaddr,
+                                                      SizeT              stacksize,
+                                                      IntT               contentionscope,
+                                                      ShedParam*         shedPar,
+                                                      IntT               policy
+                                                      )
+{
+    GetStateFunctionResult *res = create(&type_GetStateFunctionResult,
+        functionResult,
+        detachState,
+        guardSize,
+        inheritedSched,
+        stackaddr,
+        stacksize,
+        contentionscope,
+        shedPar,
+        policy
+        );
+    
+    return res;
+}
+
+specification typedef struct ShedParam ShedParam = {};
+
+ShedParam *create_ShedParam(
+                            IntT             sched_priority,
+                            IntT             sched_ss_low_priority, 
+                            TimeSpecTObj*    sched_ss_repl_period,  
+                            TimeSpecTObj*    sched_ss_init_budget,  
+                            IntT             sched_ss_max_repl
+                            )
+{
+    ShedParam *res = create(&type_ShedParam,
+        sched_priority,
+        sched_ss_low_priority, 
+        sched_ss_repl_period,  
+        sched_ss_init_budget,  
+        sched_ss_max_repl
+        );
+    return res;
+}
+
+
+PThreadAttr* create_PThreadAttrPattr(CallContext context, PThreadAttrTPtr pattr)
+{
+    Map *isInitialized=create_Map(&type_Integer, &type_Integer);
+    PThreadAttr* attr=create_PThreadAttr( 
+        pattr, 
+        isInitialized, 
+        0, 
+        0, 
+        0, 
+        0, 
+        0, 
+        0, 
+        NULL_VoidTPtr, 
+        0
+        );
+    attr->detachstate=SUT_PTHREAD_CREATE_JOINABLE;
+    put_Map(isInitialized, create_Integer(DETACHSTATE), create_Integer(true));
+    attr->guardsize=
+        getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+    put_Map(isInitialized, create_Integer(GUARDSIZE), create_Integer(true));           
+    return attr;
+}
+
+void registerPThreadAttr(CallContext context, PThreadAttrTPtr pattr)
+{
+    registerObjectInMemory(
+        pattr,
+        sizeof_SUTType("pthread_attr_t"),
+        create_PThreadAttrPattr(context, pattr)
+        );
+}
+
+void unregisterPThreadAttr(PThreadAttrTPtr pattr)
+{
+    unregisterObjectInMemory(pattr);
+}
+
+PThreadAttr* getPThreadAttr(PThreadAttrTPtr pattr)
+{
+    return getObjectInMemory(pattr);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/

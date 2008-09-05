@@ -1,0 +1,755 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "socket/netdb/netdb_media.seh"
+#include "common/common_media.seh"
+
+#include "socket/netdb/netdb_model.seh"
+
+/*****************************************************************************/
+/**                            Format Functions                             **/
+/*****************************************************************************/
+
+ServentT * readServentT_TSStream(ThreadId threadid,TSStream* stream)
+{
+    ServentT * res;
+
+    IntT is_null = readInt_TSStream(stream);
+    if(is_null)
+        return NULL;
+
+    res = create_emptyServentT();
+
+    res->s_name      = readCString_TSStream(stream);
+    res->s_aliases   = readPointer_TSStream(threadid, stream);
+    res->s_port      = readInt_TSStream(stream);
+    res->s_proto     = readCString_TSStream(stream);
+
+    return res;
+}
+
+ProtoentT * readProtoentT_TSStream(ThreadId threadid,TSStream* stream)
+{
+    ProtoentT * res;
+
+    IntT is_null = readInt_TSStream(stream);
+    if(is_null)
+        return NULL;
+
+    res = create_emptyProtoentT();
+    
+    res->p_name      = readCString_TSStream(stream);
+    res->p_aliases   = readPointer_TSStream(threadid, stream);
+    res->p_proto     = readInt_TSStream(stream);
+
+    return res;
+}
+
+HostentT * readHostentT_TSStream(ThreadId threadid,TSStream* stream)
+{
+    HostentT * res;
+
+    IntT is_null = readInt_TSStream(stream);
+    if(is_null)
+        return NULL;
+
+    res = create_emptyHostentT();
+
+    res->h_name      = readCString_TSStream(stream);
+    res->h_aliases   = readPointer_TSStream(threadid, stream);
+    res->h_addrtype  = readInt_TSStream(stream);
+    res->h_length    = readInt_TSStream(stream);
+    res->h_addr_list = readPointer_TSStream(threadid, stream);
+
+    return res;
+}
+
+
+void writeSockaddrT_TSStream(TSStream *stream, SockaddrT * sa)
+{
+    //tmp
+}
+
+AddrInfoT * create_AddrInfoT_VoidTPtr(CallContext context, AddrInfoTPtr ptr)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+    AddrInfoT * res = NULL;
+    
+    if(isNULL_VoidTPtr(ptr))
+        return res;
+
+    format_TSCommand( &command, "read_addrinfo:$(ptr)", create_VoidTPtrObj(ptr) );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        res = create(&type_AddrInfoT, NULL_VoidTPtr, 0,0,0,0, 0, NULL, NULL, NULL_VoidTPtr);
+        res->addr = ptr;
+        res->ai_flags = readInt_TSStream(&command.response);
+        res->ai_family = readInt_TSStream(&command.response);
+        res->ai_socktype = readInt_TSStream(&command.response);
+        res->ai_protocol = readInt_TSStream(&command.response);
+
+        res->ai_addrlen = readUInt_TSStream(&command.response);
+
+        res->ai_addr = readSockaddr_TSStream(&command.response);
+
+        res->ai_canonname = readCString_TSStream(&command.response);
+        res->ai_next = readPointer_TSStream(context, &command.response);
+    }
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+AddrInfoT * create_AddrInfoT(CallContext context, 
+                             IntT ai_flags, IntT ai_family, IntT ai_socktype, IntT ai_protocol,
+                             sut_socklen_t ai_addrlen, SockaddrT * ai_addr,
+                             CString * ai_canonname, AddrInfoTPtr ai_next)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+    AddrInfoT * res = NULL;
+    AddrInfoTPtr addr;
+    
+    format_TSCommand( &command, "create_addrinfo:$(int)$(int)$(int)$(int)$(sockaddr)$(str)$(ptr)", 
+                     create_IntTObj(ai_flags),             
+                     create_IntTObj(ai_family),
+                     create_IntTObj(ai_socktype),
+                     create_IntTObj(ai_protocol),
+                     ai_addr, 
+                     ai_canonname, 
+                     create_VoidTPtrObj(ai_next)   
+                    );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        addr = readPointer_TSStream(context, &command.response);
+
+        res = create_AddrInfoT_VoidTPtr(context, addr);
+    }
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+void write_AddrInfoT(CallContext context, AddrInfoT * ai)
+{
+    TSCommand command = create_TSCommand();
+    bool verdict;
+    
+    if( isNULL_VoidTPtr(ai->addr) )
+        return;
+
+    if( ai->ai_addr != NULL )
+    {
+        verdict = 0;
+        return;
+    }
+
+    format_TSCommand( &command, "write_addrinfo:$(ptr)$(int)$(int)$(int)$(int)$(sockaddr)$(str)$(ptr)", 
+                     create_VoidTPtrObj(ai->addr),
+                     create_IntTObj(ai->ai_flags),             
+                     create_IntTObj(ai->ai_family),
+                     create_IntTObj(ai->ai_socktype),
+                     create_IntTObj(ai->ai_protocol),
+                     ai->ai_addr, 
+                     ai->ai_canonname, 
+                     create_VoidTPtrObj(ai->ai_next) 
+                    );
+    verdict = executeCommandInContext( context, &command );
+    if (verdict)
+    {
+        /**/
+    }
+    destroy_TSCommand(&command);
+}
+
+AddrInfoT * create_emptyAddrInfoT(CallContext context)
+{
+    return create_AddrInfoT(context, 0, SUT_AF_UNSPEC, 0, 0, 
+                            0, NULL, NULL, NULL_VoidTPtr );
+}
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSocketNetdbSubsystem(void)
+{
+    if(!init_netdb())          
+        traceUserInfo("init_netdb failed!!!"); 
+
+    // Set up mediators
+    set_mediator_endservent_spec(endservent_media);
+    set_mediator_getservbyname_spec(getservbyname_media);
+    set_mediator_getservbyport_spec(getservbyport_media);
+    set_mediator_getservent_spec(getservent_media);
+    set_mediator_setservent_spec(setservent_media);
+
+    set_mediator_endprotoent_spec(endprotoent_media);
+    set_mediator_getprotobyname_spec(getprotobyname_media);
+    set_mediator_getprotobynumber_spec(getprotobynumber_media);
+    set_mediator_getprotoent_spec(getprotoent_media);
+    set_mediator_setprotoent_spec(setprotoent_media);
+
+    set_mediator_freeaddrinfo_spec(freeaddrinfo_media);
+    set_mediator_getaddrinfo_spec(getaddrinfo_media);
+
+    set_mediator_getnameinfo_spec(getnameinfo_media);
+
+    set_mediator_gethostbyaddr_spec(gethostbyaddr_media);
+    set_mediator_gethostbyname_spec(gethostbyname_media);   
+
+    set_mediator_gai_strerror_spec(gai_strerror_media);
+    set_mediator___h_errno_location_spec(__h_errno_location_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** endservent_spec **/
+mediator endservent_media for specification
+void endservent_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "endservent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onEndservent(context);
+    }
+}
+
+/** getservbyname_spec **/
+mediator getservbyname_media for specification
+ServentT * getservbyname_spec( CallContext context, CString *name, CString *proto )
+{
+    call
+    {
+        ServentT * res;
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "getservbyname:$(str)$(str)", name, proto );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readServentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGetservbyname(context, name, proto, getservbyname_spec);
+    }
+}
+
+
+/** getservbyport_spec **/
+mediator getservbyport_media for specification
+ServentT * getservbyport_spec( CallContext context, IntT port, CString * proto )
+{
+    call
+    {
+        ServentT * res;
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "getservbyport:$(int)$(str)", create_IntTObj(port), proto );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readServentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGetservbyport(context, port, proto, getservbyport_spec);
+    }
+}
+
+/** getservent_spec **/
+mediator getservent_media for specification
+ServentT * getservent_spec( CallContext context)
+{
+    call
+    {
+        ServentT * res;
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "getservent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readServentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGetservent(context, getservent_spec);
+    }
+}
+
+
+/** setservent_spec **/
+mediator setservent_media for specification
+void setservent_spec( CallContext context, IntT stayopen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "setservent:$(int)", create_IntTObj(stayopen) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onSetservent(context, stayopen);
+    }
+}
+
+
+/****/
+
+
+/** endprotoent_spec **/
+mediator endprotoent_media for specification
+void endprotoent_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "endprotoent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;
+    }
+    state
+    {
+        onEndprotoent(context);
+    }
+}
+
+/** getprotobyname_spec **/
+mediator getprotobyname_media for specification
+ProtoentT * getprotobyname_spec( CallContext context, CString * name)
+{
+    call
+    {
+        ProtoentT * res;
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "getprotobyname:$(str)", name );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readProtoentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGetprotobyname(context, name, getprotobyname_spec);
+    }
+}
+
+
+/** getprotobynumber_spec **/
+mediator getprotobynumber_media for specification
+ProtoentT * getprotobynumber_spec( CallContext context, IntT proto )
+{
+    call
+    {
+        ProtoentT * res;
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "getprotobynumber:$(int)", create_IntTObj(proto) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readProtoentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGetprotobynumber(context, proto, getprotobynumber_spec);
+    }
+}
+
+
+/** getprotoent_spec **/
+mediator getprotoent_media for specification
+ProtoentT * getprotoent_spec( CallContext context )
+{
+    call
+    {
+        ProtoentT * res;
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "getprotoent" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readProtoentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+         return res;
+    }
+    state
+    {
+        onGetprotoent(context, getprotoent_spec);
+    }
+}
+
+/** setprotoent_spec **/
+mediator setprotoent_media for specification
+void setprotoent_spec( CallContext context, IntT stayopen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "setprotoent:$(int)", create_IntTObj(stayopen) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+    state
+    {
+        onSetprotoent(context, stayopen);
+    }
+}
+
+/****/
+
+
+/** freeaddrinfo_spec **/
+mediator freeaddrinfo_media for specification
+void freeaddrinfo_spec( CallContext context, AddrInfoTPtr ai_ptr )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "freeaddrinfo:$(ptr)", create_VoidTPtrObj(ai_ptr) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return; 
+    }
+}
+
+
+/** getaddrinfo_spec **/
+mediator getaddrinfo_media for specification
+IntT getaddrinfo_spec( CallContext context, CString * nodename, 
+                       CString * servname, AddrInfoT * hints, VoidTPtrObj * res )
+{
+    call 
+    {
+        IntT result;
+        TSCommand command = create_TSCommand();
+    
+        if(hints)
+            write_AddrInfoT(context, hints);
+        
+        format_TSCommand( &command, "getaddrinfo:$(str)$(str)$(ptr)$(int)$(ptr)", 
+                          nodename, servname, 
+                          create_VoidTPtrObj(hints ? (VoidTPtr)hints->addr : (VoidTPtr)NULL_VoidTPtr), 
+                          create_IntTObj( (res==NULL)?1:0 ),  res
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            result = readInt_TSStream(&command.response);
+            if(res)
+            {
+                *res = readPointer_TSStream(context, &command.response);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return result;
+    }
+    state
+    {
+        onGetaddrinfo(context, nodename, servname, hints, res, getaddrinfo_spec);
+    }
+}
+
+
+/****/
+
+
+/** getnameinfo_spec **/
+mediator getnameinfo_media for specification
+IntT getnameinfo_spec( CallContext context, SockaddrT * sa, 
+                       CString * node, sut_socklen_t nodelen, 
+                       CString * service, sut_socklen_t servicelen, 
+                       IntT flags )
+{
+    call
+    {
+        IntT res;
+        CString * tmp;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "getnameinfo:$(sockaddr)$(str)$(uint)$(str)$(uint)$(int)",
+                          sa,  
+                          node, create_UIntTObj(nodelen), 
+                          service, create_UIntTObj(servicelen), 
+                          create_IntTObj(flags)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            
+            tmp = readCString_TSStream(&command.response);
+            if(node)
+            {
+                if(!tmp)
+                {
+                    setBadVerdict("getnameinfo_media: tmp(1) is NULL"); 
+                    destroy_TSCommand(&command);
+                    return res;
+                }
+                copy_Object(tmp, node);
+            }
+
+            tmp = readCString_TSStream(&command.response);
+            if(service)
+            {
+                if(!tmp)
+                {
+                    setBadVerdict("getnameinfo_media: tmp(2) is NULL"); 
+                    destroy_TSCommand(&command);
+                    return res;
+                }
+                copy_Object(tmp, service);
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGetnameinfo(context, sa, node, nodelen, service, servicelen, flags, getnameinfo_spec);
+    }
+}
+
+
+/****/
+
+/** gethostbyaddr_spec **/
+mediator gethostbyaddr_media for specification
+HostentT * gethostbyaddr_spec( CallContext context, VoidTPtr addr, sut_socklen_t len, IntT type )
+{
+    call
+    {
+        HostentT * res;
+        TSCommand command = create_TSCommand();
+    
+        
+        format_TSCommand( &command, "gethostbyaddr:$(ptr)$(uint)$(int)", create_VoidTPtrObj(addr), 
+                          create_UIntTObj(len), create_IntTObj(type)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readHostentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGethostbyaddr(context, addr, len, type, gethostbyaddr_spec);
+    }
+}
+
+
+/** gethostbyname_spec **/
+mediator gethostbyname_media for specification
+HostentT * gethostbyname_spec( CallContext context, CString * name )
+{
+    call
+    {
+        HostentT * res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "gethostbyname:$(str)", name );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readHostentT_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+    state
+    {
+        onGethostbyname(context, name, gethostbyname_spec);
+    }
+}
+
+
+/****/
+
+
+/** gai_strerror_spec **/
+mediator gai_strerror_media for specification
+CString * gai_strerror_spec( CallContext context, IntT ecode )
+{
+    call
+    {
+        CString * res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "gai_strerror:$(int)", create_IntTObj(ecode) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readCString_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+/** __h_errno_location_spec **/
+mediator __h_errno_location_media for specification
+VoidTPtr __h_errno_location_spec( CallContext context)
+{
+    call
+    {
+        VoidTPtr res;
+        TSCommand command = create_TSCommand();
+    
+        format_TSCommand( &command, "__h_errno_location" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readPointer_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onHErrnoLocation(context, __h_errno_location_spec);
+    }
+}
+
+
+
+

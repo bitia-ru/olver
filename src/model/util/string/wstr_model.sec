@@ -1,0 +1,3121 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "util/string/wstr_config.h"
+#include "util/string/wstr_model.seh"
+#include "config/system_config.seh"
+#include "data/errno_model.seh"
+#include "memory/heap/heap_model.seh"
+
+
+#pragma SEC subsystem string "util.string"
+
+/* 
+   The group of functions 'util.string.wstr' consists of: 
+       wcpcpy [1]
+       wcpncpy [1]
+       wcscat [2]
+       wcschr [2]
+       wcscmp [2]
+       wcscpy [2]
+       wcscspn [2]
+       wcsdup [1]
+       wcslen [2]
+       wcsncat [2]
+       wcsncmp [2]
+       wcsncpy [2]
+       wcsnlen [1]
+       wcspbrk [2]
+       wcsrchr [2]
+       wcsspn [2]
+       wcsstr [2]
+       wcswcs [2]
+ */
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    wcpcpy -- copy a wide character string, returning a pointer to its end
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t * wcpcpy(wchar_t * dest, const wchar_t * src);
+
+DESCRIPTION
+
+    wcpcpy() is the wide-character equivalent of stpcpy(). It copies the wide 
+    character string src, including the terminating null wide character code, 
+    to the array dest.
+
+    The strings may not overlap.
+
+    The programmer shall ensure that there is room for at least wcslen()(src)+1
+    wide characters at dest.
+
+RETURN VALUE
+
+    wcpcpy() returns a pointer to the end of the wide-character string dest, 
+    that is, a pointer to the terminating null wide character code.
+
+*/
+
+specification
+WStringTPtr wcpcpy_spec( CallContext context, WStringTPtr dest, WStringTPtr src)
+{
+    SizeT len, wlen;
+
+    WString* dest_post;
+    WString* src_pre;
+    WString* src_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "dest is not NULL", !isNULL_VoidTPtr(dest));
+        REQ("", "src is not NULL", !isNULL_VoidTPtr(src));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by dest is available in the context", isValidPointer(context, dest));
+        REQ("", "Memory pointed to by src is available in the context", isValidPointer(context, src));
+
+        /* [Get the length of the source string including the terminating null WC-code] */
+        src_pre = readWString_VoidTPtr(src);
+        len = length_WString(src_pre) + 1;
+
+        /* [Get the length of the source string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+        /*
+         * The programmer shall ensure that there is room for at least wcslen() (src)+1 
+         * wide characters at dest. 
+         */
+        REQ("app.wcpcpy.03", "Memory pointed to by dest is enough", sizeWMemoryAvailable(dest) >= wlen);
+        REQ("", "Memory pointed to by src is enough", sizeRMemoryAvailable(src) >= wlen);
+
+        /*
+         * The strings may not overlap.
+         */
+        REQ("app.wcpcpy.02", "Objects are not overlapped",
+            !areObjectsOverlapped(dest, wlen, src, wlen));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len == 1)
+            return { Srce, "src is empty"};
+        else
+            return { Srcne, "src is not empty"};    
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(dest)
+    ALIGNMENT_COVERAGE(src)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        /* [Preliminary reading of almost all the data we need] */
+        src_post = readWString_VoidTPtr(src);
+        dest_post = readWString_VoidTPtr(dest);
+
+        /*
+         * It copies the wide character string src, including the terminating null wide 
+         * character code, to the array dest. 
+         */
+        REQ("wcpcpy.01", "dest contains the string from src", equals(dest_post, src_pre));
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "src shall not be changed", equals(src_post, src_pre));
+
+        /*
+         * wcpcpy() returns a pointer to the end of the wide-character string dest 
+         */
+        REQ("wcpcpy.04", "wcpcpy() function shall return a pointer to the terminating null wide character code", 
+            equals_VoidTPtr(wcpcpy_spec, add_VoidTPtr(dest,(len-1) * sizeof_WCharT)));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(dest), dest, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(dest), dest, wlen)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(src), dest, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(src), dest, wlen)
+                  )
+           );
+
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+    wcpncpy -- copy a fixed-size string of wide characters, returning a pointer to its end
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t * wcpncpy(wchar_t * dest, const wchar_t * src, size_t n);
+
+DESCRIPTION
+
+    wcpncpy() is the wide-character equivalent of stpncpy(). It copies at most 
+    n wide characters from the wide-character string src, including the 
+    terminating null wide character code, to the array dest. Exactly n wide 
+    characters are written at dest. If the length wcslen()(src) is smaller than
+    n, the remaining wide characters in the array dest are filled with null 
+    wide character codes. If the length wcslen()(src) is greater than or equal 
+    to n, the string dest will not be terminated with a null wide character 
+    code.
+
+    The strings may not overlap.
+
+    The programmer shall ensure that there is room for at least n wide 
+    characters at dest.
+
+RETURN VALUE
+
+    wcpncpy() returns a pointer to the wide character one past the last 
+    non-null wide character written.
+
+*/
+
+specification
+WStringTPtr wcpncpy_spec(CallContext context, WStringTPtr dest, WStringTPtr src, SizeT n)
+{
+    SizeT len, len_clr, wlen, wn;
+
+    WString* src_pre;
+    WString* src_post;
+    WString* dest_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "dest is not NULL", !isNULL_VoidTPtr(dest));
+        REQ("", "src is not NULL", !isNULL_VoidTPtr(src));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by dest is available in the context", isValidPointer(context, dest));
+        REQ("", "Memory pointed to by src is available in the context", isValidPointer(context, src));
+
+        /* [Get the source string] */
+        src_pre = readLimitedWString_VoidTPtr(src, n);
+
+        /* [Get the number of characters to copy considering the trailing null character if present.] */
+        len = length_WString(src_pre);
+        len_clr = len;
+        if (len < n) len++;
+
+        /* [Get the number of bytes to copy] */
+        wlen = len * sizeof_WCharT;
+        wn = n * sizeof_WCharT;
+
+        /*
+         * The programmer shall ensure that there is room for at least n wide characters 
+         * at dest. 
+         */
+        REQ("app.wcpncpy.05", "Memory pointed to by dest is enough", sizeWMemoryAvailable(dest) >= wn);
+        REQ("", "Memory pointed to by src is enough", sizeRMemoryAvailable(src) >= wlen);
+
+        /*
+         * If copying takes place between objects that overlap, the behavior is undefined.
+         */
+        REQ("app.wcpncpy.04", "Objects are not overlapped", !areObjectsOverlapped(dest, wn, src, wlen));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (n == 0)
+            return {Z, "Copy zero chars"};
+        else if (len_clr == 0)
+            return {E, "Copy empty string"};
+        else if (len_clr < n)
+            return {S, "Copy non-empty string"};
+        else
+            return {N, "Copy n chars"};
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(dest)
+    ALIGNMENT_COVERAGE(src)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        /* [Preliminary reading of almost all the data we need] */
+        src_post = readLimitedWString_VoidTPtr(src, n);
+        dest_post = readLimitedWString_VoidTPtr(dest, n);
+
+        /*
+         * It copies at most n wide characters from the wide-character string src, 
+         * including the terminating null wide character code, to the array dest. 
+         */
+        /*
+         * Exactly n wide characters are written at dest. 
+         */
+        REQ("wcpncpy.01;wcpncpy.02", "dest contains the string with length <= n chars from src",
+            equals(dest_post, src_pre)
+           );
+
+        if (len < n)
+        {
+            /*
+             * If the length wcslen()(src) is smaller than n, the remaining wide characters in 
+             * the array dest are filled with null wide character codes. If the length wcslen() 
+             * (src) is greater than or equal to n, the string dest will not be terminated 
+             * with a null wide character code. 
+             */
+            REQ("wcpncpy.03", "The rest of dest memory contains null bytes",
+                isZeroArray(add_VoidTPtr(dest, wlen), wn - wlen)
+               );
+        }
+
+        /* [The object pointed to by src shall not be changed] */
+        REQ("", "src shall not be changed", equals(src_post, src_pre));
+
+        /*
+         * wcpncpy() returns a pointer to the wide character one past the last
+         * non-null wide character written
+         */
+        if (n == 0)
+        {
+            REQ("wcpncpy.06.nzero", "wcpncpy() function shall return dest if n == 0",
+                equals_VoidTPtr(wcpncpy_spec, dest));               
+        }
+        else if (len_clr >= n)
+        {
+            REQ("wcpncpy.06.lcgn", "wcpncpy() function shall return a pointer to dest + n",
+                equals_VoidTPtr(wcpncpy_spec, add_VoidTPtr(dest, wn)));        
+        }
+        else
+        {
+            REQ("wcpncpy.06.else", "wcpncpy() function shall return a pointer to the end of dest",
+                equals_VoidTPtr(wcpncpy_spec, add_VoidTPtr(dest, (len - 1) * sizeof_WCharT)));        
+        }
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(dest), dest, wn),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(dest), dest, wn)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(src), dest, wn),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(src), dest, wn)
+                  )
+           );
+
+        return true;
+    }
+
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcscat - concatenate two wide-character strings
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcscat(wchar_t *restrict ws1, const wchar_t *restrict ws2);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the ISO 
+    C standard. Any conflict between the requirements described here and the 
+    ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 defers
+    to the ISO C standard. 
+
+    The wcscat() function shall append a copy of the wide-character string 
+    pointed to by ws2 (including the terminating null wide-character code) to 
+    the end of the wide-character string pointed to by ws1. The initial 
+    wide-character code of ws2 shall overwrite the null wide-character code at 
+    the end of ws1. If copying takes place between objects that overlap, the 
+    behavior is undefined.
+
+RETURN VALUE
+
+    The wcscat() function shall return ws1; no return value is reserved to 
+    indicate an error.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WStringTPtr wcscat_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+    SizeT len1, len2, len, wlen, wlen2;
+
+    WString* ws2_pre;
+    WString* ws2_post;
+    WString* ws1_pre;
+    WString* ws1_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context, ws1));
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context, ws2));
+
+        /* [Load the strings to the instrumental machine] */
+        ws2_pre = readWString_VoidTPtr(ws2);
+        ws1_pre = readWString_VoidTPtr(ws1);
+
+        /* [Get the lengths of the strings including the terminating null character] */
+        len1 = length_WString(ws1_pre) + 1;
+        len2 = length_WString(ws2_pre) + 1;
+        len = len1 + len2 - 1;
+
+        /* [Get the length of the strings in bytes] */
+        wlen = len * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeWMemoryAvailable(ws1) >= wlen);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        /*
+         * If copying takes place between objects that overlap, the behavior is undefined.
+         */
+        REQ("app.wcscat.03", "Objects are not overlapped", !areObjectsOverlapped(ws1, wlen, ws2, wlen2));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if ((len1 == 1) && (len2 == 1))
+            return { S12, "ws1 and ws2 are empty"};
+        else if ((len1 == 1) && (len2 != 1))
+            return { S1, "ws1 is empty"};
+        else if ((len1 != 1) && (len2 == 1))
+            return { S2, "ws2 is empty"};
+        else
+            return { S, "ws1 and ws2 both are not empty"};
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        /* [Preliminary reading of almost all the data we need] */
+        ws2_post = readWString_VoidTPtr(ws2);
+        ws1_post = readWString_VoidTPtr(ws1);
+
+        /*
+         * The wcscat() function shall append a copy of the wide-character string pointed 
+         * to by ws2 (including the terminating null wide-character code) to the end of 
+         * the wide-character string pointed to by ws1. 
+         */
+        /*
+         * The initial wide-character code of ws2 shall overwrite the null wide-character 
+         * code at the end of ws1. 
+         */
+        REQ("wcscat.01;wcscat.02", "ws1 contains the concatenation of the ws1 and ws2",
+            equals(ws1_post, concat_WString(ws1_pre, ws2_pre))
+           );
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws2 shall not be changed", equals(ws2_post, ws2_pre));
+
+        /*
+         * The wcscat() function shall return ws1 
+         */
+        REQ("wcscat.03", "wstrcat() function shall return ws1",
+            equals_VoidTPtr(wcscat_spec, ws1));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wlen)
+                  )
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    wcschr - wide-character string scanning operation
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcschr(const wchar_t *ws, wchar_t wc);
+
+DESCRIPTION
+    The functionality described on this reference page is aligned with the ISO 
+    C standard. Any conflict between the requirements described here and the 
+    ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 defers
+    to the ISO C standard. 
+
+    The wcschr() function shall locate the first occurrence of wc in the 
+    wide-character string pointed to by ws. The application shall ensure that 
+    the value of wc is a character representable as a type wchar_t and a 
+    wide-character code corresponding to a valid character in the current 
+    locale. The terminating null wide-character code is considered to be part 
+    of the wide-character string.
+
+RETURN VALUE
+
+    Upon completion, wcschr() shall return a pointer to the wide-character 
+    code, or a null pointer if the wide-character code is not found.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+WStringTPtr wcschr_spec(CallContext context, WStringTPtr ws, WCharT wc)
+{
+    SizeT len, wlen;
+    WString* ws_pre;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws is not NULL", !isNULL_VoidTPtr(ws));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws is available in the context", isValidPointer(context,ws));
+
+        /* [Load the string to the instrumental machine] */
+        ws_pre = readWString_VoidTPtr(ws);
+
+        /* [Get length of the string including the terminating null character] */
+        len = length_WString(ws_pre) + 1;
+
+        /* [Get the length of the string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+        /*
+         * The application shall ensure that the value of wc is a character representable 
+         * as a type wchar_t and a wide-character code corresponding to a valid character 
+         * in the current locale. 
+         */
+        REQ("app.wcschr.02", "wc is in the current locale", TODO_REQ());
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws is enough", sizeRMemoryAvailable(ws) >= wlen);
+
+        return true;
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    coverage NullCharacterC
+    {
+        if (wc == 0)
+            return { Zero, "Search for null termination"};
+        else
+            return { NonZero, "Search for not null character" };
+    }
+
+    coverage SymbolExistanceC
+    {
+        if( wcschr_model(ws_pre, wc)==-1)
+            return {SymbolNotIncluded, "Symbol is not in the string"};
+        return {SymbolIncluded, "Symbol is in the string"};
+    }
+
+    coverage EmptySearchedString
+    {
+        if(len==1)
+            return {SearhedStringEmpty, "Searched string is empty"};
+        return {SearhedStringNotEmpty, "Searched string is not empty"};
+    }
+
+    post
+    {
+        WString* ws_post = readWString_VoidTPtr(ws);
+
+        IntT searchResult = wcschr_model(ws_pre, wc);
+
+        if (searchResult == -1)
+        {
+            /*
+             * The wcschr() function shall locate the first occurrence of wc in the wide- 
+             * character string pointed to by ws. 
+             * 
+             * a null pointer if the wide-character code is not found 
+             */
+            REQ("wcschr.01.02", "wcschr() returns null pointer if the wide-character code is not found",
+                isNULL_VoidTPtr(wcschr_spec));
+        }
+        else
+        {
+            /*
+             * The wcschr() function shall locate the first occurrence of wc in the wide- 
+             * character string pointed to by ws. 
+             * 
+             * wcschr() shall return a pointer to the wide-character code 
+             */
+            REQ("wcschr.01.01", "wcschr() shall return a pointer to the wide-character code",
+                searchResult * sizeof_WCharT == diff_VoidTPtr(wcschr_spec, ws));
+        }
+
+        /*
+         * The terminating null wide-character code is considered to be part of the wide- 
+         * character string. 
+         */
+        if(wc == '\0') REQ("wcschr.03", "already checked by model", true);
+
+        /* [Nothing should be changed in ws] */
+        REQ("", "Nothing should be changed in ws", equals(ws_post, ws_pre));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws), ws, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws), ws, wlen)
+                  )
+           );
+
+        return true;
+    }
+}
+
+IntT wcschr_model(WString* ws, WCharT wc)
+{
+    IntT i;
+
+    SizeT len = length_WString(ws);
+
+    if (wc == NULL_WCharT)
+    {
+        return len;
+    }
+
+    for(i = 0; i < len; i++)
+    {
+        WCharT t = wcharAt_WString(ws, i);
+        if (wc == t)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcscmp - compare two wide-character strings
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    int wcscmp(const wchar_t *ws1, const wchar_t *ws2);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The wcscmp() function shall compare the wide-character string pointed to
+    by ws1 to the wide-character string pointed to by ws2.
+
+    The sign of a non-zero return value shall be determined by the sign of the
+    difference between the values of the first pair of wide-character codes
+    that differ in the objects being compared.
+
+RETURN VALUE
+
+    Upon completion, wcscmp() shall return an integer greater than, equal to,
+    or less than 0, if the wide-character string pointed to by ws1 is greater
+    than, equal to, or less than the wide-character string pointed to by ws2,
+    respectively.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+IntT wcscmp_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+    SizeT len1, wlen1;
+    SizeT len2, wlen2;
+
+    WString* ws1_pre;
+    WString* ws2_pre;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1) );
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context,ws1) );
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context,ws2) );
+
+        /* [Load the strings to the instrumental machine] */
+        ws1_pre = readWString_VoidTPtr(ws1);
+        ws2_pre = readWString_VoidTPtr(ws2);
+
+        /* [Get lengths of the strings including the terminating null character] */
+        len1 = length_WString(ws1_pre) + 1;
+        len2 = length_WString(ws2_pre) + 1;
+
+        /* [Get the lengths of the strings in bytes] */
+        wlen1 = len1 * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeRMemoryAvailable(ws1) >= wlen1);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        return true;
+    }
+
+    coverage C
+    {
+
+        IntT compResult = wcscmp_model(ws1_pre, ws2_pre);
+
+        if (len1 == 1)
+            return { LeftStringEmpty, "ws1 is empty"};
+        else if (len2 == 1)
+            return { RightStringEmpty, "ws2 is empty"};
+        else if (compResult > 0)
+            return { LeftIsGreater, "ws1 > ws2"};
+        else if (compResult < 0)
+            return { RightIsGreater, "ws1 < ws2"};
+        else
+            return { EqualStrings, "ws1 == ws2"};
+    }
+
+    post
+    {
+        WString* ws1_post = readWString_VoidTPtr(ws1);
+        WString* ws2_post = readWString_VoidTPtr(ws2);
+
+        IntT compResult = wcscmp_model(ws1_pre, ws2_pre);
+
+        /*
+         * The wcscmp() function shall compare the wide-character string pointed to by ws1 
+         * to the wide-character string pointed to by ws2.
+         * 
+         * The sign of a non-zero return value shall be determined by the sign of the 
+         * difference between the values of the first pair of wide-character codes that 
+         * differ in the objects being compared.
+         */
+        /*
+         * The wcscmp() function shall compare the wide-character string pointed to by ws1 
+         * to the wide-character string pointed to by ws2.
+         * 
+         * Upon completion, wcscmp() shall return an integer greater than, equal to, or 
+         * less than 0, if the wide-character string pointed to by ws1 is greater than, 
+         * equal to, or less than the wide-character string pointed to by ws2, 
+         * respectively.
+         */
+        REQ("wcscmp.01.01;wcscmp.01.02", "Compare result is valid", (compResult> 0 && wcscmp_spec > 0)
+                                     || (compResult < 0 && wcscmp_spec < 0)
+                                     || (compResult == 0 && wcscmp_spec == 0));
+
+        /* [Nothing should be changed in ws1] */
+        REQ("", "Nothing should be changed in ws1", equals(ws1_post, ws1_pre));
+
+        /* [Nothing should be changed in ws2] */
+        REQ("", "Nothing should be changed in ws2", equals(ws2_post, ws2_pre));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2)
+                  )
+           );
+
+        return true;
+    }
+}
+
+IntT wcscmp_model(WString* ws1, WString* ws2)
+{
+    int i;
+
+    SizeT len1 = length_WString(ws1);
+    SizeT len2 = length_WString(ws2);
+
+    SizeT len = len2 > len1 ? len1 : len2;
+
+    for(i = 0; i < len; i++)
+    {
+        WCharT c1 = wcharAt_WString(ws1, i);
+        WCharT c2 = wcharAt_WString(ws2, i);
+
+        if (c1 > c2)
+        {
+            return 1;
+        }
+        if (c1 < c2)
+        {
+            return -1;
+        }
+    }
+
+    if (len1 != len2)
+    {
+        if (len1 > len2)
+            return 1;
+        else
+            return -1;
+    }
+    else
+        return 0;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcscpy - copy a wide-character string
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcscpy(wchar_t *restrict ws1, const wchar_t *restrict ws2);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the
+    ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 defers
+    to the ISO C standard. 
+
+    The wcscpy() function shall copy the wide-character string pointed to by
+    ws2 (including the terminating null wide-character code) into the array
+    pointed to by ws1. If copying takes place between objects that overlap, the
+    behavior is undefined.
+
+RETURN VALUE
+
+    The wcscpy() function shall return ws1; no return value is reserved to
+    indicate an error.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WStringTPtr wcscpy_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+    SizeT len, wlen;
+
+    WString* ws2_pre;
+    WString* ws2_post;
+    WString* ws1_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context, ws1));
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context, ws2));
+
+        /* [Load the string to instrumental machine] */
+        ws2_pre = readWString_VoidTPtr(ws2);
+
+        /* [Get the length of the string including the terminating null WC-code] */
+        len = length_WString(ws2_pre) + 1;
+
+        /* [Get the length of the string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeWMemoryAvailable(ws1) >= wlen);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen);
+
+        /*
+         * If copying takes place between objects that overlap, the behavior is undefined.
+         */
+        REQ("app.wcscpy.02", "Objects are not overlapped", !areObjectsOverlapped(ws1, wlen, ws2, wlen));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len == 1)
+            return {WS2e, "ws2 is empty"};
+        else
+            return {WS2ne, "ws2 is not empty"};
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        /* [Preliminary reading of almost all the data we need] */
+        ws2_post = readWString_VoidTPtr(ws2);
+        ws1_post = readWString_VoidTPtr(ws1);
+
+        /*
+         * The wcscpy() function shall copy the wide-character string pointed to by ws2 ( 
+         * including the terminating null wide-character code) into the array pointed to 
+         * by ws1. 
+         */
+        REQ("wcscpy.01", "ws1 contains the string from ws2", equals(ws1_post, ws2_pre));
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws2 shall not be changed", equals(ws2_post, ws2_pre));
+
+        /*
+         * The wcscpy() function shall return ws1 
+         */
+        REQ("wcscpy.03", "wcscpy() function shall return ws1", equals_VoidTPtr(wcscpy_spec, ws1));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wlen)
+                  )
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+    wcscspn - get the length of a complementary wide substring
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    size_t wcscspn(const wchar_t *ws1, const wchar_t *ws2);
+
+DESCRIPTION
+    The functionality described on this reference page is aligned with the ISO 
+    C standard. Any conflict between the requirements described here and the 
+    ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 defers
+    to the ISO C standard. 
+
+    The wcscspn() function shall compute the length (in wide characters) of the
+    maximum initial segment of the wide-character string pointed to by ws1 
+    which consists entirely of wide-character codes not from the wide-character
+    string pointed to by ws2.
+RETURN VALUE
+
+    The wcscspn() function shall return the length of the initial substring of 
+    ws1; no return value is reserved to indicate an error.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+SizeT wcscspn_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+    SizeT len1,wlen1;
+    SizeT len2,wlen2;
+
+    WString* ws1_pre;
+    WString* ws2_pre;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1) );
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context,ws1) );
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context,ws2) );
+
+        /* [Load the strings to the instrumental machine] */
+        ws1_pre = readWString_VoidTPtr(ws1);
+        ws2_pre = readWString_VoidTPtr(ws2);
+
+        /* [Get lengths of the strings including the terminating null byte] */
+        len1 = length_WString(ws1_pre) + 1;
+        len2 = length_WString(ws2_pre) + 1;
+
+        wlen1 = len1 * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeRMemoryAvailable(ws1) >= wlen1);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len1 == 1 && len2 == 1)
+        {
+            return { EmptyStrings, "Both strings are empty" };
+        }
+        else if (len1 > 1 && len2 == 1)
+        {
+            return { PatternEmpty, "Pattern string is empty" };
+        }
+        else if (len1 == 1 && len2 > 1)
+        {
+            return { StringEmpty, "Search string is empty" };
+        }
+        else if (wcscspn_model(ws1_pre, ws2_pre) == 0)
+        {
+            return { SegmentEmpty, "Segment is empty" };
+        }
+        else
+        {
+            return { SegmentNotEmpty, "Segment is not empty" };
+        }
+    }
+
+    post
+    {
+        WString* ws1_post = readWString_VoidTPtr(ws1);
+        WString* ws2_post = readWString_VoidTPtr(ws2);
+
+        SizeT segmentLength = wcscspn_model(ws1_pre, ws2_pre);
+
+        /*
+         * The wcscspn() function shall compute the length (in wide characters) of the 
+         * maximum initial segment of the wide-character string pointed to by ws1 which 
+         * consists entirely of wide-character codes not from the wide-character string 
+         * pointed to by ws2.
+         * 
+         * The wcscspn() function shall return the length of the initial substring of ws1 
+         */
+        REQ("wcscspn.01.01", "Function shall return correct value", segmentLength == wcscspn_spec);
+
+        /* [Nothing should be changed in ws1] */
+        REQ("", "Nothing should be changed in ws1", equals(ws1_post, ws1_pre));
+
+        /* [Nothing should be changed in ws2] */
+        REQ("", "Nothing should be changed in ws2", equals(ws2_post, ws2_pre));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2)
+                  )
+           );
+
+        return true;
+    }
+}
+
+SizeT wcscspn_model(WString* ws1, WString* ws2)
+{
+    int i;
+    int j;
+    
+    SizeT len1 = length_WString(ws1);    
+    SizeT len2 = length_WString(ws2);    
+
+    if (len1 == 0 || len2 == 0)
+    {
+        return len1;
+    }
+
+    for(i = 0; i < len1; i++)
+    {
+        WCharT wc = wcharAt_WString(ws1, i);
+
+        for(j = 0; j < len2; j++)
+        {
+            WCharT wt = wcharAt_WString(ws2, j);
+
+            if (wc == wt)
+            {
+                return i;
+            }
+        }
+    }
+
+    return i;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    wcsdup -- duplicate a wide-character string
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t * wcsdup(const wchar_t * s);
+
+DESCRIPTION
+
+    wcsdup() is the wide-character equivalent of strdup(). It allocates and
+    returns a new wide-character string whose initial contents is a duplicate
+    of the wide-character string s.
+
+    Memory for the new wide-character string is obtained with malloc(), and can
+    be freed with free().
+
+RETURN VALUE
+
+    wcsdup() returns a pointer to the new wide-character string, or NULL if
+    sufficient memory was not available.
+
+ERRORS
+
+    The wcsdup() function may fail if:
+
+    [ENOMEM]
+        Storage space available is insufficient.
+
+*/
+
+/*
+ * The ERRORS section is taken from POSIX strdup() specification , because LSB
+ * specification of wcsdup() does not contain description of errno values.
+ */
+
+specification
+WStringTPtr wcsdup_spec(CallContext context, WStringTPtr s, ErrorCode* errno)
+{
+    SizeT len, wlen;
+    WString* s2_pre;
+
+    pre
+    {
+        /* [Consistency with legacy memory management mode] */
+        REQ("app.brk.04;app.sbrk.04", "Consistency with legacy memory management mode", isMallocAllowed(context));
+
+        /* [Implicit precondition] */
+        REQ("", "s is not NULL", !isNULL_VoidTPtr(s));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s is available in the context", isValidPointer(context, s));
+
+        /* [Load the strings to the instrumental machine] */
+        s2_pre = readWString_VoidTPtr(s);
+
+        /* [Get the length of the string including the terminating null WC-code] */
+        len = length_WString(s2_pre) + 1;
+
+        /* [Get the length of the string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s is enough", sizeRMemoryAvailable(s) >= wlen);
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len == 1)
+            return { Se, "s is empty" };
+        else
+            return { Sne, "s is not empty" };
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(s)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        WString* s2_post = readWString_VoidTPtr(s);
+        WString* s1_post = readWString_VoidTPtr(wcsdup_spec);
+
+        if (isNULL_VoidTPtr(wcsdup_spec))
+        {
+            /*
+             * [If not succeeded, the wcsdup() function shall return a null
+             *  pointer and set errno to indicate the error.]
+             */
+            REQ("", "if result is NULL, errno have to be ENOMEM", *errno == SUT_ENOMEM);
+            return true;
+        }
+
+        /*
+         * It allocates and returns a new wide-character string whose initial contents is 
+         * a duplicate of the wide-character string s. 
+         * 
+         * NULL if sufficient memory was not available. 
+         */
+        REQ("wcsdup.01.02", "memory is enough", TODO_REQ());
+
+        /*
+         * Memory for the new wide-character string is obtained with malloc(), and can be 
+         * freed with free(). 
+         */
+        REQ("wcsdup.02", "memory is obtained with malloc() and can be passed with free()", TODO_REQ());
+
+        /*
+         * It allocates and returns a new wide-character string whose initial contents is 
+         * a duplicate of the wide-character string s. 
+         * 
+         * wcsdup() returns a pointer to the new wide-character string 
+         */
+        REQ("wcsdup.01.01", "Input and output strings must be equal", equals(s2_pre, s1_post));
+
+        /* [The object pointed to by s shall not be changed] */
+        REQ("", "s shall not be changed", equals(s2_pre, s2_post));
+
+        /* [Return string and output string can not overlap] */
+        REQ("", "Input and output strings can not have common areas",
+            !areObjectsOverlapped(s, wlen, wcsdup_spec, wlen)
+          );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(s), s, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(s), s, wlen)
+                  )
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcslen - get wide-character string length
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    size_t wcslen(const wchar_t *ws);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the
+    ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 defers
+    to the ISO C standard. 
+
+    The wcslen() function shall compute the number of wide-character codes in
+    the wide-character string to which ws points, not including the terminating
+    null wide-character code.
+
+RETURN VALUE
+
+    The wcslen() function shall return the length of ws; no return value is
+    reserved to indicate an error.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+SizeT wcslen_spec(CallContext context, WStringTPtr ws)
+{
+    SizeT len, wlen;
+    WString* s_wstring_pre;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws is not NULL", !isNULL_VoidTPtr(ws));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws is available in the context", isValidPointer(context, ws));
+
+        /* [Load the strings to the instrumental machine] */
+        s_wstring_pre = readWString_VoidTPtr(ws);
+
+        /* [Get the length of the string including the terminating null WC-code] */
+        len = length_WString(s_wstring_pre) + 1;
+
+        /* [Get the length of the string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws is enough", sizeRMemoryAvailable(ws) >= wlen);
+
+        return true;
+    }
+
+    coverage SizeC
+    {
+        if (len == 1)      
+            return {EmptyString, "Empty String"};
+
+        if (len == 2)      
+            return {OneCharacterString, "One Character String"};
+
+        return {GeneralString, "General String"};
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        WString* s_wstring_post = readWString_VoidTPtr(ws);
+
+        /* [The object pointed to by ws shall not be changed] */
+        REQ("", "ws shall not be changed", equals(s_wstring_pre, s_wstring_post));
+
+        /*
+         * The wcslen() function shall compute the number of wide-character codes in the 
+         * wide-character string to which ws points, not including the terminating null 
+         * wide-character code.
+         * 
+         * The wcslen() function shall return the length of ws 
+         */
+        REQ("wcslen.01;wcslen.01.01", "Return value equals the string size", wcslen_spec == (len - 1));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws), ws, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws), ws, wlen)
+                  )
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcsncat - concatenate a wide-character string with part of another
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcsncat(wchar_t *restrict ws1, const wchar_t *restrict ws2,
+           size_t n);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the 
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The wcsncat() function shall append not more than n wide-character codes
+    (a null wide-character code and wide-character codes that follow it are
+    not appended) from the array pointed to by ws2 to the end of the
+    wide-character string pointed to by ws1. The initial wide-character code
+    of ws2 shall overwrite the null wide-character code at the end of ws1.
+    A terminating null wide-character code shall always be appended to the
+    result. If copying takes place between objects that overlap, the behavior
+    is undefined.
+
+RETURN VALUE
+
+    The wcsncat() function shall return ws1; no return value is reserved
+    to indicate an error.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WStringTPtr wcsncat_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2, SizeT n)
+{
+    SizeT len1, len2, len, rlen, wlen;
+
+    WString* ws2_pre;
+    WString* ws1_pre;
+    WString* ws2_post;
+    WString* ws1_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context, ws1));
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context, ws2));
+
+        /* [Get the source and destination strings] */
+        ws2_pre = readLimitedWString_VoidTPtr(ws2, n);
+        ws1_pre = readWString_VoidTPtr(ws1);
+
+        /* [Get the lengths of the strings including the terminating null byte] */
+        len2 = length_WString(ws2_pre) + 1;
+        len1 = length_WString(ws1_pre) + 1;
+        len = len1 + len2 - 1;
+
+        /* [Get the length of the string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+        /* [Number of bytes to read from ws2] */
+        rlen = (n >= len2 ? len2 : n) * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeWMemoryAvailable(ws1) >= wlen);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= rlen);
+
+        /*
+         * If copying takes place between objects that overlap, the behavior is undefined.
+         */
+        REQ("app.wcsncat.04", "Objects are not overlapped", !areObjectsOverlapped(ws1, wlen, ws2, rlen));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len1 == 1)
+        {
+            if (n == 0)
+                return {EZ, "Add zero chars to empty string"};
+            else if (len2 == 1)
+                return {EE, "Add empty string to empty string"};
+            else if (len2 < n + 1)
+                return {ES, "Add non-empty string to empty string"};
+            else
+                return {EN, "Add n chars to empty string"};
+        }
+        else
+        {
+            if (n == 0)
+                return {NZ, "Add zero chars to non-empty string"};
+            else if (len2 == 1)
+                return {NE, "Add empty string to non-empty string"};
+            else if (len2 < n + 1)
+                return {NS, "Add non-empty string to non-empty string"};
+            else
+                return {NN, "Add n chars to non-empty string"};
+        }
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        ws2_post = readLimitedWString_VoidTPtr(ws2, n);
+        ws1_post = readWString_VoidTPtr(ws1);
+
+        /*
+         * The wcsncat() function shall append not more than n wide-character codes (a 
+         * null wide-character code and wide-character codes that follow it are not 
+         * appended) from the array pointed to by ws2 to the end of the wide-character 
+         * string pointed to by ws1. 
+         */
+        /*
+         * The initial wide-character code of ws2 shall overwrite the null wide-character 
+         * code at the end of ws1. 
+         */
+        /*
+         * A terminating null wide-character code shall always be appended to the result. 
+         */
+        REQ("wcsncat.01;wcsncat.02;wcsncat.03",
+            "s1 contains the concatenation of the s1 and <= n chars from s2",
+            equals(ws1_post, concat_WString(ws1_pre, ws2_pre))
+           );
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws2 shall not be changed", equals(ws2_post, ws2_pre));
+
+        /*
+         * The wcsncat() function shall return ws1 
+         */
+        REQ("wcsncat.05", "wcsncat() function shall return ws1", equals_VoidTPtr(wcsncat_spec, ws1));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wlen)
+                  )
+           );
+
+        return true;
+    }
+
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcsncmp - compare part of two wide-character strings
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    int wcsncmp(const wchar_t *ws1, const wchar_t *ws2, size_t n);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The wcsncmp() function shall compare not more than n wide-character codes
+    (wide-character codes that follow a null wide-character code are not
+    compared) from the array pointed to by ws1 to the array pointed to by ws2.
+
+    The sign of a non-zero return value shall be determined by the sign of the
+    difference between the values of the first pair of wide-character codes
+    that differ in the objects being compared.
+
+RETURN VALUE
+
+    Upon successful completion, wcsncmp() shall return an integer greater than,
+    equal to, or less than 0, if the possibly null-terminated array pointed
+    to by ws1 is greater than, equal to, or less than the possibly
+    null-terminated array pointed to by ws2, respectively.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+IntT wcsncmp_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2, SizeT n)
+{
+    SizeT len1, len1_clr, wlen1;
+    SizeT len2, len2_clr, wlen2;
+
+    WString* ws1_pre;
+    WString* ws2_pre;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1) );
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context,ws1) );
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context,ws2) );
+
+        /* [Load the strings to the instrumental machine] */
+        ws1_pre = readLimitedWString_VoidTPtr(ws1, n);
+        ws2_pre = readLimitedWString_VoidTPtr(ws2, n);
+
+        /* [Get the "clear" lengths of the strings, without the terminating null chars] */
+        len1 = len1_clr = length_WString(ws1_pre);
+        len2 = len2_clr = length_WString(ws2_pre);
+
+        /* [Get lengths of the arrays to compare] */
+        if (len1 < n)
+            len1++;
+        if (len2 < n)
+            len2++;
+
+        /* [Get the length of the arrays in bytes] */
+        wlen1 = len1 * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeRMemoryAvailable(ws1) >= wlen1);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        return true;
+    }
+
+    coverage ResultC
+    {
+        IntT compResult = wcsncmp_model(ws1_pre, ws2_pre, n);
+
+        if (compResult > 0)
+            return { LeftIsGreater, "ws1 > ws2"};
+        else if (compResult < 0)
+            return { RightIsGreater, "ws1 < ws2"};
+        else
+            return { EqualStrings, "ws1 == ws2"};
+    }
+
+    coverage ConfineC
+    {
+        if ((len1_clr == n) && (len2_clr == n))
+            return {ConfineBoth, "Both strings are confined"};
+        if (len1_clr == n)
+            return {ConfineFirst, "First string is confined"};
+        if (len2_clr == n)
+            return {ConfineSecond, "Second string is confined"};
+        return {NotConfine, "Strings are not confined"};
+    }
+
+    post
+    {
+        WString* ws1_post = readLimitedWString_VoidTPtr(ws1, n);
+        WString* ws2_post = readLimitedWString_VoidTPtr(ws2, n);
+
+        IntT compResult = wcsncmp_model(ws1_pre, ws2_pre, n);
+
+        /*
+         * The wcsncmp() function shall compare not more than n wide-character codes (wide- 
+         * character codes that follow a null wide-character code are not compared) from 
+         * the array pointed to by ws1 to the array pointed to by ws2.
+         * 
+         * The sign of a non-zero return value shall be determined by the sign of the 
+         * difference between the values of the first pair of wide-character codes that 
+         * differ in the objects being compared.
+         */
+        /*
+         * The wcsncmp() function shall compare not more than n wide-character codes (wide- 
+         * character codes that follow a null wide-character code are not compared) from 
+         * the array pointed to by ws1 to the array pointed to by ws2.
+         * 
+         * wcsncmp() shall return an integer greater than, equal to, or less than 0, if 
+         * the possibly null-terminated array pointed to by ws1 is greater than, equal to, 
+         * or less than the possibly null-terminated array pointed to by ws2, respectively. 
+         * 
+         */
+        REQ("wcsncmp.01.01;wcsncmp.01.02", "Compare result is valid", (compResult > 0 && wcsncmp_spec > 0)
+                                     || (compResult < 0 && wcsncmp_spec < 0)
+                                     || (compResult == 0 && wcsncmp_spec == 0));
+
+        /* [Nothing should be changed in ws1] */
+        REQ("", "Nothing should be changed in ws1", equals(ws1_post, ws1_pre));
+
+        /* [Nothing should be changed in ws2] */
+        REQ("", "Nothing should be changed in ws2", equals(ws2_post, ws2_pre));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2)
+                  )
+           );
+
+        return true;
+    }
+}
+
+IntT wcsncmp_model(WString* ws1, WString* ws2, SizeT n)
+{
+    int i;
+    bool confine = false;
+
+    SizeT len1 = length_WString(ws1);
+    SizeT len2 = length_WString(ws2);
+
+    SizeT len = len2 > len1 ? len1 : len2;
+ 
+    if(len >= n)
+    {
+        confine = true;
+        len = n;
+    }
+
+    for(i = 0; i < len; i++)
+    {
+        WCharT c1 = wcharAt_WString(ws1, i);
+        WCharT c2 = wcharAt_WString(ws2, i);
+
+        if (c1 > c2)
+        {
+            return 1;
+        }
+        if (c1 < c2)
+        {
+            return -1;
+        }
+    }
+
+    if(!confine)
+    {
+        if (len1 != len2)
+        {
+            if (len1 > len2)
+                return 1;
+            else
+                return -1;
+        }
+        else
+            return 0;
+    }
+    else
+        return 0;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+NAME
+
+    wcsncpy - copy part of a wide-character string
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcsncpy(wchar_t *restrict ws1, const wchar_t *restrict ws2,
+           size_t n);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the
+    ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 defers
+    to the ISO C standard. 
+
+    The wcsncpy() function shall copy not more than n wide-character codes
+    (wide-character codes that follow a null wide-character code are not
+    copied) from the array pointed to by ws2 to the array pointed to by ws1. If
+    copying takes place between objects that overlap, the behavior is
+    undefined.
+
+    If the array pointed to by ws2 is a wide-character string that is shorter
+    than n wide-character codes, null wide-character codes shall be appended to
+    the copy in the array pointed to by ws1, until n wide-character codes in
+    all are written.
+
+RETURN VALUE
+
+    The wcsncpy() function shall return ws1; no return value is reserved to
+    indicate an error.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WStringTPtr wcsncpy_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2, SizeT n)
+{
+    SizeT len, len_clr, wlen, wn;
+
+    WString* ws2_pre;
+    WString* ws2_post;
+    WString* ws1_post;
+
+    char* empty = "";
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context, ws1));
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context, ws2));
+
+
+        /* [Get the source string] */
+        ws2_pre = readLimitedWString_VoidTPtr(ws2, n);
+
+        /* [Get the number of characters to copy considering the trailing null character if present.] */
+        len = length_WString(ws2_pre);
+        len_clr = len;
+        if (len < n) len++;
+
+        /* [Get the number of bytes to copy] */
+        wlen = len * sizeof_WCharT;
+        wn = n * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeWMemoryAvailable(ws1) >= wn);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen);
+
+        /*
+         * If copying takes place between objects that overlap, the behavior is undefined.
+         */
+        REQ("app.wcsncpy.02", "Objects are not overlapped", !areObjectsOverlapped(ws1, wn, ws2, wlen));
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (n == 0)
+            return {Z, "Copy zero chars"};
+        else if (len_clr == 0)
+            return {E, "Copy empty string"};
+        else if (len_clr < n)
+            return {S, "Copy non-empty string"};
+        else
+            return {N, "Copy n chars"};
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        /* [Preliminary reading of almost all the data we need] */
+        ws2_post = readLimitedWString_VoidTPtr(ws2, n);
+        ws1_post = readLimitedWString_VoidTPtr(ws1, n);
+
+         /*
+         * The wcsncpy() function shall copy not more than n wide-character codes (wide- 
+         * character codes that follow a null wide-character code are not copied) from the 
+         * array pointed to by ws2 to the array pointed to by ws1. 
+         */
+        REQ("wcsncpy.01", "ws1 contains the string with length <= n chars from ws2",
+            equals(ws1_post, ws2_pre)
+           );
+
+        if (len < n)
+        {
+            /*
+             * If the array pointed to by ws2 is a wide-character string that is shorter than 
+             * n wide-character codes, null wide-character codes shall be appended to the copy 
+             * in the array pointed to by ws1, until n wide-character codes in all are written.
+             */
+            REQ("wcsncpy.03", "The rest of ws1 memory contains null bytes",
+                isZeroArray(add_VoidTPtr(ws1, wlen), wn - wlen)
+               );
+        }
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws2 shall not be changed", equals(ws2_post, ws2_pre));
+
+        /*
+         * The wcsncpy() function shall return ws1 
+         */
+        REQ("wcsncpy.04", "wcsncpy() function shall return ws1",
+            equals_VoidTPtr(wcsncpy_spec, ws1));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wn),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wn)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wn),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws1, wn)
+                  )
+           );
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+    wcsnlen -- determine the length of a fixed-size wide-character string
+
+SYNOPSIS
+
+
+    #include <wchar.h>
+
+    size_t wcsnlen(const wchar_t * s, size_t maxlen);
+
+DESCRIPTION
+
+    wcsnlen() is the wide-character equivalent of strnlen(). It returns the
+    number of wide-characters in the string s, not including the terminating
+    null wide character code, but at most maxlen. In doing this, wcsnlen()
+    looks only at the first maxlen wide-characters at s and never beyond
+    s + maxlen.
+
+RETURN VALUE
+
+    wcsnlen() returns wcslen()(s) if that is less than maxlen, or maxlen if
+    there is no null wide character code among the first maxlen wide characters
+    pointed to by s.
+
+*/
+
+specification
+SizeT wcsnlen_spec(CallContext context, WStringTPtr s, SizeT maxlen)
+{
+    SizeT len, len_clr, wlen;
+    WString* s_pre;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "s is not NULL", !isNULL_VoidTPtr(s) );
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by s is available in the context", isValidPointer(context, s));
+
+        /* [Load the string to the instrumental machine] */
+        s_pre = readLimitedWString_VoidTPtr(s, maxlen);
+
+        /* [Get the length of the string including the terminating null character] */
+        len = length_WString(s_pre);
+        len_clr = len;
+        if (len < maxlen) len++;
+
+        /* [Get the length of the string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by s is enough", sizeRMemoryAvailable(s) >= wlen);
+
+        return true;
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(s)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    coverage SizeC
+    {
+        if(len_clr == 0)      
+            return { EmptyString, "Empty String" };
+        else if (len_clr == 1)      
+            return { OneCharacterString, "One Character String" };
+        else
+            return {GeneralString, "General String"};
+    }
+
+    coverage ConfineC
+    {
+        if(len_clr < maxlen)
+            return { NotConfined, "String is not confined"};
+        else 
+            return { Confined, "String is confined"};
+    }
+
+    post
+    {
+        WString* s_post = readLimitedWString_VoidTPtr(s, maxlen);
+
+        /* [The object pointed to by s shall not be changed] */
+        REQ("", "s shall not be changed", equals(s_pre, s_post));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(s), s, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(s), s, wlen)
+                  )
+           );
+
+        /*
+         * It returns the number of wide-characters in the string s, not including the 
+         * terminating null wide character code, but at most maxlen. 
+         * 
+         * wcsnlen() returns wcslen() (s) if that is less than maxlen, or maxlen if there 
+         * is no null wide character code among the first maxlen wide characters pointed 
+         * to by s. 
+         */
+        REQ("wcsnlen.01.01", "Return value equals the string size", wcsnlen_spec == len_clr);
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcspbrk - scan a wide-character string for a wide-character code
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcspbrk(const wchar_t *ws1, const wchar_t *ws2);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the ISO
+    C standard. Any conflict between the requirements described here and the
+    ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 defers
+    to the ISO C standard. 
+
+    The wcspbrk() function shall locate the first occurrence in the
+    wide-character string pointed to by ws1 of any wide-character code from the
+    wide-character string pointed to by ws2.
+
+RETURN VALUE
+
+    Upon successful completion, wcspbrk() shall return a pointer to the
+    wide-character code or a null pointer if no wide-character code from ws2
+    occurs in ws1.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WStringTPtr wcspbrk_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+    SizeT len1, wlen1;
+    SizeT len2, wlen2;
+
+    WString* ws1_pre;
+    WString* ws2_pre;
+
+    IntT charPosition;
+
+    pre
+    {
+       /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context, ws1));
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context, ws2));
+
+        /* [Load the strings to the instrumental machine] */
+        ws1_pre = readWString_VoidTPtr(ws1);
+        ws2_pre = readWString_VoidTPtr(ws2);
+
+        /* [Get lengths of the strings including the terminating null character] */
+        len1 = length_WString(ws1_pre) + 1;
+        len2 = length_WString(ws2_pre) + 1;
+
+        /* [Get lengths of the strings in bytes] */
+        wlen1 = len1 * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+        /* [Calling the model function] */
+        charPosition = wcspbrk_model(ws1_pre, ws2_pre);
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeRMemoryAvailable(ws1) >= wlen1);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len1 == 1 && len2 == 1)
+        {
+            return {EmptyStrings, "Both strings are empty"};
+        }
+        else if (len1 > 1 && len2 == 1)
+        {
+            return {PatternEmpty, "Pattern string is empty"};
+        }
+        else if (len1 == 1 && len2 > 1)
+        {
+            return {StringEmpty, "Search string is empty"};
+        }
+        else if (charPosition == -1)
+        {
+            return {CharacterNotFound, "Character not found"};
+        }
+        else
+        {
+            return {CharacterFound, "Character found"};
+        }
+    }
+
+    post
+    {
+        WString* ws1_post = readWString_VoidTPtr(ws1);
+        WString* ws2_post = readWString_VoidTPtr(ws2);
+
+        if (charPosition == -1)
+        {
+            /*
+             * The wcspbrk() function shall locate the first occurrence in the wide-character 
+             * string pointed to by ws1 of any wide-character code from the wide-character 
+             * string pointed to by ws2.
+             * 
+             * a null pointer if no wide-character code from ws2 occurs in ws1 
+             */
+            REQ("wcspbrk.01.02", "null pointer is returned if no char was not found", isNULL_VoidTPtr(wcspbrk_spec));
+        }
+        else
+        {
+            /*
+             * The wcspbrk() function shall locate the first occurrence in the wide-character 
+             * string pointed to by ws1 of any wide-character code from the wide-character 
+             * string pointed to by ws2.
+             * 
+             * wcspbrk() shall return a pointer to the wide-character code 
+             */
+            REQ("wcspbrk.01.01", "wcspbrk() shall return a pointer to a char found",
+                charPosition * sizeof_WCharT == diff_VoidTPtr(wcspbrk_spec, ws1));
+
+        }
+
+        /* [Nothing should be changed in ws1] */
+        REQ("", "Nothing should be changed in ws1", equals(ws1_post, ws1_pre));
+
+        /* [Nothing should be changed in ws2] */
+        REQ("", "Nothing should be changed in ws2",equals(ws2_post, ws2_pre));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2)
+                  )
+           );
+
+        return true;
+    }
+}
+
+IntT wcspbrk_model(WString* ws1, WString* ws2)
+{
+    int i;
+    int j;
+    
+    SizeT len1 = length_WString(ws1);    
+    SizeT len2 = length_WString(ws2);    
+
+    if (len1 == 0 || len2 == 0)
+    {
+        return -1;
+    }
+
+    for(i = 0; i < len1; i++)
+    {
+        WCharT c = wcharAt_WString(ws1, i);
+
+        for(j = 0; j < len2; j++)
+        {
+            if (c == wcharAt_WString(ws2, j))
+            {
+                return i;
+            }
+        }
+    }
+
+    return -1;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcsrchr - wide-character string scanning operation
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcsrchr(const wchar_t *ws, wchar_t wc);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The wcsrchr() function shall locate the last occurrence of wc in the
+    wide-character string pointed to by ws. The application shall ensure that
+    the value of wc is a character representable as a type wchar_t and a
+    wide-character code corresponding to a valid character in the current
+    locale. The terminating null wide-character code shall be considered to be
+    part of the wide-character string.
+
+RETURN VALUE
+
+    Upon successful completion, wcsrchr() shall return a pointer to the
+    wide-character code or a null pointer if wc does not occur in the
+    wide-character string.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WStringTPtr wcsrchr_spec(CallContext context, WStringTPtr ws, WCharT wc)
+{
+    SizeT len, wlen;
+    WString* ws_pre;
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws is not NULL", !isNULL_VoidTPtr(ws));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws is available in the context", isValidPointer(context,ws));
+
+        /* [Load the string to the instrumental machine] */
+        ws_pre = readWString_VoidTPtr(ws);
+
+        /* [Get length of the string including the terminating null character] */
+        len = length_WString(ws_pre) + 1;
+
+        /* [Get the length of the string in bytes] */
+        wlen = len * sizeof_WCharT;
+
+        /*
+         * The application shall ensure that the value of wc is a character representable 
+         * as a type wchar_t and a wide-character code corresponding to a valid character 
+         * in the current locale. 
+         */
+        REQ("app.wcsrchr.02", "wc is in current locale", TODO_REQ());
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws is enough", sizeRMemoryAvailable(ws) >= wlen);
+
+        return true;
+    }
+
+    coverage NullCharacterC
+    {
+        if (wc == 0)
+            return { Zero, "Search for null termination"};
+        else
+            return { NonZero, "Search for not null character" };
+    }
+
+    coverage SymbolExistanceC
+    {
+        if (wcsrchr_model(ws_pre, wc) == -1)
+            return {SymbolNotIncluded, "Symbol is not in the string"};
+        else
+            return {SymbolIncluded, "Symbol is in the string"};
+    }
+
+    coverage EmptySearchedString
+    {
+        if (len == 1)
+            return {SearhedStringEmpty, "Searched string is empty"};
+        else
+            return {SearhedStringNotEmpty, "Searched string is not empty"};
+    }
+
+    post
+    {
+        IntT searchResult;
+        WString* ws_post = readWString_VoidTPtr(ws);
+
+        searchResult = wcsrchr_model(ws_pre, wc);
+
+        if (searchResult == -1)
+        {
+            /*
+             * The wcsrchr() function shall locate the last occurrence of wc in the wide- 
+             * character string pointed to by ws. 
+             * 
+             * or a null pointer if wc does not occur in the wide-character string.
+             */
+            REQ("wcsrchr.01.02", "null pointer is returned if the character was not found",
+                isNULL_VoidTPtr(wcsrchr_spec));
+        }
+        else
+        {
+            /*
+             * The wcsrchr() function shall locate the last occurrence of wc in the wide- 
+             * character string pointed to by ws. 
+             * 
+             * wcsrchr() shall return a pointer to the wide-character code 
+             */
+            REQ("wcsrchr.01.01", "wcsrchr() shall return a pointer to the character",
+                searchResult * sizeof_WCharT == diff_VoidTPtr(wcsrchr_spec, ws));
+        }
+
+        /*
+         * The terminating null wide-character code shall be considered to be part of the 
+         * wide-character string. 
+         */
+        if(wc == '\0') REQ("wcsrchr.03", "already checked by model", true);
+
+        /* [Nothing should be changed in ws] */
+        REQ("", "Nothing should be changed in ws", equals(ws_post, ws_pre));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws), ws, wlen),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws), ws, wlen)
+                  )
+           );
+
+        return true;
+    }
+}
+
+IntT wcsrchr_model(WString* ws, WCharT wc)
+{
+    int i;
+    SizeT len;
+
+    len = length_WString(ws);
+
+    if (wc == NULL_WCharT)
+    {
+        return len;
+    }
+
+    for(i = len - 1; i >= 0; i--)
+    {
+        WCharT t;
+        t = wcharAt_WString(ws, i);
+        if (wc == t)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcsspn - get the length of a wide substring
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    size_t wcsspn(const wchar_t *ws1, const wchar_t *ws2);
+
+DESCRIPTION
+
+      The functionality described on this reference page is aligned with the 
+      ISO C standard. Any conflict between the requirements described here and 
+      the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001 
+      defers to the ISO C standard. 
+
+      The wcsspn() function shall compute the length (in wide characters) of 
+      the maximum initial segment of the wide-character string pointed to by 
+      ws1 which consists entirely of wide-character codes from the 
+      wide-character string pointed to by ws2.
+
+RETURN VALUE
+
+    The wcsspn() function shall return the length of the initial substring of 
+    ws1; no return value is reserved to indicate an error.
+
+ERRORS
+
+    No errors are defined
+*/
+
+specification
+SizeT wcsspn_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+    SizeT len1, wlen1, len2, wlen2, res;
+
+    WString* ws1_pre;
+    WString* ws1_post;
+    WString* ws2_pre;
+    WString* ws2_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context, ws1));
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context, ws2));
+
+        /* [Get the lengths of the strings including the terminating null byte] */
+        ws1_pre = readWString_VoidTPtr(ws1);
+        ws2_pre = readWString_VoidTPtr(ws2);
+
+        len1 = length_WString(ws1_pre) + 1;
+        len2 = length_WString(ws2_pre) + 1;
+
+        wlen1 = len1 * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeRMemoryAvailable(ws1) >= wlen1);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        res = wcsspn_model(ws1_pre, ws2_pre);
+
+        return true;
+    }
+
+    coverage C
+    {
+        if ((len1 == 1) && (len2 == 1))
+            return {S12, "ws1 and ws2 are empty"};
+        else if ((len1 == 1) && (len2 != 1))
+            return {S1, "ws1 is empty"};
+        else if ((len1 != 1) && (len2 == 1))
+            return {S2, "ws2 is empty"};
+        else
+        {
+            if (res == 0)
+                return {E, "Empty segment"};
+            else
+                return {N, "Non-empty segment"};
+        }
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        /* [Preliminary reading of almost all the data we need] */
+        ws1_post = readWString_VoidTPtr(ws1);
+        ws2_post = readWString_VoidTPtr(ws2);
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws1 shall not be changed", equals(ws1_post, ws1_pre));
+
+        /* [The object pointed to by s2 shall not be changed] */
+        REQ("", "ws2 shall not be changed", equals(ws2_post, ws2_pre));
+
+        /*
+         * The wcsspn() function shall compute the length (in wide characters) of the 
+         * maximum initial segment of the wide-character string pointed to by ws1 which 
+         * consists entirely of wide-character codes from the wide-character string 
+         * pointed to by ws2.
+         * 
+         * The wcsspn() function shall return the length of the initial substring of ws1 
+         */
+        REQ("wcsspn.01.01", "wcsspn() function shall return the length of the initial substring of ws1", 
+            (res == wcsspn_spec));
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2)
+                  )
+           );
+
+        return true;
+    }
+}
+
+SizeT wcsspn_model(WString* ws1, WString* ws2)
+{
+    int i;
+    int j;
+    bool found;
+    
+    SizeT len1 = length_WString(ws1);    
+    SizeT len2 = length_WString(ws2);    
+
+    if ((len1 == 0) || (len2 == 0))
+    {
+        return 0;
+    }
+
+    for(i = 0; i < len1; i++)
+    {
+        WCharT wc = wcharAt_WString(ws1, i);
+        found = false;
+
+        for(j = 0; j < len2; j++)
+        {
+            if (wc == wcharAt_WString(ws2, j))
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return i;
+    }
+
+    return i;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcsstr - find a wide-character substring
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcsstr(const wchar_t *restrict ws1, const wchar_t *restrict ws2);
+
+DESCRIPTION
+
+    The functionality described on this reference page is aligned with the
+    ISO C standard. Any conflict between the requirements described here and
+    the ISO C standard is unintentional. This volume of IEEE Std 1003.1-2001
+    defers to the ISO C standard.
+
+    The wcsstr() function shall locate the first occurrence in the
+    wide-character string pointed to by ws1 of the sequence of wide characters
+    (excluding the terminating null wide character) in the wide-character
+    string pointed to by ws2.
+
+RETURN VALUE
+
+    Upon successful completion, wcsstr() shall return a pointer to the located
+    wide-character string, or a null pointer if the wide-character string is
+    not found.
+
+    If ws2 points to a wide-character string with zero length, the function
+    shall return ws1.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+/* REFERENCES: wcswcs_spec() refers the wcsstr_spec() */
+
+specification
+WStringTPtr wcsstr_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+    SizeT len1, len2, wlen1, wlen2;
+
+    WString* ws1_pre;
+    WString* ws1_post;
+    WString* ws2_pre;
+    WString* ws2_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context",
+            isValidPointer(context, ws1));
+
+        REQ("", "Memory pointed to by ws2 is available in the context",
+            isValidPointer(context, ws2));
+
+        /* [Get the lengths of the strings including the terminating null character] */
+        ws1_pre = readWString_VoidTPtr(ws1);
+        ws2_pre = readWString_VoidTPtr(ws2);
+        len1 = length_WString(ws1_pre) + 1;
+        len2 = length_WString(ws2_pre) + 1;
+
+        /* [Get the length of the strings in bytes] */
+        wlen1 = len1 * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeRMemoryAvailable(ws1) >= wlen1);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len1 == 1)
+        {
+            if (len2 == 1)
+                return {EE, "Find empty substring in empty string"};
+            else if (len2 == 2)
+                return {CE, "Find single char in empty string"};
+            else
+                return {SE, "Find some substring in empty string"};
+        }
+        else if (len1 == 2)
+        {
+            if (len2 == 1)
+                return {EC, "Find empty substring in single char"};
+            else if (len2 == 2)
+                return {CC, "Find single char in single char"};
+            else
+                return {SC, "Find some substring in single char"};
+        }
+        else
+        {
+            if (len2 == 1)
+                return {ES, "Find empty substring in non-empty string"};
+            else if (len2 == 2)
+                return {CS, "Find single char in non-empty string"};
+            else
+                return {SS, "Find some substring in non-empty string"};
+        }
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        IntT res;
+
+        /* [Preliminary reading of almost all the data we need] */
+        ws1_post = readWString_VoidTPtr(ws1);
+        ws2_post = readWString_VoidTPtr(ws2);
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws1 shall not be changed", equals(ws1_post, ws1_pre));
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws2 shall not be changed", equals(ws2_post, ws2_pre));
+
+        res = wcsstr_model(ws1_pre, ws2_pre);
+
+        if (res == -1)
+        {
+            /*
+             * The wcsstr() function shall locate the first occurrence in the wide-character 
+             * string pointed to by ws1 of the sequence of wide characters (excluding the 
+             * terminating null wide character) in the wide-character string pointed to by ws2. 
+             * 
+             * 
+             * a null pointer if the wide-character string is not found
+             */
+            REQ("wcsstr.01.02", "null pointer is returned if the string was not found",
+                isNULL_VoidTPtr(wcsstr_spec));
+        }
+        else
+        {
+            /*
+             * The wcsstr() function shall locate the first occurrence in the wide-character 
+             * string pointed to by ws1 of the sequence of wide characters (excluding the 
+             * terminating null wide character) in the wide-character string pointed to by ws2. 
+             * 
+             * 
+             * wcsstr() shall return a pointer to the located wide-character string
+             */
+            REQ("wcsstr.01.01", "wcsstr() shall return a pointer to the string",
+                res * sizeof_WCharT == diff_VoidTPtr(wcsstr_spec, ws1));
+        }
+
+        /*
+         * If ws2 points to a wide-character string with zero length, the function shall 
+         * return ws1.
+         */
+        if(len2 == 1) REQ("wcsstr.02", "already checked by model", true);
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2)
+                  )
+           );        
+
+        return true;
+    }
+}
+
+IntT wcsstr_model(WString* ws1, WString* ws2)
+{
+    int i = 0;
+    int j;
+    bool found;
+
+    SizeT len1 = length_WString(ws1);
+    SizeT len2 = length_WString(ws2);
+
+    /* If ws2 points to a string with zero length, the function shall return ws1. */
+    if (len2 == 0) return 0;
+
+    while (i < len1)
+    {
+        if (wcharAt_WString(ws1, i) == wcharAt_WString(ws2, 0))
+        {
+            /* The rest is too short, ws2 cannot be there. */
+            if (i + len2 > len1)
+                return -1;
+
+            found = true;
+            for (j=0; j<len2; j++)
+            {
+                if (wcharAt_WString(ws1, i + j) != wcharAt_WString(ws2, j))
+                {
+                    found = false;
+                    break;
+                }
+            }
+            if (found)
+                return i;
+        }
+        ++i;
+    }
+
+    return -1;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+ refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    wcswcs - find a wide substring (LEGACY)
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    wchar_t *wcswcs(const wchar_t *ws1, const wchar_t *ws2);
+
+DESCRIPTION
+
+    The wcswcs() function shall locate the first occurrence in the
+    wide-character string pointed to by ws1 of the sequence of wide-character
+    codes (excluding the terminating null wide-character code) in the
+    wide-character string pointed to by ws2.
+
+RETURN VALUE
+
+    Upon successful completion, wcswcs() shall return a pointer to the located
+    wide-character string or a null pointer if the wide-character string is
+    not found.
+
+    If ws2 points to a wide-character string with zero length, the function
+    shall return ws1.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+WStringTPtr wcswcs_spec(CallContext context, WStringTPtr ws1, WStringTPtr ws2)
+{
+
+/* The wcswcs() function shall be equivalent to wcsstr(). */
+/* START EQUIVALENT SPECIFICATION: wcsstr_spec */
+
+    SizeT len1, len2, wlen1, wlen2;
+
+    WString* ws1_pre;
+    WString* ws1_post;
+    WString* ws2_pre;
+    WString* ws2_post;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "ws1 is not NULL", !isNULL_VoidTPtr(ws1));
+        REQ("", "ws2 is not NULL", !isNULL_VoidTPtr(ws2));
+
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by ws1 is available in the context", isValidPointer(context, ws1));
+        REQ("", "Memory pointed to by ws2 is available in the context", isValidPointer(context, ws2));
+
+        /* [Get the lengths of the strings including the terminating null character] */
+        ws1_pre = readWString_VoidTPtr(ws1);
+        ws2_pre = readWString_VoidTPtr(ws2);
+        len1 = length_WString(ws1_pre) + 1;
+        len2 = length_WString(ws2_pre) + 1;
+
+        /* [Get the length of the strings in bytes] */
+        wlen1 = len1 * sizeof_WCharT;
+        wlen2 = len2 * sizeof_WCharT;
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by ws1 is enough", sizeRMemoryAvailable(ws1) >= wlen1);
+        REQ("", "Memory pointed to by ws2 is enough", sizeRMemoryAvailable(ws2) >= wlen2);
+
+        return true;
+    }
+
+    coverage C
+    {
+        if (len1 == 1)
+        {
+            if (len2 == 1)
+                return {EE, "Find empty substring in empty string"};
+            else if (len2 == 2)
+                return {CE, "Find single char in empty string"};
+            else
+                return {SE, "Find some substring in empty string"};
+        }
+        else if (len1 == 2)
+        {
+            if (len2 == 1)
+                return {EC, "Find empty substring in single char"};
+            else if (len2 == 2)
+                return {CC, "Find single char in single char"};
+            else
+                return {SC, "Find some substring in single char"};
+        }
+        else
+        {
+            if (len2 == 1)
+                return {ES, "Find empty substring in non-empty string"};
+            else if (len2 == 2)
+                return {CS, "Find single char in non-empty string"};
+            else
+                return {SS, "Find some substring in non-empty string"};
+        }
+    }
+
+#if POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED == 0
+    ALIGNMENT_COVERAGE(ws1)
+    ALIGNMENT_COVERAGE(ws2)
+#endif // POSIX_STRING_WSTRINGS_MUST_BE_ALIGNED
+
+    post
+    {
+        IntT res;
+
+        /* [Preliminary reading of almost all the data we need] */
+        ws1_post = readWString_VoidTPtr(ws1);
+        ws2_post = readWString_VoidTPtr(ws2);
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws1 shall not be changed", equals(ws1_post, ws1_pre));
+
+        /* [The object pointed to by ws2 shall not be changed] */
+        REQ("", "ws2 shall not be changed", equals(ws2_post, ws2_pre));
+
+        res = wcsstr_model(ws1_pre, ws2_pre);
+
+        if (res == -1)
+        {
+            /*
+             * The wcswcs() function shall locate the first occurrence in the wide-character 
+             * string pointed to by ws1 of the sequence of wide-character codes (excluding the 
+             * terminating null wide-character code) in the wide-character string pointed to 
+             * by ws2.
+             * 
+             * a null pointer if the wide-character string is not found. 
+             */
+            REQ("wcswcs.01.02", "null pointer is returned if the string was not found",
+                isNULL_VoidTPtr(wcswcs_spec));
+        }
+        else
+        {
+            /*
+             * The wcswcs() function shall locate the first occurrence in the wide-character 
+             * string pointed to by ws1 of the sequence of wide-character codes (excluding the 
+             * terminating null wide-character code) in the wide-character string pointed to 
+             * by ws2.
+             * 
+             * wcswcs() shall return a pointer to the located wide-character string 
+             */
+            REQ("wcswcs.01.01", "wcswcs() shall return a pointer to the string",
+                res * sizeof_WCharT == diff_VoidTPtr(wcswcs_spec, ws1));
+        }
+
+        /*
+         * If ws2 points to a wide-character string with zero length, the function shall 
+         * return ws1.
+         */
+        if(len2 == 1) REQ("wcswcs.02", "already checked by model", true);
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws1), ws1, wlen1)
+                  )
+           );
+
+        /* [Other memory shall not be changed] */
+        REQ("", "Other memory shall not be changed",
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(ws2), ws2, wlen2)
+                  )
+           );      
+
+        return true;
+    }
+
+/* END EQUIVALENT SPECIFICATION: strchr_spec */
+}
+
+
+/********************************************************************/
+/**                      Helper Functions                          **/
+/********************************************************************/
+
+bool compareNWCharArray(WCharArray* x, WCharArray* y, SizeT n)
+{
+    unsigned int xsize = size_WCharArray(x);
+    unsigned int ysize = size_WCharArray(y);
+    unsigned int i;
+
+    if((xsize<n)||(ysize<n)) return false;
+    for(i=0;i<n;i++)
+    {
+        if(wcharAt_WCharArray(x,i)!=wcharAt_WCharArray(y,i)) return false;
+    }
+    return true;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

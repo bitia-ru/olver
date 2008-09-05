@@ -1,0 +1,410 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/ncurses/ncurses_data.seh"
+#include "data/ncurses_model.seh"
+#include "ncurses/string/scanf_model.seh"
+#include "ncurses/input/string_model.seh"
+
+#pragma SEC subsystem string "ncurses.string"
+
+/*
+   The group of functions 'ncurses.string.scanf' consists of:
+       mvscanw [1]
+       mvwscanw [1]
+       scanw [1]
+       vw_scanw [1]
+       vwscanw [1]
+       wscanw [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX (R) Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    mvscanw, mvwscanw, scanw, wscanw - convert formatted input from a window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int mvscanw(int y, int x, char *fmt, ...);
+
+    int mvwscanw(WINDOW *win, int y, int x, char *fmt, ...);
+
+    int scanw(char *fmt, ...);
+
+    int wscanw(WINDOW *win, char *fmt, ...);
+
+DESCRIPTION
+
+    These functions are similar to scanf(). Their effect is as though mvwgetstr()
+    were called to get a multi-byte character string from the current or specified
+    window at the current or specified cursor position, and then sscanf() were
+    used to interpret and convert that string.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+IntT scanw_spec( CallContext context, WindowTPtr * win, NCursesPosition * pos, CString * fmt, List /* NULL */ * arguments )
+{
+    NCursesWindow * curWnd = getWindowMayNULL( context, win );
+    NCursesWindow * local = createNCursesWindow_Local( curWnd );
+
+    scanw_model( context, local, pos, fmt, arguments );
+
+    switch ( 10 * ( win == NULL ? 0 : 1 ) + ( pos == NULL ? 0 : 1 ) ) {
+        case  0 : FILTER( "scanw"    ); break;
+        case  1 : FILTER( "mvscanw"  ); break;
+        case 10 : FILTER( "wscanw"   ); break;
+        case 11 : FILTER( "mvwscanw" ); break;
+    }
+
+    pre
+    {
+        return true;
+    }
+    coverage Win
+    {
+        if ( win == NULL ) { return { WinIsNull   , "win is NULL"     }; }
+                      else { return { WinIsNotNull, "win is not NULL" }; }
+    }
+    coverage Pos
+    {
+        if ( pos == NULL ) { return { PosIsNull   , "pos is NULL"     }; }
+                      else { return { PosIsNotNull, "pos is not NULL" }; }
+    }
+    post
+    {
+        /*
+         * These functions are similar to scanf().
+         */
+        REQ( "mvscanw.01;vwscanw.mvscanw.01;mvwscanw.01;scanw.01;wscanw.01", "", TODO_REQ() );
+
+        /*
+         * Their effect is as though mvwgetstr() were called to get a multi-byte character
+         * string from the current or specified window at the current or specified cursor
+         * position, and then sscanf() were used to interpret and convert that string.
+         */
+        REQ( "mvscanw.02;mvwscanw.02;scanw.02;wscanw.02", "", TODO_REQ() );
+
+        if ( scanw_spec != SUT_EOK )
+        {
+            /*
+             * [Upon successful completion, these functions return OK.]
+             * Otherwise, they return ERR.
+             */
+            REQ( "mvscanw.03.02;vwscanw.mvscanw.03.02;mvwscanw.03.02;scanw.03.02;wscanw.03.02",
+                 "these functions return ERR", scanw_spec == SUT_ERR
+               );
+        }
+        else
+        {
+            /*
+             * Upon successful completion, these functions return OK.
+             */
+            REQ( "mvscanw.03.01;vwscanw.mvscanw.03.01;mvwscanw.03.01;scanw.03.01;wscanw.03.01",
+                 "these functions return OK", scanw_spec == SUT_EOK
+               );
+
+            REQ( "", "Check all", check_NCursesWindows( curWnd, local, CH_DATA, -1 ) );
+        }
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+void onScanw( CallContext context, WindowTPtr * win, NCursesPosition * pos,
+              CString * fmt, List /* NULL */ * arguments, IntT scanw_spec
+            )
+{
+    if ( scanw_spec != SUT_ERR ) {
+        NCursesWindow * curWnd = getWindowMayNULL( context, win );
+        NCursesTerminal * term = getNCursesStdTerminal( context );
+        List * buf = term->inserted_character_buffer;
+
+        //Erasing part of buffer...
+        while( ! isEmpty_List( buf ) ) {
+            IntTObj * chObj = get_List( buf, size_List( buf ) - 1 );
+            remove_List( buf, size_List( buf ) - 1 );
+            if ( readStrStop( * chObj ) ) { break; }
+        }
+
+        updateNCursesWindow( context, curWnd->address );
+        refresh_WindowTPtr( context, win, 1 );
+    }
+}
+
+void scanw_model
+         ( CallContext context, NCursesWindow * local, NCursesPosition * pos, CString * fmt, List /* NULL */ * arguments )
+{
+    NCursesTerminal * term = getNCursesStdTerminal( context );
+    List * preBuf = clone( term->inserted_character_buffer );
+    int i;
+    if ( isEmpty_List( preBuf ) ) { return; }
+    if ( pos != NULL ) { local->cursorPos = clone( pos ); }
+    for ( i = size_List( preBuf ) - 1; i >= 0; i-- ) {
+        IntTObj * chObj = get_List( preBuf, i );
+        ChTypeT ch = create_emptyChTypeT();
+        if ( readStrStop( * chObj ) ) { break; }
+        ch.letter = * chObj;
+        if ( ( ch.letter & SUT_UNGETCH ) == 0 ) {
+            if ( isSpecChar( ch ) ) {
+                addSpecChar( local, local->cursorPos, ch, true, false );
+            } else {
+                setElement_NCursesWindow( local, local->cursorPos, ch );
+                incrementCursorPos( local, local->cursorPos );
+            }
+        }
+    }
+    newlineCursorPos( local, local->cursorPos );
+    pushNCursesWindow( local );
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX (R) Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    vw_scanw - convert formatted input from a window
+
+SYNOPSIS
+
+    #include <stdarg.h>
+    #include <curses.h>
+    int vw_scanw(WINDOW *, char *, va_list varflist);
+
+DESCRIPTION
+
+    The vw_scanw() function achieves the same effect as wscanw() using a variable
+    argument list. The third argument is a va_list, as defined in <stdarg.h>.
+
+RETURN VALUE
+
+    Upon successful completion, vw_scanw() returns OK. Otherwise, it returns ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+specification
+IntT vw_scanw_spec( CallContext context, WindowTPtr * win, CString * fmt, List /* NULL */ * arguments )
+{
+    NCursesWindow * curWnd = getWindowMayNULL( context, win );
+    NCursesWindow * local = createNCursesWindow_Local( curWnd );
+
+    scanw_model( context, local, NULL, fmt, arguments );
+
+    FILTER( "vw_scanw" );
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * The vw_scanw() function achieves the same effect as wscanw() using a variable
+         * argument list.
+         */
+        REQ( "vw_scanw.01", "", TODO_REQ() );
+
+        /*
+         * The third argument is a va_list, as defined in <stdarg.h>.
+         */
+        REQ( "vw_scanw.02", "The third argument is a va_list", true );
+
+        if ( vw_scanw_spec != SUT_EOK )
+        {
+            /*
+             * [Upon successful completion, vw_scanw() returns OK.]
+             * Otherwise, it returns ERR.
+             */
+            REQ( "vw_scanw.03.02", "vw_scanw() return ERR", vw_scanw_spec == SUT_ERR );
+        }
+        else
+        {
+            /*
+             * Upon successful completion, vw_scanw() returns OK.
+             */
+            REQ( "vw_scanw.03.01", "Upon successful completion, vw_scanw() returns OK", vw_scanw_spec == SUT_EOK );
+
+            REQ( "", "Check all", check_NCursesWindows( curWnd, local, CH_DATA, -1 ) );
+        }
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+specification
+IntT vwscanw_spec( CallContext context, WindowTPtr * win, CString * fmt, List /* NULL */ * arguments )
+{
+    NCursesWindow * curWnd = getWindowMayNULL( context, win );
+    NCursesWindow * local = createNCursesWindow_Local( curWnd );
+
+    scanw_model( context, local, NULL, fmt, arguments );
+
+    FILTER( "vwscanw" );
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * The vwscanw() function achieves the same effect as wscanw() using a variable
+         * argument list.
+         */
+        REQ( "vwscanw.mvscanw.01", "", TODO_REQ() );
+
+        /*
+         * The third argument is a va_list, as defined in <varargs.h>.
+         */
+        REQ( "vwscanw.mvscanw.02", "The third argument is a va_list", true );
+
+        if ( vwscanw_spec != SUT_EOK )
+        {
+            /*
+             * [Upon successful completion, vw_scanw() returns OK.]
+             * Otherwise, it returns ERR.
+             */
+            REQ( "vwscanw.mvscanw.03.02", "vwscanw() return ERR", vwscanw_spec == SUT_ERR );
+        }
+        else
+        {
+            /*
+             * Upon successful completion, vw_scanw() returns OK.
+             */
+            REQ( "vwscanw.mvscanw.03.01", "Upon successful completion, vwscanw() returns OK", vwscanw_spec == SUT_EOK );
+
+            REQ( "", "Check all", check_NCursesWindows( curWnd, local, CH_DATA, -1 ) );
+        }
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+/** getstr_noErrorFromReq_spec **/
+specification
+IntT getstr_noErrorFromReq_spec( CallContext context, WindowTPtr * win, NCursesPosition * pos, StringTPtr str )
+{
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+    List* lst_pre = clone(term->inserted_character_buffer);
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    getnstr_model(context, local, str, pos, -1);
+
+    if(win)
+    {
+        if(pos) {   FILTER("mvwgetstr");  }
+        else    {   FILTER("wgetstr");    }
+    }
+    else
+    {
+        if(pos) {   FILTER("mvgetstr");   }
+        else    {   FILTER("getstr");     }
+    }
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        IntTObj* chObj;
+        List* tmp = create_List(&type_IntTObj);
+        CString* s = readCString_VoidTPtr(str);
+        IntT is_correct = 1, ind = -1, size = size_List(lst_pre);
+
+        if(!size)
+        {
+            //All checks possible only if we push elements using
+            //ncursesInputChar or ungetch
+
+            return true;
+        }
+
+        if(getstr_noErrorFromReq_spec == SUT_ERR)
+        {
+            return true;
+        }
+
+        while(size>0)
+        {
+            chObj = get_List(lst_pre, --size);
+
+            if(readStrStop(*chObj))
+                break;
+
+            if(++ind < length_CString(s))
+                if(charAt_CString(s, ind) != *chObj)
+                    is_correct = 0;
+        }
+
+        compareScreens_Context(context);
+        check_NCursesWindows(curWnd, local, CH_ALL, -1);
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}

@@ -1,0 +1,909 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "signal/sigaction/sigaction_media.seh"
+#include "common/common_media.seh"
+#include "process/process/process_model.seh"
+
+
+int worked_reactions;
+
+
+/********************************************************************/
+/**                 Formatters                                     **/
+/********************************************************************/
+
+void stackt_formatter(TSStream *stream, StackT* value)
+{
+
+    VERIFY_TYPE(stackt_formatter, &type_StackT, value);
+
+    writeTypeHeaderTSStream(stream, "stackt");
+
+    writePointer_TSStream(stream,  value->ss_sp);
+    writeInt_TSStream(stream,  value->ss_flags);
+    writeSize_TSStream(stream,  value->ss_size);
+}
+
+
+void readStackT_TSStream(CallContext context, TSStream* stream, StackT* stack)
+{
+    stack->ss_sp = readPointer_TSStream(context, stream);
+    stack->ss_flags = readInt_TSStream(stream);
+    stack->ss_size = readSize_TSStream(stream);
+}
+
+static void sigaction_data_formatter(TSStream* stream,SigAction* data)
+{
+  VERIFY_TYPE(sigaction_data_formatter, &type_SigAction, data);
+
+  writeSigActionData_TSStream(stream, data);
+}
+
+void writeSigActionData_TSStream( TSStream* stream, SigAction* data)
+{
+    int i,size;    
+
+    writeTypeHeaderTSStream(stream,"sigaction_data");
+
+    writeInt_TSStream(stream, (IntT)data->m_sa_handler);
+    writeInt_TSStream(stream, (IntT)data->m_sa_sigaction);
+    writeInt_TSStream(stream, convertSignalFlagsToIntT(&data->m_sa_flag));
+
+    size = size_Set(data->m_sa_mask);
+    writeSize_TSStream(stream, size);
+    for(i = 0; i < size; i++)
+    {
+        IntTObj* int_value = get_Set(data->m_sa_mask, i);
+        writeInt_TSStream(stream, *int_value);
+    }
+}
+
+
+/*
+ * Read all fields of sigaction structure except sa_mask
+ */
+void read_StructSigaction(SigAction* s_oact, TSStream* stream)
+{
+    IntT fl;
+    
+    s_oact->m_sa_handler = readInt_TSStream(stream);
+    s_oact->m_sa_sigaction = readInt_TSStream(stream);
+    fl = readInt_TSStream(stream);
+    s_oact->m_sa_flag = SignalConvertIntTToFlags(fl);
+}
+
+
+/********************************************************************/
+/**                 Deferred Reactions Processors                  **/
+/********************************************************************/
+static void pthread_sigmask_react_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    IntT res;
+    res = readInt_TSStream(stream);
+
+    worked_reactions++;
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_sigmask_react,
+        create_Pthread_SigmaskReactionType(threadId, res, NULL, NULL),
+        meta->timestamp);
+    VERBOSE("pthread_sigmask_react reaction registered...\n");
+}
+
+static void sigprocmask_react_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    IntT res;
+    res = readInt_TSStream(stream);
+    
+    worked_reactions++;
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_sigmask_react,
+        create_Pthread_SigmaskReactionType(threadId, res, NULL, NULL),
+        meta->timestamp);
+    VERBOSE("pthread_sigmask_react reaction registered...\n");
+}
+
+static void user_catcher_handler_reaction_start_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_catcher_handler_reaction_start,
+        create_UserCatcherHandlerStartReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_catcher_handler_reaction_start reaction registered...\n");
+}
+static void user_catcher_handler_reaction_finish_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_catcher_handler_reaction_finish,
+        create_UserCatcherHandlerFinishReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_catcher_handler_reaction_finish reaction registered...\n");
+}
+
+static void user_agent_handler_reaction_start_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_agent_handler_reaction_start,
+        create_UserAgentHandlerStartReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_agent_handler_reaction_start reaction registered...\n");
+}
+static void user_agent_handler_reaction_finish_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_agent_handler_reaction_finish,
+        create_UserAgentHandlerFinishReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_agent_handler_reaction_finish reaction registered...\n");
+}
+
+static void user_catcher_sigaction_reaction_start_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_catcher_sigaction_reaction_start,
+        create_UserCatcherSigactionStartReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_catcher_sigaction_reaction_start reaction registered...\n");
+}
+static void user_catcher_sigaction_reaction_finish_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_catcher_sigaction_reaction_finish,
+        create_UserCatcherSigactionFinishReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_catcher_sigaction_reaction_finish reaction registered...\n");
+}
+
+static void user_agent_sigaction_reaction_start_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_agent_handler_reaction_start,
+        create_UserAgentSigactionStartReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_agent_sigaction_reaction_start reaction registered...\n");
+}
+static void user_agent_sigaction_reaction_finish_processor(ThreadId threadId, 
+                TSStream* stream, TSMetaData* meta)
+{   
+    Signal* signo;
+    signo = create_Signal(readInt_TSStream(stream));
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        user_agent_handler_reaction_finish,
+        create_UserAgentSigactionFinishReactionType(getThread(threadId), signo),
+        meta->timestamp);
+    VERBOSE("user_agent_sigaction_reaction_finish reaction registered...\n");
+}
+
+static void pause_return_processor(ThreadId threadId, TSStream* stream, TSMetaData* meta)
+{   
+    IntT funcRes = readInt_TSStream(stream);
+    IntT errno = readInt_TSStream(stream);
+
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        pause_return,
+        create_PauseReturnType(threadId, funcRes, create_ErrorCode(errno)),
+        meta->timestamp);
+}
+
+static void sigsuspend_return_processor(ThreadId threadId, TSStream* stream, TSMetaData* meta)
+{   
+    IntT funcRes = readInt_TSStream(stream);
+    IntT errno = readInt_TSStream(stream);
+    
+    registerReactionWithTimeInterval(
+        getThreadChannelID(threadId),
+        NULL,
+        sigsuspend_return,
+        create_SigsuspendReturnType(threadId, funcRes, create_ErrorCode(errno)),
+        meta->timestamp);
+}
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initSignalSigactionSubsystem(void)
+{
+    // Set up mediators
+    set_mediator___libc_current_sigrtmax_spec(__libc_current_sigrtmax_media);
+    set_mediator___libc_current_sigrtmin_spec(__libc_current_sigrtmin_media);
+    set_mediator_bsd_signal_spec(bsd_signal_media);
+    set_mediator_pause_spec(pause_media);
+    set_mediator_pause_return(pause_return_media);
+
+    set_mediator_pthread_sigmask_spec(pthread_sigmask_media);
+    set_mediator_pthread_sigmask_react(pthread_sigmask_react_media);
+    set_mediator_sigaction_spec(sigaction_media);
+    set_mediator_sigaltstack_spec(sigaltstack_media);
+    set_mediator_siginterrupt_spec(siginterrupt_media);
+    set_mediator_signal_spec(signal_media);
+    set_mediator_sigpending_spec(sigpending_media);
+//    set_mediator_sigprocmask_react(sigprocmask_react_media);
+//    set_mediator_sigreturn_spec(sigreturn_media);
+    set_mediator_sigsuspend_spec(sigsuspend_media);
+    set_mediator_sigsuspend_return(sigsuspend_return_media);
+
+    set_mediator_user_catcher_handler_reaction_start(user_catcher_handler_reaction_start_media);
+    set_mediator_user_catcher_handler_reaction_finish(user_catcher_handler_reaction_finish_media);
+
+    set_mediator_user_agent_handler_reaction_start(user_agent_handler_reaction_start_media);
+    set_mediator_user_agent_handler_reaction_finish(user_agent_handler_reaction_finish_media);
+
+    set_mediator_user_catcher_sigaction_reaction_start(user_catcher_sigaction_reaction_start_media);
+    set_mediator_user_catcher_sigaction_reaction_finish(user_catcher_sigaction_reaction_finish_media);
+
+    set_mediator_user_agent_sigaction_reaction_start(user_agent_sigaction_reaction_start_media);
+    set_mediator_user_agent_sigaction_reaction_finish(user_agent_sigaction_reaction_finish_media);
+  
+    // Set up dr processors
+    registerDRProcessor("pthread_sigmask_react", pthread_sigmask_react_processor);
+    registerDRProcessor("sigprocmask_react", sigprocmask_react_processor);
+    registerDRProcessor("user_catcher_handler_reaction_start", 
+                        user_catcher_handler_reaction_start_processor);
+    registerDRProcessor("user_catcher_handler_reaction_finish", 
+                        user_catcher_handler_reaction_finish_processor);
+    
+    registerDRProcessor("user_agent_handler_reaction_start", 
+                        user_agent_handler_reaction_start_processor);
+    registerDRProcessor("user_agent_handler_reaction_finish", 
+                        user_agent_handler_reaction_finish_processor);
+    
+    registerDRProcessor("user_catcher_sigaction_reaction_start", 
+                        user_catcher_sigaction_reaction_start_processor);
+    registerDRProcessor("user_catcher_sigaction_reaction_finish", 
+                        user_catcher_sigaction_reaction_finish_processor);
+
+    registerDRProcessor("user_agent_sigaction_reaction_start", 
+                        user_agent_sigaction_reaction_start_processor);
+    registerDRProcessor("user_agent_sigaction_reaction_finish", 
+                        user_agent_sigaction_reaction_finish_processor);
+
+    registerDRProcessor("pause_return", pause_return_processor);
+    registerDRProcessor("sigsuspend_return", sigsuspend_return_processor);
+
+    // Set up formatters
+    registerTSFormatter("sigaction_data",(TSFormatterFuncType)sigaction_data_formatter);
+    registerTSFormatter("stackt",(TSFormatterFuncType)stackt_formatter);
+
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** __libc_current_sigrtmax_spec **/
+
+mediator __libc_current_sigrtmax_media for specification
+IntT __libc_current_sigrtmax_spec( CallContext context)
+{
+    call
+    {        
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "__libc_current_sigrtmax" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        SystemState*  systemState  = getSystemState_CallContext(context);
+        systemState->configuration->sigrtmax = __libc_current_sigrtmax_spec;
+    }
+}
+
+/** __libc_current_sigrtmin_spec **/
+
+mediator __libc_current_sigrtmin_media for specification
+IntT __libc_current_sigrtmin_spec( CallContext context)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "__libc_current_sigrtmin" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        SystemState*  systemState  = getSystemState_CallContext(context);
+        systemState->configuration->sigrtmin = __libc_current_sigrtmin_spec;
+    }
+}
+
+/** bsd_signal_spec **/
+mediator bsd_signal_media for specification
+SignalHandler bsd_signal_spec( CallContext context, Signal* sig, SignalHandler handler, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "bsd_signal:$(int)$(int)", sig, create_IntTObj(handler));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            res =readInt_TSStream(&command.response);
+            *errno =readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        onBsdSignal(context, sig, handler, bsd_signal_spec);
+    }
+}
+
+
+/** pause_spec **/
+mediator pause_media for specification
+void pause_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "pause" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;  
+  }
+    state
+    {
+        onPause(context);
+    }
+}
+
+mediator pause_return_media for reaction
+PauseReturnType* pause_return(void)
+{
+    state
+    {
+        onPauseReturn(pause_return->context, pause_return);
+    }
+}
+
+
+/** pthread_sigmask_spec **/
+//This mediator refers to: sigprocmask, pthread_sigmask
+mediator pthread_sigmask_media for specification
+void pthread_sigmask_spec( CallContext context, SigMaskAction how, SigSetTPtr set, SigSetTPtr oset, bool singleThreaded)
+{
+    ThreadState* thSt;
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+        if (!singleThreaded)
+        {
+            format_TSCommand( &command, "pthread_sigmask:$(int)$(ptr)$(ptr)", 
+                              create_IntTObj(how),
+                              create_VoidTPtrObj(set),
+                              create_VoidTPtrObj(oset));
+        }
+        else
+        {
+            format_TSCommand( &command, "sigprocmask:$(int)$(ptr)$(ptr)", 
+                create_IntTObj(how),
+                create_VoidTPtrObj(set),
+                create_VoidTPtrObj(oset));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;  
+    }
+    state
+    {
+        thSt = getThreadState_CallContext(context);
+        onPthread_sigmask(context, how, set, oset, singleThreaded);
+    }
+}
+
+mediator pthread_sigmask_react_media for reaction
+Pthread_SigmaskReactionType* pthread_sigmask_react(void)
+{
+    state
+    {
+        onPthread_sigmask_react(pthread_sigmask_react);
+    }
+}
+
+/** sigaction_spec **/
+mediator sigaction_media for specification
+IntT sigaction_spec(CallContext context, Signal* sig, SigAction* s_act, 
+                    SigAction* s_oact, ErrorCode* errno)
+{
+    TSCommand command = create_TSCommand();
+    IntT res;
+
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT is_act_NULL, is_oact_NULL;
+    
+        if (s_act == NULL)
+        {
+            is_act_NULL = 1;
+        }
+        else
+        {
+            is_act_NULL = 0;
+        }
+
+        if (s_oact == NULL)
+        {
+            is_oact_NULL = 1;
+        }
+        else
+        {
+            is_oact_NULL = 0;
+        }
+
+        if (is_act_NULL == 0)
+        {
+            format_TSCommand( &command, "sigaction:$(int)$(int)$(int)$(sigaction_data)",
+                             create_IntTObj(*sig), create_IntTObj(is_act_NULL), create_IntTObj(is_oact_NULL), s_act);
+        }
+        else
+        {
+            format_TSCommand( &command, "sigaction:$(int)$(int)$(int)",
+                             create_IntTObj(*sig), create_IntTObj(is_act_NULL), create_IntTObj(is_oact_NULL));
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            if (is_oact_NULL == 0)
+            {
+                read_StructSigaction(s_oact, &command.response);
+            }            
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        onSigaction(context, sig, s_oact, s_act, sigaction_spec);
+    }   
+}
+
+/** sigaltstack_spec **/
+mediator sigaltstack_media for specification
+SigaltstackReturnType* sigaltstack_spec( CallContext context, StackT* ss, ErrorCode* errno)
+{
+    call
+    {
+        IntT funcRes;
+        StackT* oldSs = create_StackT(NULL_VoidTPtr, 0, 0);
+        SizeT minsigstcksz;
+
+        TSCommand command = create_TSCommand();
+    
+         
+        if (ss!=NULL)
+        {
+            format_TSCommand( &command, "sigaltstack:$(int)$(stackt)", create_IntTObj(1), ss );
+        }
+        else
+        {
+            format_TSCommand( &command, "sigaltstack:$(int)", create_IntTObj(0));
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            funcRes = readInt_TSStream(&command.response);
+            readStackT_TSStream(context, &command.response, oldSs);
+            minsigstcksz = readSize_TSStream(&command.response);
+
+            *errno  = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_SigaltstackReturnType( funcRes, oldSs, minsigstcksz);
+  }
+}
+
+
+/** siginterrupt_spec **/
+mediator siginterrupt_media for specification
+IntT siginterrupt_spec( CallContext context, Signal* sig, IntT flag, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "siginterrupt:$(int)$(int)", sig, create_IntTObj(flag) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            res  = readInt_TSStream(&command.response);
+            *errno  = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        onSiginterrupt(context, sig, flag, siginterrupt_spec);
+    }
+}
+
+
+/** signal_spec **/
+//This mediator refers to: __sysv_signal, signal
+mediator signal_media for specification
+SignalHandler signal_spec(CallContext context, Signal* sig, SignalHandler handler, 
+                          ErrorCode* errno, bool lsbFunc)
+{
+    call
+    {
+        SignalHandler res;
+        TSCommand command = create_TSCommand();
+    
+        if (!lsbFunc)
+        {
+            format_TSCommand( &command, "signal:$(int)$(int)", sig, create_IntTObj(handler) );
+        }
+        else
+        {
+            format_TSCommand( &command, "__sysv_signal:$(int)$(int)", sig, create_IntTObj(handler) );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        onSignal(context, sig, handler, signal_spec);
+    }
+}
+
+
+/** sigpending_spec **/
+mediator sigpending_media for specification
+IntT sigpending_spec(CallContext context, SigSetTPtr set, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand(&command, "sigpending:$(ptr)",
+                         create_VoidTPtrObj(set));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            * errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        onSigpending(context, set, sigpending_spec);
+    }
+}
+
+
+/** sigprocmask_spec **/
+/*
+mediator sigprocmask_media for specification
+void sigprocmask_spec(CallContext context, SigMaskAction how, SigSetTPtr set, SigSetTPtr oset)
+{
+    ThreadState* thSt;
+    
+    call
+    {
+        TSCommand command = create_TSCommand();
+        String* str;
+    
+        format_TSCommand( &command, "sigprocmask:$(int)$(ptr)$(ptr)", 
+                          create_IntTObj(how),
+                          create_VoidTPtrObj(set),
+                          create_VoidTPtrObj(oset));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            str = readString_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;  
+    }
+    state
+    {
+        thSt = getThreadState_CallContext(context);
+        onSigprocmask(context, how, set, oset);
+    }
+}
+
+mediator sigprocmask_react_media for reaction
+SigprocmaskReactionType* sigprocmask_react(void)
+{
+    state
+    {
+        onSigprocmask_react(sigprocmask_react);
+    }
+}
+*/
+/** sigreturn_spec **/
+/****
+mediator sigreturn_media for specification
+ReturnType sigreturn_spec( CallContext context, ... )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "sigreturn" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+  }
+}
+****/
+
+
+/** sigsuspend_spec **/
+mediator sigsuspend_media for specification
+void sigsuspend_spec( CallContext context, SigSetTPtr sigmask)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "sigsuspend:$(ptr)", create_VoidTPtrObj(sigmask) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return;  
+    }
+    state
+    {
+        onSigsuspend(context, sigmask);
+    }
+}
+
+
+mediator sigsuspend_return_media for
+reaction SigsuspendReturnType* sigsuspend_return(void)
+{
+    state
+    {
+        onSigsuspendReturn(sigsuspend_return->context, sigsuspend_return);
+    }
+}
+
+/************************************************************************/
+/*                  Mediators for catchers reactions                    */
+/************************************************************************/
+
+mediator user_catcher_handler_reaction_start_media for 
+reaction UserCatcherHandlerStartReactionType* user_catcher_handler_reaction_start(void)
+{
+    state
+    {
+        on_user_catcher_handler_reaction_start(user_catcher_handler_reaction_start);
+    }
+}
+mediator user_catcher_handler_reaction_finish_media for 
+reaction UserCatcherHandlerFinishReactionType* user_catcher_handler_reaction_finish(void)
+{
+    state
+    {
+        on_user_catcher_handler_reaction_finish(user_catcher_handler_reaction_finish);
+    }
+}
+
+mediator user_agent_handler_reaction_start_media for 
+reaction UserAgentHandlerStartReactionType* user_agent_handler_reaction_start(void)
+{
+    state
+    {
+        on_user_agent_handler_reaction_start(user_agent_handler_reaction_start);
+    }
+}
+mediator user_agent_handler_reaction_finish_media for 
+reaction UserAgentHandlerFinishReactionType* user_agent_handler_reaction_finish(void)
+{
+    state
+    {
+        on_user_agent_handler_reaction_finish(user_agent_handler_reaction_finish);
+    }
+}
+
+
+mediator user_catcher_sigaction_reaction_start_media for 
+reaction UserCatcherSigactionStartReactionType* user_catcher_sigaction_reaction_start(void)
+{
+    state
+    {
+        on_user_catcher_sigaction_reaction_start(user_catcher_sigaction_reaction_start);
+    }
+}
+mediator user_catcher_sigaction_reaction_finish_media for 
+reaction UserCatcherSigactionFinishReactionType* user_catcher_sigaction_reaction_finish(void)
+{
+    state
+    {
+        on_user_catcher_sigaction_reaction_finish(user_catcher_sigaction_reaction_finish);
+    }
+}
+
+mediator user_agent_sigaction_reaction_start_media for 
+reaction UserAgentSigactionStartReactionType* user_agent_sigaction_reaction_start(void)
+{
+    state
+    {
+        on_user_agent_sigaction_reaction_start(user_agent_sigaction_reaction_start);
+    }
+}
+mediator user_agent_sigaction_reaction_finish_media for 
+reaction UserAgentSigactionFinishReactionType* user_agent_sigaction_reaction_finish(void)
+{
+    state
+    {
+        on_user_agent_sigaction_reaction_finish(user_agent_sigaction_reaction_finish);
+    }
+}
+
+

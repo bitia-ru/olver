@@ -1,0 +1,2724 @@
+ /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "io/pipe/pipe_model.seh"
+#include "common/common_model.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "fs/fs/fs_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "fs/meta/meta_model.seh"
+#include "io/file/file_config.h"
+#include "io/file/file_model.seh"
+#include "fs/fifo/fifo_config.h"
+#include "fs/fifo/fifo_model.seh"
+
+#include "common/common_media.seh"
+#pragma SEC subsystem fifo "fs.fifo"
+
+
+/*
+   The group of functions 'fs.fifo' consists of:
+       mkfifo [2]
+       close_fifo
+       write_fifo
+       read_fifo
+       writev_fifo
+       readv_fifo
+       open_fifo
+*/
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+--------------------------------------------------------------------------------
+
+NAME
+
+    mkfifo - make a FIFO special file
+
+SYNOPSIS
+
+    #include <sys/stat.h>
+    int mkfifo(const char *path, mode_t mode);
+
+DESCRIPTION
+
+    The mkfifo() function shall create a new FIFO special file named by the
+    pathname pointed to by path. The file permission bits of the new FIFO shall
+    be initialized from mode. The file permission bits of the mode argument
+    shall be modified by the process' file creation mask.
+
+    When bits in mode other than the file permission bits are set, the effect
+    is implementation-defined.
+
+    If path names a symbolic link, mkfifo() shall fail and set errno to
+    [EEXIST].
+
+    The FIFO's user ID shall be set to the process' effective user ID. The
+    FIFO's group ID shall be set to the group ID of the parent directory or to
+    the effective group ID of the process. Implementations shall provide a way
+    to initialize the FIFO's group ID to the group ID of the parent directory.
+    Implementations may, but need not, provide an implementation-defined way to
+    initialize the FIFO's group ID to the effective group ID of the calling
+    process.
+
+    Upon successful completion, mkfifo() shall mark for update the st_atime,
+    st_ctime, and st_mtime fields of the file. Also, the st_ctime and st_mtime
+    fields of the directory that contains the new entry shall be marked for
+    update.
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned. Otherwise, -1 shall be
+    returned, no FIFO shall be created, and errno shall be set to indicate the
+    error.
+
+ERRORS
+
+    The mkfifo() function shall fail if:
+
+        [EACCES]
+        A component of the path prefix denies search permission, or write
+        permission is denied on the parent directory of the FIFO to be created.
+
+        [EEXIST]
+        The named file already exists.
+
+        [ELOOP]
+        A loop exists in symbolic links encountered during resolution of the
+        path argument.
+
+        [ENAMETOOLONG]
+        The length of the path argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+        [ENOENT]
+        A component of the path prefix specified by path does not name an
+        existing directory or path is an empty string.
+
+        [ENOSPC]
+        The directory that would contain the new file cannot be extended or
+        the file system is out of file-allocation resources.
+
+        [ENOTDIR]
+        A component of the path prefix is not a directory.
+
+        [EROFS]
+        The named file resides on a read-only file system.
+
+    The mkfifo() function may fail if:
+
+        [ELOOP]
+        More than {SYMLOOP_MAX} symbolic links were encountered during
+        resolution of the path argument.
+
+        [ENAMETOOLONG]
+        As a result of encountering a symbolic link in resolution of the path
+        argument, the length of the substituted pathname string exceeded
+        {PATH_MAX}.
+*/
+specification
+IntT mkfifo_spec( CallContext context, CString* path, FilePermissions* mode, ErrorCode* errno)
+{
+    Bool3       isELOOP;
+    FileSystem* file_system=getFileSystem(context);
+    FileSystem* pre_fs=clone(file_system);
+    CString *   absPath = resolvePath_Ext(context, file_system, path, &isELOOP);
+    File*       file = getFile_FileSystem( file_system, absPath );
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        if (file!=NULL && file->kind==SymbolicLinkFile)
+        {
+            /*
+            * If path names a symbolic link, mkfifo() shall fail and set errno to [EEXIST].
+            */
+            REQ("mkfifo.04", "Function shall fail on symbolic link", mkfifo_spec==-1 && *errno==SUT_EEXIST);
+        }
+
+        /*
+        * Otherwise, -1 shall be returned, no FIFO shall be created, and errno shall be
+        * set to indicate the error.
+        */
+        ERROR_BEGIN(POSIX_MKFIFO, "mkfifo.11", mkfifo_spec==-1, *errno)
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [EACCES] A component of the path prefix denies search permission, or write
+        * permission is denied on the parent directory of the FIFO to be created.
+        */
+        ERROR_SHALL3(POSIX_MKFIFO, EACCES, "mkfifo.12.01", isEACCES_dir_mkrm(context, pre_fs, absPath))
+
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [EEXIST] The named file already exists.
+        */
+        ERROR_SHALL3(POSIX_MKFIFO, EEXIST, "mkfifo.12.02", doesFileExist_FileSystem(pre_fs, absPath))
+
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [ELOOP] A loop exists in symbolic links encountered during resolution of the
+        * path argument.
+        */
+        ERROR_SHALL3(POSIX_MKFIFO, ELOOP, "mkfifo.12.03", isELOOP)
+
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [ENAMETOOLONG] The length of the path argument exceeds {PATH_MAX} or a
+        * pathname component is longer than {NAME_MAX}.
+        */
+        ERROR_SHALL3(POSIX_MKFIFO, ENAMETOOLONG, "mkfifo.12.04", isENAMETOOLONG(context, path))
+
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [ENOENT] A component of the path prefix specified by path does not name an
+        * existing directory or path is an empty string.
+        */
+        ERROR_SHALL3(POSIX_MKFIFO, ENOENT, "mkfifo.12.05", isENOENT_dir(context, pre_fs, getParentDir_Path(absPath)))
+
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [ENOSPC] The directory that would contain the new file cannot be extended or
+        * the file system is out of file-allocation resources.
+        */
+        ERROR_UNCHECKABLE(POSIX_MKFIFO, ENOSPC, "mkfifo.12.06", "Disk space not modeled")
+
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [ENOTDIR] A component of the path prefix is not a directory.
+        */
+        ERROR_SHALL3(POSIX_MKFIFO, ENOTDIR, "mkfifo.12.07", isENOTDIR_dir(context, pre_fs, getParentDir_Path(absPath)))
+
+        /*
+        * The mkfifo() function shall fail if:
+        *
+        * [EROFS] The named file resides on a read-only file system.
+        */
+        ERROR_SHALL(POSIX_MKFIFO, EROFS, "mkfifo.12.08", TODO_ERR(EROFS))
+
+        /*
+        * The mkfifo() function may fail if:
+        *
+        * [ELOOP] More than {SYMLOOP_MAX} symbolic links were encountered during
+        * resolution of the path argument.
+        */
+        ERROR_MAY3(POSIX_MKFIFO, ELOOP, "mkfifo.13.01", isELOOP)
+
+        /*
+        * The mkfifo() function may fail if:
+        *
+        * [ENAMETOOLONG] As a result of encountering a symbolic link in resolution of
+        * the path argument, the length of the substituted pathname string exceeded {
+        * PATH_MAX}.
+        */
+        ERROR_MAY3(POSIX_MKFIFO, ENAMETOOLONG, "mkfifo.13.02", isENAMETOOLONG(context, absPath))
+
+        ERROR_END()
+
+        /*
+        * Upon successful completion, 0 shall be returned.
+        */
+        REQ("mkfifo.10", "Function shall return zero", mkfifo_spec==0);
+
+
+
+
+        return true;
+    }
+}
+
+
+void mkfifo_model( CallContext context, CString* path, FilePermissions* mode)
+{
+    Bool3       isELOOP;
+    FileDescId  fdi; /* TODO: реализовать для FIFO хранилище всех файловых дескрипторов */
+    FileSystem* file_system=getFileSystem(context);
+    CString *   absPath = resolvePath_Ext(context, file_system, path, &isELOOP);
+    File*       file;
+    FIFOFileDescriptor* descr=create_FIFOFileDescriptor(create_CByteArray(NULL, 0));
+    ProcessState* ps=getProcessState_CallContext(context);
+    CString*      parPath=getParentDir_Path(absPath);
+    File*         parentDir=getFile_FileSystem(getFileSystem(context), parPath);
+
+
+    file = registerFile( file_system, path );
+
+    if (file != NULL)
+    {
+        file->descriptor=descr;
+        file->kind=FIFOFile;
+        file->size=create_OffTObj(0);
+
+        /*
+        * The file permission bits of the new FIFO shall be initialized from mode. The
+        * file permission bits of the mode argument shall be modified by the process'
+        * file creation mask.
+        */
+        IMPLEMENT_REQ("mkfifo.02");
+        file->permissions=ANDPermissions(ps->meta.umask, mode);
+
+        /*
+        * The FIFO's user ID shall be set to the process' effective user ID.
+        */
+        IMPLEMENT_REQ("mkfifo.05");
+        file->uid=create_UidTObj(ps->meta.effective_userid);
+
+
+        if(FILE_IO_OPEN_SETS_GID_TO_PROCESS_GID)
+        {
+            /*
+            * The FIFO's group ID shall be set to the group ID of the parent directory or to
+            * the effective group ID of the process.
+            */
+            IMPLEMENT_REQ("mkfifo.06");
+
+            file->gid=create_GidTObj(ps->meta.effective_groupid);
+        }
+        else
+        {
+            if (parentDir!=NULL && parentDir->gid!=NULL)
+            {
+                /*
+                * Implementations shall provide a way to initialize the FIFO's group ID to the
+                * group ID of the parent directory. Implementations may, but need not, provide an
+                * implementation-defined way to initialize the FIFO's group ID to the effective
+                * group ID of the calling process.
+                */
+                IMPLEMENT_REQ("mkfifo.07");
+
+                file->gid=clone(parentDir->gid);
+            }
+        }
+
+        /*
+        * Upon successful completion, mkfifo() shall mark for update the st_atime,
+        * st_ctime, and st_mtime fields of the file.
+        */
+        IMPLEMENT_REQ("mkfifo.08");
+        file->atime_updated=false;
+        file->ctime_updated=false;
+        file->mtime_updated=false;
+
+        if (parentDir!=NULL)
+        {
+            /*
+            * Also, the st_ctime and st_mtime fields of the directory that contains the new
+            * entry shall be marked for update.
+            */
+            IMPLEMENT_REQ("mkfifo.09");
+            parentDir->ctime_updated=false;
+            parentDir->mtime_updated=false;
+        }
+    }
+}
+
+void OnFIFO(CallContext context, CString* path, FilePermissions* mode, IntT mkfifo_spec)
+{
+    if (mkfifo_spec!=-1)
+    {
+        mkfifo_model(context, path, mode);
+    }
+}
+
+
+specification
+IntT close_fifo_spec( CallContext context,  FileDescId  fildes, ErrorCode* errno)
+{
+    FileDescriptor* fd=getFileDescriptor(fildes);
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * otherwise, -1 shall be returned and errno set to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_CLOSE, "close.13.02", close_fifo_spec==-1, *errno )
+        /*
+        * The close() function shall fail if:
+        *
+        * [EBADF]
+        *
+        * The fildes argument is not a valid file descriptor.
+        */
+        ERROR_SHALL(POSIX_CLOSE, EBADF, "close.14.01", fd==NULL)
+
+        /*
+        * The close() function shall fail if:
+        *
+        * [EINTR]
+        *
+        * The close() function was interrupted by a signal.
+        */
+        ERROR_SHALL(POSIX_CLOSE, EINTR, "close.14.02", TODO_ERR(EINTR))
+
+        /*
+        * The close() function may fail if:
+        *
+        * [EIO]
+        *
+        * An I/O error occurred while reading from or writing to the file system.
+        */
+        ERROR_UNCHECKABLE(POSIX_CLOSE, EIO, "close.15.01", "Can not check IO errors")
+
+        ERROR_END()
+
+        /*
+         * Upon successful completion, 0 shall be returned;
+         */
+        REQ("close.13.01", "Upon successful completion, 0 shall be returned",
+             close_fifo_spec==0);
+
+        /*
+         * The close() function shall deallocate the file descriptor indicated by fildes.
+         * To deallocate means to make the file descriptor available for return by
+         * subsequent calls to open() or other functions that allocate file descriptors.
+         */
+        REQ("?close.01", "File descriptor shall be deallocated",
+            getFileDescriptor(fildes)==NULL);
+
+        /*
+         * If an I/O error occurred while reading from or writing to the file system
+         * during close(), it may return -1 with errno set to [EIO]; if this error is
+         * returned, the state of fildes is unspecified.
+         */
+        REQ_UNCHECKABLE("close.16.02", "Can't check IO errors");
+
+        /*
+         * If close() is interrupted by a signal that is to be caught, it shall return -1
+         * with errno set to [EINTR] and the state of fildes is unspecified.
+         */
+        REQ("close.16.01", "", TODO_REQ());
+
+
+        /*
+         * If the link count of the file is 0, when all file descriptors associated with
+         * the file are closed, the space occupied by the file shall be freed and the file
+         * shall no longer be accessible.
+         */
+        REQ("close.05", "", TODO_REQ());
+
+        /*
+         * When there is an outstanding cancelable asynchronous I/O operation against
+         * fildes when close() is called, that I/O operation may be canceled.
+         */
+        REQ_UNCHECKABLE("close.10.01", "AIO");
+
+        /*
+         * An I/O operation that is not canceled completes as if the close() operation had
+         * not yet occurred.
+         */
+        REQ_UNCHECKABLE("close.10.02", "AIO");
+
+        /*
+         * All operations that are not canceled shall complete as if the close() blocked
+         * until the operations completed.
+         */
+        REQ_UNCHECKABLE("close.10.03", "AIO");
+
+        /*
+         * The close() operation itself need not block awaiting such I/O completion.
+         */
+        REQ_UNCHECKABLE("close.10.04", "AIO");
+
+        return true;
+  }
+}
+
+void onFIFOClose( CallContext context,  FileDescId  fildes, IntT close_spec)
+{
+    File* file=getFile_FileDescId(fildes);
+    FileDescriptor* fdesc=getFileDescriptor(fildes);
+
+    if (close_spec==0)
+    {
+        unregisterFileDescriptor(fildes);
+
+        if (fdesc!=NULL && fdesc->path==NULL && file!=NULL)
+        {
+            FileDescriptor* fd2=getFileDescriptor_File(context, file);
+            FileSystem*     file_system=getFileSystem(context);
+            if (fd2==NULL)
+            {
+                remove_Map( file_system->files, create_FileIdObj(fdesc->file));
+            }
+        }
+
+    }
+}
+
+
+
+specification
+void write_fifo_spec(CallContext context, FileDescId fildes, VoidTPtr buf,
+                      SizeT nbyte, ErrorCode* errno)
+{
+    File* file=getFile_FileDescId(fildes);
+    LongT pipe_buf=getSystemConfigurationValue(context, SUT_PC_PIPE_BUF);
+
+    pre
+    {
+        /*
+        * [Variable {PIPE_BUF} shall have known value]
+        */
+        REQ("", "Variable {PIPE_BUF} shall have known value",
+            pipe_buf!= SC_VALUE_UNKNOWN && pipe_buf!= SC_VALUE_NO_LIMIT);
+
+        if (file!=NULL)
+        {
+            /*
+            * [Function works with FIFO or pipe files only]
+            */
+            REQ("", "File shall be FIFO or pipe", file->kind == FIFOFile);
+
+
+            /*
+            * If nbyte is zero and the file is not a regular file, the results are
+            * unspecified.
+            */
+            REQ("app.write.03", "nbyte shall not be zero", nbyte!=0);
+        }
+
+        /*
+        * If the value of nbyte is greater than {SSIZE_MAX}, the result is implementation-
+        * defined.
+        */
+        REQ("app.write.13", "The value of nbyte shall be less than {SSIZE_MAX}",
+            (nbyte <= (SizeT)max_SSizeT));
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+
+
+specification typedef struct WriteFIFOCall WriteFIFOCall = {};
+
+WriteFIFOCall * create_WriteFIFOCall(
+    FileDescId fildes,
+    VoidTPtr   buf,
+    SizeT      nbyte,
+    SSizeT     oldSize
+)
+{
+    return create(&type_WriteFIFOCall, fildes, buf, nbyte, oldSize);
+}
+
+void onWriteFIFO(CallContext context, FileDescId fildes, VoidTPtr buf, SizeT nbyte)
+{
+    FIFOFileDescriptor* fdesc=getDescriptor_FileDescId(fildes);
+    SSizeT oldSize=-1;
+    if (fdesc!=NULL)
+    {
+        oldSize=size_CByteArray(fdesc->data);
+    }
+    startBlockedCall(context, create_WriteFIFOCall(fildes, buf, nbyte, oldSize));
+}
+
+
+void write_fifo_model(CallContext context, SSizeT write_fifo_spec)
+{
+    WriteFIFOCall* blocked_call=finishBlockedCall(context);
+    FileDescriptor* fdesc=getFileDescriptor(blocked_call->fildes);
+    FIFOFileDescriptor*    fifoDescr=getDescriptor_FileDescId(blocked_call->fildes);
+    CByteArray* data;
+    File* file=getFile_FileDescId(blocked_call->fildes);
+
+    if (fifoDescr!=NULL && file!=NULL)
+    {
+
+        data=readCByteArray_VoidTPtr(blocked_call->buf, write_fifo_spec);
+
+        /*
+        * There is no file offset associated with a pipe, hence each write request shall
+        * append to the end of the pipe.
+        */
+        IMPLEMENT_REQ("write.16");
+
+        fifoDescr->data=concat_CByteArray(fifoDescr->data, data);
+
+        if (blocked_call->nbyte>0)
+        {
+            /*
+             * Upon successful completion, where nbyte is greater than 0, write() shall mark
+             * for update the st_ctime and st_mtime fields of the file,
+             *
+             */
+            IMPLEMENT_REQ("write.22.01");
+            file->ctime_updated=false;
+            file->mtime_updated=false;
+        }
+     }
+}
+
+void onWriteFIFOReturn(CallContext context, SSizeT write_fifo_spec)
+{
+    if (write_fifo_spec!=-1)
+    {
+        write_fifo_model(context, write_fifo_spec);
+    }
+}
+
+
+specification typedef struct WriteFIFOReturnType WriteFIFOReturnType= {};
+
+WriteFIFOReturnType * create_WriteFIFOReturnType(
+    CallContext context,
+    SSizeT      functionResult,
+    ErrorCode*  errno
+)
+{
+    return create(&type_WriteFIFOReturnType, context, functionResult, errno);
+}
+
+reaction WriteFIFOReturnType* write_fifo_return(void)
+{
+    post
+    {
+
+        CallContext            context=write_fifo_return->context;
+        ProcessState*          ps=getProcessState_CallContext(context);
+        WriteFIFOCall*         fCall= findBlockedCall(@getBlockedCalls(), context);
+        LongT                  pipe_buf=getSystemConfigurationValue(context, SUT_PC_PIPE_BUF);
+        FileDescId             fildes=fCall->fildes;
+        File*                  file=getFile_FileDescId(fildes);
+        FIFOFileDescriptor*    fifoDescr=getDescriptor_FileDescId(fildes);
+
+
+        /*
+         * Otherwise, -1 shall be returned and errno set to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_WRITE, "write.40.03", write_fifo_return->functionResult==-1, *write_fifo_return->errno)
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * The O_NONBLOCK flag is set for the file descriptor and the thread would be
+         * delayed in the write() operation.
+         *
+         */
+        /*
+        * Otherwise, write() shall transfer no data and return -1 with errno set to [
+        * EAGAIN].
+        */
+        /*
+        * If the O_NONBLOCK flag is set, write() requests shall be handled differently,
+        * in the following ways:
+        *
+        * A write request for more than {PIPE_BUF} bytes shall cause one of the following:
+        *
+        * When no data can be written, transfer no data, and return -1 with errno set to [
+        * EAGAIN].
+        */
+        ERROR_SHALL3(POSIX_WRITE, EAGAIN, "write.41.01;write.19.02.02;write.19.03.02", isO_NONBLOCKset(fildes))
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EBADF]
+         *
+         * The fildes argument is not a valid file descriptor open for writing.
+         *
+         */
+        ERROR_SHALL(POSIX_WRITE, EBADF, "write.41.02", file==NULL ||
+            getAccessMode_FileDescId(fildes)==ReadOnly)
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EFBIG]
+         *
+         * An attempt was made to write a file that exceeds the implementation-defined
+         * maximum file size [XSI]  or the process' file size limit,  and there was no
+         * room for any bytes to be written.
+         *
+         */
+         ERROR_UNCHECKABLE(POSIX_WRITE, EFBIG, "write.41.03",
+            "Implementation-defined maximum file size can not be checked")
+
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EINTR]
+         *
+         * The write operation was terminated due to the receipt of a signal, and no data
+         * was transferred.
+         *
+         */
+        ERROR_SHALL(POSIX_WRITE, EINTR, "write.41.05", TODO_ERR(EINTR))
+
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [ENOSPC]
+         *
+         * There was no free space remaining on the device containing the file.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITE, ENOSPC, "write.41.07", "Can not determine free space")
+
+
+        /*
+         * The write() and [XSI] pwrite() functions may fail if:
+         *
+         * [EIO]
+         *
+         * A physical I/O error has occurred.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITE, EIO, "write.43.02", "Can not check physical I/O errors")
+
+        /*
+         * The write() and [XSI] pwrite() functions may fail if:
+         *
+         * [ENOBUFS]
+         *
+         * Insufficient resources were available in the system to perform the operation.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITE, ENOBUFS, "write.43.03", "Can not check insufficient resources case")
+
+        /*
+         * The write() and [XSI] pwrite() functions may fail if:
+         *
+         * [ENXIO]
+         *
+         * A request was made of a nonexistent device, or the request was outside the
+         * capabilities of the device.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITE, ENXIO, "write.43.04", "Impossible to check details about devices")
+
+
+        /*
+        * The write() and [XSI] pwrite() functions shall fail if:
+        *
+        * [EPIPE] An attempt is made to write to a pipe or FIFO that is not open for
+        * reading by any process, or that only has one end open. A SIGPIPE signal shall
+        * also be sent to the thread.
+        */
+        ERROR_SHALL(POSIX_WRITE, EPIPE, "write.41.08", !isFIFOOpenedForReadingWriting(context, fildes, true))
+
+        ERROR_END()
+
+        /*
+         * This number shall never be greater than nbyte.
+         *
+         */
+        REQ("write.40.02", "Function shall return number not greater than nbyte",
+            write_fifo_return->functionResult<=fCall->nbyte);
+
+        if (getBlockMode_FileDescId(fildes)==Blocking)
+        {
+            /*
+            * If the O_NONBLOCK flag is clear, a write request may cause the thread to block,
+            * but on normal completion it shall return nbyte.
+            */
+            REQ("write.18", "Function shall return nbyte", write_fifo_return->functionResult==fCall->nbyte);
+        }
+        else
+        {
+            if (fCall->nbyte<=pipe_buf)
+            {
+                /*
+                * A write request for {PIPE_BUF} or fewer bytes shall have the following effect:
+                * if there is sufficient space available in the pipe, write() shall transfer all
+                * the data and return the number of bytes requested.
+                */
+                REQ("write.19.02.01", "Function shall return the number of bytes requested",
+                    write_fifo_return->functionResult==fCall->nbyte);
+            }
+            else
+            {
+                if (fCall->oldSize==0)
+                {
+                    /*
+                    * If the O_NONBLOCK flag is set, write() requests shall be handled differently,
+                    * in the following ways:
+                    *
+                    * A write request for more than {PIPE_BUF} bytes shall cause one of the following:
+                    *
+                    * When at least one byte can be written, transfer what it can and return the
+                    * number of bytes written. When all data previously written to the pipe is read,
+                    * it shall transfer at least {PIPE_BUF} bytes.
+                    */
+                    REQ("write.19.03.01", "Function shall write not less then {PIPE_BUF} bytes",
+                        size_CByteArray(fifoDescr->data)>=pipe_buf);
+                }
+            }
+        }
+
+
+        /*
+         * If write() is interrupted by a signal after it successfully writes some data,
+         * it shall return the number of bytes written.
+         *
+         */
+        REQ("write.12", "", TODO_REQ());
+
+
+        /*
+         * If the O_DSYNC bit has been set, write I/O operations on the file descriptor
+         * shall complete as defined by synchronized I/O data integrity completion
+         *
+         */
+        REQ("write.24", "", TODO_REQ());
+
+        /*
+         * If the O_SYNC bit has been set, write I/O operations on the file descriptor
+         * shall complete as defined by synchronized I/O file integrity completion.
+         *
+         */
+        REQ("write.25", "", TODO_REQ());
+
+        /*
+        * If the O_NONBLOCK flag is set, write() requests shall be handled differently,
+        * in the following ways:
+        *
+        * The write() function shall not block the thread.
+        */
+        REQ("write.19.01", "", TODO_REQ());
+
+        /*
+        * Write requests of {PIPE_BUF} bytes or less shall not be interleaved with data
+        * from other processes doing writes on the same pipe.
+        */
+        REQ("write.17.01", "", TODO_REQ());
+
+        /*
+        * Writes of greater than {PIPE_BUF} bytes may have data interleaved, on arbitrary
+        * boundaries, with writes by other processes, whether or not the O_NONBLOCK flag
+        * of the file status flags is set.
+        */
+        REQ("write.17.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+specification
+void read_fifo_spec(CallContext context, FileDescId fildes, VoidTPtr buf,
+                      SizeT nbyte, ErrorCode* errno)
+{
+    File* file=getFile_FileDescId(fildes);
+
+    pre
+    {
+        if (file!=NULL)
+        {
+            /*
+             * [Function works with FIFO and pipe files only]
+             *
+             */
+            REQ("", "Function works with FIFO and pipe files only",
+                file->kind==FIFOFile);
+        }
+
+
+        /*
+        * If the value of nbyte is greater than {SSIZE_MAX}, the result is implementation-defined.
+        *
+        */
+        REQ("app.read.51", "The value of nbyte shall be less than {SSIZE_MAX}",
+            (nbyte <= (SizeT)max_SSizeT));
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+
+specification typedef struct ReadFIFOCall ReadFIFOCall = {};
+
+ReadFIFOCall * create_ReadFIFOCall(
+    FileDescId fildes,
+    VoidTPtr buf,
+    SizeT nbyte,
+    FIFOFileDescriptor*  fifoDescr
+)
+{
+    return create(&type_ReadFIFOCall, fildes, buf, nbyte, fifoDescr);
+}
+
+void onReadFIFO(CallContext context, FileDescId fildes, VoidTPtr buf, SizeT nbyte)
+{
+    FIFOFileDescriptor*  fifoDescr=getDescriptor_FileDescId(fildes);
+
+    if (fifoDescr!=NULL)
+    {
+        startBlockedCall(context, create_ReadFIFOCall(fildes, buf, nbyte, clone(fifoDescr)));
+    }
+    else
+    {
+        startBlockedCall(context, create_ReadFIFOCall(fildes, buf, nbyte, NULL));
+    }
+}
+
+
+void onReadFIFOReturn(CallContext context, SSizeT read_fifo_spec, ReadFIFOReturnType* read_fifo_return)
+{
+    ReadFIFOCall*          blocked_call=finishBlockedCall(context);
+    File*                  file=getFile_FileDescId(blocked_call->fildes);
+    FIFOFileDescriptor*    fifoDescr=getDescriptor_FileDescId(blocked_call->fildes);
+
+    if (read_fifo_spec!=-1 && file!=NULL && fifoDescr!=NULL)
+    {
+        file->atime_updated=false;
+
+        read_fifo_return->oldArray=clone(fifoDescr->data);
+
+        if (size_CByteArray(fifoDescr->data)>=read_fifo_spec)
+        {
+            fifoDescr->data=right_CByteArray(fifoDescr->data, read_fifo_spec);
+        }
+    }
+}
+
+
+specification typedef struct ReadFIFOReturnType ReadFIFOReturnType= {};
+
+ReadFIFOReturnType * create_ReadFIFOReturnType(
+    CallContext context,
+    SSizeT      functionResult,
+    ErrorCode*  errno,
+    CByteArray* oldArray
+)
+{
+    return create(&type_ReadFIFOReturnType, context, functionResult, errno, oldArray);
+}
+
+reaction ReadFIFOReturnType* read_fifo_return(void)
+{
+    post
+    {
+        CallContext            context=read_fifo_return->context;
+        ProcessState*          ps=getProcessState_CallContext(context);
+        ReadFIFOCall*          fCall= findBlockedCall(@getBlockedCalls(), context);
+        CByteArray*            data=readCByteArray_VoidTPtr(fCall->buf, fCall->nbyte);
+        FileDescId             fildes=fCall->fildes;
+        File*                  file=getFile_FileDescId(fildes);
+        FIFOFileDescriptor*    fifoDescr=fCall->fifoDescr;
+
+        if (isFIFOOpenedForReadingWriting(context, fildes, false) && fifoDescr!=NULL && size_CByteArray(fifoDescr->data)==0 && getBlockMode_FileDescId(fildes)==Nonblocking)
+        {
+            /*
+             * When attempting to read from an empty pipe or FIFO:
+             *
+             * If some process has the pipe open for writing and O_NONBLOCK is set, read()
+             * shall return -1 and set errno to [EAGAIN].
+             */
+            REQ("read.09.02", "Function shall return -1 and set errno to [EAGAIN]",
+                read_fifo_return->functionResult==-1 && *read_fifo_return->errno==SUT_EAGAIN);
+        }
+
+        /*
+         * Otherwise, the functions shall return -1 and set errno to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_READ, "read.41.02", read_fifo_return->functionResult==-1, *read_fifo_return->errno)
+
+        /*
+         * The read() and [XSI] pread() functions shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * The O_NONBLOCK flag is set for the file descriptor and the thread would be
+         * delayed.
+         *
+         */
+        ERROR_SHALL3(POSIX_READ, EAGAIN, "read.42.01", isO_NONBLOCKset(fildes))
+
+        /*
+         * The read() and [XSI] pread() functions shall fail if:
+         *
+         * [EBADF]
+         *
+         * The fildes argument is not a valid file descriptor open for reading.
+         *
+         */
+        ERROR_SHALL(POSIX_READ, EBADF, "read.42.02", file==NULL || getAccessMode_FileDescId(fildes)==WriteOnly)
+
+        /*
+         * The read() and [XSI] pread() functions shall fail if:
+         *
+         * [EINTR]
+         *
+         * The read operation was terminated due to the receipt of a signal, and no data
+         * was transferred.
+         *
+         */
+        ERROR_SHALL(POSIX_READ, EINTR, "read.42.04", TODO_ERR(EINTR))
+
+        /*
+         * The read() and [XSI] pread() functions may fail if:
+         *
+         * [EIO]
+         *
+         * A physical I/O error has occurred.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_READ, EIO, "read.44.01", "Can not check IO errors")
+
+        /*
+         * The read() and [XSI] pread() functions may fail if:
+         *
+         * [ENOBUFS]
+         *
+         * Insufficient resources were available in the system to perform the operation.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_READ, ENOBUFS, "read.44.02", "Can not check insufficient resources case")
+
+        /*
+         * The read() and [XSI] pread() functions may fail if:
+         *
+         * [ENOMEM]
+         *
+         * Insufficient memory was available to fulfill the request.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_READ, ENOMEM, "read.44.03", "Can not check insufficient memory case")
+
+        ERROR_END()
+
+
+        if (!isFIFOOpenedForReadingWriting(context, fildes, false) && fifoDescr!=NULL && size_CByteArray(fifoDescr->data)==0)
+        {
+            /*
+             * When attempting to read from an empty pipe or FIFO:
+             *
+             * If no process has the pipe open for writing, read() shall return 0 to indicate
+             * end-of-file.
+             */
+            REQ("read.09.01", "Function shall return zero", read_fifo_return->functionResult==0);
+        }
+
+
+        /*
+         * Upon successful completion, read() [XSI]  and pread() shall return a non-
+         * negative integer indicating the number of bytes actually read.
+         *
+         */
+        REQ("read.41.01", "Return value shall be non negative", read_fifo_return->functionResult>=0);
+
+        /*
+         * and shall return the number of bytes read. This number shall never be greater
+         * than nbyte.
+         *
+         */
+        REQ("read.13.02", "Number of bytes read shall never be greater than nbyte", read_fifo_return->functionResult<=fCall->nbyte);
+
+
+        if (size_CByteArray(fifoDescr->data)<fCall->nbyte && size_CByteArray(fifoDescr->data)!=0)
+        {
+            /*
+             * The value returned may be less than nbyte
+             *
+             * or if the file is a pipe or FIFO or special file and has fewer than nbyte bytes
+             * immediately available for reading.
+             */
+            REQ("read.14.03", "The value returned shall be less than nbyte ",
+                read_fifo_return->functionResult<fCall->nbyte);
+        }
+
+
+        if (size_CByteArray(fifoDescr->data)!=0)
+        {
+            /*
+             * The read() function reads data previously written to a file.
+             *
+             */
+            REQ("read.52", "Read data shall be valid", checkFIFODataRead(context, fifoDescr->data, fCall->buf, read_fifo_return->functionResult));
+        }
+        else
+        {
+            /*
+            * When attempting to read from an empty pipe or FIFO:
+            *
+            * If some process has the pipe open for writing and O_NONBLOCK is clear, read()
+            * shall block the calling thread until some data is written or the pipe is closed
+            * by all processes that had the pipe open for writing.
+            */
+            REQ("pread.09.03", "Read data shall be valid", checkFIFODataRead(context, read_fifo_return->oldArray, fCall->buf, read_fifo_return->functionResult));
+        }
+
+
+        if (fCall->nbyte>0)
+        {
+            File*                  file=getFile_FileDescId(fildes);
+
+            /*
+             * Upon successful completion, where nbyte is greater than 0, read() shall mark
+             * for update the st_atime field of the file
+             *
+             */
+            REQ("?read.13.01", "read() shall mark for for update the st_atime field of the file",
+                file->atime_updated == false);
+        }
+
+        /*
+        * The value returned may be less than nbyte
+        *
+        * if the read() request was interrupted by a signal,
+        */
+        REQ("read.14.02", "", TODO_REQ());
+
+
+        /*
+         * If a read() is interrupted by a signal before it reads any data, it shall
+         * return -1 with errno set to [EINTR].
+         *
+         */
+        REQ("read.15", "", TODO_REQ());
+
+        /*
+         * If a read() is interrupted by a signal after it has successfully read some data,
+         * it shall return the number of bytes read.
+         *
+         */
+        REQ("read.16", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+specification
+void writev_fifo_spec( CallContext context, FileDescId fildes, List* iov,
+                       ErrorCode* errno)
+{
+    File* file=getFile_FileDescId(fildes);
+    LongT pipe_buf=getSystemConfigurationValue(context, SUT_PC_PIPE_BUF);
+
+    pre
+    {
+        /*
+        * [Variable {PIPE_BUF} shall have known value]
+        */
+        REQ("", "Variable {PIPE_BUF} shall have known value",
+            pipe_buf!= SC_VALUE_UNKNOWN && pipe_buf!= SC_VALUE_NO_LIMIT);
+
+        if (file!=NULL)
+        {
+            /*
+            * [Function works with FIFO or pipe files only]
+            */
+            REQ("", "File shall be FIFO or pipe", file->kind == FIFOFile);
+
+            /*
+            * For other file types, the behavior is unspecified.
+            */
+            REQ("app.writev.05", "Data length shall be non zero", sumIOVecMembers(iov)!=0);
+
+        }
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+specification typedef struct WritevFIFOCall WritevFIFOCall = {};
+
+WritevFIFOCall * create_WritevFIFOCall(
+    FileDescId fildes,
+    List*      iov,
+    SSizeT     oldSize
+)
+{
+    return create(&type_WritevFIFOCall, fildes, iov, oldSize);
+}
+
+void onWritevFIFO(CallContext context, FileDescId fildes, List* iov)
+{
+    FIFOFileDescriptor* fdesc=getDescriptor_FileDescId(fildes);
+    SSizeT oldSize=-1;
+    if (fdesc!=NULL)
+    {
+        oldSize=size_CByteArray(fdesc->data);
+    }
+    startBlockedCall(context, create_WritevFIFOCall(fildes, iov, oldSize));
+}
+
+
+void writev_fifo_model(CallContext context, SSizeT writev_fifo_spec)
+{
+    WritevFIFOCall* blocked_call=finishBlockedCall(context);
+    FileDescriptor* fdesc=getFileDescriptor(blocked_call->fildes);
+    FIFOFileDescriptor*    fifoDescr=getDescriptor_FileDescId(blocked_call->fildes);
+    CByteArray* data;
+    File* file=getFile_FileDescId(blocked_call->fildes);
+    SizeT sumLen=0;
+    List* iov=blocked_call->iov;
+    IntT i=0;
+
+    if (fifoDescr!=NULL && file!=NULL)
+    {
+        sumLen=0;
+        for (i=0;i<size_List(iov);i++)
+        {
+            IOvec* curVec=get_List(iov, i);
+            SizeT  curLen;
+
+            if (sumLen>=writev_fifo_spec)
+            {
+                break;
+            }
+
+            if (sumLen+curVec->iov_len<=writev_fifo_spec)
+            {
+                curLen=curVec->iov_len;
+            }
+            else
+            {
+                curLen=writev_fifo_spec-sumLen;
+            }
+
+            /*
+             * Each iovec entry specifies the base address and length of an area in memory
+             * from which data should be written. The writev() function shall always write a
+             * complete area before proceeding to the next.
+             */
+            IMPLEMENT_REQ("writev.03");
+
+            sumLen+=curVec->iov_len;
+
+            /*
+            * The writev() function shall gather output data from the iovcnt buffers
+            * specified by the members of the iov array: iov[0], iov[1], ..., iov[iovcnt-1].
+            *
+            */
+            IMPLEMENT_REQ("writev.01");
+
+
+            data=readCByteArray_VoidTPtr(curVec->iov_base, curLen);
+
+            /*
+            * There is no file offset associated with a pipe, hence each write request shall
+            * append to the end of the pipe.
+            */
+            IMPLEMENT_REQ("writev.pwrite.16");
+
+            fifoDescr->data=concat_CByteArray(fifoDescr->data, data);
+
+            /*
+             * Upon successful completion, where nbyte is greater than 0, write() shall mark
+             * for update the st_ctime and st_mtime fields of the file,
+             *
+             */
+            IMPLEMENT_REQ("writev.pwrite.22.01");
+            file->ctime_updated=false;
+            file->mtime_updated=false;
+        }
+
+    }
+}
+
+void onWritevFIFOReturn(CallContext context, SSizeT writev_fifo_spec)
+{
+    if (writev_fifo_spec!=-1)
+    {
+        writev_fifo_model(context, writev_fifo_spec);
+    }
+}
+
+reaction WriteFIFOReturnType* writev_fifo_return(void)
+{
+    post
+    {
+
+        CallContext            context=writev_fifo_return->context;
+        ProcessState*          ps=getProcessState_CallContext(context);
+        WritevFIFOCall*         fCall= findBlockedCall(@getBlockedCalls(), context);
+        LongT                  pipe_buf=getSystemConfigurationValue(context, SUT_PC_PIPE_BUF);
+        FileDescId             fildes=fCall->fildes;
+        File*                  file=getFile_FileDescId(fildes);
+        FIFOFileDescriptor*    fifoDescr=getDescriptor_FileDescId(fildes);
+        List* iov=fCall->iov;
+
+
+        ERROR_BEGIN(POSIX_WRITEV, "writev.07.02;writev.07.04", writev_fifo_return->functionResult==-1, *writev_fifo_return->errno)
+
+        /*
+         * In addition, the writev() function shall fail if:
+         *
+         * [EINVAL] The sum of the iov_len values in the iov array would overflow an
+         * ssize_t.
+         */
+        /*
+         * If the sum of the iov_len values is greater than {SSIZE_MAX}, the operation
+         * shall fail and no data shall be transferred.
+         */
+        ERROR_SHALL(POSIX_WRITEV, EINVAL, "writev.08.01;writev.06", sumIOVecMembers(iov)>(SSizeT)max_SSizeT)
+
+        /*
+         * The writev() function may fail and set errno to:
+         *
+         * [EINVAL] The iovcnt argument was less than or equal to 0, or greater than {
+         * IOV_MAX}.
+         */
+        /*
+         * The iovcnt argument is valid if greater than 0 and less than or equal to {
+         * IOV_MAX}, as defined in <limits.h>.
+         */
+         ERROR_MAY(POSIX_WRITEV, EINVAL, "writev.09.01;writev.02", size_List(iov)==0 ||
+             (getSystemConfigurationValue(context, SUT_SC_IOV_MAX)!= SC_VALUE_UNKNOWN
+             &&
+             getSystemConfigurationValue(context, SUT_SC_IOV_MAX)!= SC_VALUE_NO_LIMIT
+             &&
+             size_List(iov) > getSystemConfigurationValue(context, SUT_SC_IOV_MAX)))
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * The O_NONBLOCK flag is set for the file descriptor and the thread would be
+         * delayed in the write() operation.
+         *
+         */
+        /*
+        * Otherwise, write() shall transfer no data and return -1 with errno set to [
+        * EAGAIN].
+        */
+        /*
+        * If the O_NONBLOCK flag is set, write() requests shall be handled differently,
+        * in the following ways:
+        *
+        * A write request for more than {PIPE_BUF} bytes shall cause one of the following:
+        *
+        * When no data can be written, transfer no data, and return -1 with errno set to [
+        * EAGAIN].
+        */
+        ERROR_SHALL3(POSIX_WRITEV, EAGAIN, "writev.pwrite.41.01;writev.pwrite.19.02.02;writev.pwrite.19.03.02", isO_NONBLOCKset(fildes))
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EBADF]
+         *
+         * The fildes argument is not a valid file descriptor open for writing.
+         *
+         */
+        ERROR_SHALL(POSIX_WRITEV, EBADF, "writev.pwrite.41.02", file==NULL ||
+            getAccessMode_FileDescId(fildes)==ReadOnly)
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EFBIG]
+         *
+         * An attempt was made to write a file that exceeds the implementation-defined
+         * maximum file size [XSI]  or the process' file size limit,  and there was no
+         * room for any bytes to be written.
+         *
+         */
+         ERROR_UNCHECKABLE(POSIX_WRITEV, EFBIG, "writev.pwrite.41.03",
+            "Implementation-defined maximum file size can not be checked")
+
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [EINTR]
+         *
+         * The write operation was terminated due to the receipt of a signal, and no data
+         * was transferred.
+         *
+         */
+        ERROR_SHALL(POSIX_WRITEV, EINTR, "writev.pwrite.41.05", TODO_ERR(EINTR))
+
+
+        /*
+         * The write() and [XSI] pwrite() functions shall fail if:
+         *
+         * [ENOSPC]
+         *
+         * There was no free space remaining on the device containing the file.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITEV, ENOSPC, "writev.pwrite.41.07", "Can not determine free space")
+
+
+        /*
+         * The write() and [XSI] pwrite() functions may fail if:
+         *
+         * [EIO]
+         *
+         * A physical I/O error has occurred.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITEV, EIO, "writev.pwrite.43.02", "Can not check physical I/O errors")
+
+        /*
+         * The write() and [XSI] pwrite() functions may fail if:
+         *
+         * [ENOBUFS]
+         *
+         * Insufficient resources were available in the system to perform the operation.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITEV, ENOBUFS, "writev.pwrite.43.03", "Can not check insufficient resources case")
+
+        /*
+         * The write() and [XSI] pwrite() functions may fail if:
+         *
+         * [ENXIO]
+         *
+         * A request was made of a nonexistent device, or the request was outside the
+         * capabilities of the device.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_WRITEV, ENXIO, "writev.pwrite.43.04", "Impossible to check details about devices")
+
+
+        /*
+        * The write() and [XSI] pwrite() functions shall fail if:
+        *
+        * [EPIPE] An attempt is made to write to a pipe or FIFO that is not open for
+        * reading by any process, or that only has one end open. A SIGPIPE signal shall
+        * also be sent to the thread.
+        */
+        ERROR_SHALL(POSIX_WRITEV, EPIPE, "writev.pwrite.41.08", !isFIFOOpenedForReadingWriting(context, fildes, true))
+
+        ERROR_END()
+
+        /*
+         * This number shall never be greater than nbyte.
+         *
+         */
+        REQ("write.40.02", "Function shall return number not greater than number of bytes to write",
+            writev_fifo_return->functionResult<=sumIOVecMembers(iov));
+
+        if (getBlockMode_FileDescId(fildes)==Blocking)
+        {
+            /*
+            * If the O_NONBLOCK flag is clear, a write request may cause the thread to block,
+            * but on normal completion it shall return nbyte.
+            */
+            REQ("writev.pwrite.18", "Function shall return nbyte", writev_fifo_return->functionResult==sumIOVecMembers(iov));
+        }
+        else
+        {
+            if (sumIOVecMembers(iov)<=pipe_buf)
+            {
+                /*
+                * A write request for {PIPE_BUF} or fewer bytes shall have the following effect:
+                * if there is sufficient space available in the pipe, write() shall transfer all
+                * the data and return the number of bytes requested.
+                */
+                REQ("writev.pwrite.19.02.01", "Function shall return the number of bytes requested",
+                    writev_fifo_return->functionResult==sumIOVecMembers(iov));
+            }
+            else
+            {
+                if (fCall->oldSize==0)
+                {
+                    /*
+                    * If the O_NONBLOCK flag is set, write() requests shall be handled differently,
+                    * in the following ways:
+                    *
+                    * A write request for more than {PIPE_BUF} bytes shall cause one of the following:
+                    *
+                    * When at least one byte can be written, transfer what it can and return the
+                    * number of bytes written. When all data previously written to the pipe is read,
+                    * it shall transfer at least {PIPE_BUF} bytes.
+                    */
+                    REQ("writev.pwrite.19.03.01", "Function shall write not less then {PIPE_BUF} bytes",
+                        size_CByteArray(fifoDescr->data)>=pipe_buf);
+                }
+            }
+        }
+
+
+        /*
+         * If write() is interrupted by a signal after it successfully writes some data,
+         * it shall return the number of bytes written.
+         *
+         */
+        REQ("writev.pwrite.12", "", TODO_REQ());
+
+
+        /*
+         * If the O_DSYNC bit has been set, write I/O operations on the file descriptor
+         * shall complete as defined by synchronized I/O data integrity completion
+         *
+         */
+        REQ("writev.pwrite.24", "", TODO_REQ());
+
+        /*
+         * If the O_SYNC bit has been set, write I/O operations on the file descriptor
+         * shall complete as defined by synchronized I/O file integrity completion.
+         *
+         */
+        REQ("writev.pwrite.25", "", TODO_REQ());
+
+        /*
+        * If the O_NONBLOCK flag is set, write() requests shall be handled differently,
+        * in the following ways:
+        *
+        * The write() function shall not block the thread.
+        */
+        REQ("writev.pwrite.19.01", "", TODO_REQ());
+
+        /*
+        * Write requests of {PIPE_BUF} bytes or less shall not be interleaved with data
+        * from other processes doing writes on the same pipe.
+        */
+        REQ("writev.pwrite.17.01", "", TODO_REQ());
+
+        /*
+        * Writes of greater than {PIPE_BUF} bytes may have data interleaved, on arbitrary
+        * boundaries, with writes by other processes, whether or not the O_NONBLOCK flag
+        * of the file status flags is set.
+        */
+        REQ("writev.pwrite.17.02", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+specification
+void readv_fifo_spec(CallContext context, FileDescId fildes, List* iov,
+                  ErrorCode* errno)
+{
+    File* file=getFile_FileDescId(fildes);
+
+    pre
+    {
+        if (file!=NULL)
+        {
+            /*
+             * [Function works with FIFO and pipe files only]
+             *
+             */
+            REQ("", "Function works with FIFO and pipe files only",
+                file->kind==FIFOFile);
+        }
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+specification typedef struct ReadvFIFOCall ReadvFIFOCall = {};
+
+ReadvFIFOCall * create_ReadvFIFOCall(
+    FileDescId fildes,
+    List*      iov,
+    FIFOFileDescriptor*  fifoDescr
+)
+{
+    return create(&type_ReadvFIFOCall, fildes, iov, fifoDescr);
+}
+
+void onReadvFIFO(CallContext context, FileDescId fildes, List* iov)
+{
+    FIFOFileDescriptor*  fifoDescr=getDescriptor_FileDescId(fildes);
+
+    if (fifoDescr!=NULL)
+    {
+        startBlockedCall(context, create_ReadvFIFOCall(fildes, iov, clone(fifoDescr)));
+    }
+    else
+    {
+        startBlockedCall(context, create_ReadvFIFOCall(fildes, iov, NULL));
+    }
+
+}
+
+
+void onReadvFIFOReturn(CallContext context, SSizeT readv_fifo_spec, ReadFIFOReturnType* readv_fifo_return)
+{
+    ReadvFIFOCall* blocked_call=finishBlockedCall(context);
+    File*         file=getFile_FileDescId(blocked_call->fildes);
+    FIFOFileDescriptor* fifoDescr=getDescriptor_FileDescId(blocked_call->fildes);
+
+    if (readv_fifo_spec!=-1 && file!=NULL && fifoDescr!=NULL)
+    {
+        file->atime_updated=false;
+
+        readv_fifo_return->oldArray=clone(fifoDescr->data);
+
+        if (size_CByteArray(fifoDescr->data)>=readv_fifo_spec)
+        {
+            fifoDescr->data=right_CByteArray(fifoDescr->data, readv_fifo_spec);
+        }
+
+    }
+}
+
+
+reaction ReadFIFOReturnType* readv_fifo_return(void)
+{
+    post
+    {
+        CallContext            context=readv_fifo_return->context;
+        ProcessState*          ps=getProcessState_CallContext(context);
+        ReadvFIFOCall*         fCall= findBlockedCall(@getBlockedCalls(), context);
+        FileDescId             fildes=fCall->fildes;
+        File*                  file=getFile_FileDescId(fildes);
+        FIFOFileDescriptor*    fifoDescr=fCall->fifoDescr;
+        List*                  iov=fCall->iov;
+
+
+        if (isFIFOOpenedForReadingWriting(context, fildes, false) && fifoDescr!=NULL && size_CByteArray(fifoDescr->data)==0 && getBlockMode_FileDescId(fildes)==Nonblocking)
+        {
+            /*
+             * When attempting to read from an empty pipe or FIFO:
+             *
+             * If some process has the pipe open for writing and O_NONBLOCK is set, read()
+             * shall return -1 and set errno to [EAGAIN].
+             */
+            REQ("readv.pread.09.02", "Function shall return -1 and set errno to [EAGAIN]",
+                readv_fifo_return->functionResult==-1 && *readv_fifo_return->errno==SUT_EAGAIN);
+        }
+
+        /*
+         * Otherwise, the functions shall return -1 and set errno to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_READV, "readv.pread.41.02", readv_fifo_return->functionResult==-1, *readv_fifo_return->errno)
+
+        /*
+        * In addition, the readv() function shall fail if:
+        *
+        * [EINVAL] The sum of the iov_len values in the iov array overflowed an ssize_t.
+        *
+        */
+        ERROR_SHALL(POSIX_READV, EINVAL, "readv.06.01",  sumIOVecMembers(iov)>(SizeT)max_SSizeT)
+
+        /*
+        * The readv() function may fail if:
+        *
+        * [EINVAL] The iovcnt argument was less than or equal to 0, or greater than {
+        * IOV_MAX}.
+        */
+        /*
+        * The iovcnt argument is valid if greater than 0 and less than or equal to {
+        * IOV_MAX}.
+        */
+        ERROR_MAY(POSIX_READV, EINVAL, "readv.07.01;app.readv.02", size_List(iov)==0 ||
+        (getSystemConfigurationValue(context, SUT_SC_IOV_MAX)!= SC_VALUE_UNKNOWN
+        &&
+        getSystemConfigurationValue(context, SUT_SC_IOV_MAX)!= SC_VALUE_NO_LIMIT
+        &&
+            size_List(iov) > getSystemConfigurationValue(context, SUT_SC_IOV_MAX)))
+
+        /*
+         * The read() and [XSI] pread() functions shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * The O_NONBLOCK flag is set for the file descriptor and the thread would be
+         * delayed.
+         *
+         */
+        ERROR_SHALL3(POSIX_READV, EAGAIN, "readv.pread.42.01", isO_NONBLOCKset(fildes))
+
+        /*
+         * The read() and [XSI] pread() functions shall fail if:
+         *
+         * [EBADF]
+         *
+         * The fildes argument is not a valid file descriptor open for reading.
+         *
+         */
+        ERROR_SHALL(POSIX_READV, EBADF, "readv.pread.42.02", file==NULL || getAccessMode_FileDescId(fildes)==WriteOnly)
+
+        /*
+         * The read() and [XSI] pread() functions shall fail if:
+         *
+         * [EINTR]
+         *
+         * The read operation was terminated due to the receipt of a signal, and no data
+         * was transferred.
+         *
+         */
+        ERROR_SHALL(POSIX_READV, EINTR, "readv.pread.42.04", TODO_ERR(EINTR))
+
+        /*
+         * The read() and [XSI] pread() functions may fail if:
+         *
+         * [EIO]
+         *
+         * A physical I/O error has occurred.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_READV, EIO, "readv.pread.44.01", "Can not check IO errors")
+
+        /*
+         * The read() and [XSI] pread() functions may fail if:
+         *
+         * [ENOBUFS]
+         *
+         * Insufficient resources were available in the system to perform the operation.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_READV, ENOBUFS, "readv.pread.44.02", "Can not check insufficient resources case")
+
+        /*
+         * The read() and [XSI] pread() functions may fail if:
+         *
+         * [ENOMEM]
+         *
+         * Insufficient memory was available to fulfill the request.
+         *
+         */
+        ERROR_UNCHECKABLE(POSIX_READV, ENOMEM, "readv.pread.44.03", "Can not check insufficient memory case")
+
+        ERROR_END()
+
+
+        if (!isFIFOOpenedForReadingWriting(context, fildes, false) && fifoDescr!=NULL && size_CByteArray(fifoDescr->data)==0)
+        {
+            /*
+             * When attempting to read from an empty pipe or FIFO:
+             *
+             * If no process has the pipe open for writing, read() shall return 0 to indicate
+             * end-of-file.
+             */
+            REQ("readv.pread.09.01", "Function shall return zero", readv_fifo_return->functionResult==0);
+        }
+
+
+        /*
+         * Upon successful completion, read() [XSI]  and pread() shall return a non-
+         * negative integer indicating the number of bytes actually read.
+         *
+         */
+        REQ("readv.pread.41.01", "Return value shall be non negative", readv_fifo_return->functionResult>=0);
+
+
+        /*
+         * and shall return the number of bytes read. This number shall never be greater
+         * than nbyte.
+         *
+         */
+        REQ("readv.pread.13.02", "Number of bytes read shall never be greater than number of bytes requested",
+            readv_fifo_return->functionResult<=sumIOVecMembers(iov));
+
+
+        if (size_CByteArray(fifoDescr->data)<sumIOVecMembers(iov) && size_CByteArray(fifoDescr->data)!=0)
+        {
+            /*
+             * The value returned may be less than nbyte
+             *
+             * or if the file is a pipe or FIFO or special file and has fewer than nbyte bytes
+             * immediately available for reading.
+             */
+            REQ("readv.pread.14.03", "The value returned shall be less than number of bytes requested",
+                readv_fifo_return->functionResult<sumIOVecMembers(iov));
+        }
+
+
+        {
+            IntT i;
+            SizeT sumLen=0;
+            CByteArray* dataCopy;
+
+            if (size_CByteArray(fifoDescr->data)!=0)
+            {
+                dataCopy=clone(fifoDescr->data);
+            }
+            else
+            {
+                dataCopy=clone(readv_fifo_return->oldArray);
+            }
+
+            for (i=0;i<size_List(iov);i++)
+            {
+                IOvec* curVec=get_List(iov, i);
+                SizeT  curLen;
+
+                if (sumLen>=readv_fifo_return->functionResult)
+                {
+                    break;
+                }
+
+                if (sumLen+curVec->iov_len<=readv_fifo_return->functionResult)
+                {
+                    curLen=curVec->iov_len;
+                }
+                else
+                {
+                    curLen=readv_fifo_return->functionResult-sumLen;
+                }
+
+                sumLen+=curVec->iov_len;
+
+
+                /*
+                * The readv() function shall place the input data into the iovcnt buffers
+                * specified by the members of the iov array: iov[0], iov[1], ..., iov[ iovcnt-1].
+                *
+                */
+                /*
+                * Each iovec entry specifies the base address and length of an area in memory
+                * where data should be placed.
+                *
+                */
+                /*
+                * The readv() function shall always fill an area completely before proceeding
+                * to the next.
+                *
+                */
+                /*
+                 * The read() function reads data previously written to a file.
+                 *
+                 */
+                REQ("readv.01;readv.03;readv.04;readv.pread.52", "Read data shall be valid", checkFIFODataRead(context, dataCopy,
+                        curVec->iov_base, curLen));
+                dataCopy=right_CByteArray(dataCopy, curLen);
+            }
+        }
+
+        {
+            File* fl = getFile_FileDescId(fildes);
+            /*
+            * Upon successful completion, readv() shall mark for update the st_atime field of
+            * the file.
+            */
+            REQ("?readv.05", "readv() shall mark for update the st_atime field of the file", fl->atime_updated == false);
+        }
+
+        /*
+         * When attempting to read from an empty pipe or FIFO:
+         *
+         * If some process has the pipe open for writing and O_NONBLOCK is clear, read()
+         * shall block the calling thread until some data is written or the pipe is closed
+         * by all processes that had the pipe open for writing.
+         */
+        REQ("readv.pread.09.03", "", TODO_REQ());
+
+
+        /*
+        * The value returned may be less than nbyte
+        *
+        * if the read() request was interrupted by a signal,
+        */
+        REQ("readv.pread.14.02", "", TODO_REQ());
+
+
+        /*
+         * If a read() is interrupted by a signal before it reads any data, it shall
+         * return -1 with errno set to [EINTR].
+         *
+         */
+        REQ("readv.pread.15", "", TODO_REQ());
+
+        /*
+         * If a read() is interrupted by a signal after it has successfully read some data,
+         * it shall return the number of bytes read.
+         *
+         */
+        REQ("readv.pread.16", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+//This specification refers to: open_fifo, open64_fifo
+specification
+void open_fifo_spec( CallContext context, CString* path, OpenFlags oflag,
+                     FilePermissions* mode, ErrorCode* errno, bool is64bits )
+{
+    Bool3 isELOOP;
+    CString *absPath = resolvePath_Ext(context, getFileSystem(context), path, &isELOOP);
+    Bool3 fileExists=doesFileExist_FileSystem( getFileSystem(context), absPath);
+    File* oldFile=NULL;
+    File* curFile=getFile_FileSystem(getFileSystem(context), absPath);
+    pre
+    {
+
+        if (curFile!=NULL)
+        {
+            /*
+            * [Function works with FIFO files only]
+            */
+            REQ("", "File shall  be FIFO", curFile->kind==FIFOFile);
+        }
+
+        /*
+        * Values for oflag are constructed by a bitwise-inclusive OR of flags from the
+        * following list, defined in <fcntl.h>.>Applications shall specify exactly one
+        * of the first three values (file access modes) below in the value of oflag:
+        *
+        * O_RDONLY
+        *
+        * Open for reading only.
+        *
+        * O_WRONLY
+        *
+        * Open for writing only.
+        *
+        * O_RDWR
+        *
+        * Open for reading and writing. The result is undefined if this flag is applied
+        * to a FIFO.
+        *
+        */
+        REQ("?app.open.104", "Open flag shall be valid", oflag.access_mode==ReadOnly || oflag.access_mode==WriteOnly);
+
+
+        if (fileExists==True_Bool3)
+        {
+            oldFile=clone(getFile_FileSystem(getFileSystem(context), absPath));
+        }
+
+        /*
+        * If O_EXCL is set and O_CREAT is not set, the result is undefined.
+        */
+        if(oflag.excl)
+        {
+            REQ("app.open.08.04", "O_CREAT shall be set", oflag.creat==true);
+        }
+
+        if (oflag.creat)
+        {
+            /*
+            * When bits other than the file permission bits are set, the effect is
+            * unspecified.
+            *
+            */
+            REQ("app.open.06.06", "Model inhibits invalid flag values", true);
+        }
+        if (oflag.trunc)
+        {
+            /*
+            * The result of using O_TRUNC with O_RDONLY is undefined.
+            */
+            REQ("app.open.13.04", "O_RDONLY shall not be set",
+                oflag.access_mode!=ReadOnly);
+
+            if (fileExists==True_Bool3)
+            {
+                /*
+                * Its effect on other file types is implementation-defined.
+                */
+                REQ("app.open.13.03", "File type shall be valid",
+                    oldFile->kind==FIFOFile);
+            }
+        }
+
+
+        if (oflag.block_mode==Nonblocking && fileExists==True_Bool3)
+        {
+            /*
+            * Otherwise, the behavior of O_NONBLOCK is unspecified.
+            *
+            */
+            REQ("app.open.10.05", "File type shall be valid for O_NONBLOCK",
+                (oldFile->kind==FIFOFile &&
+                (oflag.access_mode==ReadOnly || oflag.access_mode==WriteOnly))
+                || oldFile->kind == BlockFile || oldFile->kind == CharacterFile);
+        }
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+
+specification typedef struct OpenFIFOCall OpenFIFOCall = {};
+
+OpenFIFOCall * create_OpenFIFOCall(
+    CString* path,
+    OpenFlags oflag,
+    FilePermissions* mode,
+    bool is64bits,
+    Bool3 fileExists,
+    FileSystem *pre_fs,
+    File* oldFile
+)
+{
+    return create(&type_OpenFIFOCall,
+        path,
+        oflag,
+        mode,
+        is64bits,
+        fileExists,
+        pre_fs,
+        oldFile
+        );
+}
+
+void onOpenFIFO( CallContext context, CString* path, OpenFlags oflag,
+             FilePermissions* mode, bool is64bits )
+{
+    Bool3 isELOOP;
+    CString *absPath = resolvePath_Ext(context, getFileSystem(context), path, &isELOOP);
+    Bool3 fileExists=doesFileExist_FileSystem( getFileSystem(context), absPath);
+    File* oldFile=NULL;
+    FileSystem *pre_fs = clone(getFileSystem(context));
+
+    OpenFIFOCall* curCall;
+
+    if (fileExists==True_Bool3)
+    {
+        oldFile=clone(getFile_FileSystem(getFileSystem(context), absPath));
+    }
+
+    curCall=create_OpenFIFOCall(path, oflag, mode, is64bits, fileExists, pre_fs, oldFile);
+    startBlockedCall(context, curCall);
+}
+
+
+void onOpenFIFOReturn(CallContext context, FileDescId open_fifo_spec)
+{
+    OpenFIFOCall* blocked_call=finishBlockedCall(context);
+    CString* path=blocked_call->path;
+    OpenFlags oflag=blocked_call->oflag;
+    FilePermissions* mode=blocked_call->mode;
+    bool is64bits=blocked_call->is64bits;
+
+    ProcessState* ps=getProcessState_CallContext(context);
+    FileSystem*   file_system = getFileSystem(context);
+    Bool3         eloop;
+    CString*      resolved=resolvePath_Ext(context, file_system, path, &eloop);
+    CString*      parPath=getParentDir_Path(resolved);
+    Bool3         fileExists=doesFileExist_FileSystem(file_system, resolved);
+    File*         file = getFile_FileSystem( file_system, resolved );
+    File*         parentDir=getFile_FileSystem(getFileSystem(context), parPath);
+
+    if (open_fifo_spec.filedesc >= 0)
+    {
+        if (oflag.trunc && fileExists==True_Bool3)
+        {
+            updateCtimePath(context, file_system, resolved);
+            updateMtimePath(context, file_system, resolved);
+        }
+        if (oflag.creat && fileExists==False_Bool3)
+        {
+            updateAtimePath(context, file_system, resolved);
+            updateCtimePath(context, file_system, resolved);
+            updateMtimePath(context, file_system, resolved);
+
+            updateCtimePath(context, file_system, parPath);
+            updateMtimePath(context, file_system, parPath);
+        }
+
+        if (file == NULL)
+        {
+            file = registerFile( file_system, path );
+            file->kind=RegularFile;
+        }
+        if (file != NULL)
+        {
+            RegularFileDescriptor* descr=create_DefaultRegularFileDescriptor();
+            descr->append=oflag.append;
+
+            if (fileExists==False_Bool3)
+            {
+                registerFileDescriptor( open_fifo_spec, file->fileid, path, oflag.access_mode,
+                    oflag.block_mode, RegularFile, false, (OffT)0, true, is64bits, descr);
+                file->permissions=ANDPermissions(ps->meta.umask, mode);
+                file->uid=create_UidTObj(ps->meta.effective_userid);
+                if(FILE_IO_OPEN_SETS_GID_TO_PROCESS_GID)
+                {
+                    file->gid=create_GidTObj(ps->meta.effective_groupid);
+                }else{
+                    if (parentDir!=NULL && parentDir->gid!=NULL)
+                    {
+                        file->gid=clone(parentDir->gid);
+                    }
+                }
+                file->descriptor=descr;
+
+                file->kind=RegularFile;
+                file->size=create_OffTObj(0);
+
+            }
+            else
+            {
+                if (file->descriptor==NULL)
+                {
+                    if (file->kind==RegularFile)
+                    {
+                        registerFileDescriptor( open_fifo_spec, file->fileid, path, oflag.access_mode,
+                            oflag.block_mode, file->kind, false, (OffT)0, true, is64bits, descr);
+                        file->descriptor=descr;
+                        descr->notExternallyModified=false;
+                    }
+                    else
+                    {
+                        registerFileDescriptor( open_fifo_spec, file->fileid, path, oflag.access_mode,
+                            oflag.block_mode, file->kind, false, (OffT)0, true, is64bits, NULL);
+                    }
+                }
+                else
+                {
+                    registerFileDescriptor( open_fifo_spec, file->fileid, path, oflag.access_mode,
+                        oflag.block_mode, file->kind, false, (OffT)0, true, is64bits, file->descriptor);
+                }
+
+                if (file->kind==RegularFile && oflag.access_mode!=ReadOnly && oflag.trunc)
+                {
+                    file->size=create_OffTObj(0);
+                }
+            }
+        }
+    }
+}
+
+
+specification typedef struct OpenFIFOReturnType OpenFIFOReturnType= {};
+
+OpenFIFOReturnType * create_OpenFIFOReturnType(
+    CallContext context,
+    FileDescId filedesc,
+    ErrorCode* errno
+)
+{
+    return create(&type_OpenFIFOReturnType,
+        context,
+        filedesc,
+        errno
+        );
+}
+
+reaction OpenFIFOReturnType* open_fifo_return(void)
+{
+    post
+    {
+        CallContext            context=open_fifo_return->context;
+        ProcessState*          ps=getProcessState_CallContext(context);
+
+        OpenFIFOCall* fCall= findBlockedCall(@getBlockedCalls(), context);
+        CString* path=fCall->path;
+        OpenFlags oflag=fCall->oflag;
+        FilePermissions* mode=fCall->mode;
+        bool is64bits=fCall->is64bits;
+        Bool3 fileExists=fCall->fileExists;
+        FileSystem *pre_fs = fCall->pre_fs;
+        File* oldFile=fCall->oldFile;
+
+        Bool3 isELOOP;
+        CString *absPath = resolvePath_Ext(context, getFileSystem(context), path, &isELOOP);
+
+        File* openedFile;
+        FileDescriptor* openedFileDesc;
+        RegularFileDescriptor *desc;
+
+        if (oflag.excl && oflag.creat && fileExists)
+        {
+            File* exFile=getFile_FileSystem(getFileSystem(context), absPath);
+            /*
+            * If the file exists, this flag has no effect except as noted under O_EXCL below.
+            *
+            */
+            /*
+            * If O_CREAT and O_EXCL are set, open() shall fail if the file exists.
+            *
+            */
+            REQ("open.06.01;open.08.01", "Function shall fail", open_fifo_return->filedesc.filedesc==-1);
+
+
+            if (exFile->kind==SymbolicLinkFile)
+            {
+                /*
+                * If O_EXCL and O_CREAT are set, and path names a symbolic link, open() shall
+                * fail and set errno to [EEXIST], regardless of the contents of the symbolic link.
+                *
+                */
+                REQ("open.08.03", "Function shall fail with EEXIST", open_fifo_return->filedesc.filedesc==-1 && *open_fifo_return->errno==SUT_EEXIST);
+            }
+        }
+
+        if (open_fifo_return->filedesc.filedesc==-1)
+        {
+            if (fileExists==False_Bool3)
+            {
+                /*
+                * No files shall be created or modified if the function returns -1.
+                *
+                */
+                REQ("?open.30.03", "File shall not be created",
+                    doesFileExist_FileSystem(getFileSystem(context), absPath)==False_Bool3);
+            }
+        }
+
+        /*
+         * Otherwise, -1 shall be returned and errno set to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_OPEN, "open.30.02", open_fifo_return->filedesc.filedesc==-1, *open_fifo_return->errno )
+        /*
+         * The open() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Search permission is denied on a component of the path prefix, or the file
+         * exists and the permissions specified by oflag are denied, or the file does not
+         * exist and write permission is denied for the parent directory of the file to be
+         * created, or O_TRUNC is specified and write permission is denied.
+         */
+         ERROR_SHALL3(POSIX_OPEN, EACCES, "open.31.01", isEACCES_io_file_open(context, pre_fs, absPath, fileExists, oflag))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EEXIST]
+         *
+         * O_CREAT and O_EXCL are set, and the named file exists.
+         */
+        ERROR_SHALL(POSIX_OPEN, EEXIST, "open.31.02", oflag.creat && oflag.excl && fileExists==True_Bool3)
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EINTR]
+         *
+         * A signal was caught during open().
+         */
+        ERROR_SHALL(POSIX_OPEN, EINTR, "open.31.03", TODO_ERR(EINTR))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * [SIO] The implementation does not support synchronized I/O for this file.
+         */
+        ERROR_SHALL(POSIX_OPEN, EINVAL, "open.31.04", TODO_ERR(EINVAL))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EIO]
+         *
+         * [XSR] The path argument names a STREAMS file and a hangup or error occurred
+         * during the open().
+         */
+        ERROR_SHALL(POSIX_OPEN, EIO, "open.31.05", TODO_ERR(EIO))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EISDIR]
+         *
+         * The named file is a directory and oflag includes O_WRONLY or O_RDWR.
+         */
+        ERROR_SHALL(POSIX_OPEN, EISDIR, "open.31.06", fileExists==True_Bool3 && oldFile->kind==DirectoryFile
+            && oflag.access_mode!=ReadOnly)
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ELOOP]
+         *
+         * A loop exists in symbolic links encountered during resolution of the path
+         * argument.
+         */
+        ERROR_SHALL3(POSIX_OPEN, ELOOP, "open.31.07", isELOOP)
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EMFILE]
+         *
+         * {OPEN_MAX} file descriptors are currently open in the calling process.
+         */
+        ERROR_SHALL3(POSIX_OPEN, EMFILE, "open.31.08", isOpenFileDescNumberExceedMax(context))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * The length of the path argument exceeds {PATH_MAX} or a pathname component is
+         * longer than {NAME_MAX}.
+         */
+        ERROR_SHALL3(POSIX_OPEN, ENAMETOOLONG, "open.31.09",  isENAMETOOLONG(context, path))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ENFILE]
+         *
+         * The maximum allowable number of files is currently open in the system.
+         */
+        ERROR_UNCHECKABLE(POSIX_OPEN, ENFILE, "open.31.10", "ENFILE could not be checked")
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ENOENT]
+         *
+         * O_CREAT is not set and the named file does not exist; or O_CREAT is set and
+         * either the path prefix does not exist or the path argument points to an empty
+         * string.
+         */
+        ERROR_SHALL(POSIX_OPEN, ENOENT, "open.31.11", (oflag.creat==false && fileExists==False_Bool3)||
+            (oflag.creat && (isENOENT_dir(context, pre_fs, getParentDir_Path(absPath ))==True_Bool3)))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ENOSR]
+         *
+         * [XSR] The path argument names a STREAMS-based file and the system is unable to
+         * allocate a STREAM.
+         */
+        ERROR_SHALL(POSIX_OPEN, ENOSR, "open.31.12", TODO_ERR(ENOSR))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ENOSPC]
+         *
+         * The directory or file system that would contain the new file cannot be expanded,
+         * the file does not exist, and O_CREAT is specified.
+         */
+        ERROR_SHALL(POSIX_OPEN, ENOSPC, "open.31.13", TODO_ERR(ENOSPC))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ENOTDIR]
+         *
+         * A component of the path prefix is not a directory.
+         */
+        ERROR_SHALL3(POSIX_OPEN, ENOTDIR, "open.31.14", isENOTDIR_dir(context, pre_fs, getParentDir_Path(absPath)))
+
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [ENXIO]
+         *
+         * The named file is a character special or block special file, and the device
+         * associated with this special file does not exist.
+         */
+        ERROR_SHALL(POSIX_OPEN, ENXIO, "open.31.16", TODO_ERR(ENXIO))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EOVERFLOW]
+         *
+         * The named file is a regular file and the size of the file cannot be represented
+         * correctly in an object of type off_t.
+         *
+         * The open() function shall fail if:
+         *
+         * [EOVERFLOW]
+         * The named file is a regular file and either O_LARGEFILE is not set and
+         * the size of the file cannot be represented correctly in an object of
+         * type off_t or O_LARGEFILE is set and the size of the file cannot be
+         * represented correctly in an object of type off64_t.
+         */
+        ERROR_SHALL(POSIX_OPEN, EOVERFLOW, "open.31.17", TODO_ERR(EOVERFLOW))
+
+        /*
+         * The open() function shall fail if:
+         *
+         * [EROFS]
+         *
+         * The named file resides on a read-only file system and either O_WRONLY, O_RDWR,
+         * O_CREAT (if the file does not exist), or O_TRUNCis set in the oflag argument.
+         */
+        ERROR_SHALL(POSIX_OPEN, EROFS, "open.31.18", TODO_ERR(EROFS))
+
+        /*
+         * The open() function may fail if:
+         *
+         * [EINVAL]
+         *
+         * The value of the oflag argument is not valid.
+         */
+        ERROR_UNCHECKABLE(POSIX_OPEN, EINVAL, "open.32.02", "Model inhibits the invalid oflag values")
+
+        /*
+         * The open() function may fail if:
+         *
+         * [ELOOP]
+         *
+         * More than {SYMLOOP_MAX} symbolic links were encountered during resolution of
+         * the path argument.
+         */
+        ERROR_MAY3(POSIX_OPEN, ELOOP, "open.32.03", isELOOP)
+
+        /*
+         * The open() function may fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * As a result of encountering a symbolic link in resolution of the path argument,
+         * the length of the substituted pathname string exceeded {PATH_MAX}.
+         */
+        ERROR_MAY3(POSIX_OPEN, ENAMETOOLONG, "open.32.04", isENAMETOOLONG(context, absPath))
+
+        /*
+         * The open() function may fail if:
+         *
+         * [ENOMEM]
+         *
+         * [XSR] The path argument names a STREAMS file and the system is unable to
+         * allocate resources.
+         */
+        ERROR_MAY(POSIX_OPEN, ENOMEM, "open.32.05", TODO_ERR(ENOMEM))
+
+        /*
+         * The open() function may fail if:
+         *
+         * [ETXTBSY]
+         *
+         * The file is a pure procedure (shared text) file that is being executed and
+         * oflag is O_WRONLY or O_RDWR.
+         */
+        ERROR_MAY(POSIX_OPEN, ETXTBSY, "open.32.06", TODO_ERR(ETXTBSY))
+
+        ERROR_END()
+
+
+        openedFile=getFile_FileDescId(open_fifo_return->filedesc);
+        openedFileDesc=getFileDescriptor(open_fifo_return->filedesc);
+        if (openedFile!=NULL && openedFile->kind==RegularFile)
+        {
+            desc=getDescriptor_FileDescId(open_fifo_return->filedesc);
+        }
+
+        /*
+         * The open() function shall establish the connection between a file and a file
+         * descriptor. It shall create an open file description that refers to a file and
+         * a file descriptor that refers to that open file description.
+         *
+         */
+        REQ("open.01", "File descriptor shall not be NULL", openedFileDesc!=NULL);
+
+        /*
+         * The open() function shall return a file descriptor for the named file that is
+         * the lowest file descriptor not currently open for that process.
+         *
+         */
+        /*
+         * Upon successful completion, the function shall open the file and return a non-
+         * negative integer representing the lowest numbered unused file descriptor.
+         *
+         */
+        REQ("open.02.01;open.30.01", "Descriptor shall be lowest",
+            isLowestUnused_FileDescId(ps->file_descriptors, open_fifo_return->filedesc));
+
+        /*
+         * The open file description is new, and therefore the file descriptor shall not
+         * share it with any other process in the system.
+         */
+        REQ_UNCHECKABLE("open.02.02", "Can not detect file sharing");
+
+        /*
+         * The file status flags and file access modes of the open file description shall
+         * be set according to the value of oflag.
+         *
+         */
+        REQ("?open.04", "Access mode shall be valid", getAccessMode_FileDescId(open_fifo_return->filedesc)
+            ==oflag.access_mode);
+
+        if (fileExists==False_Bool3 && oflag.creat)
+        {
+            /*
+            * Otherwise, the file shall be created;
+            *
+            */
+            REQ("?open.06.02","File shall be created", openedFile!=NULL);
+
+            /*
+             * the user ID of the file shall be set to the effective user ID of the process;
+             *
+             */
+            REQ("?open.06.03", "User ID of the file shall be valid",
+                equals(openedFile->uid, create_UidTObj(ps->meta.effective_userid)));
+            {
+                /*
+                 * the group ID of the file shall be set to the group ID of the file's parent
+                 * directory or to the effective group ID of the process;
+                 *
+                 */
+                CString* parPath=getParentDir_Path(absPath);
+                File* parentDir=getFile_FileSystem(getFileSystem(context), parPath);
+
+                REQ("?open.06.04", "Group ID shall be valid",
+                    equals(openedFile->gid, create_GidTObj(ps->meta.effective_groupid)) ||
+                    equals(openedFile->gid, parentDir->gid));
+            }
+
+            /*
+             * and the access permission bits (see <sys/stat.h>) of the file mode shall be
+             * set to the value of the third argument taken as type mode_t modified as follows:
+             * a bitwise AND is performed on the file-mode bits and the corresponding bits in
+             * the complement of the process' file mode creation mask. Thus, all bits in the
+             * file mode whose corresponding bit in the file mode creation mask is set are
+             * cleared.
+             *
+             */
+            REQ("?open.06.05", "Permissions shall be valid",
+                equals(openedFile->permissions, ANDPermissions(ps->meta.umask, mode)));
+
+            /*
+            * If O_CREAT is set and the file did not previously exist, upon successful
+            * completion, open() shall mark for update the st_atime, st_ctime, and st_mtime
+            * fields of the file and the st_ctime and st_mtime fields of the parent directory.
+            *
+            */
+            REQ("?open.14", "Time shall be marked for update", openedFile->atime_updated==false &&
+                openedFile->ctime_updated==false && openedFile->mtime_updated==false);
+
+        }
+
+        /*
+         * The check for the existence of the file and the creation of the file if it does
+         * not exist shall be atomic with respect to other threads executing open() naming
+         * the same filename in the same directory with O_EXCL and O_CREAT set.
+         *
+         */
+        IMPLEMENT_REQ("open.08.02");
+
+        if (oflag.trunc)
+        {
+            if (fileExists==True_Bool3 && oflag.access_mode!=ReadOnly)
+            {
+                /*
+                 * If the file exists and is a regular file, and the file is successfully opened
+                 * O_RDWR or O_WRONLY, its length shall be truncated to 0, and the mode and owner
+                 * shall be unchanged.
+                 *
+                 */
+                REQ("?open.13.01", "File parameters shall be unchanged and size shall be zero",
+                    openedFile->size==0 && equals(openedFile->permissions, oldFile->permissions)
+                    && equals(openedFile->uid, oldFile->uid));
+            }
+
+
+            /*
+            * If O_TRUNC is set and the file did previously exist, upon successful completion,
+            * open() shall mark for update the st_ctime and st_mtime fields of the file.
+            *
+            */
+            REQ("?open.15", "File time shall be updated", openedFile->ctime_updated==false &&
+                openedFile->mtime_updated==false);
+
+        }
+
+        /*
+         * O_DSYNC
+         *
+         * [SIO] Write I/O operations on the file descriptor shall complete as defined by
+         * synchronized I/O data integrity completion.
+         *
+         */
+        REQ("open.07", "", TODO_REQ());
+
+
+        /*
+         * If both the O_SYNC and O_DSYNC flags are set, the effect is as if only the
+         * O_SYNC flag was set.
+         *
+         */
+        REQ("open.16", "", TODO_REQ());
+
+        /*
+         * If path refers to a STREAMS file, oflag may be constructed from O_NONBLOCK OR'
+         * ed with either O_RDONLY, O_WRONLY, or O_RDWR. Other flag values are not
+         * applicable to STREAMS devices and shall have no effect on them.
+         *
+         */
+        REQ("open.17", "", TODO_REQ());
+
+        /*
+         * If O_NONBLOCK is set, the open() function shall return without blocking for the
+         * device to be ready or available.
+         *
+         */
+        REQ("open.10.03", "", TODO_REQ());
+
+        /*
+         * If O_NONBLOCK is clear, the open() function shall block the calling thread
+         * until the device is ready or available before returning.
+         *
+         */
+        REQ("open.10.04", "", TODO_REQ());
+
+        /*
+         * Read I/O operations on the file descriptor shall complete at the same level of
+         * integrity as specified by the O_DSYNC and O_SYNC flags.
+         *
+         */
+        REQ("open.11.01", "", TODO_REQ());
+
+        /*
+         * If both O_DSYNC and O_RSYNC are set in oflag, all I/O operations on the file
+         * descriptor shall complete as defined by synchronized I/O data integrity
+         * completion.
+         *
+         */
+        REQ("open.11.02", "", TODO_REQ());
+
+        /*
+         * If both O_SYNC and O_RSYNC are set in flags, all I/O operations on the file
+         * descriptor shall complete as defined by synchronized I/O file integrity
+         * completion.
+         *
+         */
+        REQ("open.11.03", "", TODO_REQ());
+
+        /*
+         * O_SYNC
+         *
+         * [SIO] Write I/O operations on the file descriptor shall complete as defined by
+         * synchronized I/O file integrity completion.
+         *
+         */
+        REQ("open.12", "", TODO_REQ());
+
+
+        /*
+         * The largest value that can be represented correctly in an object of type off_t
+         * shall be established as the offset maximum in the open file description.
+         *
+         */
+        REQ("open.19", "", TODO_REQ());
+
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool isFIFOOpenedForReadingWriting(CallContext context, FileDescId fildes, bool checkReading)
+{
+    SystemState* systemState=getSystemState(context.system);
+    Map* processes=systemState->processes;
+    File* file=getFile_FileDescId(fildes);
+    IntT i=0;
+    if (file==NULL)
+    {
+        return false;
+    }
+    for (i=0;i<size_Map(processes);i++)
+    {
+        ProcessState* processState = get_Map(processes, key_Map(processes, i));
+        FileDescriptor* desc=getFileDescriptor_File(
+            create_CallContext(processState->processid.system, processState->processid.process, 0), file);
+        if (desc!=NULL && !equals(create_FileDescIdObj(desc->file_desc_id), create_FileDescIdObj(fildes)))
+        {
+            if (checkReading)
+            {
+                if (getAccessMode_FileDescId(desc->file_desc_id)!=WriteOnly)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                if (getAccessMode_FileDescId(desc->file_desc_id)!=ReadOnly)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+bool checkFIFODataRead(CallContext context, CByteArray* fdata, VoidTPtr buf, SSizeT nbytes)
+{
+    CByteArray*         data  = NULL;
+
+    /*
+    * read on the file descriptor fildes[0] shall access data written to the file
+    * descriptor fildes[1] on a first-in-first-out basis.
+    */
+    IMPLEMENT_REQ("pipe.05");
+
+    data=readCByteArray_VoidTPtr(buf, nbytes);
+
+    if (size_CByteArray(fdata)<nbytes)
+    {
+        return false;
+    }
+
+    if (!compare_CByteArrays(data, fdata, nbytes))
+    {
+        return false;
+    }
+
+    return true;
+}

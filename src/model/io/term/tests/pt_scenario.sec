@@ -1,0 +1,219 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "data/errno_model.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "io/term/term_media.seh"
+#include "io/term/tests/pt_scenario.seh"
+
+bool pre_grantpt_spec(CallContext context, FileDescId fildes, ErrorCode *errno);
+
+bool pre_openpty_spec(CallContext context, FileDescId *amaster,
+                      FileDescId *aslave, CString *name, VoidTPtr termp,
+                      WinSize *winp, ErrorCode *errno);
+
+bool pre_posix_openpt_spec(CallContext context, OpenFlags oflag,
+                       ErrorCode *errno);
+
+bool pre_ptsname_spec(CallContext context, FileDescId fildes);
+
+bool pre_ttyio_TIOCGWINSZ_spec(CallContext context, FileDescId fd,
+                               WinSize *argp, ErrorCode *errno);
+
+bool pre_unlockpt_spec(CallContext context, FileDescId fildes,
+                       ErrorCode *errno);
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/********************************************************************/
+/**                      Test Scenario Debug                       **/
+/********************************************************************/
+#ifdef IO_TERM_LOCAL_MAIN
+
+static AssertionExit system_assertion_handler;
+
+void io_term_pt_assertion_exit(const char *format, va_list arg_list)
+{
+    system_assertion_handler(format, arg_list);
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static VoidTPtr termp;
+static ErrorCode *error;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_pt_scenario(int argc, char **argv)
+{
+#ifdef IO_TERM_LOCAL_MAIN
+
+    system_assertion_handler = atAssertion(io_term_pt_assertion_exit);
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+    context = getContext();
+
+    termp = allocateMemoryBlock(context, sizeof_Type(context, "struct termios"));
+
+    if(isNULL_VoidTPtr(termp))
+        return false;
+
+    error = create_ErrorCode(SUT_EOK);
+
+    return true;
+}
+
+static void finish_pt_scenario(void)
+{
+    deallocateMemoryBlock(context, termp);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(pt_scenario);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+#define PT_NUMBER 16
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool pt_scen()
+{
+    int i;
+    FileDescId amaster;
+    OpenFlags oflag = { ReadWrite, Blocking, false, false, false, false, true,
+                                                                    false };
+
+    for(i = 0; i < PT_NUMBER; i++)
+    {
+        if(pre_posix_openpt_spec(context, oflag, error))
+            amaster = posix_openpt_spec(context, oflag, error);
+
+        if(pre_grantpt_spec(context, amaster, error))
+            grantpt_spec(context, amaster, error);
+
+        if(pre_unlockpt_spec(context, amaster, error))
+            unlockpt_spec(context, amaster, error);
+
+        if(pre_ptsname_spec(context, amaster))
+            ptsname_spec(context, amaster);
+    }
+
+    return true;
+}
+
+scenario
+bool pty_pt_scen()
+{
+    int i;
+    FileDescId amaster, aslave;
+    CString *name = create_CString("");
+    WinSize *winp = default_WinSize();
+
+    for(i = 0; i < PT_NUMBER; i++)
+    {
+        if(pre_openpty_spec(context, &amaster, &aslave, name, termp, winp, error))
+            openpty_spec(context, &amaster, &aslave, name, termp, winp, error);
+
+        if(pre_ttyio_TIOCGWINSZ_spec(context, aslave, winp, error))
+            ttyio_TIOCGWINSZ_spec(context, aslave, winp, error);
+
+        if(pre_grantpt_spec(context, amaster, error))
+            grantpt_spec(context, amaster, error);
+
+        if(pre_unlockpt_spec(context, amaster, error))
+            unlockpt_spec(context, amaster, error);
+
+        if(pre_ptsname_spec(context, amaster))
+            ptsname_spec(context, amaster);
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm pt_scenario =
+{
+    .init = init_pt_scenario,
+    .finish = finish_pt_scenario,
+    .actions = 
+    {
+        pt_scen,
+        pty_pt_scen,
+        NULL
+    }
+};
+
+bool main_io_term_pt(int argc, char **argv)
+{
+    pt_scenario(argc, argv);
+    return true;
+}
+
+#ifdef IO_TERM_LOCAL_MAIN
+
+#include "common/init.seh"
+#include "common/control_center.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+    initIoFileSubsystem();
+    initIoTermSubsystem();
+}
+
+int main(int argc, char **argv)
+{
+    initTestSystem();
+    loadSUT();
+    addTraceToFile("trace.xml");    
+    main_io_term_pt(argc, argv);
+    
+    return 0;
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */

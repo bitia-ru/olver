@@ -1,0 +1,569 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "util/format/wtime_model.seh"
+#include "config/system_config.seh"
+#include "util/string/wcasecmp_model.seh"
+
+
+#pragma SEC subsystem format "util.format"
+
+
+
+/* 
+   The group of functions 'util.format.wtime' consists of: 
+       wcsftime [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright © 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    wcsftime - convert date and time to a wide-character string
+
+SYNOPSIS
+
+    #include <wchar.h>
+
+    size_t wcsftime(wchar_t *restrict wcs, size_t maxsize,
+        const wchar_t *restrict format, const struct tm *restrict timeptr);
+
+DESCRIPTION
+
+    [CX]  The functionality described on this reference page is aligned with 
+    the ISO C standard. Any conflict between the requirements described here 
+    and the ISO C standard is unintentional. This volume of IEEE Std 
+    1003.1-2001 defers to the ISO C standard. 
+
+    The wcsftime() function shall be equivalent to the strftime() function, 
+    except that:
+
+        The argument wcs points to the initial element of an array of wide 
+        characters into which the generated output is to be placed.
+
+        The argument maxsize indicates the maximum number of wide characters to
+        be placed in the output array.
+
+        The argument format is a wide-character string and the conversion 
+        specifications are replaced by corresponding sequences of wide 
+        characters.
+
+        The return value indicates the number of wide characters placed in the 
+        output array.
+
+    If copying takes place between objects that overlap, the behavior is 
+    undefined.
+
+RETURN VALUE
+
+    If the total number of resulting wide-character codes including the 
+    terminating null wide-character code is no more than maxsize, wcsftime() 
+    shall return the number of wide-character codes placed into the array 
+    pointed to by wcs, not including the terminating null wide-character code. 
+    Otherwise, zero is returned and the contents of the array are unspecified.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+specification
+SizeT wcsftime_spec( CallContext context, WStringTPtr wcs, SizeT maxsize, WStringTPtr format, TmT* timeptr)
+{
+    SizeT len, wlen;
+
+    WString* wcs_post;
+    WString* format_pre;
+    WString* format_post;
+    
+    pre
+    {
+        REQ("", "timeptr is not NULL", timeptr != NULL);
+
+        REQ("", "Memory pointed to by format is available in the context", isValidPointer(context, format));
+        REQ("", "Memory pointed to by wcs is available in the context", isValidPointer(context, wcs));
+
+        format_pre = readWString_VoidTPtr(format);
+        len = length_WString(format_pre) + 1;
+
+        wlen = len * sizeof_WCharT;
+        
+        /*
+         * The wcsftime() function shall be equivalent to the strftime() function, except 
+         * that:
+         *
+         * The argument wcs points to the initial element of an array of wide characters 
+         * into which the generated output is to be placed.
+         */
+        REQ("wcsftime.01.01", "wcs points where the generated output is to be placed, ought to be not NULL", !isNULL_VoidTPtr(wcs));
+        
+        /*
+         * The wcsftime() function shall be equivalent to the strftime() function, except 
+         * that:
+         *
+         * The argument format is a wide-character string and the conversion 
+         * specifications are replaced by corresponding sequences of wide characters.
+         */
+        REQ("wcsftime.01.03", "format is a wide-character string, conversion specifications are replaced correspondently, ought to be not NULL", !isNULL_VoidTPtr(format));
+        
+        /*
+         * If copying takes place between objects that overlap, the behavior is undefined.
+         */
+        REQ("app.wcsftime.02", "If copying takes place between objects that overlap, the behavior is undefined", 
+            !areObjectsOverlapped(wcs, wlen, format, wlen));
+
+        /*
+         * [Invariant defined for timeptr in time subsystem]
+         */
+        /*
+         * If any of the specified values are outside the normal range, the characters 
+         * stored are unspecified.
+         */
+        REQ("app.wcsftime.strftime.10", "Specified values are outside the normal range, characters stored are unspecified", 
+            true);
+
+        /*
+          * [This requirement is relevant to Normal Conversion Specifiers]
+          */
+        /*
+         * If a conversion specification does not correspond to any of the above, the 
+         * behavior is undefined.
+         */
+        REQ("app.wcsftime.strftime.12", "Conversion specifications ought to correspond to standardized", normal_format_exist(format_pre, 0));
+
+        /*
+         * If a struct tm broken-down time structure is created by localtime() or 
+         * localtime_r(), or modified by mktime(), and the value of TZ is subsequently 
+         * modified, the results of the %Z and %z strftime() conversion specifiers are 
+         * undefined, when strftime() is called with such a broken-down time structure.
+         */
+        if (format_exist(format_pre, 'z', 1, 0) || format_exist(format_pre, 'Z', 1, 0))
+            REQ("app.wcsftime.strftime.13", "", TODO_REQ());
+
+        /*
+         * If a struct tm broken-down time structure is created or modified by gmtime() or 
+         * gmtime_r(), it is unspecified whether the result of the %Z and %z conversion 
+         * specifiers shall refer to UTC or the current local timezone, when strftime() is 
+         * called with such a broken-down time structure.
+         */
+        if (format_exist(format_pre, 'z', 1, 0) || format_exist(format_pre, 'Z', 1, 0))
+            REQ("app.wcsftime.strftime.14", "", TODO_REQ());
+
+        /*
+          * [This requirement is relevant to Modified Conversion Specifiers]
+          */
+        /*
+          * If a conversion specifier is not one of the above, the behavior is undefined.
+          */
+        REQ("app.wcsftime.strftime.19", "Mod. Conversion specifications ought to correspond to standardized", mod_format_exist(format_pre, 0));
+
+        return true;
+    }
+
+    coverage C_Morphed
+    {
+        if (len == 1)
+        {
+            return { InputIsEmpty, "Format string is empty, no output generated" };
+        }
+        else if ( wcs_morphed(format_pre, 0) == 0 )
+        {
+            return { InputIsOrdinary, "Format string is not empty, output is identical to it" };
+        }
+        else if ( wcs_morphed(format_pre, 0) == 1 || wcs_morphed(format_pre, 0) == 2 || wcs_morphed(format_pre, 0) == 3)
+        {
+            return { InputIsMorphedSimple, "Format string is not empty, output is generated from templates" };
+        }
+    }
+
+    post
+    {
+        format_post = readWString_VoidTPtr(format);
+        wcs_post = readWString_VoidTPtr(wcs);
+
+        REQ("", "format shall not be changed", equals(format_post, format_pre));
+
+        /*
+         * The wcsftime() function shall be equivalent to the strftime() function, except 
+         * that:
+         *
+         * The argument maxsize indicates the maximum number of wide characters to be 
+         * placed in the output array.
+         */
+         
+        /*
+         * No more than maxsize bytes are placed into the array.
+         */
+        REQ("wcsftime.strftime.07;wcsftime.01.02", "No more than maxsize bytes are placed into the array", 
+            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(wcs), wcs, maxsize * sizeof_WCharT),
+                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(wcs), wcs, maxsize * sizeof_WCharT)
+                )
+            );
+
+        /*
+         * If the alternative format or specification does not exist for the current 
+         * locale (see ERA in the Base Definitions volume of IEEE Std 1003.1-2001, Section 
+         * 7.3.5, LC_TIME), the behavior shall be as if the unmodified conversion 
+         * specification were used.
+         */
+        REQ("wcsftime.strftime.16", "", TODO_REQ());
+        
+         /*
+         * %Ec Replaced by the locale's alternative appropriate date and time 
+         * representation.
+         */
+        REQ("wcsftime.strftime.17.01", "", TODO_REQ());
+
+        /*
+         * %EC Replaced by the name of the base year (period) in the locale's alternative 
+         * representation.
+         */
+        REQ("wcsftime.strftime.17.02", "", TODO_REQ());
+
+        /*
+         * %Ex Replaced by the locale's alternative date representation.
+         */
+        REQ("wcsftime.strftime.17.03", "", TODO_REQ());
+
+        /*
+         * %EX Replaced by the locale's alternative time representation.
+         */
+        REQ("wcsftime.strftime.17.04", "", TODO_REQ());
+
+        /*
+         * %Ey Replaced by the offset from %EC (year only) in the locale's alternative 
+         * representation.
+         */
+        REQ("wcsftime.strftime.17.05", "", TODO_REQ());
+
+        /*
+         * %EY Replaced by the full alternative year representation.
+         */
+        REQ("wcsftime.strftime.17.06", "", TODO_REQ());
+
+        /*
+         * %Od Replaced by the day of the month, using the locale's alternative numeric 
+         * symbols, filled as needed with leading zeros if there is any alternative symbol 
+         * for zero; otherwise, with leading spaces.
+         */
+        REQ("wcsftime.strftime.17.07", "", TODO_REQ());
+
+        /*
+         * %Oe Replaced by the day of the month, using the locale's alternative numeric 
+         * symbols, filled as needed with leading spaces.
+         */
+        REQ("wcsftime.strftime.17.08", "", TODO_REQ());
+
+        /*
+         * %OH Replaced by the hour (24-hour clock) using the locale's alternative numeric 
+         * symbols.
+         */
+        REQ("wcsftime.strftime.17.09", "", TODO_REQ());
+
+        /*
+         * %OI Replaced by the hour (12-hour clock) using the locale's alternative numeric 
+         * symbols.
+         */
+        REQ("wcsftime.strftime.17.10", "", TODO_REQ());
+
+        /*
+         * %Om Replaced by the month using the locale's alternative numeric symbols.
+         */
+        REQ("wcsftime.strftime.17.11", "", TODO_REQ());
+
+        /*
+         * %OM Replaced by the minutes using the locale's alternative numeric symbols.
+         */
+        REQ("wcsftime.strftime.17.12", "", TODO_REQ());
+
+        /*
+         * %OS Replaced by the seconds using the locale's alternative numeric symbols.
+         */
+        REQ("wcsftime.strftime.17.13", "", TODO_REQ());
+
+        /*
+         * %Ou Replaced by the weekday as a number in the locale's alternative 
+         * representation (Monday=1).
+         */
+        REQ("wcsftime.strftime.17.14", "", TODO_REQ());
+
+        /*
+         * %OU Replaced by the week number of the year (Sunday as the first day of the 
+         * week, rules corresponding to %U ) using the locale's alternative numeric 
+         * symbols.
+         */
+        REQ("wcsftime.strftime.17.15", "", TODO_REQ());
+
+        /*
+         * %OV Replaced by the week number of the year (Monday as the first day of the 
+         * week, rules corresponding to %V ) using the locale's alternative numeric 
+         * symbols.
+         */
+        REQ("wcsftime.strftime.17.16", "", TODO_REQ());
+
+        /*
+         * %Ow Replaced by the number of the weekday (Sunday=0) using the locale's 
+         * alternative numeric symbols.
+         */
+        REQ("wcsftime.strftime.17.17", "", TODO_REQ());
+
+        /*
+         * %OW Replaced by the week number of the year (Monday as the first day of the 
+         * week) using the locale's alternative numeric symbols.
+         */
+        REQ("wcsftime.strftime.17.18", "", TODO_REQ());
+
+        /*
+         * %Oy Replaced by the year (offset from %C ) using the locale's alternative 
+         * numeric symbols.
+         */
+        REQ("wcsftime.strftime.17.19", "", TODO_REQ());
+
+        /*
+          * If the total number of resulting wide-character codes including the terminating 
+          * null wide-character code is no more than maxsize, wcsftime() shall return the 
+          * number of wide-character codes placed into the array pointed to by wcs, not 
+          * including the terminating null wide-character code.
+          */
+        if(wcsftime_spec != 0)
+        {
+            REQ("wcsftime.03.01;wcsftime.01.04", "shall return the number of wide-character codes placed into the array wcs", 
+                !isNULL_VoidTPtr(wcs) && length_WString(wcs_post) == wcsftime_spec
+            );
+        }
+
+        return true;
+    }
+}
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+int wcs_morphed(WString* target, int offset)
+{
+    SizeT len = length_WString(target) + 1;
+    int way = 0;
+    WCharT tmp;
+    int j, k;
+    int i;
+    if (offset >= len) return true;
+    
+    i = indexOfWCharFrom_WString(target, '%', offset);
+    if (i >= 0)
+    {
+        tmp = wcharAt_WString(target, ++i);
+        if (tmp == 'E')
+            way = 1;
+        if (tmp == 'O')
+            way = 2;
+        if (way == 0)
+            for (j = 0; j < (sizeof(modifiers)/sizeof(WCharT)); j++)
+            {
+                if (tmp == modifiers[j])
+                {
+                    way = 3;
+                    break;
+                }
+            }
+        switch (way)
+        {
+//        case 0 : return 0;
+        case 1 : 
+                {
+                    tmp = wcharAt_WString(target, ++i);
+                    for (k = 0; k < (sizeof(advEmodifiers)/sizeof(WCharT)); k++)
+                    {
+                        if (tmp == advEmodifiers[k])
+                        {
+                            return 2;
+                            break;
+                        }
+                    }
+                    break;
+                }
+        case 2 : 
+                {
+                    tmp = wcharAt_WString(target, ++i);
+                    for (k = 0; k < (sizeof(advOmodifiers)/sizeof(WCharT)); k++)
+                    {
+                        if (tmp == advOmodifiers[k])
+                        {
+                            return 3;
+                            break;
+                        }
+                    }
+                    break;
+                }
+        case 3 : return 1; 
+        default: return wcs_morphed(target, ++i);
+        }
+    }
+    else return 0;
+}
+
+bool format_exist(WString* location, WCharT target, int breed, int offset)
+{
+    SizeT len = length_WString(location) + 1;
+    WCharT tmp;
+    int i;
+    if (offset >= len) return true;
+    
+    i = indexOfWCharFrom_WString(location, '%', offset);
+    if (i >= 0)
+    {
+        tmp = wcharAt_WString(location, ++i);
+        if (breed == 1)
+        {
+            if (tmp == target)
+                return true;
+            else
+                return format_exist(location, target, breed, ++i);
+        }
+        else if (breed == 2)
+        {
+            if (tmp == 'E')
+            {
+                tmp = wcharAt_WString(location, ++i);
+                if (tmp == target) return true;
+                else
+                    return format_exist(location, target, breed, ++i);
+            }
+        }
+        else if (breed == 3)
+        {
+            if (tmp == 'O')
+            {
+                tmp = wcharAt_WString(location, ++i);
+                if (tmp == target) return true;
+                else
+                    return format_exist(location, target, breed, ++i);
+            }
+        }
+    }
+    else return false;
+}
+
+bool normal_format_exist(WString* location, int offset)
+{
+    SizeT len = length_WString(location) + 1;
+    WCharT tmp;
+    int j = 0;
+    int k = 0;
+    int i;
+    if (offset >= len) return true;
+    
+    i = indexOfWCharFrom_WString(location, '%', offset);
+    if (i >= 0)
+    {
+        tmp = wcharAt_WString(location, ++i);
+        if (tmp == 'O' || tmp == 'E')
+            return normal_format_exist(location, i+2);
+        else
+        {
+            for (j = 0; j < (sizeof(modifiers)/sizeof(WCharT)); j++)
+            {
+                if (tmp == modifiers[j])
+                {
+                    k = 1;
+                    break;
+                }
+            }
+            if (k == 0) return false;
+            else 
+                return normal_format_exist(location, ++i);
+        }
+    }
+    else return true;
+}
+
+bool mod_format_exist(WString* location, int offset)
+{
+    SizeT len = length_WString(location) + 1;
+    WCharT tmp;
+    int j = 0;
+    int k = 0;
+    int i;
+    if (offset >= len) return true;
+    
+    i = indexOfWCharFrom_WString(location, '%', offset);
+    if (i >= 0)
+    {
+        tmp = wcharAt_WString(location, ++i);
+        if (tmp != 'O' || tmp != 'E')
+            return mod_format_exist(location, ++i);
+        else
+        {
+            if (tmp == 'E')
+            {
+                tmp = wcharAt_WString(location, ++i);
+                for (j = 0; j < (sizeof(advEmodifiers)/sizeof(WCharT)); j++)
+                {
+                    if (tmp == advEmodifiers[j])
+                    {
+                        k = 1;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                tmp = wcharAt_WString(location, ++i);
+                for (j = 0; j < (sizeof(advOmodifiers)/sizeof(WCharT)); j++)
+                {
+                    if (tmp == advOmodifiers[j])
+                    {
+                        k = 1;
+                        break;
+                    }
+                }
+            }
+            if (k == 0) return false;
+            else
+                return mod_format_exist(location, ++i);
+        }
+    }
+    else return true;
+}
+

@@ -1,0 +1,1294 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "common/common_model.seh"
+#include "data/errno_model.seh"
+#include "atl/integer.h"    
+#include "atl/long.h"
+#include "atl/void_ast.h"
+#include "atl/stringbuffer.h"
+#include "atl/stringbuffer.h"
+#include <stdarg.h>
+
+bool req_scen_verdict = true;
+
+/********************************************************************/
+/**                  Common Model Initialization                   **/
+/********************************************************************/
+bool trace_all_requirements;
+void initCommonModel(void)
+{
+    trace_all_requirements = false;
+}
+
+
+/********************************************************************/
+/**                        Trace Functions                         **/
+/********************************************************************/
+bool tterm( bool value, const char* str )
+{
+char* buff;
+
+    if (value)
+        return true;
+    buff = (char*)malloc( strlen(str)+256 );
+    sprintf( buff, "%s is false", str );
+    traceUserInfo( buff );
+    free( buff );
+    return value;
+}
+
+bool fterm( bool value, const char* str )
+{
+char* buff;
+
+    if (!value)
+        return true;
+    buff = (char*)malloc( strlen(str)+256 );
+    sprintf( buff, "%s is true", str );
+    traceUserInfo( buff );
+    free( buff );
+    return value;
+}
+
+
+/********************************************************************/
+/**                           REQ FILTER                           **/
+/********************************************************************/
+
+static List * req_filters = NULL;
+static bool filter_reverse = false;
+
+bool initReqFilters(void)
+{
+    req_filters = create_List(&type_CString);
+    filter_reverse = false;    
+    return true;
+}
+
+
+void req_filter(char * s) 
+{ 
+    assertion(req_filters!=NULL, "ReqFilters is not initialised. Use initReqFilters()." );
+    append_List(req_filters,create_CString(s));
+}
+
+
+void filter_clean()
+{
+    assertion(req_filters!=NULL, "ReqFilters is not initialised. Use initReqFilters()." );
+    clear_List(req_filters);
+    filter_reverse = false;
+}
+
+void reverse_filter()
+{
+    filter_reverse = true;
+}
+
+static int isMarkAllowed(char *s)
+{
+
+    if(strncmp(s,"app.",4)==0) // suppress apps
+        return 0;
+
+    if( (req_filters!=NULL) && (size_List(req_filters)>0) )
+    {
+        char sbuffer[4096];
+        char *buffer = (char*)sbuffer;
+        int i;
+        int l = strlen(s);
+        int start = 0;
+        char pref = 0; // prefix !,? or $
+        bool app = false;
+        CString * cstring;
+
+        buffer[0] = 0;
+
+        for( i=0; (i<l) && (s[i]==32); i++ );
+
+        for(;i<l;i++)
+        {
+            if(s[i]=='.')
+            {
+                assertion( i < sizeof(sbuffer), "isMarkAllowed: not enough memory" );
+                buffer = sbuffer;
+                buffer[i-start]=0;
+                strncpy(buffer, s+start, i-start);
+        
+                if( (buffer[0] == '!') || (buffer[0] == '?') || (buffer[0] == '$') )
+                {
+                    pref = buffer[0];
+                    buffer++;
+                }
+                if( strcmp(buffer,"app")==0 )
+                {
+                    start = i+1;
+                    app = true;
+                    continue;
+                }
+                break;
+            }
+        }
+
+        if( buffer[0] != 0 )
+        {
+            cstring = create_CString(buffer);
+            if( filter_reverse )
+            {
+                if( contains_List(req_filters, cstring) )
+                    return 0;
+            }
+            else
+                if( !contains_List(req_filters, cstring) )
+                    return 0;
+        }
+    }
+
+    if( (s[0] == '!') /*|| (s[0] == '?')*/ || (s[0] == '$') )
+        s++;
+
+    return 1;
+}
+
+static void filterMark(char * s)
+{
+
+    if(isMarkAllowed(s))
+        traceMark(s);
+}
+
+static void filterFailedMark(char * s)
+{
+    if(isMarkAllowed(s))
+     {
+        char* req_name = malloc( strlen(s) + 16 );
+        assertion( req_name != NULL, "filterFailedMark: not enough memory" );
+
+        sprintf( req_name, "req_id.%s", s );
+        traceExceptionValue( req_name, s );
+        free( req_name );
+     }
+}
+
+String* filterAllowedRequirements(char * id)
+{
+char  sbuffer[4096];
+int i,j,len;
+StringBuffer* res = create_StringBuffer();
+bool first = true;
+
+    if (id == NULL)
+        return toString(res);
+    len = strlen(id);
+    if (len == 0)
+        return toString(res);
+    j = 0;
+    // Main cycle
+    for(i=0;id[i]!=0;i++)
+    {
+        if (id[i] == ';')
+        {
+            // Create copy of id
+            if (j == 0)
+            {
+                assertion( i < sizeof(sbuffer), "filterAllowedRequirements: not enough memory" );
+                strcpy(sbuffer,id);
+            }
+            sbuffer[i] = 0;
+            if (i>j && isMarkAllowed(sbuffer+j))
+            {
+                if(!first)
+                 {
+                    append_StringBuffer( res, ";" );
+                 }
+                append_StringBuffer( res, sbuffer+j );
+                first = false;
+            }
+            j = i+1;
+        }
+    }
+    if (i>j && isMarkAllowed(id+j) )
+    {
+        if(!first)
+         {
+            append_StringBuffer( res, ";" );
+         }
+        append_StringBuffer( res, id+j );
+        first = false;
+    }
+    return toString(res);
+}
+
+void traceRequirements(char* id)
+{
+    char  sbuffer[4096];
+    int i,j,len;
+    
+    if (id == NULL)
+        return;
+    len = strlen(id);
+    if (len == 0)
+        return;
+    j = 0;
+    // Main cycle
+    for(i=0;id[i]!=0;i++)
+    {
+        if (id[i] == ';')
+        {
+            // Create copy of id
+            if (j == 0)
+            {
+                assertion( i < sizeof(sbuffer), "traceRequirements: not enough memory" );
+                strcpy(sbuffer,id);
+            }
+            sbuffer[i] = 0;
+            if (i>j)
+            {
+                filterMark(sbuffer+j);
+            }
+            j = i+1;
+        }
+    }
+    if (i>j)
+    {
+        filterMark(id+j);
+    }
+}
+
+void traceFailedRequirements(char* id)
+{
+    char  sbuffer[4096];
+    int i,j,len;
+    
+    if (id == NULL)
+        return;
+    len = strlen(id);
+    if (len == 0)
+        return;
+    j = 0;
+    // Main cycle
+    for(i=0;id[i]!=0;i++)
+    {
+        if (id[i] == ';')
+        {
+            // Create copy of id
+            if (j == 0)
+            {
+                assertion( i < sizeof(sbuffer), "traceFailedRequirements: not enough memory" );
+                strcpy(sbuffer,id);
+            }
+            sbuffer[i] = 0;
+            if (i>j)
+            {
+                filterFailedMark(sbuffer+j);
+            }
+            j = i+1;
+        }
+    }
+    if (i>j)
+    {
+        filterFailedMark(id+j);
+    }
+}
+
+void traceExtraProperty(const char* key, Object* value)
+{
+String* value_str = toString(value);
+
+    traceExceptionValue( key, toCharArray_String(value_str) ); 
+}
+
+void traceExtraFormattedProperty(const char* key, const char* format, ...)
+{
+va_list arg_list;
+String* value_str;
+
+    va_start(arg_list, format);
+
+    value_str = vformat_String(format, arg_list);
+    traceExceptionValue( key, toCharArray_String(value_str) );
+
+    va_end(arg_list);
+}
+
+bool AlwaysTrue(const char* strReqs)
+{
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Three Valued Boolean Type                   **/
+/********************************************************************/
+Bool3 not_Bool3(Bool3 x)
+{
+    switch(x)
+    {
+    case True_Bool3:
+        return False_Bool3;
+    case False_Bool3:
+        return True_Bool3;
+    default:
+        return Unknown_Bool3;
+    }
+}
+
+Bool3 and_Bool3(Bool3 x, Bool3 y)
+{
+    if(x == True_Bool3 && y == True_Bool3)
+        return True_Bool3;
+
+    if(x == False_Bool3 || y == False_Bool3)
+        return False_Bool3;
+
+    return Unknown_Bool3;
+}
+
+Bool3 or_Bool3(Bool3 x, Bool3 y)
+{
+    if(x == True_Bool3 || y == True_Bool3)
+        return True_Bool3;
+
+    if(x == False_Bool3 && y == False_Bool3)
+        return False_Bool3;
+
+    return Unknown_Bool3;
+}
+
+Bool3 equals_Bool3(Bool3 x, Bool3 y)
+{
+    if(x == Unknown_Bool3 || y == Unknown_Bool3)
+        return Unknown_Bool3;
+
+    return x == y ? True_Bool3 : False_Bool3;
+}
+
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+specification typedef TimeUnit TimeUnitObj = {};
+
+TimeUnitObj * create_TimeUnitObj(TimeUnit timeUnit)
+{
+    return create(&type_TimeUnitObj, timeUnit);
+}
+
+/********************************************************************/
+/**                          Memory Block                          **/
+/********************************************************************/
+specification typedef struct MemoryBlock MemoryBlock = {};
+
+MemoryBlock* create_MemoryBlock( VoidTPtr address, SizeT size )
+{
+    return create( &type_MemoryBlock,
+                       address, size, create_List(NULL), NULL
+                 );
+}
+
+static void insertMemoryBlock( List* memory_blocks, MemoryBlock* new_mb )
+{
+    int i,size;
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (new_mb->address.address < mb->address.address)
+         {
+            add_List( memory_blocks, i, new_mb );
+            return;
+         }
+        if (new_mb->address.address < mb->address.address + mb->size)
+         {
+            insertMemoryBlock( mb->subblocks, new_mb );
+            return;
+         }
+     }
+    append_List( memory_blocks, new_mb );
+}
+
+MemoryBlock* registerMemoryBlock( VoidTPtr address, SizeT size )
+{
+    MemoryBlock* mb;
+    List* memory_blocks;
+
+    if (isNULL_VoidTPtr(address))
+        return NULL;
+
+    mb = create_MemoryBlock( address, size );
+    memory_blocks = getMemoryBlocks_VoidTPtr( address );
+    assertion( memory_blocks != NULL, "registerMemoryBlock: Process not found" );
+    insertMemoryBlock( memory_blocks, mb );
+    return mb;
+}
+
+bool removeMemoryBlock( List* memory_blocks, VoidTPtr address )
+{
+    int i,size;
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (address.address < mb->address.address)
+            return false;
+        if (address.address <= mb->address.address + mb->size)
+         {
+            if (removeMemoryBlock( mb->subblocks, address ))
+                return true;
+            if (mb->address.address == address.address)
+             {
+                remove_List( memory_blocks, i );
+                return true;
+             }
+         }
+     }
+  return false;
+}
+
+void unregisterMemoryBlock( VoidTPtr address )
+{
+    List* memory_blocks;
+
+    if (isNULL_VoidTPtr(address))
+        return;
+
+    memory_blocks = getMemoryBlocks_VoidTPtr( address );
+    assertion( memory_blocks != NULL, "unregisterMemoryBlock: Process not found" );    
+    removeMemoryBlock( memory_blocks, address );
+}
+
+void printMemoryBlocks( List* memory_blocks, int level )
+{
+    int i,j,size;
+
+    size = size_List(memory_blocks);
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        for( j = 0; j < level; j++ ) { VERBOSE("  "); }
+        VERBOSE("%lu    [%lu]\n",(unsigned long)mb->address.address,(unsigned long)mb->size);
+        printMemoryBlocks( mb->subblocks, level+1 );
+     }
+}
+
+void printMemoryBlocksInfo( CallContext context )
+{
+    List* memory_blocks;
+
+    memory_blocks = getMemoryBlocks_CallContext(context);
+    assertion( memory_blocks != NULL, "printMemoryBlocksInfo: Process not found" );    
+
+    VERBOSE("Printing Memory State...\n");
+    printMemoryBlocks(memory_blocks, 1);
+}
+
+
+/********************************************************************/
+/**                      Memory Blocks Storage                     **/
+/********************************************************************/
+MemoryBlock* getMemoryBlock( VoidTPtr ptr )
+{
+    List* memory_blocks;
+
+    assertion( !isNULL_VoidTPtr(ptr), "getMemoryBlock: ptr is NULL" );
+
+    memory_blocks = getMemoryBlocks_VoidTPtr(ptr);
+
+    return findMemoryBlock(memory_blocks, ptr );
+}
+
+MemoryBlock* findMemoryBlock( List* memory_blocks, VoidTPtr ptr )
+{
+    MemoryBlock* res;
+    int i,size;
+
+    assertion( !isNULL_VoidTPtr(ptr), "findMemoryBlock: ptr is NULL" );
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (ptr.address < mb->address.address)
+            return NULL;
+        if (ptr.address < mb->address.address + mb->size)
+         {
+            res = findMemoryBlock( mb->subblocks, ptr );
+            return (res != NULL) ? res : mb;
+         }
+        if (ptr.address == mb->address.address)
+            return mb;
+     }
+    return NULL;
+}
+
+MemoryBlock* getTopMemoryBlock( VoidTPtr ptr )
+{
+    List* memory_blocks;
+
+    assertion( !isNULL_VoidTPtr(ptr), "getTopMemoryBlock: ptr is NULL" );
+
+    memory_blocks = getMemoryBlocks_VoidTPtr(ptr);
+    assertion( memory_blocks != NULL, "getTopMemoryBlock: Process not found" );  
+
+    return findTopMemoryBlock( memory_blocks, ptr );
+}
+
+MemoryBlock* findTopMemoryBlock( List* memory_blocks, VoidTPtr ptr )
+{
+    int i,size;
+
+    assertion( !isNULL_VoidTPtr(ptr), "findTopMemoryBlock: ptr is NULL" );
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (ptr.address < mb->address.address)
+            return NULL;
+        if (ptr.address < mb->address.address + mb->size)
+            return mb;
+        if (ptr.address == mb->address.address)
+            return mb;
+     }
+    return NULL;
+}
+
+bool isDisjointMemoryBlock( List* memory_blocks, VoidTPtr ptr, SizeT size )
+{
+    int i,size2;
+
+    assertion( !isNULL_VoidTPtr(ptr), "isDisjointMemoryBlock: ptr is NULL" );
+
+    size2 = size_List( memory_blocks );
+    for( i = 0; i < size2; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (ptr.address + size <= mb->address.address)
+         {
+            if ((ptr.address == mb->address.address) && (size == 0))
+                return false;
+            return true;
+         }
+        if (ptr.address >= mb->address.address + mb->size)
+         {
+            if ((ptr.address == mb->address.address) && (mb->size == 0))
+                return false;
+            continue;
+         }
+        return false;
+     }
+    return true;
+}
+
+bool isDisjointMemoryBlockExceptFor( List* memory_blocks, VoidTPtr except_block, VoidTPtr ptr, SizeT size )
+{
+    int i,size2;
+
+    assertion( !isNULL_VoidTPtr(ptr), "isDisjointMemoryBlockExceptFor: ptr is NULL" );
+
+    size2 = size_List( memory_blocks );
+    for( i = 0; i < size2; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (mb->address.address == except_block.address)
+         {
+            continue;
+         }
+        if (ptr.address + size <= mb->address.address)
+         {
+            if ((ptr.address == mb->address.address) && (size == 0))
+                return false;
+            return true;
+         }
+        if (ptr.address >= mb->address.address + mb->size)
+         {
+          if ((ptr.address == mb->address.address) && (mb->size == 0))
+              return false;
+          continue;
+         }
+        return false;
+     }
+    return true;
+}
+
+bool isHeapBlockPointer( VoidTPtr ptr )
+{
+    List* memory_blocks;
+    int i,size;
+
+    if( isNULL_VoidTPtr(ptr) )
+        return false;
+
+    memory_blocks = getMemoryBlocks_VoidTPtr(ptr);
+    if ( memory_blocks == NULL )
+        return false;
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (ptr.address == mb->address.address)
+            return true;
+        if (ptr.address < mb->address.address)
+            return false;
+     }
+    return false;
+}
+
+/* getNumberOfHeapBlocks */
+int getNumberOfHeapBlocks( CallContext context )
+{
+    List* memory_blocks;
+
+    memory_blocks = getMemoryBlocks_CallContext(context);
+    assertion( memory_blocks != NULL, "getNumberOfHeapBlocks: Process not found" );
+
+    return size_List( memory_blocks );
+}
+
+MemoryBlock* getLastMemoryBlock( CallContext context )
+{
+    List* memory_blocks;
+    int size;
+    MemoryBlock* memoryBlock = NULL;
+
+    memory_blocks = getMemoryBlocks_CallContext(context);
+  
+    assertion( memory_blocks != NULL, "getFirstMemoryBlock: Process not found" );
+
+    size = size_List(memory_blocks);
+
+    if (size > 0)
+     {
+        memoryBlock = get_List(memory_blocks, size - 1);
+     }
+    return memoryBlock;
+}
+
+CByteArray* readCByteArray_MemoryBlock( MemoryBlock* mb )
+{
+    assertion( mb != NULL, "readCByteArray_MemoryBlock: mb is NULL" );
+
+    return readCByteArray_VoidTPtr( mb->address, mb->size );
+}
+
+WCharArray* readWCharArray_MemoryBlock( MemoryBlock* mb )
+{
+    assertion( mb != NULL, "readWCharArray_MemoryBlock: mb is NULL" );
+
+    return readWCharArray_VoidTPtr( mb->address, mb->size );
+}
+
+CByteArray* readCByteArray_MemoryBlockExceptFor( MemoryBlock* mb, VoidTPtr ptr, SizeT size )
+{
+    sut_ptr_t mbaddr,exceptaddr,endaddr;
+    SizeT i;
+    UCharT* buffer;
+    CByteArray* res2;
+
+    assertion( mb != NULL, "readCByteArray_MemoryBlockExceptFor: mb is NULL" );
+    if (!isNULL_VoidTPtr(ptr))
+     {
+        assertion( mb->address.system == ptr.system, "readCByteArray_MemoryBlockExceptFor: different systems" );
+        assertion( mb->address.process == ptr.process, "readCByteArray_MemoryBlockExceptFor: different processes" );
+     }
+
+    res2 = readCByteArray_MemoryBlock( mb );
+    mbaddr = mb->address.address;
+    exceptaddr = ptr.address;
+    if ((mbaddr <= exceptaddr) && (exceptaddr <= mbaddr + mb->size))
+     {
+        endaddr = (exceptaddr + size <= mbaddr + mb->size) ? exceptaddr + size : mbaddr + mb->size;
+        buffer = byteArray_CByteArray(res2);
+        for( i = exceptaddr - mbaddr; i < endaddr - mbaddr; i++  )
+         {
+            buffer[i] = 0;
+         }
+     }
+    return res2;
+}
+
+
+/********************************************************************/
+/**                       Objects In Memory                        **/
+/********************************************************************/
+
+void registerObjectInMemory( VoidTPtr ptr, SizeT size, Object* data )
+{
+    MemoryBlock* mb = registerMemoryBlock( ptr, size );
+  
+    mb->data = data;
+}
+
+void unregisterObjectInMemory( VoidTPtr ptr )
+{
+    unregisterMemoryBlock(ptr);
+}
+
+Object* getObjectInMemory( VoidTPtr ptr )
+{
+    List* memory_blocks;;
+
+    if (isNULL_VoidTPtr(ptr))
+        return NULL;
+
+    memory_blocks = getMemoryBlocks_VoidTPtr(ptr);
+    assertion( memory_blocks != NULL, "getObjectInMemory: Process not found" );
+
+    return findObjectInMemoryBlocks( memory_blocks, ptr );
+}
+
+Object* findObjectInMemoryBlocks( List* memory_blocks, VoidTPtr ptr )
+{
+    MemoryBlock* mb = findMemoryBlock( memory_blocks, ptr );
+
+    if (mb == NULL)
+        return NULL;
+    return mb->data;
+}
+
+Object* getTypedObjectInMemory( VoidTPtr ptr, const Type* type_desc )
+{
+    List* memory_blocks;
+
+    if (isNULL_VoidTPtr(ptr))
+        return NULL;
+
+    memory_blocks = getMemoryBlocks_VoidTPtr(ptr);
+    assertion( memory_blocks != NULL, "getTypedObjectInMemory: Process not found" );
+
+    return findTypedObjectInMemoryBlocks( memory_blocks, ptr, type_desc );
+}
+
+Object* findTypedObjectInMemoryBlocks( List* memory_blocks, VoidTPtr ptr, const Type* type_desc )
+{
+    MemoryBlock* res;
+    int i,size;
+
+    assertion( !isNULL_VoidTPtr(ptr), "findMemoryBlock: ptr is NULL" );
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        if (ptr.address < mb->address.address)
+           return NULL;
+        if (ptr.address < mb->address.address + mb->size)
+         {
+            res = findTypedObjectInMemoryBlocks( mb->subblocks, ptr, type_desc );
+            if (res != NULL)
+                return res;
+         }
+        if ((ptr.address == mb->address.address) && (mb->data != NULL))
+         {
+            if (type(mb->data) == type_desc)
+                return mb;
+         }
+     }
+    return NULL;
+}
+
+/* getTypedObjectsInMemory */
+ObjectsInMemory* getTypedObjectsInMemory( CallContext context, const Type* type_desc )
+{
+    List* memory_blocks;
+
+    assertion( type_desc != NULL, "getTypedObjectsInMemory: type_desc is NULL" );
+
+    memory_blocks = getMemoryBlocks_CallContext(context);
+  
+    assertion( memory_blocks != NULL, "getTypedObjectsInMemory: Process not found" );
+
+    return findTypedObjectsInMemoryBlocks( memory_blocks, type_desc );
+}
+
+static void collectTypedObjectsInMemoryBlocks( List* memory_blocks, const Type* type_desc, ObjectsInMemory* res )
+{
+    int i,size;
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        collectTypedObjectsInMemoryBlocks( mb->subblocks, type_desc, res );
+        if (mb->data != NULL)
+         {
+          if (type(mb->data) == type_desc)
+              put_Map( res, create_VoidTPtrObj(mb->address), mb->data );
+         }
+     }
+}
+
+ObjectsInMemory* findTypedObjectsInMemoryBlocks( List* memory_blocks, const Type* type_desc )
+{
+    Map* res;
+
+    res = create_Map( &type_VoidTPtrObj, type_desc );
+    collectTypedObjectsInMemoryBlocks( memory_blocks, type_desc, res );
+    return res;
+}
+
+/* getAllTypedObjectsInMemory */
+ObjectsInMemory* getAllTypedObjectsInMemory( const Type* type_desc )
+{
+    int i, size;
+    Map* res;
+    List* all_memory_blocks;
+
+    assertion( type_desc != NULL, "getAllTypedObjectsInMemory: type_desc is NULL" );
+
+    res = create_Map( &type_VoidTPtrObj, type_desc );
+    
+    all_memory_blocks = getAllMemoryBlocks();
+    
+    size = size_List(all_memory_blocks);
+    for( i = 0; i < size; i++ )
+    {
+        collectTypedObjectsInMemoryBlocks( get_List(all_memory_blocks, i), type_desc, res );
+    }
+    return res;
+}
+
+Object* findObjectInMemory( ObjectsInMemory* objects, VoidTPtr ptr )
+{
+    return get_Map( objects, create_VoidTPtrObj(ptr) );
+}
+
+
+/* getNumberOfTypedObjectsInMemoryBlocks */
+static int getNumberOfTypedObjectsInMemoryBlocks( List* memory_blocks, const Type* type_desc )
+{
+    int res = 0;
+    int i,size;
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        res = res + getNumberOfTypedObjectsInMemoryBlocks( mb->subblocks, type_desc );
+        if (mb->data != NULL)
+         {
+            if (type(mb->data) == type_desc)
+                res++;
+         }
+     }
+    return res;
+}
+
+int getNumberOfTypedObjectsInMemory( CallContext context, const Type* type_desc )
+{
+    List* memory_blocks;
+
+    assertion( type_desc != NULL, "getNumberOfTypedObjectsInMemory: type_desc is NULL" );
+
+    memory_blocks = getMemoryBlocks_CallContext(context);
+  
+    assertion( memory_blocks != NULL, "getNumberOfTypedObjectsInMemory: Process not found" );
+
+    return getNumberOfTypedObjectsInMemoryBlocks( memory_blocks, type_desc );
+}
+
+/* getAnyObjectInMemoryOfType */
+Object* getAnyObjectInMemoryOfType( CallContext context, const Type* type_desc )
+{
+    List* memory_blocks;
+
+    assertion( type_desc != NULL, "getAnyObjectInMemoryOfType: type_desc is NULL" );
+
+    memory_blocks = getMemoryBlocks_CallContext(context);
+  
+    assertion( memory_blocks != NULL, "getAnyObjectInMemoryOfType: Process not found" );
+
+    return findAnyObjectInMemoryBlocksOfType( memory_blocks, type_desc );
+}
+
+Object* findAnyObjectInMemoryBlocksOfType( List* memory_blocks, const Type* type_desc )
+{
+    Object* res2;
+    int i,size;
+
+    size = size_List( memory_blocks );
+    for( i = 0; i < size; i++ )
+     {
+        MemoryBlock* mb = get_List( memory_blocks, i );
+        res2 = findAnyObjectInMemoryBlocksOfType( mb->subblocks, type_desc );
+        if (res2 != NULL)
+            return res2;
+
+        if (mb->data != NULL)
+         {
+            if (type(mb->data) == type_desc)
+                return mb;
+         }
+     }
+    return NULL;
+}
+
+// To be implemented
+Object* selectObjectInMemory( CallContext context, SelectorFuncType selector );
+
+
+/********************************************************************/
+/**                     Common Memory Functions                    **/
+/********************************************************************/
+bool isValidPointer( CallContext context, VoidTPtr ptr )
+{
+    return (ptr.system == context.system)
+        && (ptr.process == context.process);
+}
+
+//SizeT sizeMemoryAvailable( VoidTPtr ptr, AccessT requiredAccess );
+SizeT sizeRWMemoryAvailable( VoidTPtr ptr )
+{
+    MemoryBlock* mb = getTopMemoryBlock(ptr);
+
+    if (mb == NULL)
+        return 0;
+    return (mb->size - (diff_VoidTPtr(ptr,mb->address)));
+}
+
+SizeT sizeRMemoryAvailable( VoidTPtr ptr )
+{
+    MemoryBlock* mb = getTopMemoryBlock(ptr);
+
+    if (mb == NULL)
+        return 0;
+    return (mb->size - (diff_VoidTPtr(ptr,mb->address)));
+}
+
+SizeT sizeWMemoryAvailable( VoidTPtr ptr )
+{
+    MemoryBlock* mb = getTopMemoryBlock(ptr);
+
+    if (mb == NULL)
+        return 0;
+    return (mb->size - (diff_VoidTPtr(ptr,mb->address)));
+}
+
+bool areObjectsOverlapped( VoidTPtr ptr1, SizeT size1, VoidTPtr ptr2, SizeT size2 )
+{
+    assertion( !isNULL_VoidTPtr(ptr1), "areObjectsOverlapped: ptr1 is NULL" );
+    assertion( !isNULL_VoidTPtr(ptr2), "areObjectsOverlapped: ptr2 is NULL" );
+    assertion( ptr1.system == ptr2.system, "areObjectsOverlapped: Objects belong to different systems" );
+    assertion( ptr1.process == ptr2.process, "areObjectsOverlapped: Objects belong to different processes" );
+
+    if (ptr1.address + size1 <= ptr2.address)
+        return false;
+    if (ptr2.address + size2 <= ptr1.address)
+        return false;
+    return true;
+}
+
+bool isPointerAligned( VoidTPtr ptr, SizeT allignment )
+{
+    return (ptr.address % allignment == 0);
+}
+
+
+bool isZeroArray(VoidTPtr s, SizeT n)
+{
+    CByteArray* zeroArrayP;
+    int i;
+
+    zeroArrayP=readCByteArray_VoidTPtr(s, n);
+    for(i=0; i<n; i++)
+    {
+        if(byteAt_CByteArray(zeroArrayP, i)!=0)
+            return false;
+    }
+    return true;
+}
+
+
+/********************************************************************/
+/**                            Error Code                          **/
+/********************************************************************/
+String* to_string_ErrorCode(sut_int* error_code)
+{
+    if(*error_code == SUT_EOK)
+        return create_String("EOK");
+    else
+    if(*error_code == SUT_EINVAL)
+        return create_String("EINVAL");
+    else
+    if(*error_code == SUT_E2BIG)
+        return create_String("E2BIG");
+    else
+    if(*error_code == SUT_EACCES)
+        return create_String("EACCES");
+    else
+    if(*error_code == SUT_EAGAIN)
+        return create_String("EAGAIN");
+    else
+    if(*error_code == SUT_EEXIST)
+        return create_String("EEXIST");
+    else
+    if(*error_code == SUT_EFAULT)
+        return create_String("EFAULT");
+    else
+    if(*error_code == SUT_ENOENT)
+        return create_String("ENOENT");
+    else
+    if(*error_code == SUT_ETIMEDOUT)
+        return create_String("ETIMEDOUT");
+    else
+    if(*error_code == SUT_EBADF)
+        return create_String("EBADF");
+    else
+    if(*error_code == SUT_EBADMSG)
+        return create_String("EBADMSG");
+    else
+    if(*error_code == SUT_EBUSY)
+        return create_String("EBUSY");
+    else
+    if(*error_code == SUT_ECANCELED)
+        return create_String("ECANCELED");
+    else
+    if(*error_code == SUT_ECHILD)
+        return create_String("ECHILD");
+    else
+    if(*error_code == SUT_EDEADLK)
+        return create_String("EDEADLK");
+    else
+    if(*error_code == SUT_EDOM)
+        return create_String("EDOM");
+    else
+    if(*error_code == SUT_EFBIG)
+        return create_String("EFBIG");
+    else
+    if(*error_code == SUT_EINPROGRESS)
+        return create_String("EINPROGRESS");
+    else
+    if(*error_code == SUT_EINTR)
+        return create_String("EINTR");
+    else
+    if(*error_code == SUT_EIO)
+        return create_String("EIO");
+    else
+    if(*error_code == SUT_EISDIR)
+        return create_String("EISDIR");
+    else
+    if(*error_code == SUT_EMFILE)
+        return create_String("EMFILE");
+    else
+    if(*error_code == SUT_EMLINK)
+        return create_String("EMLINK");
+    else
+    if(*error_code == SUT_EMSGSIZE)
+        return create_String("EMSGSIZE");
+    else
+    if(*error_code == SUT_ENAMETOOLONG)
+        return create_String("ENAMETOOLONG");
+    else
+    if(*error_code == SUT_ENFILE)
+        return create_String("ENFILE");
+    else
+    if(*error_code == SUT_ENODEV)
+        return create_String("ENODEV");
+    else
+    if(*error_code == SUT_ENOEXEC)
+        return create_String("ENOEXEC");
+    else
+    if(*error_code == SUT_ENOLCK)
+        return create_String("ENOLCK");
+    else
+    if(*error_code == SUT_ENOMEM)
+        return create_String("ENOMEM");
+    else
+    if(*error_code == SUT_ENOSPC)
+        return create_String("ENOSPC");
+    else
+    if(*error_code == SUT_ENOSYS)
+        return create_String("ENOSYS");
+    else
+    if(*error_code == SUT_ENOTDIR)
+        return create_String("ENOTDIR");
+    else
+    if(*error_code == SUT_ENOTEMPTY)
+        return create_String("ENOTEMPTY");
+    else
+    if(*error_code == SUT_ENOTSUP)
+        return create_String("ENOTSUP");
+    else
+    if(*error_code == SUT_ENOTTY)
+        return create_String("ENOTTY");
+    else
+    if(*error_code == SUT_ENXIO)
+        return create_String("ENXIO");
+    else
+    if(*error_code == SUT_EPERM)
+        return create_String("EPERM");
+    else
+    if(*error_code == SUT_EPIPE)
+        return create_String("EPIPE");
+    else
+    if(*error_code == SUT_ERANGE)
+        return create_String("ERANGE");
+    else
+    if(*error_code == SUT_EROFS)
+        return create_String("EROFS");
+    else
+    if(*error_code == SUT_ESPIPE)
+        return create_String("ESPIPE");
+    else
+    if(*error_code == SUT_ESRCH)
+        return create_String("ESRCH");
+    else
+    if(*error_code == SUT_EXDEV)
+        return create_String("EXDEV");
+    else
+    if(*error_code == SUT_EADDRINUSE)
+        return create_String("EADDRINUSE");
+    else
+    if(*error_code == SUT_EADDRNOTAVAIL)
+        return create_String("EADDRNOTAVAIL");
+    else
+    if(*error_code == SUT_EAFNOSUPPORT)
+        return create_String("EAFNOSUPPORT");
+    else
+    if(*error_code == SUT_EALREADY)
+        return create_String("EALREADY");
+    else
+    if(*error_code == SUT_ECONNABORTED)
+        return create_String("ECONNABORTED");
+    else
+    if(*error_code == SUT_ECONNREFUSED)
+        return create_String("ECONNREFUSED");
+    else
+    if(*error_code == SUT_ECONNRESET)
+        return create_String("ECONNRESET");
+    else
+    if(*error_code == SUT_EDESTADDRREQ)
+        return create_String("EDESTADDRREQ");
+    else
+    if(*error_code == SUT_EDQUOT)
+        return create_String("EDQUOT");
+    else
+    if(*error_code == SUT_EHOSTUNREACH)
+        return create_String("EHOSTUNREACH");
+    else
+    if(*error_code == SUT_EIDRM)
+        return create_String("EIDRM");
+    else
+    if(*error_code == SUT_EILSEQ)
+        return create_String("EILSEQ");
+    else
+    if(*error_code == SUT_EISCONN)
+        return create_String("EISCONN");
+    else
+    if(*error_code == SUT_ELOOP)
+        return create_String("ELOOP");
+    else
+    if(*error_code == SUT_EMULTIHOP)
+        return create_String("EMULTIHOP");
+    else
+    if(*error_code == SUT_ENETDOWN)
+        return create_String("ENETDOWN");
+    else
+    if(*error_code == SUT_ENETUNREACH)
+        return create_String("ENETUNREACH");
+    else
+    if(*error_code == SUT_ENOBUFS)
+        return create_String("ENOBUFS");
+    else
+    if(*error_code == SUT_ENODATA)
+        return create_String("ENODATA");
+    else
+    if(*error_code == SUT_ENOLINK)
+        return create_String("ENOLINK");
+    else
+    if(*error_code == SUT_ENOMSG)
+        return create_String("ENOMSG");
+    else
+    if(*error_code == SUT_ENOPROTOOPT)
+        return create_String("ENOPROTOOPT");
+    else
+    if(*error_code == SUT_ENOSR)
+        return create_String("ENOSR");
+    else
+    if(*error_code == SUT_ENOSTR)
+        return create_String("ENOSTR");
+    else
+    if(*error_code == SUT_ENOTCONN)
+        return create_String("ENOTCONN");
+    else
+    if(*error_code == SUT_ENOTSOCK)
+        return create_String("ENOTSOCK");
+    else
+    if(*error_code == SUT_EOVERFLOW)
+        return create_String("EOVERFLOW");
+    else
+    if(*error_code == SUT_EPROTO)
+        return create_String("EPROTO");
+    else
+    if(*error_code == SUT_EPROTONOSUPPORT)
+        return create_String("EPROTONOSUPPORT");
+    else
+    if(*error_code == SUT_EPROTOTYPE)
+        return create_String("EPROTOTYPE");
+    else
+    if(*error_code == SUT_ESTALE)
+        return create_String("ESTALE");
+    else
+    if(*error_code == SUT_ETIME)
+        return create_String("ETIME");
+    else
+    if(*error_code == SUT_ETXTBSY)
+        return create_String("ETXTBSY");
+    else
+    if(*error_code == SUT_EHOSTDOWN)
+        return create_String("EHOSTDOWN");
+    else
+    if(*error_code == SUT_ENETRESET)
+        return create_String("ENETRESET");
+    else
+    if(*error_code == SUT_EPFNOSUPPORT)
+        return create_String("EPFNOSUPPORT");
+
+    return toString( create_Integer( *error_code ) );
+}
+
+specification typedef sut_int ErrorCode = {.to_string = (ToString)to_string_ErrorCode };
+
+ErrorCode* create_ErrorCode( sut_int errno )
+{
+    return create( &type_ErrorCode, errno );
+}
+
+
+/********************************************************************/
+/**                            Time Delay                          **/
+/********************************************************************/
+

@@ -1,0 +1,360 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "socket/rpc/pmap_config.h"
+#include "socket/rpc/pmap_model.seh"
+#include "socket/socket/socket_model.seh"
+#include "socket/netdata/netdata_model.seh"
+
+
+#pragma SEC subsystem rpc "socket.rpc"
+
+
+/*
+   The group of functions 'socket.rpc.pmap' consists of:
+       pmap_getport [3]
+       pmap_set [3]
+       pmap_unset [3]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+WRONG SIGNATURE IN LSB 3.1 STANDART!!!
+*/
+specification
+UShortT pmap_getport_spec( CallContext context, SockaddrT * addr,
+                          ULongT prognum, ULongT versnum, ULongT protocol )
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        PmapPortRec * elem;
+
+       UInt32T sinaddr = getInetSocket_sin_addr(addr);
+        if( sinaddr == ntohl_model(SUT_INADDR_LOOPBACK) ) /*addr is localhost*/
+        {
+            elem = pmap_find_mapping(prognum, versnum, protocol);
+            if(elem == NULL)
+                elem = pmap_find_mapping_maxver(prognum, protocol);
+
+
+            if(pmap_getport_spec == 0)
+            {
+                /*
+                 * On failure, if either the program was not registered or the remote
+                 * portmapper service could not be reached, the pmap_getport() function shall
+                 * return 0.
+                 */
+                REQ("pmap_getport.04.02",
+                    "program was not registered or the remote service could not be reached",
+                    (elem==NULL) || (!elem->mapped)
+                   );
+                return true;
+            }
+
+            /*
+             * On success, the pmap_getport() function shall return the port number in host
+             * byte order of the RPC application registered with the remote portmapper.
+             */
+            REQ("pmap_getport.04.01", "shall return the port number",
+                (elem==NULL) || ( elem->mapped && (elem->port == pmap_getport_spec) )
+               );
+
+        }
+
+        /*
+         * The pmap_getport() function shall return the port number assigned to a service
+         * registered with a RPC Binding service running on a given target system, using
+         * the protocol described in RFC 1833: Binding Protocols for ONC RPC
+         * Version 2.
+         */
+        REQ("pmap_getport.01", "", TODO_REQ());
+
+        /*
+         * Conforming implementations shall support both IPPROTO_UDP and IPPROTO_TCP
+         * protocols.
+         */
+        REQ("pmap_getport.02", "", TODO_REQ());
+
+        /*
+         * The value of address->sin_port shall be ignored, and the standard value
+         * for the portmapper port shall always be used.
+         */
+        REQ("pmap_getport.03", "", TODO_REQ());
+
+
+        /*
+         * If the remote portmap service could not be reached, the status is left in the
+         * global variable rpc_createerr.
+         */
+        REQ("pmap_getport.05", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+pmap_set -- establishes mapping to machine's RPC Bind service.
+
+SYNOPSIS
+
+#include <rpc/pmap_clnt.h>
+
+bool_t pmap_set(const u_long program, const u_long version, int protocol,
+u_short port);
+
+DESCRIPTION
+
+pmap_set() establishes a mapping between the triple [program,version,protocol]
+and port on the machine's RPC Bind service. The value of protocol is most
+likely IPPROTO_UDP or IPPROTO_TCP. Automatically done by svc_register().
+
+RETURN VALUE
+
+pmap_set() returns non-zero if it suceeds, 0 otherwise.
+*/
+specification
+BoolT pmap_set_spec( CallContext context, ULongT program, ULongT version, IntT protocol, UShortT port)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        PmapPortRec * res = pmap_find_mapping(program, version, protocol);
+        /*
+         * pmap_set() establishes a mapping between the triple [program,version,protocol]
+         * and port on the machine's RPC Bind service.
+         */
+        REQ("?pmap_set.01", "establishes a mapping", res && res->mapped );
+
+        return true;
+    }
+}
+
+void onPmapSet(CallContext context, ULongT program, ULongT version, IntT protocol, UShortT port, BoolT pmap_set_spec)
+{
+    if(pmap_set_spec != 0)
+    {
+        pmap_add_mapping(program, version, protocol, port);
+    }
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+  pmap_unset --  destroys RPC Binding
+
+SYNOPSIS
+
+#include <rpc/pmap_clnt.h>
+
+bool_t pmap_unset(u_long prognum, u_long versnum);
+
+DESCRIPTION
+
+As a user interface to the RPC Bind service, pmap_unset() destroys all mapping
+between the triple [prognum,versnum, *] and ports on the machine's RPC Bind
+service.
+
+RETURN VALUE
+
+pmap_unset() returns non-zero if it succeeds, zero otherwise.
+*/
+specification
+BoolT pmap_unset_spec( CallContext context, ULongT prognum, ULongT versnum )
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * pmap_unset() returns non-zero if it succeeds,
+         * zero otherwise.
+         */
+        if(pmap_unset_spec != 0)
+        {
+            REQ("pmap_unset.02.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * pmap_unset() returns non-zero if it succeeds
+         */
+        REQ("pmap_unset.02.01", "returns non-zero if it succeeds", pmap_unset_spec==0);
+
+        /*
+         * As a user interface to the RPC Bind service,
+         * pmap_unset() destroys all mapping between the triple
+         * [prognum,versnum,*] and ports on the machine's
+         * RPC Bind service.
+         */
+        REQ("?pmap_unset.01", "destroys all mapping of [prognum,versnum,*]",
+             pmap_find_mappings(prognum, versnum) == NULL);
+
+        return true;
+    }
+}
+
+void onPmapUnset(CallContext context, ULongT prognum, ULongT versnum, BoolT pmap_unset_spec)
+{
+    pmap_unset_mappings(prognum, versnum);
+}
+
+/********************************************************************/
+/**                       Pmap Types                               **/
+/********************************************************************/
+
+specification typedef struct PmapTriple PmapTriple = {};
+
+PmapTriple * create_PmapTriple(ULongT prognum, ULongT versnum, UIntT protocol)
+{
+    return create(&type_PmapTriple, prognum, versnum, protocol);
+}
+
+specification typedef struct PmapPortRec PmapPortRec = {};
+
+PmapPortRec * create_PmapPortRec(bool isknown, UShortT port)
+{
+    return create(&type_PmapPortRec, isknown, port);
+}
+
+Map * pmap_model; // PmapTriple * => PmapPortRec *
+
+bool init_pmap()
+{
+    pmap_model = create_Map(&type_PmapTriple, &type_PmapPortRec);
+    if(!pmap_model)
+        return false;
+
+    return true;
+}
+
+void pmap_add_mapping(ULongT prognum, ULongT versnum, UIntT protocol, UShortT port)
+{
+    put_Map(pmap_model, create_PmapTriple(prognum, versnum, protocol), create_PmapPortRec(true, port) );
+}
+
+PmapPortRec * pmap_find_mapping(ULongT prognum, ULongT versnum, UIntT protocol)
+{
+    PmapTriple * key = create_PmapTriple(prognum, versnum, protocol);
+
+    return get_Map(pmap_model, key);
+}
+
+void pmap_unset_mappings(ULongT prognum, ULongT versnum)
+{
+    int i,sz;
+
+    sz = size_Map(pmap_model);
+
+    for(i=0;i<sz;i++)
+    {
+        PmapTriple * key = key_Map(pmap_model, i);
+
+        if( (key->prognum == prognum) && (key->versnum == versnum) )
+        {
+            PmapPortRec * elem = get_Map(pmap_model, key);
+            elem->mapped = false;
+        }
+    }
+}
+
+
+PmapPortRec * pmap_find_mappings(ULongT prognum, ULongT versnum)
+{
+    int i,sz;
+
+    sz = size_Map(pmap_model);
+
+    for(i=0;i<sz;i++)
+    {
+        PmapTriple * key = key_Map(pmap_model, i);
+
+        if( (key->prognum == prognum) && (key->versnum == versnum) )
+        {
+            PmapPortRec * elem = get_Map(pmap_model, key);
+            if(elem->mapped)
+                return elem;
+        }
+    }
+    return NULL;
+}
+
+PmapPortRec * pmap_find_mapping_maxver(ULongT prognum, ULongT protocol)
+{
+    int i,sz;
+    UShortT maxver = 0;
+    PmapPortRec * maxver_port = NULL;
+
+    sz = size_Map(pmap_model);
+
+    for(i=0;i<sz;i++)
+    {
+        PmapTriple * key = key_Map(pmap_model, i);
+
+        if( (key->prognum == prognum) && (key->protocol == protocol) && (key->versnum > maxver) )
+        {
+            PmapPortRec * elem = get_Map(pmap_model, key);
+            if(elem->mapped)
+            {
+                maxver = key->versnum;
+                maxver_port = elem;
+            }
+        }
+    }
+    return maxver_port;
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+

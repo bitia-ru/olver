@@ -1,0 +1,778 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#define NEWREQ
+
+#include "util/search/queue_model.seh"
+
+
+#pragma SEC subsystem search "util.search"
+
+
+/* 
+   The group of functions 'util.search.queue' consists of: 
+       insque [1]
+       remque [1]
+*/
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    insque, remque - insert or remove an element in a queue
+
+SYNOPSIS
+
+    #include <search.h>
+
+    void insque(void *element, void *pred);
+    void remque(void *element);
+
+DESCRIPTION
+
+    The insque() and remque() functions shall manipulate queues built from
+    doubly-linked lists. The queue can be either circular or linear. 
+    An application using insque() or remque() shall ensure it defines a
+    structure in which the first two members of the structure are pointers to
+    the same type of structure, and any further members are
+    application-specific. The first member of the structure is a forward
+    pointer to the next entry in the queue. The second member is a backward
+    pointer to the previous entry in the queue. If the queue is linear, the
+    queue is terminated with null pointers. The names of the structure and of
+    the pointer members are not subject to any special restriction.
+
+    The insque() function shall insert the element pointed to by element into
+    a queue immediately after the element pointed to by pred.
+
+    The remque() function shall remove the element pointed to by element from
+    a queue.
+
+    If the queue is to be used as a linear list, invoking
+    insque(&element, NULL), where element is the initial element of the queue,
+    shall initialize the forward and backward pointers of element to null
+    pointers.
+
+    If the queue is to be used as a circular list, the application shall ensure
+    it initializes the forward pointer and the backward pointer of the initial
+    element of the queue to the element's own address.
+
+RETURN VALUE
+
+    The insque() and remque() functions do not return a value.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+void insque_spec(CallContext context, VoidTPtr element, QueueElementPtr pred)
+{
+    QueueElementList* snap_shot_pre;
+    QueueElementList* snap_shot_post;
+    int pred_index;
+
+    pre
+    {
+        /* [Implicit precondition] */
+        /*
+         * An application using insque() or remque() shall ensure it defines a structure 
+         * in which the first two members of the structure are pointers to the same type 
+         * of structure 
+         */
+        REQ("app.insque.01", "Element is not NULL", !isNULL_VoidTPtr(element));
+
+        /*
+         * If the queue is to be used as a linear list, invoking insque(&element, NULL), 
+         * where element is the initial element of the queue, shall initialize the forward 
+         * and backward pointers of element to null pointers. If the queue is to be used 
+         * as a circular list, the application shall ensure it initializes the forward 
+         * pointer and the backward pointer of the initial element of the queue to the 
+         * element's own address.
+         */
+        REQ("app.insque.04", "Element is not a part of another queue or belongs to a one element queue",
+            isQueueElementAvailable(element));
+
+        /* [Create snap-shot of the queue] */
+        if(!isNULL_VoidTPtr(pred))
+        {
+            /* [pred element is a part of a queue] */
+            REQ("", "pred element is a part of a queue", getQueueElement(pred) != NULL);
+
+            /* [Create a copy of the pre-state of the queue using list object] */
+            snap_shot_pre = queue_List(pred);
+
+            /* [Get index of the pred element in this list] */
+            pred_index = getQueueElementIndex(snap_shot_pre, pred);
+        }
+        else
+        {
+            /* [Create empty list since pred is NULL] */
+            snap_shot_pre = create_QueueElementList();
+
+            /* [pred index + 1 == 0, this is the index in the list for insertion of the element] */
+            pred_index = -1;
+        }
+
+        return true;
+    }
+
+    coverage C
+    {
+        if(isCircularQueue(pred))
+        {
+            return { InsertCircularQueue, "Insert element in a circular queue" };
+        }
+        else
+        {
+            if(isNULL_VoidTPtr(pred))
+            {
+                return { CreateQueue, "Queue creation" };
+            }
+            else if(pred_index == 0)
+            {
+                return { InsertAtBeginning, "Insert element at the queue beginning"};
+            }
+            else if(pred_index == (size_List(snap_shot_pre) - 1))
+            {
+                return { InsertAtEnd, "Insert element at the queue end"};
+            }
+            else
+            {
+                return { InsertInMiddle, "Insert element at the queue middle" };
+            }
+        }
+    }
+
+    post
+    {
+        /* [Update model representation of the queue. Add new element to the list.] */
+        add_List(snap_shot_pre, pred_index + 1, create_QueueElementPtrObj(element));
+
+        /* [Create a copy of the post-state of the queue using list object] */
+        if(isCircularQueue(pred))
+        {
+            snap_shot_post = queue_List(pred);
+        }
+        else
+        {
+            snap_shot_post = queue_List(element);
+        }
+
+        /*
+         * The insque() function shall insert the element pointed to by element into a 
+         * queue immediately after the element pointed to by pred.
+         */
+        REQ("insque.02", "Check consistency between the modified pre and post states of the queue", 
+            equals(snap_shot_pre, snap_shot_post));
+
+        /*
+         * If the queue is to be used as a linear list, invoking insque(&element, 
+         * NULL), where element is the initial element of the queue, shall initialize the 
+         * forward and backward pointers of element to null pointers.
+         */
+        REQ("insque.03", "is implemented by the model", true);
+
+        /* [Check reference integrity of the post state] */
+        REQ("", "Check reference integrity of the post state", invariant(snap_shot_post));
+
+      
+        return true;
+    }
+}
+
+specification
+void remque_spec(CallContext context, QueueElementPtr element)
+{
+    QueueElement* next_queue_element;
+    QueueElement* prev_queue_element;
+
+    QueueElementList* snap_shot_pre;
+    QueueElementList* snap_shot_post;
+
+    int element_index;
+
+    bool circular_queue = false;
+
+    pre
+    {
+        /*
+         * An application using insque() or remque() shall ensure it defines a structure 
+         * in which the first two members of the structure are pointers to the same type 
+         * of structure 
+         */
+        /* It need to ckeck that the memory is enough (?) */
+        REQ("app.remque.01", "Element is not NULL", !isNULL_VoidTPtr(element));
+
+        /* [Element is a part of a queue] */
+        REQ("", "Element is a part of a queue", getQueueElement(element) != NULL);
+
+        /* [Create a copy of the pre-state of the queue using list object] */
+        snap_shot_pre =  queue_List(element); 
+
+        /* [Get index of the element in this list] */
+        element_index  = getQueueElementIndex(snap_shot_pre, element);
+
+        /* [Get previous and next elements] */
+        prev_queue_element = prev_QueueElement(element);
+        next_queue_element = next_QueueElement(element);
+
+        /* [Determine if the queue is circular] */
+        circular_queue = isCircularQueue(element);
+
+        return true;
+    }
+
+    coverage C
+    {
+        if(circular_queue)
+        {
+            if (equals_VoidTPtr(element, prev_queue_element->address))
+            {
+                return { RemoveTheOnlyElementCircularQueue,
+                    "Remove element from an one element circular queue" };
+            }
+            else
+            {
+                return { RemoveCircularQueue, "Remove element from a circular queue" };
+            }
+        }        
+        else if((next_queue_element == NULL) && (prev_queue_element == NULL))
+        {
+            return { RemoveTheOnlyElement,
+                "Remove element from an one element linear queue" };
+        }
+        else if(next_queue_element == NULL)
+        {
+            return { RemoveAtEnd, "Remove element at the linear queue end" };
+        }
+        else if(prev_queue_element == NULL)
+        {
+            return { RemoveAtBegin, "Remove element at the linear queue begin"};
+        }
+        else
+        {
+            return { RemoveAtMiddle, "Remove element at the queue linear middle" };
+        }
+    }
+
+    post
+    {
+        /* [Update model representation of the queue. Remove the element from the list.] */
+        remove_List(snap_shot_pre, element_index);
+
+        /* [Create a copy of the post-state of the queue using list object] */
+        // circular queue
+        if (circular_queue)
+        {
+            // one element circular queue
+            if (equals_VoidTPtr(element, prev_queue_element->address))
+            {
+                snap_shot_post = queue_List(NULL_VoidTPtr);
+            }
+            else
+            {
+                snap_shot_post = queue_List(next_queue_element->address);
+            }
+        }
+        // linear queue
+        else
+        {
+            if (prev_queue_element)
+            {
+                 snap_shot_post = queue_List(prev_queue_element->address); 
+            }
+            else if (next_queue_element)
+            {
+                 snap_shot_post = queue_List(next_queue_element->address);
+            }
+            // empty queue
+            else 
+            {
+                 snap_shot_post = queue_List(NULL_VoidTPtr);
+            }
+        }
+
+        /*
+         * The remque() function shall remove the element pointed to by element from a 
+         * queue.
+         */
+        REQ("remque.02", "Check consistency between the modified pre and post states of the queue", 
+            compare(snap_shot_pre, snap_shot_post) == 0);
+
+        /* [Check reference integrity of the post state] */
+        REQ("", "Check reference integrity of the post state", invariant(snap_shot_post));
+
+      
+        return true;
+    }
+}
+
+specification
+void create_circular_queue_spec(CallContext context, VoidTPtr element)
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Element is not NULL", !isNULL_VoidTPtr(element));
+
+        /* [Element is not a part of another queue or belongs to a one element queue] */
+        REQ("", "Element is not a part of another queue or belongs to a one element queue", isQueueElementAvailable(element));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by element is enough", sizeWMemoryAvailable(element) >= 2*sizeof_VoidTPtr);
+
+        return true;
+    }
+    coverage C
+    {
+        return { CreateCircularQueue, "Create circular queue" };
+    }
+    post
+    {
+        QueueElement *queue_element = getQueueElement(element);
+
+        /* [Check existence of model object for the element] */
+        REQ("", "QueueElement corresponding to element exists", queue_element!=NULL);
+
+        /* [Forward reference has to refer to the element] */
+        REQ("", "Forward reference has to refer to the element", equals_VoidTPtr(queue_element->forward, queue_element->address));
+
+        /* [Backward reference has to refer to the element] */
+        REQ("", "Backward reference has to refer to the element", equals_VoidTPtr(queue_element->backward, queue_element->address));
+
+        return true;
+    }
+}
+
+specification
+void create_linear_queue_spec(CallContext context, VoidTPtr element)
+{
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "Element is not NULL", !isNULL_VoidTPtr(element));
+
+        /* [Element is not a part of another queue or belongs to a one element queue] */
+        REQ("", "Element is not a part of another queue or belongs to a one element queue", isQueueElementAvailable(element));
+
+        /* [Implicit precondition] */
+        REQ("", "Memory pointed to by element is enough", sizeWMemoryAvailable(element) >= 2*sizeof_VoidTPtr);
+
+        return true;
+    }
+
+    coverage C
+    {
+        return { CreateLinearQueue, "Create linear queue" };
+    }
+
+    post
+    {
+        QueueElement *queue_element = getQueueElement(element);
+
+        /* [Check existence of model object for the element] */
+        REQ("", "Check existence of model object for element", queue_element!=NULL);
+
+        /* [Forward reference has to be NULL] */
+        REQ("", "Forward reference has to be NULL", equals_VoidTPtr(queue_element->forward, NULL_VoidTPtr));
+
+        /* [Backward reference has to be NULL] */
+        REQ("", "Backward reference has to be NULL", equals_VoidTPtr(queue_element->backward, NULL_VoidTPtr));
+
+        return true;
+    }
+}
+
+
+/********************************************************************/
+/**                       Queue                                    **/
+/********************************************************************/
+
+/* QueueElementPtrObj */
+int compare_QueueElementPtrObj(QueueElementPtr* left, QueueElementPtr* right);
+
+specification typedef QueueElementPtr QueueElementPtrObj = 
+{
+    .compare = (Compare)compare_QueueElementPtrObj
+};
+
+QueueElementPtrObj* create_QueueElementPtrObj(QueueElementPtr ptr)
+{
+  return create(&type_QueueElementPtrObj, ptr.system, ptr.process, ptr.address);
+}
+
+int compare_QueueElementPtrObj(QueueElementPtr* left, QueueElementPtr* right)
+{
+    if (equals_VoidTPtr(*left, *right))
+    {
+        return 0;
+    }
+    return 1;
+}
+
+/* QueueElement */
+int compare_QueueElement(struct QueueElement* left, struct QueueElement* right);
+
+specification invariant typedef struct QueueElement QueueElement = 
+{
+    .compare = (Compare)compare_QueueElement
+};
+
+int compare_QueueElement(struct QueueElement* left, struct QueueElement* right)
+{
+    if(
+            equals_VoidTPtr(left->address, right->address)
+        &&  equals_VoidTPtr(left->forward, right->forward)
+        &&  equals_VoidTPtr(left->backward, right->backward)
+        )
+        return 0;
+    return 1;
+}
+
+/* Ckecker of consistency of currentElement's links */
+invariant(QueueElement* currentElement)
+{
+    if(!isNULL_VoidTPtr(currentElement->forward)) 
+    {
+        QueueElement* nextElement = getQueueElement(currentElement->forward);
+        if (nextElement)
+        {
+            /* [Current Element and Next Element are not in consistent state] */
+            REQ("", "Current Element and Next Element are not in consistent state", 
+                equals_VoidTPtr(nextElement->backward, currentElement->address));
+        }
+        else
+        {
+            /* [Next Element has not been found in Memory Objects] */
+            REQ("", "Next Element has not been found in Memory Objects", 
+                false);
+        }
+    }
+
+    if(!isNULL_VoidTPtr(currentElement->backward)) 
+    {
+        QueueElement* prevElement = getQueueElement(currentElement->backward);
+        if (prevElement)
+        {
+            /* [Current element and Prev Element are not in consistent state] */
+            REQ("", "Current element and Prev Element are not in consistent state", 
+                equals_VoidTPtr(prevElement->forward, currentElement->address));
+        }
+        else
+        {
+            /* [Prev element has not been found in Memory Objects] */
+            REQ("", "Previous element has not been found in Memory Objects", 
+                false);
+        }
+    }
+
+    return true;
+}
+
+/* QueueElementList */
+invariant(QueueElementList* list)
+{
+    QueueElement* element;
+
+    int i;
+    int size = size_List(list);
+
+    for (i = 0; i < size; i++)
+    {
+        QueueElementPtrObj* obj = get_List(list, i);
+        element = getQueueElement(*obj);
+
+        REQ("", "Element references must be valid", invariant(element));
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+QueueElementList* queue_List(QueueElementPtr address)
+{
+    QueueElement * element;
+
+    QueueElementList* list = create_QueueElementList();
+
+    // empty queue
+    if (isNULL_VoidTPtr(address))
+    {
+        return list;
+    }
+
+    // circular queue
+    if (isCircularQueue(address))
+    {
+        QueueElementPtr firstElementAddress = address;
+
+        element = getQueueElement(address);
+
+        append_List(list, create_QueueElementPtrObj(element->address));
+
+        element = getQueueElement(element->forward);
+
+        while(!equals_VoidTPtr(firstElementAddress, element->address))
+        {
+            append_List(list, create_QueueElementPtrObj(element->address));
+            element = getQueueElement(element->forward);
+        }
+    }
+    // linear queue
+    else
+    {
+        element = getFirstQueueElement(address); 
+
+        append_List(list, create_QueueElementPtrObj(element->address));
+
+        while(!isNULL_VoidTPtr(element->forward))
+        {
+            element = getQueueElement(element->forward);
+            append_List(list, create_QueueElementPtrObj(element->address));
+        }
+    }
+
+    return list;
+}
+
+QueueElement* getFirstQueueElement(QueueElementPtr address)
+{
+    QueueElement *element = getQueueElement(address);
+
+    if (isCircularQueue(address))
+    {
+        return element;
+    }
+    else
+    {
+        while(element)
+        {
+            if (!isNULL_VoidTPtr(element->backward))
+            {
+                element = getQueueElement(element->backward);
+            }
+            else
+            {
+                break;
+            }
+        }
+        return element;
+    }
+}
+
+int getQueueElementIndex(QueueElementList* list, QueueElementPtr address)
+{
+    int i;
+    int size = size_List(list);
+
+    for(i = 0; i < size; i++)
+    {
+        QueueElementPtrObj *tmp = get_List(list, i);
+
+        if (equals_VoidTPtr(address, *tmp))
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool isCircularQueue(QueueElementPtr address)
+{
+    QueueElement* first = getQueueElement(address), *current;
+
+    if(!first) return false;
+
+    current = first;
+
+    while(true)
+    {
+        current = next_QueueElement(current->address);
+
+        if(!current) 
+        {
+            return false;
+        }
+
+        if (equals(current, first))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool isQueueElementAvailable(QueueElementPtr element)
+{
+    Object* object;
+    QueueElement* qelement;
+
+    object = getObjectInMemory(element);
+
+    if (object == NULL)
+        return true;
+
+    if (type(object) != &type_QueueElement)
+        return false;
+
+    qelement = object;
+
+    // One element linear queue
+    if (isNULL_VoidTPtr(qelement->forward) && isNULL_VoidTPtr(qelement->backward))
+        return true;
+
+    // One element circular queue
+    if (equals_VoidTPtr(qelement->forward, element))
+        return true;
+
+    // Multiple element queue
+    return false;
+}
+
+QueueElement* getQueueElement(QueueElementPtr address)
+{
+    return getObjectInMemory(address);
+}
+
+QueueElement* next_QueueElement(QueueElementPtr address)
+{
+    QueueElement* current=getQueueElement(address);
+    if(current)
+    {
+        return getQueueElement(current->forward);
+    }
+    return NULL;
+}
+
+QueueElement* prev_QueueElement(QueueElementPtr address)
+{
+    QueueElement* current=getQueueElement(address);
+    if(current)
+    {
+        return getQueueElement(current->backward);
+    }
+    return NULL;
+}
+
+QueueElement* create_QueueElement(VoidTPtr address, VoidTPtr forward, VoidTPtr backward)
+{
+    return create(&type_QueueElement, address, forward, backward);
+}
+
+QueueElementList* create_QueueElementList(void)
+{
+    return create(&type_QueueElementList, &type_QueueElementPtrObj);
+}
+
+/********************************************************************/
+/**                        Debug Functions                         **/
+/********************************************************************/
+
+FILE *stream;
+void printQueue(QueueElement* element)
+{
+    QueueElement* current;
+    int count_right=0, count_left = 0;
+    List * printedElements = create_List(NULL);
+    if(element == NULL)
+    {
+        return;
+    }
+    current=element;
+    append_List( printedElements, clone(current));
+
+    while(true)
+    {
+        QueueElementPtr next = current->forward; 
+        if(isNULL_VoidTPtr(next)) break;
+        current = getQueueElement(next);
+        if(!contains_List( printedElements, current))
+        {
+            append_List( printedElements, clone(current));
+            count_right++;
+        }else break;
+    }
+
+    while(true)
+    {
+        QueueElementPtr prev = current->backward; 
+        if(isNULL_VoidTPtr(prev)) break;
+        current = getQueueElement(prev);
+        if(!contains_List( printedElements, current))
+        {
+            add_List( printedElements, 0, clone(current));
+            count_left++;
+        }else break;
+    }
+
+    printNodeList(printedElements);
+
+}
+
+void printNodeList(List *queue_list)
+{
+    int i;
+    QueueElement* current;
+    for(i=0;i<size_List(queue_list);i++)
+    {
+        current = (QueueElement*)get_List( queue_list, i );
+        printNode(current);
+    }
+}
+
+void printNode(QueueElement* element)
+{
+    if(element==NULL) return;
+
+    verbose( "node: %d\n", element);
+    verbose( "  address: %d\n", element->address.address);
+    verbose( "  forward: %d\n", element->forward.address);
+    verbose( "  backward: %d\n", element->backward.address);
+}
+

@@ -1,0 +1,179 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/format/time_media.seh"
+#include "common/common_media.seh"
+
+/********************************************************************/
+/**                    Formatters                                  **/
+/********************************************************************/
+
+void timetm_formatter(TSStream *stream, TmT* value)
+{
+    VERIFY_TYPE(tm_formatter, &type_TmT, value);
+    
+    writeTypeHeaderTSStream(stream, "tm");
+
+    
+    writeInt_TSStream(stream,  value->tm_sec);
+    writeInt_TSStream(stream,  value->tm_min);
+    writeInt_TSStream(stream,  value->tm_hour);
+    writeInt_TSStream(stream,  value->tm_mday);
+    writeInt_TSStream(stream,  value->tm_mon);
+    writeInt_TSStream(stream,  value->tm_year);
+    writeInt_TSStream(stream,  value->tm_wday);
+    writeInt_TSStream(stream,  value->tm_yday);
+    writeInt_TSStream(stream,  value->tm_isdst);
+    writeLong_TSStream(stream, value->tm_gmtoff);
+    writeCString_TSStream(stream, value->tm_zone);
+}
+
+
+TmT* readTimeTm_TSStream(TSStream* stream)
+{
+    TmT* res = create_TmT(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
+
+    res->tm_sec = readInt_TSStream(stream);
+    res->tm_min = readInt_TSStream(stream);
+    res->tm_hour = readInt_TSStream(stream);
+    res->tm_mday = readInt_TSStream(stream);
+    res->tm_mon = readInt_TSStream(stream);
+    res->tm_year = readInt_TSStream(stream);
+    res->tm_wday = readInt_TSStream(stream);
+    res->tm_yday = readInt_TSStream(stream);
+    res->tm_isdst = readInt_TSStream(stream);
+    res->tm_gmtoff = readLong_TSStream(stream);
+    res->tm_zone = readCString_TSStream(stream);
+
+    return res;
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilFormatTimeSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_getdate_spec(getdate_media);
+    set_mediator_strftime_spec(strftime_media);
+    set_mediator_strptime_spec(strptime_media);
+
+    // Set up formatters
+    registerTSFormatter("timetm",(TSFormatterFuncType)timetm_formatter);
+
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** getdate_spec **/
+mediator getdate_media for specification
+TmT* getdate_spec( CallContext context, CString* str)
+{
+    call
+    {
+        TmT* res = NULL;
+        bool notNull;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getdate:$(str)", str);
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            notNull = readInt_TSStream(&command.response);
+            if(notNull)
+            {
+                res = readTimeTm_TSStream(&command.response);
+            }
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+
+/** strftime_spec **/
+mediator strftime_media for specification
+SizeT strftime_spec( CallContext context, StringTPtr s, SizeT maxsize, StringTPtr format, TmT* timeptr)
+{
+    call
+    {
+        SizeT funcRes;
+        
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "strftime:$(ptr)$(size)$(ptr)$(timetm)", create_VoidTPtrObj(s), create_SizeTObj(maxsize), create_VoidTPtrObj(format), timeptr);
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            funcRes = readSize_TSStream(&command.response);
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return funcRes;
+    }
+}
+
+
+/** strptime_spec **/
+mediator strptime_media for specification
+CString* strptime_spec( CallContext context, StringTPtr buf, StringTPtr format, TmT* timeptr)
+{
+    call
+    {
+        bool notNull;
+        CString* resStr = NULL;
+        
+        TSCommand command = create_TSCommand();
+        
+        format_TSCommand( &command, "strptime:$(ptr)$(ptr)$(timetm)", create_VoidTPtrObj(buf), create_VoidTPtrObj(format), timeptr);
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            notNull = readInt_TSStream(&command.response);
+            if(notNull)
+            {
+                resStr = readCString_TSStream(&command.response);
+            }
+
+            copy(readTimeTm_TSStream(&command.response),timeptr);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return resStr; 
+    }
+}
+
+
+

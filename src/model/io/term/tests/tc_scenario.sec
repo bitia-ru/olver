@@ -1,0 +1,319 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "data/errno_model.seh"
+#include "io/file/file_media.seh"
+#include "fs/fs/fs_media.seh"
+#include "io/term/term_media.seh"
+#include "io/term/tests/tc_scenario.seh"
+#include "io/term/tests/term_scenario.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+#define MAX_OUTPUT_QUEUE_SIZE   3
+
+#define MAX_SPEED_NUMBER        2
+
+static SpeedT speeds[MAX_SPEED_NUMBER] = 
+{
+    SUT_B0,
+    SUT_B50
+};
+
+/********************************************************************/
+/**                      Test Scenario Debug                       **/
+/********************************************************************/
+#ifdef IO_TERM_LOCAL_MAIN
+
+static AssertionExit system_assertion_handler;
+
+void io_term_tc_assertion_exit(const char *format, va_list arg_list)
+{
+    system_assertion_handler(format, arg_list);
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static VoidTPtr ptm_termp;
+static VoidTPtr pts_termp;
+static ErrorCode *error;
+static FileDescId amaster, aslave;
+static CString *name;
+static WinSize *winp;
+static Terminal *terminal;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_tc_scenario(int argc, char **argv)
+{
+#ifdef IO_TERM_LOCAL_MAIN
+
+    system_assertion_handler = atAssertion(io_term_tc_assertion_exit);
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */
+
+    context = getContext();
+    initPathSystemConfiguration();
+    ptm_termp = allocateMemoryBlock(context, sizeof_Type(context, "struct termios"));
+    pts_termp = allocateMemoryBlock(context, sizeof_Type(context, "struct termios"));
+
+    if(isNULL_VoidTPtr(ptm_termp) || isNULL_VoidTPtr(pts_termp))
+        return false;
+
+    error = create_ErrorCode(SUT_EOK);
+
+    amaster = aslave = WrongFileDescId;
+    name = create_CString("");
+    winp = default_WinSize();    
+    terminal = NULL;
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec(100);
+
+    return true;
+}
+
+static void finish_tc_scenario(void)
+{
+    deallocateMemoryBlock(context, ptm_termp);
+    deallocateMemoryBlock(context, pts_termp);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(tc_scenario);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+static List* tc_scenario_state() 
+{
+    List* list = create_List(&type_Integer);
+
+    if(!isWrong_FileDescId(aslave))
+        terminal = getTerminal_FileDescId(aslave);
+
+    append_List(list, create_Integer(terminal != NULL ?
+        size_TerminalQueue(getInputQueue_Terminal(terminal)) : 0));
+    append_List(list, create_Integer(terminal != NULL ?
+        size_TerminalQueue(getOutputQueue_Terminal(terminal)) : 0));
+    append_List(list, create_Integer(terminal != NULL ?
+        isInputSuspended_Terminal(terminal) : 0));
+    append_List(list, create_Integer(terminal != NULL ?
+        isOutputSuspended_Terminal(terminal) : 0));
+
+    return list;
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool tcdrain_scen()
+{
+    if(isWrong_FileDescId(aslave))
+    {
+        openpty_spec(context, &amaster, &aslave, name, pts_termp, winp, error);
+        tcgetattr_spec(context, amaster, ptm_termp, error);
+        tcgetattr_spec(context, aslave, pts_termp, error);
+    }
+
+    tcdrain_spec(context, aslave);
+
+    return true;
+}
+
+scenario
+bool tcflow_scen()
+{
+    if(isWrong_FileDescId(aslave))
+    {
+        openpty_spec(context, &amaster, &aslave, name, pts_termp, winp, error);
+        tcgetattr_spec(context, amaster, ptm_termp, error);
+        tcgetattr_spec(context, aslave, pts_termp, error);
+    }
+
+    if(terminal == NULL ||
+       size_TerminalQueue(getOutputQueue_Terminal(terminal)) < MAX_OUTPUT_QUEUE_SIZE)
+    {
+        iterate(IntT action = 0; action < 4; action++;)
+        {
+            tcflow_spec(context, aslave, action);
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool tcflush_scen()
+{
+    if(isWrong_FileDescId(aslave))
+    {
+        openpty_spec(context, &amaster, &aslave, name, pts_termp, winp, error);
+        tcgetattr_spec(context, amaster, ptm_termp, error);
+        tcgetattr_spec(context, aslave, pts_termp, error);
+    }
+
+    iterate(int queue_selector = 0; queue_selector < 3; queue_selector++;)
+    {
+        tcflush_spec(context, aslave, queue_selector);
+    }
+
+    return true;
+}
+
+scenario
+bool tcgetattr_scen()
+{
+    if(isWrong_FileDescId(aslave))
+    {
+        openpty_spec(context, &amaster, &aslave, name, pts_termp, winp, error);
+        tcgetattr_spec(context, amaster, ptm_termp, error);
+        tcgetattr_spec(context, aslave, pts_termp, error);
+    }
+
+    tcgetattr_spec(context, aslave, pts_termp, error);
+
+    return true;
+}
+
+scenario
+bool tcsendbreak_scen()
+{
+    if(isWrong_FileDescId(aslave))
+    {
+        openpty_spec(context, &amaster, &aslave, name, pts_termp, winp, error);
+        tcgetattr_spec(context, amaster, ptm_termp, error);
+        tcgetattr_spec(context, aslave, pts_termp, error);
+    }
+
+    if(terminal == NULL ||
+       size_TerminalQueue(getOutputQueue_Terminal(terminal)) < MAX_OUTPUT_QUEUE_SIZE)
+    {
+        iterate(IntT duration = 0; duration < 2; duration++;)
+        {
+            tcsendbreak_spec(context, aslave, duration);
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool tcsetattr_tc_scen()
+{
+    if(isWrong_FileDescId(aslave))
+    {
+        openpty_spec(context, &amaster, &aslave, name, pts_termp, winp, error);
+        tcgetattr_spec(context, amaster, ptm_termp, error);
+        tcgetattr_spec(context, aslave, pts_termp, error);
+    }
+
+    iterate(int optional_actions = 0; optional_actions < 3; optional_actions++;)
+    iterate(int i = 0; i < MAX_SPEED_NUMBER; i++;)
+    {
+        cfmakeraw_spec(context, pts_termp);
+        cfsetspeed_spec(context, pts_termp, speeds[i], error);
+
+        tcsetattr_spec(context, aslave, optional_actions, pts_termp);
+
+        tcgetattr_spec(context, amaster, ptm_termp, error);
+        tcgetattr_spec(context, aslave, pts_termp, error);
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm tc_scenario =
+{
+    .init = init_tc_scenario,
+    .finish = finish_tc_scenario,
+    .getState = (PtrGetState)tc_scenario_state,
+    .saveModelState = (PtrSaveModelState)saveIoTermModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreIoTermModelState,
+    .isStationaryState = (PtrIsStationaryState)isIoTermModelStateStationary,
+    .actions = 
+    {
+        tcdrain_scen,
+        tcflow_scen,
+        tcflush_scen,
+        tcgetattr_scen,
+        tcsendbreak_scen,
+        tcsetattr_tc_scen,
+        NULL
+    }
+};
+
+bool main_io_term_tc(int argc, char **argv)
+{
+    tc_scenario(argc, argv);
+    return true;
+}
+
+#ifdef IO_TERM_LOCAL_MAIN
+
+#include "common/init.seh"
+#include "common/control_center.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+    initFsFsSubsystem();
+    initIoFileSubsystem();
+    initIoTermSubsystem();
+}
+
+int main(int argc, char **argv)
+{
+    initTestSystem();
+    loadSUT();
+    addTraceToFile("trace.xml");
+    main_io_term_tc(argc, argv);
+    
+    return 0;
+}
+
+#endif /* #ifdef IO_TERM_LOCAL_MAIN */

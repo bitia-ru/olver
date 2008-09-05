@@ -1,0 +1,269 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "ncurses/string/tests/scanf_scenario.seh"
+#include "common/init.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "ncurses/terminal/terminal_model.seh"
+#include "process/process/process_model.seh"
+#include "ncurses/window/window_model.seh"
+#include "ncurses/string/scanf_model.seh"
+#include "ncurses/string/input_model.seh"
+#include "ncurses/string/add_model.seh"
+#include "ncurses/input/string_model.seh"
+#include "ncurses/window/refresh_model.seh"
+#include "ncurses/move/move_model.seh"
+#include "util/format/tests/format_sheafs.seh"
+#include "util/format/tests/scanf_scenario_data.seh"
+#include "process/process/process_common.seh"
+#include "config/test_system_config.h"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+static bool needConformanceTestQuality;
+static bool moveCallAllowed;
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static StringTPtr  str;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_ncurses_string_scanf_scenario(int argc,char** argv)
+{
+    needConformanceTestQuality = ( TEST_QUALITY_LEVEL == CONFORMANCE_TEST_QUALITY_LEVEL );
+    moveCallAllowed = ( TARGET_DATA_TYPES_ARCH != LSB_ARCH_AMD64 && TARGET_DATA_TYPES_ARCH != LSB_ARCH_IA64 );
+    context = createProcessForNCurses( 40, 40 );
+    if ( ( scanedSheafs = createScanedSheafs() ) == NULL ) { return false; }
+    initscr_spec( context );
+    initReqFilters();
+    registerStdTerminal( context );
+    setVariables_StdTerminal( context );
+    readTerminfo( context, create_CString( OLVERCT_TERMINFO_PATH ) );
+
+    str = allocateMemoryBlock(context, 1024);
+
+    setFinishMode( UNTIL_END );
+    return true;
+}
+
+static void finish_ncurses_string_scanf_scenario(void)
+{
+    endwin_spec( context );
+    TEST_SCENARIO_VERDICT_VERBOSE( ncurses_string_scanf_scenario );
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool ncurses_string_scanw_scen()
+{
+    NewWinReturnType * winRet = newwin_spec( context, 30, 30, 5, 5 );
+    WindowTPtr * windows[ 2 ];
+    int winI;
+    windows[ 0 ] = NULL         ;
+    windows[ 1 ] = & winRet->win;
+
+    for ( winI = 0; winI < sizeof( windows ) / sizeof( windows[ 0 ] ); winI++ ) {
+    //for ( winI = 0; winI <= 0; winI++ ) {
+        WindowTPtr * win = windows[ winI ];
+        int posI;
+        for ( posI = 1; posI <= 2; posI++ ) {
+        //for ( posI = 2; posI <= 2; posI++ ) {
+            NCursesPosition * pos;
+            int maxScanedSheafI = ( needConformanceTestQuality ? 9 : size_List( scanedSheafs ) - 1 );
+            int scanedSheafI;
+            if ( ! moveCallAllowed ) { maxScanedSheafI = 0; }
+            switch ( posI ) {
+                case 1: pos = NULL                          ; break;
+                case 2: pos = create_NCursesPosition( 0, 0 ); break;
+            }
+            verbose( "ncurses_string_scanw_scen : %d %d\n", winI, posI );
+            dotPrint( 0, 0 );
+            for ( scanedSheafI = 0; scanedSheafI <= maxScanedSheafI; scanedSheafI++ ) {
+            //for ( scanedSheafI = 0; scanedSheafI <= 0; scanedSheafI++ ) {
+                ScanedSheaf * scanedSheaf = get_List( scanedSheafs, scanedSheafI );
+                CString * input = concat_CString( scanedSheaf->data, create_CString( "\n" ) );
+                CByteArray * ba = create_CByteArray( (ByteT *)toCharArray_CString( input ), length_CString( input ) );
+                // DUMP_screens( context );
+                { // init block
+                    if ( moveCallAllowed ) { move_spec( context, win, create_NCursesPosition( 0, 0 ) ); }
+                    ncursesInputString( context, ba );
+                    getstr_noErrorFromReq_spec( context, win, pos, str );
+                }
+                if ( moveCallAllowed ) { move_spec( context, win, create_NCursesPosition( 0, 0 ) ); }
+                ncursesInputString( context, ba );
+                setExpectedResultAndReqIds( "scanw", scanedSheaf->result, scanedSheaf->reqIds );
+                dotPrint( 10, 100 );
+                scanw_spec( context, win, pos, scanedSheaf->format, scanedSheaf->place );
+                // DUMP_screens( context );
+            } // for scanedSheafI
+            refresh_spec( context, win );
+            verbose( "\n" );
+        } // for posI
+    } // for winI
+
+    endwin_spec( context );
+
+    return true;
+}
+
+scenario
+bool ncurses_string_vw_scanw_scen()
+{
+    NewWinReturnType * winRet = newwin_spec( context, 30, 30, 5, 5 );
+    WindowTPtr * win = & winRet->win;
+
+    int maxScanedSheafI = ( needConformanceTestQuality ? 9 : size_List( scanedSheafs ) - 1 );
+    int scanedSheafI;
+    if ( ! moveCallAllowed ) { maxScanedSheafI = 0; }
+    verbose( "ncurses_string_vw_scanw_scen\n" );
+    dotPrint( 0, 0 );
+    for ( scanedSheafI = 0; scanedSheafI <= maxScanedSheafI; scanedSheafI++ ) {
+    //for ( scanedSheafI = 0; scanedSheafI <= 0; scanedSheafI++ ) {
+        ScanedSheaf * scanedSheaf = get_List( scanedSheafs, scanedSheafI );
+        CString * input = concat_CString( scanedSheaf->data, create_CString( "\n" ) );
+        CByteArray * ba = create_CByteArray( (ByteT *)toCharArray_CString( input ), length_CString( input ) );
+        // DUMP_screens( context );
+        { // init block
+            if ( moveCallAllowed ) { move_spec( context, win, create_NCursesPosition( 0, 0 ) ); }
+            ncursesInputString( context, ba );
+            getstr_noErrorFromReq_spec( context, win, create_NCursesPosition( 0, 0 ), str );
+        }
+        if ( moveCallAllowed ) { move_spec( context, win, create_NCursesPosition( 0, 0 ) ); }
+        ncursesInputString( context, ba );
+        setExpectedResultAndReqIds( "scanw", scanedSheaf->result, scanedSheaf->reqIds );
+        dotPrint( 10, 100 );
+        vw_scanw_spec( context, win, scanedSheaf->format, scanedSheaf->place );
+        // DUMP_screens( context );
+    } // for scanedSheafI
+    if ( moveCallAllowed ) { refresh_spec( context, win ); }
+    verbose( "\n" );
+
+    endwin_spec( context );
+
+    return true;
+}
+
+scenario
+bool ncurses_string_vwscanw_scen()
+{
+    NewWinReturnType * winRet = newwin_spec( context, 30, 30, 5, 5 );
+    WindowTPtr * win = & winRet->win;
+
+    int maxScanedSheafI = ( needConformanceTestQuality ? 9 : size_List( scanedSheafs ) - 1 );
+    int scanedSheafI;
+    if ( ! moveCallAllowed ) { maxScanedSheafI = 0; }
+    verbose( "ncurses_string_vwscanw_scen\n" );
+    dotPrint( 0, 0 );
+    for ( scanedSheafI = 0; scanedSheafI <= maxScanedSheafI; scanedSheafI++ ) {
+    //for ( scanedSheafI = 0; scanedSheafI <= 0; scanedSheafI++ ) {
+        ScanedSheaf * scanedSheaf = get_List( scanedSheafs, scanedSheafI );
+        CString * input = concat_CString( scanedSheaf->data, create_CString( "\n" ) );
+        CByteArray * ba = create_CByteArray( (ByteT *)toCharArray_CString( input ), length_CString( input ) );
+        // DUMP_screens( context );
+        { // init block
+            if ( moveCallAllowed ) { move_spec( context, win, create_NCursesPosition( 0, 0 ) ); }
+            ncursesInputString( context, ba );
+            getstr_noErrorFromReq_spec( context, win, create_NCursesPosition( 0, 0 ), str );
+        }
+        if ( moveCallAllowed ) { move_spec( context, win, create_NCursesPosition( 0, 0 ) ); }
+        ncursesInputString( context, ba );
+        setExpectedResultAndReqIds( "scanw", scanedSheaf->result, scanedSheaf->reqIds );
+        dotPrint( 10, 100 );
+        vwscanw_spec( context, win, scanedSheaf->format, scanedSheaf->place );
+        // DUMP_screens( context );
+    } // for scanedSheafI
+    if ( moveCallAllowed ) { refresh_spec( context, win ); }
+    verbose( "\n" );
+
+    endwin_spec( context );
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm ncurses_string_scanf_scenario =
+{
+    .init    = init_ncurses_string_scanf_scenario  ,
+    .finish  = finish_ncurses_string_scanf_scenario,
+    .actions = { ncurses_string_scanw_scen   ,
+                 ncurses_string_vw_scanw_scen,
+                 ncurses_string_vwscanw_scen ,
+                 NULL
+               }
+};
+
+bool main_ncurses_string_scanf( int argc, char** argv )
+{
+    ncurses_string_scanf_scenario( argc, argv );
+    return true;
+}
+
+#ifdef NCURSES_STRING_SCANF_LOCAL_MAIN
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemModel();
+
+    initNcurses();
+}
+
+int main(int argc, char** argv)
+{
+    set_assertion_exit_callback();
+    initTestSystem();
+    loadSUT();
+    //    system_assertion_handler = atAssertion( myAssertionExit );
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    main_ncurses_string_scanf( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

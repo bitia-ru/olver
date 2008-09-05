@@ -1,0 +1,1441 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/compress/compress_media.seh"
+#include "common/common_media.seh"
+
+/************************************************************************/
+/*                          Utilities                                   */
+/************************************************************************/
+List* readULongList(TSStream* stream, IntT size)
+{
+    List* res=create_List(&type_ULongTObj);
+    IntT i;
+    ULongT tmp;
+
+    for(i=0;i<size;i++)
+    {
+        tmp=readULong_TSStream(stream);
+        append_List(res, create_ULongTObj(tmp));
+    }
+
+    return res;
+}
+
+CString* get_ZLIB_VERSION_macro(CallContext context)
+{
+    TSCommand command = create_TSCommand();
+    CString* ret;
+
+     
+    format_TSCommand( &command, "ZLIB_VERSION:");
+
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        ret=readCString_TSStream(&command.response);
+    }
+
+    destroy_TSCommand(&command);
+    
+    return ret;
+}
+IntT get_z_stream_size(CallContext context)
+{
+    TSCommand command = create_TSCommand();
+    IntT ret;
+
+    format_TSCommand( &command, "z_stream_size:");
+
+    executeCommandInContext( context, &command );
+    if (!isBadVerdict())
+    {
+        ret=readInt_TSStream(&command.response);
+    }
+
+    destroy_TSCommand(&command);
+    
+    return ret;
+}
+void readZStream_TSStream(CallContext context, TSStream* stream, ZStream* ret)
+{
+    CString* is_NULL;
+    CString* tmp=create_CString("NULL");   
+
+    is_NULL=readCString_TSStream(stream);
+   
+    if(equals(is_NULL, tmp))
+        return;
+    
+    ret->adler=readULong_TSStream(stream);
+    ret->avail_in=readUInt_TSStream(stream);
+    ret->avail_out=readUInt_TSStream(stream);
+    ret->data_type=readInt_TSStream(stream);
+    
+    ret->msg=readCString_TSStream(stream);
+    ret->int_state=readPointer_TSStream(context, stream);
+
+    ret->zalloc=readPointer_TSStream(context, stream);
+    ret->zfree=readPointer_TSStream(context, stream);
+    ret->opaque=readPointer_TSStream(context, stream);
+
+    ret->next_in=readPointer_TSStream(context, stream);
+    ret->next_out=readPointer_TSStream(context, stream);
+
+    ret->reserved=readULong_TSStream(stream);
+    ret->total_in=readULong_TSStream(stream);
+    ret->total_out=readULong_TSStream(stream);
+}
+void writeZStream_TSStream( TSStream* stream, ZStream* value )
+{
+    writeTypeHeaderTSStream(stream,"z_stream");
+
+    if(value==NULL)
+    {
+        writeCString_TSStream(stream, create_CString("NULL"));
+
+        return;
+    }
+    
+    writeCString_TSStream(stream, create_CString("NON_NULL"));
+    
+    writeULong_TSStream(stream, value->adler);
+    writeUInt_TSStream(stream, value->avail_in);
+    writeUInt_TSStream(stream, value->avail_out);
+    writeInt_TSStream(stream, value->data_type);
+    writeCString_TSStream(stream, value->msg);
+    writePointer_TSStream(stream, value->int_state);
+    
+    writePointer_TSStream(stream, value->zalloc);
+    writePointer_TSStream(stream, value->zfree);
+    writePointer_TSStream(stream, value->opaque);
+
+    writePointer_TSStream(stream, value->next_in);
+    writePointer_TSStream(stream, value->next_out);
+
+    writeULong_TSStream(stream, value->reserved);
+    writeULong_TSStream(stream, value->total_in);
+    writeULong_TSStream(stream, value->total_out);
+}
+
+static void z_stream_formatter(TSStream* stream, ZStream* value)
+{
+    VERIFY_TYPE( z_stream_formatter, &type_ZStream, value );
+    writeZStream_TSStream( stream, value );
+}
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilCompressSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_adler32_spec(adler32_media);
+    set_mediator_compress_spec(compress_media);
+    set_mediator_compress2_spec(compress2_media);
+    set_mediator_compressBound_spec(compressBound_media);
+    set_mediator_crc32_spec(crc32_media);
+    set_mediator_deflate_spec(deflate_media);
+    set_mediator_deflateBound_spec(deflateBound_media);
+    set_mediator_deflateCopy_spec(deflateCopy_media);
+    set_mediator_deflateEnd_spec(deflateEnd_media);
+    set_mediator_deflateInit2__spec(deflateInit2__media);
+    set_mediator_deflateInit__spec(deflateInit__media);
+    set_mediator_deflateParams_spec(deflateParams_media);
+    set_mediator_deflateReset_spec(deflateReset_media);
+    set_mediator_deflateSetDictionary_spec(deflateSetDictionary_media);
+    set_mediator_get_crc_table_spec(get_crc_table_media);
+    set_mediator_gzclose_spec(gzclose_media);
+    set_mediator_gzdopen_spec(gzdopen_media);
+    set_mediator_gzeof_spec(gzeof_media);
+    set_mediator_gzerror_spec(gzerror_media);
+    set_mediator_gzflush_spec(gzflush_media);
+    set_mediator_gzgetc_spec(gzgetc_media);
+    set_mediator_gzgets_spec(gzgets_media);
+    set_mediator_gzopen_spec(gzopen_media);
+    set_mediator_gzprintf_spec(gzprintf_media);
+    set_mediator_gzputc_spec(gzputc_media);
+    set_mediator_gzputs_spec(gzputs_media);
+    set_mediator_gzread_spec(gzread_media);
+    set_mediator_gzrewind_spec(gzrewind_media);
+    set_mediator_gzseek_spec(gzseek_media);
+    set_mediator_gzsetparams_spec(gzsetparams_media);
+    set_mediator_gztell_spec(gztell_media);
+    set_mediator_gzwrite_spec(gzwrite_media);
+    set_mediator_inflate_spec(inflate_media);
+    set_mediator_inflateEnd_spec(inflateEnd_media);
+    set_mediator_inflateInit2__spec(inflateInit2__media);
+    set_mediator_inflateInit__spec(inflateInit__media);
+    set_mediator_inflateReset_spec(inflateReset_media);
+    set_mediator_inflateSetDictionary_spec(inflateSetDictionary_media);
+    set_mediator_inflateSync_spec(inflateSync_media);
+    set_mediator_inflateSyncPoint_spec(inflateSyncPoint_media);
+    set_mediator_uncompress_spec(uncompress_media);
+    set_mediator_zError_spec(zError_media);
+    set_mediator_zlibVersion_spec(zlibVersion_media);
+
+    //Set up formatters
+    registerTSFormatter("z_stream", 
+        (TSFormatterFuncType)z_stream_formatter);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** adler32_spec **/
+
+mediator adler32_media for specification
+ULongT adler32_spec( CallContext context, ULongT adler, CByteArray* buf,
+                                                                    UIntT len)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        ULongT res;
+    
+        format_TSCommand( &command, "adler32:$(ulong)$(ba)$(uint)$(int)",
+            create_ULongTObj(adler),
+            buf,
+            create_UIntTObj(len),
+            create_IntTObj(buf==NULL ? 1 : 0));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readULong_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        return res;
+    }
+}
+
+
+
+/** compress_spec **/
+
+mediator compress_media for specification
+IntT compress_spec( CallContext context, StringTPtr* dest, ULongT* destLen,
+                   StringTPtr source, ULongT sourceLen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "compress:$(ptr)$(ulong)$(ptr)$(ulong)",
+            create_VoidTPtrObj(*dest),
+            create_ULongTObj(*destLen),
+            create_VoidTPtrObj(source),
+            create_ULongTObj(sourceLen));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *dest=readPointer_TSStream(context, &command.response);
+            *destLen=readULong_TSStream(&command.response);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** compress2_spec **/
+mediator compress2_media for specification
+IntT compress2_spec( CallContext context, StringTPtr* dest, ULongT* destLen,
+                   StringTPtr source, ULongT sourceLen, IntT level)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command,
+            "compress2:$(ptr)$(ulong)$(ptr)$(ulong)$(int)",
+            create_VoidTPtrObj(*dest),
+            create_ULongTObj(*destLen),
+            create_VoidTPtrObj(source),
+            create_ULongTObj(sourceLen),
+            create_IntTObj(level));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *dest=readPointer_TSStream(context, &command.response);
+            *destLen=readULong_TSStream(&command.response);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** compressBound_spec **/
+mediator compressBound_media for specification
+IntT compressBound_spec( CallContext context, ULongT sourceLen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "compressBound:$(ulong)",
+                create_ULongTObj(sourceLen));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** crc32_spec **/
+
+mediator crc32_media for specification
+ULongT crc32_spec( CallContext context, ULongT crc, StringTPtr buf,
+                  UIntT len)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        ULongT res;
+    
+        format_TSCommand( &command, "crc32:$(ulong)$(ptr)$(uint)",
+            create_ULongTObj(crc),
+            create_VoidTPtrObj(buf),
+            create_UIntTObj(len));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readULong_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** deflate_spec **/
+
+mediator deflate_media for specification
+IntT deflate_spec( CallContext context, ZStream* stream, IntT flush )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "deflate:$(z_stream)$(int)",
+            stream, create_IntTObj(flush));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** deflateBound_spec **/
+mediator deflateBound_media for specification
+IntT deflateBound_spec( CallContext context, ZStream* stream, ULongT sourceLen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        ULongT res;
+    
+        format_TSCommand( &command, "deflateBound:$(z_stream)$(ulong)",
+            stream, create_ULongTObj(sourceLen));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** deflateCopy_spec **/
+
+mediator deflateCopy_media for specification
+IntT deflateCopy_spec( CallContext context, ZStream* dest, ZStream* source)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "deflateCopy:$(z_stream)$(z_stream)",
+            dest, source);
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, dest);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** deflateEnd_spec **/
+
+mediator deflateEnd_media for specification
+IntT deflateEnd_spec( CallContext context, ZStream* stream )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "deflateEnd:$(z_stream)", stream);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** deflateInit2__spec **/
+
+mediator deflateInit2__media for specification
+IntT deflateInit2__spec(    CallContext context, ZStream* strm, IntT level,
+                            IntT method, IntT windowBits, IntT memLevel,
+                            IntT strategy, CString* version, IntT stream_size )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command,
+        "deflateInit2_:$(z_stream)$(int)$(int)$(int)$(int)$(int)$(str)$(int)",
+        strm, create_IntTObj(level), create_IntTObj(method),
+        create_IntTObj(windowBits), create_IntTObj(memLevel),
+        create_IntTObj(strategy), version, create_IntTObj(stream_size));
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, strm);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** deflateInit__spec **/
+mediator deflateInit__media for specification
+IntT deflateInit__spec(     CallContext context, ZStream* strm, IntT level,
+                            CString* version, IntT stream_size )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command,
+        "deflateInit_:$(z_stream)$(int)$(str)$(int)",
+        strm, create_IntTObj(level), version, create_IntTObj(stream_size));
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, strm);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** deflateParams_spec **/
+
+mediator deflateParams_media for specification
+IntT deflateParams_spec( CallContext context, ZStream* stream, IntT level,
+                            IntT strategy )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "deflateParams:$(z_stream)$(int)$(int)",
+            stream, create_IntTObj(level), create_IntTObj(strategy));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res = readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** deflateReset_spec **/
+mediator deflateReset_media for specification
+IntT deflateReset_spec( CallContext context, ZStream* stream )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "deflateReset:$(z_stream)", stream);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** deflateSetDictionary_spec **/
+
+mediator deflateSetDictionary_media for specification
+IntT deflateSetDictionary_spec( CallContext context, ZStream* stream,
+                               StringTPtr dictionary, UIntT dictlen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command,
+            "deflateSetDictionary:$(z_stream)$(ptr)$(uint)",
+            stream, create_VoidTPtrObj(dictionary), create_UIntTObj(dictlen));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** get_crc_table_spec **/
+
+mediator get_crc_table_media for specification
+List* get_crc_table_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        List* res;
+
+        format_TSCommand( &command, "get_crc_table" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readULongList(&command.response, 256);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzclose_spec **/
+
+mediator gzclose_media for specification
+IntT gzclose_spec( CallContext context, VoidTPtr file, ErrorCode* errnum,
+                                                    ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzclose:$(ptr)",
+            create_VoidTPtrObj(file));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzdopen_spec **/
+
+mediator gzdopen_media for specification
+VoidTPtr gzdopen_spec( CallContext context, FileDescId fd, CString* mode,
+                                            ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        VoidTPtr res;
+    
+        format_TSCommand( &command, "gzdopen:$(int)$(str)",
+            create_IntTObj(fd.filedesc), mode);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errno=readInt_TSStream(&command.response);
+            res=readPointer_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+
+/** gzeof_spec **/
+
+mediator gzeof_media for specification
+IntT gzeof_spec( CallContext context, VoidTPtr file )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzeof:$(ptr)", create_VoidTPtrObj(file));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzerror_spec **/
+
+mediator gzerror_media for specification
+CString* gzerror_spec( CallContext context, VoidTPtr file, IntT* errnum)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        CString* res;
+    
+        format_TSCommand( &command, "gzerror:$(ptr)",
+            create_VoidTPtrObj(file));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            res = readCString_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzflush_spec **/
+
+mediator gzflush_media for specification
+IntT gzflush_spec( CallContext context, VoidTPtr file, IntT flush,
+                  ErrorCode* errnum, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzflush:$(ptr)$(int)",
+            create_VoidTPtrObj(file), create_IntTObj(flush));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum=readInt_TSStream(&command.response);
+            *errno=readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzgetc_spec **/
+
+mediator gzgetc_media for specification
+IntT gzgetc_spec( CallContext context, VoidTPtr file, ErrorCode* errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzgetc:$(ptr)", create_VoidTPtrObj(file));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errno = readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzgets_spec **/
+
+mediator gzgets_media for specification
+StringTPtr gzgets_spec( CallContext context, VoidTPtr file, StringTPtr buf,
+                        IntT len, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        StringTPtr res;
+    
+        format_TSCommand( &command, "gzgets:$(ptr)$(ptr)$(int)",
+            create_VoidTPtrObj(file), create_VoidTPtrObj(buf), 
+                create_IntTObj(len));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errno = readInt_TSStream(&command.response);
+            res = readPointer_TSStream(context, &command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzopen_spec **/
+
+mediator gzopen_media for specification
+VoidTPtr gzopen_spec( CallContext context, CString* path, CString* mode,
+                                                            ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        VoidTPtr res;
+    
+        format_TSCommand( &command, "gzopen:$(str)$(str)", path, mode);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errno=readInt_TSStream(&command.response);
+            res=readPointer_TSStream(context, &command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzprintf_spec **/
+mediator gzprintf_media for specification
+IntT gzprintf_spec( CallContext context, VoidTPtr file, CString *str,
+                 ErrorCode* errnum, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res = -1;
+    
+        format_TSCommand( &command, "gzprintf:$(ptr)$(str)",
+            create_VoidTPtrObj(file),
+            str
+            );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+  }
+}
+
+
+/** gzputc_spec **/
+
+mediator gzputc_media for specification
+IntT gzputc_spec( CallContext context, VoidTPtr file, IntT c)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzputc:$(ptr)$(int)",
+            create_VoidTPtrObj(file), create_IntTObj(c));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res =readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzputs_spec **/
+
+mediator gzputs_media for specification
+IntT gzputs_spec( CallContext context, VoidTPtr file, CString* s,
+                 ErrorCode* errnum, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzputs:$(ptr)$(str)",
+            create_VoidTPtrObj(file), s);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzread_spec **/
+
+mediator gzread_media for specification
+IntT gzread_spec( CallContext context, VoidTPtr file, VoidTPtr buf, UIntT len,
+                 ErrorCode* errnum, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzread:$(ptr)$(ptr)$(uint)",
+            create_VoidTPtrObj(file),create_VoidTPtrObj(buf),
+                create_UIntTObj(len));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzrewind_spec **/
+
+mediator gzrewind_media for specification
+IntT gzrewind_spec( CallContext context, VoidTPtr file, ErrorCode* errnum)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzrewind:$(ptr)",
+            create_VoidTPtrObj(file));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzseek_spec **/
+
+mediator gzseek_media for specification
+OffT gzseek_spec( CallContext context, VoidTPtr file, OffT offset,
+                 IntT whence, ErrorCode* errnum)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        OffT res;
+    
+        format_TSCommand( &command, "gzseek:$(ptr)$(llong)$(int)",
+            create_VoidTPtrObj(file),
+            create_OffTObj(offset),
+            create_IntTObj(whence));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            res = readLLong_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** gzsetparams_spec **/
+
+mediator gzsetparams_media for specification
+IntT gzsetparams_spec( CallContext context, VoidTPtr file, IntT level,
+                      IntT strategy)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzsetparams:$(ptr)$(int)$(int)",
+            create_VoidTPtrObj(file), create_IntTObj(level),
+            create_IntTObj(strategy));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gztell_spec **/
+
+mediator gztell_media for specification
+OffT gztell_spec( CallContext context, VoidTPtr file, ErrorCode* errnum)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        OffT res;
+    
+        format_TSCommand( &command, "gztell:$(ptr)",
+            create_VoidTPtrObj(file));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            res = readLLong_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** gzwrite_spec **/
+mediator gzwrite_media for specification
+IntT gzwrite_spec( CallContext context, VoidTPtr file, VoidTPtr buf, UIntT len,
+                 ErrorCode* errnum, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "gzwrite:$(ptr)$(ptr)$(uint)",
+            create_VoidTPtrObj(file),create_VoidTPtrObj(buf),
+                create_UIntTObj(len));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *errnum = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** inflate_spec **/
+mediator inflate_media for specification
+IntT inflate_spec( CallContext context, ZStream* stream, IntT flush )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+        CByteArray* adler_buf;
+        StringTPtr ptr;
+    
+        format_TSCommand( &command, "inflate:$(z_stream)$(int)",
+            stream, create_IntTObj(flush));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+
+            ptr=stream->next_out;
+            ptr.address-=stream->total_out;
+
+            adler_buf= 
+        readCByteArray_VoidTPtr(ptr, stream->avail_out);
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** inflateEnd_spec **/
+mediator inflateEnd_media for specification
+IntT inflateEnd_spec( CallContext context, ZStream* stream )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "inflateEnd:$(z_stream)", stream);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** inflateInit2__spec **/
+mediator inflateInit2__media for specification
+IntT inflateInit2__spec(    CallContext context, ZStream* strm,
+                            IntT windowBits,
+                            CString* version, IntT stream_size )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command,
+        "inflateInit2_:$(z_stream)$(int)$(str)$(int)",
+            strm,  create_IntTObj(windowBits), 
+            version, create_IntTObj(stream_size));
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, strm);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** inflateInit__spec **/
+mediator inflateInit__media for specification
+IntT inflateInit__spec(     CallContext context, ZStream* strm,
+                            CString* version, IntT stream_size )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command,
+        "inflateInit_:$(z_stream)$(str)$(int)",
+            strm,  version, create_IntTObj(stream_size));
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, strm);
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+/** inflateReset_spec **/
+mediator inflateReset_media for specification
+IntT inflateReset_spec( CallContext context, ZStream* stream )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "inflateReset:$(z_stream)", stream);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** inflateSetDictionary_spec **/
+mediator inflateSetDictionary_media for specification
+IntT inflateSetDictionary_spec( CallContext context, ZStream* stream,
+                               StringTPtr dictionary, UIntT dictlen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command,
+            "inflateSetDictionary:$(z_stream)$(ptr)$(uint)",
+            stream, create_VoidTPtrObj(dictionary), create_UIntTObj(dictlen));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** inflateSync_spec **/
+
+mediator inflateSync_media for specification
+IntT inflateSync_spec( CallContext context, ZStream* stream )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "inflateSync:$(z_stream)", stream );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** inflateSyncPoint_spec **/
+mediator inflateSyncPoint_media for specification
+IntT inflateSyncPoint_spec( CallContext context, ZStream* stream )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+
+        format_TSCommand( &command, "inflateSyncPoint:$(z_stream)", stream );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            readZStream_TSStream(context, &command.response, stream);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** uncompress_spec **/
+mediator uncompress_media for specification
+IntT uncompress_spec( CallContext context, StringTPtr* dest, ULongT* destLen,
+                   StringTPtr source, ULongT sourceLen)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "uncompress:$(ptr)$(ulong)$(ptr)$(ulong)",
+            create_VoidTPtrObj(*dest),
+            create_ULongTObj(*destLen),
+            create_VoidTPtrObj(source),
+            create_ULongTObj(sourceLen));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *dest=readPointer_TSStream(context, &command.response);
+            *destLen=readULong_TSStream(&command.response);
+            res=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+/** zError_spec **/
+
+mediator zError_media for specification
+CString* zError_spec( CallContext context, IntT err )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        CString* res;
+    
+        format_TSCommand( &command, "zError:$(int)",
+            create_IntTObj(err));
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readCString_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+/** zlibVersion_spec **/
+mediator zlibVersion_media for specification
+CString* zlibVersion_spec( CallContext context)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        CString* res;
+    
+        format_TSCommand( &command, "zlibVersion:");
+        executeCommandInContext( context, &command );
+
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readCString_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+

@@ -1,0 +1,4555 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "system/system/system_model.seh"
+
+#include "config/interpretation.seh"
+#include "memory/mman/mman_config.h"
+#include "config/system_config.seh"
+
+#pragma SEC subsystem mman "memory.mman"
+
+
+
+/*
+   The group of functions 'memory.mman' consists of:
+       mlock [2]
+       mlockall [2]
+       mmap [2]
+       mmap64 [2]
+       mprotect [2]
+       msync [2]
+       munlock [2]
+       munlockall [2]
+       munmap [2]
+       shm_open
+       shm_unlink
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    mlock, munlock - lock or unlock a range of process address space (REALTIME)
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int mlock(const void *addr, size_t len);
+    int munlock(const void *addr, size_t len);
+
+DESCRIPTION
+
+    The mlock() function shall cause those whole pages containing any part of
+    the address space of the process starting at address addr and continuing
+    for len bytes to be memory-resident until unlocked or until the process
+    exits or execs another process image. The implementation may require that
+    addr be a multiple of {PAGESIZE}.
+
+    The munlock() function shall unlock those whole pages containing any part
+    of the address space of the process starting at address addr and
+    continuing for len bytes, regardless of how many times mlock() has been
+    called by the process for any of the pages in the specified range. The
+    implementation may require that addr be a multiple of {PAGESIZE}.
+
+    If any of the pages in the range specified to a call to munlock() are also
+    mapped into the address spaces of other processes, any locks established
+    on those pages by another process are unaffected by the call of this
+    process to munlock().If any of the pages in the range specified by a call
+    to munlock() are also mapped into other portions of the address space of
+    the calling process outside the range specified, any locks established on
+    those pages via the other mappings are also unaffected by this call.
+
+    Upon successful return from mlock(), pages in the specified range shall be
+    locked and memory-resident. Upon successful return from munlock(), pages
+    in the specified range shall be unlocked with respect to the address space
+    of the process.Memory residency of unlocked pages is unspecified.
+
+    The appropriate privilege is required to lock process memory with mlock().
+
+RETURN VALUE
+
+    Upon successful completion, the mlock() and munlock() functions shall
+    return a value of zero. Otherwise, no change is made to any locks in the
+    address space of the process, and the function shall return a value of -1
+    and set errno to indicate the error.
+
+ERRORS
+
+    The mlock() and munlock() functions shall fail if:
+
+    [ENOMEM]
+
+        Some or all of the address range specified by the addr and len
+        arguments does not correspond to valid mapped pages in the address
+        space of the process.
+        The mlock() function shall fail if:
+
+    [EAGAIN]
+
+        Some or all of the memory identified by the operation could not be
+        locked when the call was made.
+        The mlock() and munlock() functions may fail if:
+
+    [EINVAL]
+
+        The addr argument is not a multiple of {PAGESIZE}.
+        The mlock() function may fail if:
+
+    [ENOMEM]
+
+        Locking the pages mapped by the specified range would exceed an
+        implementation-defined limit on the amount of memory that the process
+        may lock.
+
+    [EPERM]
+
+        The calling process does not have the appropriate privilege to perform
+        the requested operation.
+*/
+specification
+IntT mlock_spec( CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        LongT pagesize;
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+
+        /*
+         * Otherwise,
+         *
+         * and the function shall return a value of -1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_MLOCK, "mlock.06.02", mlock_spec == -1 , *errno)
+
+        /*
+         * The mlock() and munlock() functions shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * Some or all of the address range specified by the addr and len arguments does
+         * not correspond to valid mapped pages in the address space of the process.
+         *
+         */
+            ERROR_SHALL(POSIX_MLOCK, ENOMEM, "mlock.07.01",
+                        isNotValidMlockRange(context, addr, len))
+
+        /*
+         * The mlock() function may fail if:
+         *
+         * [ENOMEM]
+         *
+         * Locking the pages mapped by the specified range would exceed an implementation-
+         * defined limit on the amount of memory that the process may lock.
+         *
+         */
+            ERROR_MAY(POSIX_MLOCK, ENOMEM, "mlock.10.01", TODO_ERR(ENOMEM))
+
+        /*
+         * The mlock() function shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * Some or all of the memory identified by the operation could not be locked when
+         * the call was made.
+         *
+         */
+            ERROR_SHALL(POSIX_MLOCK, EAGAIN, "mlock.08.01", TODO_ERR(EAGAIN))
+
+        /*
+         * The implementation may require that addr be a multiple of {PAGESIZE}.
+         *
+         */
+        /*
+         * The mlock() and munlock() functions may fail if:
+         *
+         * [EINVAL]
+         *
+         * The addr argument is not a multiple of {PAGESIZE}.
+         *
+         */
+            ERROR_MAY(POSIX_MLOCK, EINVAL, "mlock.09.01;mlock.02", (addr.address % pagesize) != 0)
+
+        /*
+         * The appropriate privilege is required to lock process memory with mlock().
+         *
+         */
+        /*
+         * The mlock() function may fail if:
+         *
+         * [EPERM]
+         *
+         * The calling process does not have the appropriate privilege to perform the
+         * requested operation.
+         *
+         */
+            ERROR_MAY(POSIX_MLOCK, EPERM, "mlock.10.02;mlock.04",
+                      !hasPrivilegeToLock(context, addr, len))
+
+        ERROR_END()
+
+        /*
+         * The mlock() function shall cause those whole pages containing any part of the
+         * address space of the process starting at address addr and continuing for len
+         * bytes to be memory-resident until unlocked or until the process exits or execs
+         * another process image.
+         *
+         */
+        REQ("mlock.01", "", TODO_REQ());
+
+        /*
+         * Upon successful return from mlock(), pages in the specified range shall be
+         * locked and memory-resident.
+         *
+         */
+        REQ("mlock.03", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, the mlock() and munlock() functions shall return a
+         * value of zero.
+         *
+         */
+        REQ("mlock.05",
+            "Upon successful completion, the mlock() and munlock() functions "
+            "shall return a value of zero",
+            mlock_spec == 0);
+
+        /*
+         * Otherwise,
+         *
+         * no change is made to any locks in the address space of the process,
+         */
+        REQ("mlock.06.01", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    mlockall, munlockall - lock/unlock the address space of a process (REALTIME)
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int mlockall(int flags);
+    int munlockall(void);
+
+DESCRIPTION
+
+    The mlockall() function shall cause all of the pages mapped by the address
+    space of a process to be memory-resident until unlocked or until the
+    process exits or execs another process image. The flags argument
+    determines whether the pages to be locked are those currently mapped by
+    the address space of the process, those that are mapped in the future, or
+    both. The flags argument is constructed from the bitwise-inclusive OR of
+    one or more of the following symbolic constants, defined in <sys/mman.h>:
+
+    MCL_CURRENT
+    Lock all of the pages currently mapped into the address space of the
+    process.
+    MCL_FUTURE
+    Lock all of the pages that become mapped into the address space of the
+    process in the future, when those mappings are established.
+    If MCL_FUTURE is specified, and the automatic locking of future mappings
+    eventually causes the amount of locked memory to exceed the amount of
+    available physical memory or any other implementation-defined limit, the
+    behavior is implementation-defined. The manner in which the implementation
+    informs the application of these situations is also implementation-defined.
+
+    The munlockall() function shall unlock all currently mapped pages of the
+    address space of the process. Any pages that become mapped into the
+    address space of the process after a call to munlockall() shall not be
+    locked, unless there is an intervening call to mlockall() specifying
+    MCL_FUTURE or a subsequent call to mlockall() specifying MCL_CURRENT. If
+    pages mapped into the address space of the process are also mapped into
+    the address spaces of other processes and are locked by those processes,
+    the locks established by the other processes shall be unaffected by a call
+    by this process to munlockall().
+
+    Upon successful return from the mlockall() function that specifies
+    MCL_CURRENT, all currently mapped pages of the process' address space
+    shall be memory-resident and locked. Upon return from the munlockall()
+    function, all currently mapped pages of the process' address space shall
+    be unlocked with respect to the process' address space. The memory
+    residency of unlocked pages is unspecified.
+
+    The appropriate privilege is required to lock process memory with mlockall
+    ().
+
+RETURN VALUE
+
+    Upon successful completion, the mlockall() function shall return a value
+    of zero. Otherwise, no additional memory shall be locked, and the function
+    shall return a value of -1 and set errno to indicate the error. The effect
+    of failure of mlockall() on previously existing locks in the address space
+    is unspecified.
+
+    If it is supported by the implementation, the munlockall() function shall
+    always return a value of zero. Otherwise, the function shall return a
+    value of -1 and set errno to indicate the error.
+
+    ERRORS
+
+    The mlockall() function shall fail if:
+
+    [EAGAIN]
+
+        Some or all of the memory identified by the operation could not be
+        locked when the call was made.
+
+    [EINVAL]
+
+        The flags argument is zero, or includes unimplemented flags.
+        The mlockall() function may fail if:
+
+    [ENOMEM]
+
+        Locking all of the pages currently mapped into the address space of
+        the process would exceed an implementation-defined limit on the amount
+        of memory that the process may lock.
+
+    [EPERM]
+
+        The calling process does not have the appropriate privilege to perform
+        the requested operation.
+*/
+specification
+IntT mlockall_spec( CallContext context, MLockallFlags flags, ErrorCode* errno)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * Otherwise,
+         *
+         * and the function shall return a value of -1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_MLOCKALL, "mlockall.09.02", mlockall_spec == -1, *errno)
+        /*
+         * The mlockall() function shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * Some or all of the memory identified by the operation could not be locked when
+         * the call was made.
+         *
+         */
+            ERROR_SHALL(POSIX_MLOCKALL, EAGAIN, "mlockall.10.01", TODO_ERR(EAGAIN))
+
+        /*
+         * The mlockall() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The flags argument is zero, or includes unimplemented flags.
+         *
+         */
+            ERROR_SHALL(POSIX_MLOCKALL, EINVAL, "mlockall.10.02", //TODO unimplemented flags
+                        (flags.MCL_CURRENT_Flag == false) && (flags.MCL_FUTURE_Flag == false))
+
+        /*
+         * The mlockall() function may fail if:
+         *
+         * [ENOMEM]
+         *
+         * Locking all of the pages currently mapped into the address space of the process
+         * would exceed an implementation-defined limit on the amount of memory that the
+         * process may lock.
+         *
+         */
+            ERROR_MAY(POSIX_MLOCKALL, ENOMEM, "mlockall.11.01", TODO_ERR(ENOMEM))
+
+        /*
+         * The appropriate privilege is required to lock process memory with mlockall().
+         *
+         */
+        /*
+         * The mlockall() function may fail if:
+         *
+         * [EPERM]
+         *
+         * The calling process does not have the appropriate privilege to perform the
+         * requested operation.
+         *
+         */
+            ERROR_MAY(POSIX_MLOCKALL, EPERM, "mlockall.11.02;mlockall.07",
+                      !hasPrivilegeToLockall(context, flags))
+
+        ERROR_END()
+
+        /*
+         * The mlockall() function shall cause all of the pages mapped by the address
+         * space of a process to be memory-resident until unlocked or until the process
+         * exits or execs another process image.
+         *
+         */
+        REQ("mlockall.01", "", TODO_REQ());
+
+        /*
+         * The flags argument determines whether the pages to be locked are those
+         * currently mapped by the address space of the process, those that are mapped in
+         * the future, or both.
+         *
+         */
+        REQ("mlockall.02", "", TODO_REQ());
+
+        /*
+         * The flags argument is constructed from the bitwise-inclusive OR of one or more
+         * of the following symbolic constants, defined in <sys/mman.h>:
+         *
+         * MCL_CURRENT
+         *
+         * Lock all of the pages currently mapped into the address space of the process.
+         *
+         */
+        REQ("mlockall.03.01", "", TODO_REQ());
+
+        /*
+         * The flags argument is constructed from the bitwise-inclusive OR of one or more
+         * of the following symbolic constants, defined in <sys/mman.h>:
+         *
+         * MCL_FUTURE
+         *
+         * Lock all of the pages that become mapped into the address space of the process
+         * in the future, when those mappings are established.
+         *
+         */
+        REQ("mlockall.03.02", "", TODO_REQ());
+
+        /*
+         * If MCL_FUTURE is specified, and the automatic locking of future mappings
+         * eventually causes the amount of locked memory to exceed the amount of available
+         * physical memory or any other implementation-defined limit, the behavior is
+         * implementation-defined.
+         *
+         */
+        REQ("mlockall.04", "", TODO_REQ());
+
+        /*
+         * The manner in which the implementation informs the application of these
+         * situations is also implementation-defined.
+         *
+         */
+        REQ("mlockall.05", "", TODO_REQ());
+
+        /*
+         * Upon successful return from the mlockall() function that specifies MCL_CURRENT,
+         * all currently mapped pages of the process' address space shall be memory-
+         * resident and locked.
+         *
+         */
+        REQ("mlockall.06", "", TODO_REQ());
+
+
+
+        /*
+         * Upon successful completion, the mlockall() function shall return a value of
+         * zero.
+         *
+         */
+        REQ("mlockall.08",
+            "Upon successful completion, shall return a value of zero",
+            mlockall_spec == 0);
+
+        /*
+         * Otherwise,
+         *
+         * no additional memory shall be locked,
+         */
+        REQ("mlockall.09.01", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    mmap - map pages of memory
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    void *mmap(void *addr, size_t len, int prot, int flags,
+           int fildes, off_t off);
+
+DESCRIPTION
+
+    The mmap() function shall establish a mapping between a process' address
+    space and a file, shared memory object, or [TYM]   typed memory object.
+    The format of the call is as follows:
+
+    pa=mmap(addr, len, prot, flags, fildes, off);
+
+    The mmap() function shall establish a mapping between the address space of
+    the process at an address pa for len bytes to the memory object
+    represented by the file descriptor fildes at offset off for len bytes.The
+    value of pa is an implementation-defined function of the parameter addr
+    and the values of flags, further described below. A successful mmap() call
+    shall return pa as its result. The address range starting at pa and
+    continuing for len bytes shall be legitimate for the possible (not
+    necessarily current) address space of the process. The range of bytes
+    starting at off and continuing for len bytes shall be legitimate for the
+    possible (not necessarily current) offsets in the file, shared memory
+    object, or typed memory object   represented by fildes.
+
+    If fildes represents a typed memory object opened with either the
+    POSIX_TYPED_MEM_ALLOCATE flag or the POSIX_TYPED_MEM_ALLOCATE_CONTIG flag,
+    the memory object to be mapped shall be that portion of the typed memory
+    object allocated by the implementation as specified below. In this case,
+    if off is non-zero, the behavior of mmap() is undefined. If fildes refers
+    to a valid typed memory object that is not accessible from the calling
+    process, mmap() shall fail.
+
+    The mapping established by mmap() shall replace any previous mappings for
+    those whole pages containing any part of the address space of the process
+    starting at pa and continuing for len bytes.
+
+    If the size of the mapped file changes after the call to mmap() as a
+    result of some other operation on the mapped file, the effect of
+    references to portions of the mapped region that correspond to added or
+    removed portions of the file is unspecified.
+
+    The mmap() function shall be supported for regular files, shared memory
+    objects, and typed memory objects.  Support for any other type of
+    file is unspecified.
+
+    If len is zero, mmap() shall fail and no mapping shall be established.
+
+    The parameter prot determines whether read, write, execute, or some
+    combination of accesses are permitted to the data being mapped. The prot
+    shall be either PROT_NONE or the bitwise-inclusive OR of one or more of
+    the other flags in the following table, defined in the <sys/mman.h> header.
+
+    Symbolic Constant - Description
+
+        PROT_READ
+            Data can be read.
+
+        PROT_WRITE
+            Data can be written.
+
+        PROT_EXEC
+            Data can be executed.
+
+        PROT_NONE
+            Data cannot be accessed.
+
+    If an implementation cannot support the combination of access types
+    specified by prot, the call to mmap() shall fail.
+
+    An implementation may permit accesses other than those specified by prot;
+    however, if the Memory Protection option is supported, the
+    implementation shall not permit a write to succeed where PROT_WRITE has
+    not been set or shall not permit any access where PROT_NONE alone has been
+    set. The implementation shall support at least the following values of prot
+    : PROT_NONE, PROT_READ, PROT_WRITE, and the bitwise-inclusive OR of
+    PROT_READ and PROT_WRITE.  If the Memory Protection option is not supported
+    , the result of any access that conflicts with the specified protection is
+    undefined. The file descriptor fildes shall have been opened with read
+    permission, regardless of the protection options specified. If PROT_WRITE
+    is specified, the application shall ensure that it has opened the file
+    descriptor fildes with write permission unless MAP_PRIVATE is specified in
+    the flags parameter as described below.
+
+    The parameter flags provides other information about the handling of the
+    mapped data. The value of flags is the bitwise-inclusive OR of these
+    options, defined in <sys/mman.h>:
+
+    Symbolic Constant - Description
+
+        MAP_SHARED
+            Changes are shared.
+
+        MAP_PRIVATE
+            Changes are private.
+
+        MAP_FIXED
+            Interpret addr exactly.
+
+    Implementations that do not support the Memory Mapped Files option are not
+    required to support MAP_PRIVATE.
+
+    It is implementation-defined whether MAP_FIXED shall be supported.
+    MAP_FIXED shall be supported on XSI-conformant systems.
+
+    MAP_SHARED and MAP_PRIVATE describe the disposition of write references to
+    the memory object. If MAP_SHARED is specified, write references shall
+    change the underlying object. If MAP_PRIVATE is specified, modifications
+    to the mapped data by the calling process shall be visible only to the
+    calling process and shall not change the underlying object. It is
+    unspecified whether modifications to the underlying object done after the
+    MAP_PRIVATE mapping is established are visible through the MAP_PRIVATE
+    mapping. Either MAP_SHARED or MAP_PRIVATE can be specified, but not both.
+    The mapping type is retained across fork().
+
+    When fildes represents a typed memory object opened with either the
+    POSIX_TYPED_MEM_ALLOCATE flag or the POSIX_TYPED_MEM_ALLOCATE_CONTIG flag,
+    mmap() shall, if there are enough resources available, map len bytes
+    allocated from the corresponding typed memory object which were not
+    previously allocated to any process in any processor that may access that
+    typed memory object. If there are not enough resources available, the
+    function shall fail. If fildes represents a typed memory object opened
+    with the POSIX_TYPED_MEM_ALLOCATE_CONTIG flag, these allocated bytes shall
+    be contiguous within the typed memory object. If fildes represents a typed
+    memory object opened with the POSIX_TYPED_MEM_ALLOCATE flag, these
+    allocated bytes may be composed of non-contiguous fragments within the
+    typed memory object. If fildes represents a typed memory object opened
+    with neither the POSIX_TYPED_MEM_ALLOCATE_CONTIG flag nor the
+    POSIX_TYPED_MEM_ALLOCATE flag, len bytes starting at offset off within the
+    typed memory object are mapped, exactly as when mapping a file or shared
+    memory object. In this case, if two processes map an area of typed memory
+    using the same off and len values and using file descriptors that refer to
+    the same memory pool (either from the same port or from a different port),
+    both processes shall map the same region of storage.
+
+    When MAP_FIXED is set in the flags argument, the implementation is
+    informed that the value of pa shall be addr, exactly. If MAP_FIXED is set,
+    mmap() may return MAP_FAILED and set errno to [EINVAL]. If a MAP_FIXED
+    request is successful, the mapping established by mmap() replaces any
+    previous mappings for the process' pages in the range [pa,pa+len).
+
+    When MAP_FIXED is not set, the implementation uses addr in an
+    implementation-defined manner to arrive at pa. The pa so chosen shall be
+    an area of the address space that the implementation deems suitable for a
+    mapping of len bytes to the file. All implementations interpret an addr
+    value of 0 as granting the implementation complete freedom in selecting pa
+    , subject to constraints described below. A non-zero value of addr is
+    taken to be a suggestion of a process address near which the mapping
+    should be placed. When the implementation selects a value for pa, it never
+    places a mapping at address 0, nor does it replace any extant mapping.
+
+    The off argument is constrained to be aligned and sized according to the
+    value returned by sysconf() when passed _SC_PAGESIZE or _SC_PAGE_SIZE.
+    When MAP_FIXED is specified, the application shall ensure that the
+    argument addr also meets these constraints. The implementation performs
+    mapping operations over whole pages. Thus, while the argument len need not
+    meet a size or alignment constraint, the implementation shall include, in
+    any mapping operation, any partial page specified by the range [pa,pa+len).
+
+    The system shall always zero-fill any partial page at the end of an object
+    . Further, the system shall never write out any modified portions of the
+    last page of an object which are beyond its end. [MPR]   References within
+    the address range starting at pa and continuing for len bytes to whole
+    pages following the end of an object shall result in delivery of a SIGBUS
+    signal.
+
+    An implementation may generate SIGBUS signals when a reference would cause
+    an error in the mapped object, such as out-of-space condition.
+
+    The mmap() function shall add an extra reference to the file associated
+    with the file descriptor fildes which is not removed by a subsequent close
+    () on that file descriptor. This reference shall be removed when there are
+    no more mappings to the file.
+
+    The st_atime field of the mapped file may be marked for update at any time
+    between the mmap() call and the corresponding munmap() call. The initial
+    read or write reference to a mapped region shall cause the file's st_atime
+    field to be marked for update if it has not already been marked for update.
+
+    The st_ctime and st_mtime fields of a file that is mapped with MAP_SHARED
+    and PROT_WRITE shall be marked for update at some point in the interval
+    between a write reference to the mapped region and the next call to msync
+    () with MS_ASYNC or MS_SYNC for that portion of the file by any process.
+    If there is no such call and if the underlying file is modified as a
+    result of a write reference, then these fields shall be marked for update
+    at some time after the write reference.
+
+    There may be implementation-defined limits on the number of memory regions
+    that can be mapped (per process or per system).
+
+    If such a limit is imposed, whether the number of memory regions
+    that can be mapped by a process is decreased by the use of shmat() is
+    implementation-defined.
+
+    If mmap() fails for reasons other than [EBADF], [EINVAL], or [ENOTSUP],
+    some of the mappings in the address range starting at addr and continuing
+    for len bytes may have been unmapped.
+
+RETURN VALUE
+
+    Upon successful completion, the mmap() function shall return the address
+    at which the mapping was placed ( pa); otherwise, it shall return a value
+    of MAP_FAILED and set errno to indicate the error. The symbol MAP_FAILED
+    is defined in the <sys/mman.h> header. No successful return from mmap()
+    shall return the value MAP_FAILED.
+
+ERRORS
+
+    The mmap() function shall fail if:
+
+    [EACCES]
+
+        The fildes argument is not open for read, regardless of the protection
+        specified, or fildes is not open for write and PROT_WRITE was
+        specified for a MAP_SHARED type mapping.
+
+    [EAGAIN]
+
+        The mapping could not be locked in memory, if required by mlockall(),
+        due to a lack of resources.
+
+    [EBADF]
+
+        The fildes argument is not a valid open file descriptor.
+
+    [EINVAL]
+
+        The value of len is zero.
+
+    [EINVAL]
+
+        The addr argument (if MAP_FIXED was specified) or off is not a
+        multiple of the page size as returned by sysconf(), or is considered
+        invalid by the implementation.
+
+    [EINVAL]
+
+        The value of flags is invalid (neither MAP_PRIVATE nor MAP_SHARED is
+        set).
+
+    [EMFILE]
+
+        The number of mapped regions would exceed an implementation-defined
+        limit (per process or per system).
+
+    [ENODEV]
+
+        The fildes argument refers to a file whose type is not supported by
+        mmap().
+
+    [ENOMEM]
+
+        MAP_FIXED was specified, and the range [addr,addr+len) exceeds that
+        allowed for the address space of a process; or, if MAP_FIXED was not
+        specified and there is insufficient room in the address space to
+        effect the mapping.
+
+    [ENOMEM]
+
+        The mapping could not be locked in memory, if required by mlockall(),
+        because it would require more space than the system is able to supply
+
+    [ENOMEM]
+
+        Not enough unallocated memory resources remain in the typed memory
+        object designated by fildes to allocate len bytes.
+
+    [ENOTSUP]
+
+        MAP_FIXED or MAP_PRIVATE was specified in the flags argument and the
+        implementation does not support this functionality.
+        The implementation does not support the combination of accesses
+        requested in the prot argument.
+
+    [ENXIO]
+
+        Addresses in the range [off,off+len) are invalid for the object
+        specified by fildes.
+
+    [ENXIO]
+
+        MAP_FIXED was specified in flags and the combination of addr, len, and
+        off is invalid for the object specified by fildes.
+
+    [ENXIO]
+
+        The fildes argument refers to a typed memory object that is not
+        accessible from the calling process.
+
+    [EOVERFLOW]
+
+        The file is a regular file and the value of off plus len exceeds the
+        offset maximum established in the open file description associated
+        with fildes.
+*/
+specification
+VoidTPtr mmap_spec(CallContext context, VoidTPtr addr, SizeT len, MmanProtFlags prot,
+                   MmapFlags flags, FileDescId fildes, OffT off, bool is64bits, ErrorCode* errno)
+{
+    ProcessState* prStpre;
+    ProcessState* prStpost;
+
+    if (is64bits)
+        FILTER("mmap64");
+    else
+        FILTER("mmap");
+
+    pre
+    {
+        prStpre = (ProcessState*)clone(getProcessState_CallContext(context));
+        return true;
+    }
+    post
+    {
+        LongT pagesize;
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+        prStpost = getProcessState_CallContext(context);
+
+        /*
+         * otherwise, it shall return a value of MAP_FAILED and set errno to indicate the
+         * error.
+         *
+         */
+        /*
+         * No successful return from mmap() shall return the value MAP_FAILED.
+         *
+         */
+        ERROR_BEGIN(POSIX_MMAP, "mmap.51.02;mmap64.mmap.51.02;mmap.52;mmap64.mmap.52", isInvalid_VoidTPtr(mmap_spec),  *errno)
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * The fildes argument is not open for read, regardless of the protection
+         * specified, or fildes is not open for write and PROT_WRITE was specified for a
+         * MAP_SHARED type mapping.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EACCES, "mmap.53.01;mmap64.mmap.53.01", TODO_ERR(EACCES))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * [ML] The mapping could not be locked in memory, if required by mlockall(), due
+         * to a lack of resources.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EAGAIN, "mmap.53.02;mmap64.mmap.53.02", TODO_ERR(EAGAIN))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EBADF]
+         *
+         * The fildes argument is not a valid open file descriptor.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EBADF, "mmap.53.03;mmap64.mmap.53.03", !isValid_FileDescId(fildes))
+
+        /*
+         * If len is zero, mmap() shall fail and no mapping shall be established.
+         *
+         */
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The value of len is zero.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EINVAL, "mmap.53.04;mmap64.mmap.53.04;mmap.10;mmap64.mmap.10", len == 0)
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The addr argument (if MAP_FIXED was specified) or off is not a multiple of the
+         * page size as returned by sysconf(), or is considered invalid by the
+         * implementation.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EINVAL, "mmap.53.05;mmap64.mmap.53.05", ((off % pagesize) != 0)  ||
+                        ((flags.MAP_FIXED_Flag == true) && (!isRounded(addr, pagesize))))
+
+        /*
+         * Either MAP_SHARED or MAP_PRIVATE can be specified, but not both.
+         *
+         */
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The value of flags is invalid (neither MAP_PRIVATE nor MAP_SHARED is set).
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EINVAL, "mmap.23;mmap64.mmap.23;mmap.53.06;mmap64.mmap.53.06",
+                        ((!flags.MAP_PRIVATE_Flag) && (!flags.MAP_SHARED_Flag)) ||
+                        (flags.MAP_PRIVATE_Flag && flags.MAP_SHARED_Flag))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EMFILE]
+         *
+         * The number of mapped regions would exceed an implementation-defined limit (per
+         * process or per system).
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EMFILE, "mmap.53.07;mmap64.mmap.53.07", TODO_ERR(EMFILE))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENODEV]
+         *
+         * The fildes argument refers to a file whose type is not supported by mmap().
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, ENODEV, "mmap.53.08;mmap64.mmap.53.08", TODO_ERR(ENODEV))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * MAP_FIXED was specified, and the range [addr,addr+len) exceeds that allowed for
+         * the address space of a process; or, if MAP_FIXED was not specified and there is
+         * insufficient room in the address space to effect the mapping.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, ENOMEM, "mmap.53.09;mmap64.mmap.53.09", TODO_ERR(ENOMEM))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * [ML] The mapping could not be locked in memory, if required by mlockall(),
+         * because it would require more space than the system is able to supply.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, ENOMEM, "mmap.53.10;mmap64.mmap.53.10", TODO_ERR(ENOMEM))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * [TYM] Not enough unallocated memory resources remain in the typed memory
+         * object designated by fildes to allocate len bytes.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, ENOMEM, "mmap.53.11;mmap64.mmap.53.11", TODO_ERR(ENOMEM))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENOTSUP]
+         *
+         * MAP_FIXED or MAP_PRIVATE was specified in the flags argument and the
+         * implementation does not support this functionality.
+         */
+            ERROR_SHALL(POSIX_MMAP, ENOTSUP, "mmap.53.12.01;mmap64.mmap.53.12.01", TODO_ERR(ENOTSUP))
+
+        /*
+         * If an implementation cannot support the combination of access types specified
+         * by prot, the call to mmap() shall fail.
+         *
+         */
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENOTSUP]
+         *
+         * The implementation does not support the combination of accesses requested in
+         * the prot argument.
+         */
+            ERROR_SHALL(POSIX_MMAP, ENOTSUP, "mmap.13;mmap64.mmap.13;mmap.53.12.02;mmap64.mmap.53.12.02", !isImplementedProt(prot))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENXIO]
+         *
+         * Addresses in the range [off,off+len) are invalid for the object specified by
+         * fildes.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, ENXIO, "mmap.53.13;mmap64.mmap.53.13", TODO_ERR(ENXIO))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENXIO]
+         *
+         * MAP_FIXED was specified in flags and the combination of addr, len, and off is
+         * invalid for the object specified by fildes.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, ENXIO, "mmap.53.14;mmap64.mmap.53.14", TODO_ERR(ENXIO))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [ENXIO]
+         *
+         * [TYM] The fildes argument refers to a typed memory object that is not
+         * accessible from the calling process.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, ENXIO, "mmap.53.15;mmap64.mmap.53.15", TODO_ERR(ENXIO))
+
+        /*
+         * The mmap() function shall fail if:
+         *
+         * [EOVERFLOW]
+         *
+         * The file is a regular file and the value of off plus len exceeds the offset
+         * maximum established in the open file description associated with fildes.
+         *
+         */
+            ERROR_SHALL(POSIX_MMAP, EOVERFLOW, "mmap.53.16;mmap64.mmap.53.16", TODO_ERR(EOVERFLOW))
+
+        ERROR_END()
+
+        /*
+         * The mmap() function shall establish a mapping between a process' address space
+         * and a file, shared memory object, or [TYM]  typed memory object.
+         *
+         */
+        REQ("mmap.01;mmap64.mmap.01", "", TODO_REQ());
+
+        /*
+         * The mmap() function shall establish a mapping between the address space of the
+         * process at an address pa for len bytes to the memory object represented by
+         * the file descriptor fildes at offset off for len bytes
+         *
+         */
+        REQ("mmap.02;mmap64.mmap.02", "", TODO_REQ());
+
+        /*
+         * A successful mmap() call shall return pa as its result.
+         *
+         */
+        REQ("mmap.03;mmap64.mmap.03",
+            "A successful mmap() call shall return pa as its result",
+            true);
+
+        /*
+         * The address range starting at pa and continuing for len bytes shall be
+         * legitimate for the possible (not necessarily current) address space of the
+         * process.
+         *
+         */
+        REQ("mmap.04;mmap64.mmap.04",
+            "The address range starting at pa and continuing for len bytes "
+            "shall be legitimate for the possible address space of the process",
+            !isNotValidMlockRange(context, addr, len));
+
+        /*
+         * The range of bytes starting at off and continuing for len bytes shall be
+         * legitimate for the possible (not necessarily current) offsets in the file,
+         * shared memory object, or [TYM]  typed memory object  represented by fildes.
+         *
+         */
+        REQ("mmap.05;mmap64.mmap.05", "", TODO_REQ());
+
+        /*
+         * If fildes represents a typed memory object opened with either the
+         * POSIX_TYPED_MEM_ALLOCATE flag or the POSIX_TYPED_MEM_ALLOCATE_CONTIG flag, the
+         * memory object to be mapped shall be that portion of the typed memory object
+         * allocated by the implementation as specified below.
+         *
+         * In this case, if off is non-zero, the behavior of mmap() is undefined.
+         *
+         */
+        REQ("mmap.06.01;mmap64.mmap.06.01", "", TODO_REQ());
+
+        /*
+         * If fildes represents a typed memory object opened with either the
+         * POSIX_TYPED_MEM_ALLOCATE flag or the POSIX_TYPED_MEM_ALLOCATE_CONTIG flag, the
+         * memory object to be mapped shall be that portion of the typed memory object
+         * allocated by the implementation as specified below.
+         *
+         * If fildes refers to a valid typed memory object that is not accessible from the
+         * calling process, mmap() shall fail.
+         *
+         */
+        REQ("mmap.06.02;mmap64.mmap.06.02", "", TODO_REQ());
+
+        /*
+         * The mapping established by mmap() shall replace any previous mappings for those
+         * whole pages containing any part of the address space of the process starting at
+         * pa and continuing for len bytes.
+         *
+         */
+        REQ("mmap.07;mmap64.mmap.07", "", TODO_REQ());
+
+        /*
+         * If the size of the mapped file changes after the call to mmap() as a result of
+         * some other operation on the mapped file, the effect of references to portions
+         * of the mapped region that correspond to added or removed portions of the file
+         * is unspecified.
+         *
+         */
+        REQ("mmap.08;mmap64.mmap.08", "", TODO_REQ());
+
+        /*
+         * The mmap() function shall be supported for regular files, shared memory objects,
+         * and [TYM]  typed memory objects.
+         *
+         */
+        REQ("mmap.09;mmap64.mmap.09", "", TODO_REQ());
+
+        /*
+         * The parameter prot determines whether read, write, execute, or some combination
+         * of accesses are permitted to the data being mapped.
+         *
+         */
+        REQ("mmap.11;mmap64.mmap.11", "", TODO_REQ());
+
+        /*
+         * The prot shall be either PROT_NONE or the bitwise-inclusive OR of one or more
+         * of the other flags in the following table, defined in the <sys/mman.h>
+         * header.
+         *
+         */
+        REQ("mmap.12;mmap64.mmap.12",
+            "The prot shall be either PROT_NONE or the bitwise-inclusive OR "
+            "of one or more of the other flags in the following table",
+            isValidProt(prot));
+
+        /*
+         * An implementation may permit accesses other than those specified by prot; [MPR]
+         *
+         *
+         */
+        REQ("mmap.14;mmap64.mmap.14", "", TODO_REQ());
+
+        /*
+         * however, if the Memory Protection option is supported, the implementation shall
+         * not permit a write to succeed where PROT_WRITE has not been set or shall not
+         * permit any access where PROT_NONE alone has been set.
+         *
+         */
+        REQ("mmap.15;mmap64.mmap.15", "", TODO_REQ());
+
+        /*
+         * The implementation shall support at least the following values of prot:
+         * PROT_NONE, PROT_READ, PROT_WRITE, and the bitwise-inclusive OR of PROT_READ and
+         * PROT_WRITE.
+         *
+         */
+        REQ("mmap.16;mmap64.mmap.16", "", TODO_REQ());
+
+        /*
+         * If the Memory Protection option is not supported, the result of any access that
+         * conflicts with the specified protection is undefined.
+         *
+         */
+        REQ("mmap.17;mmap64.mmap.17", "", TODO_REQ());
+
+        /*
+         * The file descriptor fildes shall have been opened with read permission,
+         * regardless of the protection options specified.
+         *
+         */
+        REQ("mmap.18;mmap64.mmap.18", "", TODO_REQ());
+
+        /*
+         * If PROT_WRITE is specified, the application shall ensure that it has opened the
+         * file descriptor fildes with write permission unless MAP_PRIVATE is specified in
+         * the flags parameter as described below.
+         *
+         * The value of flags is the bitwise-inclusive OR of these options, defined in <
+         * sys/mman.h>:
+         *
+         */
+        REQ("mmap.19.01;mmap64.mmap.19.01", "", TODO_REQ());
+
+        /*
+         * Implementations that do not support the Memory Mapped Files option are not
+         * required to support MAP_PRIVATE.
+         *
+         */
+        REQ("mmap.20;mmap64.mmap.20", "", TODO_REQ());
+
+        /*
+         * It is implementation-defined whether MAP_FIXED shall be supported. [XSI]
+         * MAP_FIXED shall be supported on XSI-conformant systems.
+         *
+         */
+        REQ("mmap.21;mmap64.mmap.21", "", TODO_REQ());
+
+        /*
+         * MAP_SHARED and MAP_PRIVATE describe the disposition of write references to the
+         * memory object.
+         *
+         * If MAP_SHARED is specified, write references shall change the underlying object.
+         *
+         */
+        REQ("mmap.22.01;mmap64.mmap.22.01", "", TODO_REQ());
+
+        /*
+         * MAP_SHARED and MAP_PRIVATE describe the disposition of write references to the
+         * memory object.
+         *
+         * If MAP_PRIVATE is specified, modifications to the mapped data by the calling
+         * process shall be visible only to the calling process and shall not change the
+         * underlying object.
+         *
+         */
+        REQ("mmap.22.02;mmap64.mmap.22.02", "", TODO_REQ());
+
+        /*
+         * The mapping type is retained across fork().
+         *
+         */
+        REQ("mmap.24;mmap64.mmap.24", "", TODO_REQ());
+
+        /*
+         * When fildes represents a typed memory object opened with either the
+         * POSIX_TYPED_MEM_ALLOCATE flag or the POSIX_TYPED_MEM_ALLOCATE_CONTIG flag, mmap(
+         * ) shall, if there are enough resources available, map len bytes allocated from
+         * the corresponding typed memory object which were not previously allocated to
+         * any process in any processor that may access that typed memory object.
+         *
+         */
+        REQ("mmap.25;mmap64.mmap.25", "", TODO_REQ());
+
+        /*
+         * If there are not enough resources available, the function shall fail.
+         *
+         */
+        REQ("mmap.26;mmap64.mmap.26", "", TODO_REQ());
+
+        /*
+         * If fildes represents a typed memory object opened with the
+         * POSIX_TYPED_MEM_ALLOCATE_CONTIG flag, these allocated bytes shall be contiguous
+         * within the typed memory object.
+         *
+         */
+        REQ("mmap.27;mmap64.mmap.27", "", TODO_REQ());
+
+        /*
+         * If fildes represents a typed memory object opened with the
+         * POSIX_TYPED_MEM_ALLOCATE flag, these allocated bytes may be composed of non-
+         * contiguous fragments within the typed memory object.
+         *
+         */
+        REQ("mmap.28;mmap64.mmap.28", "", TODO_REQ());
+
+        /*
+         * If fildes represents a typed memory object opened with neither the
+         * POSIX_TYPED_MEM_ALLOCATE_CONTIG flag nor the POSIX_TYPED_MEM_ALLOCATE flag, len
+         * bytes starting at offset off within the typed memory object are mapped, exactly
+         * as when mapping a file or shared memory object. In this case, if two processes
+         * map an area of typed memory using the same off and len values and using file
+         * descriptors that refer to the same memory pool (either from the same port or
+         * from a different port), both processes shall map the same region of storage.
+         *
+         */
+        REQ("mmap.29;mmap64.mmap.29", "", TODO_REQ());
+
+        if (flags.MAP_FIXED_Flag == true)
+        {
+            /*
+             * When MAP_FIXED is set in the flags argument, the implementation is informed
+             * that the value of pa shall be addr, exactly.
+             *
+             */
+            REQ("mmap.30;mmap64.mmap.30",
+                "When MAP_FIXED is set in the flags argument, the implementation "
+                "is informed that the value of pa shall be addr, exactly",
+                equals_VoidTPtr(mmap_spec, addr));
+        }
+
+        /*
+         * If MAP_FIXED is set, mmap() may return MAP_FAILED and set errno to [EINVAL].
+         *
+         */
+        REQ("mmap.31;mmap64.mmap.31", "", TODO_REQ());
+
+        /*
+         * If a MAP_FIXED request is successful, the mapping established by mmap()
+         * replaces any previous mappings for the process' pages in the range [pa,pa+len).
+         *
+         */
+        REQ("?mmap.32;mmap64.mmap.32", "This requirement is checked in model state", true);
+
+        /*
+         * When MAP_FIXED is not set, the implementation uses addr in an implementation-
+         * defined manner to arrive at pa. The pa so chosen shall be an area of the
+         * address space that the implementation deems suitable for a mapping of len bytes
+         * to the file.
+         *
+         */
+        REQ("mmap.33;mmap64.mmap.33", "", TODO_REQ());
+
+        /*
+         * All implementations interpret an addr value of 0 as granting the implementation
+         * complete freedom in selecting pa
+         *
+         */
+        REQ("mmap.34;mmap64.mmap.34", "Info requirement", true);
+
+        /*
+         * A non-zero value of addr is taken to be a suggestion of a process address near
+         * which the mapping should be placed.
+         *
+         */
+        REQ("mmap.35;mmap64.mmap.35", "Can't be formalized, becouse pa may be not nearest address", true);
+
+        if (flags.MAP_FIXED_Flag == false)
+        {
+            /*
+             * When the implementation selects a value for pa, it never places a mapping at
+             * address 0, nor does it replace any extant mapping.
+             *
+             */
+            REQ("mmap.36;mmap64.mmap.36",
+                "It never places a mapping at address 0, nor does it replace "
+                "any extant mapping",
+                (mmap_spec.address != (sut_ptr_t)0));
+        }
+
+        /*
+         * The off argument is constrained to be aligned and sized according to the value
+         * returned by sysconf() when passed _SC_PAGESIZE or _SC_PAGE_SIZE.
+         */
+        REQ("mmap.37.01;mmap64.mmap.37.01",
+            "The off argument shall be aligned and sized according to the "
+            "value returned by sysconf when passed _SC_PAGESIZE||_SC_PAGE_SIZE",
+            (off % pagesize) == 0);
+
+        if (flags.MAP_FIXED_Flag == true)
+        {
+            /*
+             * When MAP_FIXED is specified, the application shall ensure that the argument
+             * addr also meets these constraints.
+             */
+            REQ("mmap.37.02;mmap64.mmap.37.02",
+                "When MAP_FIXED is specified, the application shall ensure "
+                "that the argument addr also meets these constraints",
+                isRounded(addr, pagesize));
+        }
+
+        /*
+         * The implementation performs mapping operations over whole pages.
+         *
+         * Thus, while the argument len need not meet a size or alignment constraint, the
+         * implementation shall include, in any mapping operation, any partial page
+         * specified by the range [pa,pa+len).
+         */
+        REQ("mmap.38.01;mmap64.mmap.38.01", "", TODO_REQ());
+
+        /*
+         * The system shall always zero-fill any partial page at the end of an object.
+         */
+
+        REQ("mmap.39;mmap64.mmap.39", "", TODO_REQ());
+
+        /*
+         * Further, the system shall never write out any modified portions of the last
+         * page of an object which are beyond its end.
+         *
+         */
+        REQ("mmap.40;mmap64.mmap.40", "", TODO_REQ());
+
+        /*
+         * References within the address range starting at pa and continuing for len bytes
+         * to whole pages following the end of an object shall result in delivery of a
+         * SIGBUS signal.
+         *
+         */
+        REQ("mmap.41;mmap64.mmap.41", "", TODO_REQ());
+
+        /*
+         * An implementation may generate SIGBUS signals when a reference would cause an
+         * error in the mapped object, such as out-of-space condition.
+         *
+         */
+        REQ("mmap.42;mmap64.mmap.42", "", TODO_REQ());
+
+        /*
+         * The mmap() function shall add an extra reference to the file associated with
+         * the file descriptor fildes which is not removed by a subsequent close() on that
+         * file descriptor.
+         *
+         */
+        REQ("mmap.43;mmap64.mmap.43", "", TODO_REQ());
+
+        /*
+         * This reference shall be removed when there are no more mappings to the file.
+         *
+         */
+        REQ("mmap.44;mmap64.mmap.44", "", TODO_REQ());
+
+        /*
+         * The st_atime field of the mapped file may be marked for update at any time
+         * between the mmap() call and the corresponding munmap() call.
+         *
+         */
+        REQ("mmap.45;mmap64.mmap.45", "", TODO_REQ());
+
+        /*
+         * The initial read or write reference to a mapped region shall cause the file's
+         * st_atime field to be marked for update if it has not already been marked for
+         * update.
+         *
+         */
+        REQ("mmap.46;mmap64.mmap.46", "", TODO_REQ());
+
+        /*
+         * The st_ctime and st_mtime fields of a file that is mapped with MAP_SHARED and
+         * PROT_WRITE shall be marked for update at some point in the interval between a
+         * write reference to the mapped region and the next call to msync() with MS_ASYNC
+         * or MS_SYNC for that portion of the file by any process
+         *
+         */
+        REQ("mmap.47;mmap64.mmap.47", "", TODO_REQ());
+
+        /*
+         * If there is no such call and if the underlying file is modified as a result of
+         * a write reference, then these fields shall be marked for update at some time
+         * after the write reference.
+         *
+         */
+        REQ("mmap.48;mmap64.mmap.48", "", TODO_REQ());
+
+        /*
+         * There may be implementation-defined limits on the number of memory regions that
+         * can be mapped (per process or per system).
+         *
+         * [XSI] If such a limit is imposed, whether the number of memory regions that
+         * can be mapped by a process is decreased by the use of shmat() is implementation-
+         * defined.
+         *
+         */
+        REQ("mmap.49;mmap64.mmap.49", "", TODO_REQ());
+
+        /*
+         * If mmap() fails for reasons other than [EBADF], [EINVAL], or [ENOTSUP], some of
+         * the mappings in the address range starting at addr and continuing for len bytes
+         * may have been unmapped.
+         *
+         */
+        REQ("mmap.50;mmap64.mmap.50", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, the mmap() function shall return the address at
+         * which the mapping was placed ( pa)
+         *
+         */
+        REQ("mmap.51.01;mmap64.mmap.51.01", "This requirement is checked, when model was used", true);
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+FileId createNewShmFileId(SystemState* sysSt, ProcessState* prSt);
+
+void onMmap(CallContext context, SizeT len, MmanProtFlags prot,
+            MmapFlags flags, FileDescId fildes, OffT off, VoidTPtr mmap_res)
+{
+    ProcessState* prSt;
+    SystemState* sysSt;
+    MMapState* cur_map;
+    OffT roundOff;
+    VoidTPtr roundStartAddr;
+    VoidTPtr roundEndAddr;
+    LongT pagesize;
+    FileId new_fid;
+    FileDescriptor* fd;
+    Map* file_data; //needed if MAP_PRIVATE is specified
+
+    if(isInvalid_VoidTPtr(mmap_res))
+    {//do nothing
+        ;
+    }
+    else
+    {
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+        prSt = getProcessState_CallContext(context);
+        sysSt = getSystemState_CallContext(context);
+
+        roundStartAddr = getRoundDownByPagesize(mmap_res, pagesize);
+        roundEndAddr = mmap_res;
+        roundEndAddr.address += len;
+
+        roundEndAddr = getRoundUpByPagesize(roundEndAddr, pagesize);
+        fd = getFileDescriptor(fildes);
+        if(flags.MAP_PRIVATE_Flag == true)
+        {
+            new_fid = createNewShmFileId(sysSt, prSt);
+            file_data = get_Map(sysSt->shared_memory_system->shm_files, create_FileIdObj(fd->file));
+            put_Map(sysSt->shared_memory_system->shm_files, create_FileIdObj(new_fid), (Map*)clone(file_data));
+            cur_map = create_MMapState(roundStartAddr, roundEndAddr, prot, flags, off, mmap_res,
+                                       len, new_fid, fd->description->access_mode);
+        }
+        else
+        {
+            cur_map = create_MMapState(roundStartAddr, roundEndAddr, prot, flags, off, mmap_res,
+                                       len, fd->file, fd->description->access_mode);
+        }
+        addMMapToMMapsList(prSt->MMaps, cur_map);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    mprotect - set protection of memory mapping
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int mprotect(void *addr, size_t len, int prot);
+
+DESCRIPTION
+
+    The mprotect() function shall change the access protections to be that
+    specified by prot for those whole pages containing any part of the address
+    space of the process starting at address addr and continuing for len bytes
+    . The parameter prot determines whether read, write, execute, or some
+    combination of accesses are permitted to the data being mapped. The prot
+    argument should be either PROT_NONE or the bitwise-inclusive OR of one or
+    more of PROT_READ, PROT_WRITE, and PROT_EXEC.
+
+    If an implementation cannot support the combination of access types
+    specified by prot, the call to mprotect() shall fail.
+
+    An implementation may permit accesses other than those specified by prot;
+    however, no implementation shall permit a write to succeed where
+    PROT_WRITE has not been set or shall permit any access where PROT_NONE
+    alone has been set. Implementations shall support at least the following
+    values of prot: PROT_NONE, PROT_READ, PROT_WRITE, and the bitwise-
+    inclusive OR of PROT_READ and PROT_WRITE. If PROT_WRITE is specified, the
+    application shall ensure that it has opened the mapped objects in the
+    specified address range with write permission, unless MAP_PRIVATE was
+    specified in the original mapping, regardless of whether the file
+    descriptors used to map the objects have since been closed.
+
+    The implementation shall require that addr be a multiple of the page size
+    as returned by sysconf().
+
+    The behavior of this function is unspecified if the mapping was not
+    established by a call to mmap().
+
+    When mprotect() fails for reasons other than [EINVAL], the protections on
+    some of the pages in the range [addr,addr+len) may have been changed.
+
+RETURN VALUE
+
+    Upon successful completion, mprotect() shall return 0; otherwise, it shall
+    return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The mprotect() function shall fail if:
+
+    [EACCES]
+
+        The prot argument specifies a protection that violates the access
+        permission the process has to the underlying memory object.
+
+    [EAGAIN]
+
+        The prot argument specifies PROT_WRITE over a MAP_PRIVATE mapping and
+        there are insufficient memory resources to reserve for locking the
+        private page.
+
+    [EINVAL]
+
+        The addr argument is not a multiple of the page size as returned by
+        sysconf().
+
+    [ENOMEM]
+
+        Addresses in the range [addr,addr+len) are invalid for the address
+        space of a process, or specify one or more pages which are not mapped.
+
+    [ENOMEM]
+
+        The prot argument specifies PROT_WRITE on a MAP_PRIVATE mapping, and
+        it would require more space than the system is able to supply for
+        locking the private pages, if required.
+
+    [ENOTSUP]
+
+        The implementation does not support the combination of accesses
+        requested in the prot argument.
+*/
+specification
+IntT mprotect_spec(CallContext context, VoidTPtr addr, SizeT len,
+                   MmanProtFlags prot, ErrorCode* errno)
+{
+    pre
+    {
+        /*
+         * The behavior of this function is unspecified if the mapping was not established
+         * by a call to mmap().
+         *
+         */
+        REQ("app.mprotect.08",
+            "The behavior of this function is unspecified if the mapping was "
+            "not established by a call to mmap()",
+            isSolidMaps(context, addr, len));
+
+        return true;
+    }
+    post
+    {
+        LongT pagesize;
+
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+        /*
+         * otherwise, it shall return -1 and set errno to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_MPROTECT, "mprotect.10.02", mprotect_spec == -1, *errno)
+        /*
+         * The mprotect() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * The prot argument specifies a protection that violates the access permission
+         * the process has to the underlying memory object.
+         *
+         */
+            ERROR_SHALL(POSIX_MPROTECT, EACCES, "mprotect.11.01",
+                        !isAccessAllowableToAllMaps(context, addr, len, prot))
+
+        /*
+         * The mprotect() function shall fail if:
+         *
+         * [EAGAIN]
+         *
+         * The prot argument specifies PROT_WRITE over a MAP_PRIVATE mapping and there are
+         * insufficient memory resources to reserve for locking the private page.
+         *
+         */
+            ERROR_SHALL(POSIX_MPROTECT, EAGAIN, "mprotect.11.02", TODO_ERR(EAGAIN))
+
+        /*
+         * The implementation shall require that addr be a multiple of the page size as
+         * returned by sysconf().
+         *
+         */
+        /*
+         * The mprotect() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The addr argument is not a multiple of the page size as returned by sysconf().
+         *
+         */
+            ERROR_SHALL(POSIX_MPROTECT, EINVAL, "mprotect.07;mprotect.11.03", !isRounded(addr, pagesize))
+
+        /*
+         * The mprotect() function shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * Addresses in the range [addr,addr+len) are invalid for the address space of a
+         * process, or specify one or more pages which are not mapped.
+         *
+         */
+            ERROR_SHALL(POSIX_MPROTECT, ENOMEM, "mprotect.11.04", TODO_ERR(ENOMEM))
+
+        /*
+         * The mprotect() function shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * The prot argument specifies PROT_WRITE on a MAP_PRIVATE mapping, and it would
+         * require more space than the system is able to supply for locking the private
+         * pages, if required.
+         *
+         */
+            ERROR_SHALL(POSIX_MPROTECT, ENOMEM, "mprotect.11.05", TODO_ERR(ENOMEM))
+
+        /*
+         * The parameter prot determines whether read, write, execute, or some combination
+         * of accesses are permitted to the data being mapped. The prot argument should be
+         * either PROT_NONE or the bitwise-inclusive OR of one or more of PROT_READ,
+         * PROT_WRITE, and PROT_EXEC.
+         * mprotect.02
+         */
+        /*
+         * If an implementation cannot support the combination of access types specified
+         * by prot, the call to mprotect() shall fail.
+         * mprotect.03
+         */
+        /*
+         * Implementations shall support at least the following values of prot: PROT_NONE,
+         * PROT_READ, PROT_WRITE, and the bitwise-inclusive OR of PROT_READ and PROT_WRITE.
+         * mprotect.05
+         */  //TODO checked in scenario
+        /*
+         * The mprotect() function shall fail if:
+         *
+         * [ENOTSUP]
+         *
+         * The implementation does not support the combination of accesses requested in
+         * the prot argument.
+         * mprotect.11.06
+         */
+            ERROR_SHALL(POSIX_MPROTECT, ENOTSUP, "mprotect.02;mprotect.03;mprotect.05;mprotect.11.06",
+                        (isValidProt(prot) == false))
+
+        ERROR_END()
+
+        /*
+         * The mprotect() function shall change the access protections to be that
+         * specified by prot for those whole pages containing any part of the address
+         * space of the process starting at address addr and continuing for len bytes.
+         *
+         */
+        REQ("mprotect.01", "Checked in model when update", true);
+
+        /*
+         * An implementation may permit accesses other than those specified by prot;
+         * however, no implementation shall permit a write to succeed where PROT_WRITE has
+         * not been set or shall permit any access where PROT_NONE alone has been set.
+         *
+         */
+        REQ("mprotect.04", "", TODO_REQ());
+
+        if (prot.PROT_WRITE_Flag && true) //TODO check not MAP_PRIVATE
+        {
+            /*
+             * If PROT_WRITE is specified, the application shall ensure that it has opened the
+             * mapped objects in the specified address range with write permission, unless
+             * MAP_PRIVATE was specified in the original mapping, regardless of whether the
+             * file descriptors used to map the objects have since been closed
+             */
+            REQ("mprotect.06", "",  TODO_REQ());
+        }
+
+        /*
+         * regardless of whether the file descriptors used to map the objects have since
+         * been closed
+         *
+         */
+ //       REQ("mprotect.06", "", TODO_REQ());
+
+        /*
+         * When mprotect() fails for reasons other than [EINVAL], the protections on some
+         * of the pages in the range [addr,addr+len) may have been changed.
+         *
+         */
+        REQ("mprotect.09", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, mprotect() shall return 0
+         *
+         */
+        REQ("mprotect.10.01",
+            "Upon successful completion, mprotect() shall return 0",
+            mprotect_spec == 0);
+
+        return true;
+    }
+}
+
+void onMProtect(CallContext context, VoidTPtr addr, SizeT len, MmanProtFlags newProt)
+{
+    ProcessState* prSt;
+    prSt = getProcessState_CallContext(context);
+    addMProtectInterval(prSt->MMaps, addr, len, newProt);
+    return;
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    msync - synchronize memory with physical storage
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int msync(void *addr, size_t len, int flags);
+
+DESCRIPTION
+
+    The msync() function shall write all modified data to permanent storage
+    locations, if any, in those whole pages containing any part of the address
+    space of the process starting at address addr and continuing for len bytes.
+    If no such storage exists, msync() need not have any effect. If requested,
+    the msync() function shall then invalidate cached copies of data.
+
+    The implementation shall require that addr be a multiple of the page size
+    as returned by sysconf().
+
+    For mappings to files, the msync() function shall ensure that all write
+    operations are completed as defined for synchronized I/O data integrity
+    completion. It is unspecified whether the implementation also writes out
+    other file attributes. When the msync() function is called on MAP_PRIVATE
+    mappings, any modified data shall not be written to the underlying object
+    and shall not cause such data to be made visible to other processes. It is
+    unspecified whether data in MAP_PRIVATE mappings has any permanent storage
+    locations. [SHM|TYM]   The effect of msync() on a shared memory object or
+    a typed memory object is unspecified.  The behavior of this function is
+    unspecified if the mapping was not established by a call to mmap().
+
+    The flags argument is constructed from the bitwise-inclusive OR of one or
+    more of the following flags defined in the <sys/mman.h> header:
+
+    Symbolic Constant - Description
+
+        MS_ASYNC
+            Perform asynchronous writes.
+
+        MS_SYNC
+            Perform synchronous writes.
+
+        MS_INVALIDATE
+            Invalidate cached data.
+
+    When MS_ASYNC is specified, msync() shall return immediately once all the
+    write operations are initiated or queued for servicing; when MS_SYNC is
+    specified, msync() shall not return until all write operations are
+    completed as defined for synchronized I/O data integrity completion.
+    Either MS_ASYNC or MS_SYNC is specified, but not both.
+
+    When MS_INVALIDATE is specified, msync() shall invalidate all cached
+    copies of mapped data that are inconsistent with the permanent storage
+    locations such that subsequent references shall obtain data that was
+    consistent with the permanent storage locations sometime between the call
+    to msync() and the first subsequent memory reference to the data.
+
+    If msync() causes any write to a file, the file's st_ctime and st_mtime
+    fields shall be marked for update.
+
+RETURN VALUE
+
+    Upon successful completion, msync() shall return 0; otherwise, it shall
+    return -1 and set errno to indicate the error.
+
+    ERRORS
+
+        The msync() function shall fail if:
+
+    [EBUSY]
+
+        Some or all of the addresses in the range starting at addr and
+        continuing for len bytes are locked, and MS_INVALIDATE is specified.
+
+    [EINVAL]
+
+        The value of flags is invalid.
+
+    [EINVAL]
+
+        The value of addr is not a multiple of the page size {PAGESIZE}.
+
+    [ENOMEM]
+
+        The addresses in the range starting at addr and continuing for len
+        bytes are outside the range allowed for the address space of a process
+        or specify one or more pages that are not mapped.
+*/
+specification
+void msync_spec( CallContext context, VoidTPtr addr, SizeT len, MsyncFlags flags, ErrorCode* errno)
+{
+    pre
+    {
+        /*
+         * The behavior of this function is unspecified if the mapping was not established
+         * by a call to mmap()
+         */
+        REQ("app.msync.07",
+            "The behavior of this function is unspecified if the mapping was "
+            "not established by a call to mmap()",
+            isSolidMaps(context, addr, len));
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+reaction MsyncReactionType* msync_react(void)
+{
+    post
+    {
+        LongT pagesize;
+
+        CallContext context;
+        VoidTPtr addr;
+        SizeT len;
+        MsyncFlags flags;
+
+        context = msync_react->params->context;
+        addr = msync_react->params->addr;
+        len = msync_react->params->len;
+        flags = msync_react->params->flags;
+
+        VERBOSE("Msync reaction start\n");
+
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+        /*
+         * otherwise, it shall return -1 and set errno to indicate the error
+         *
+         */
+         ERROR_BEGIN(POSIX_MSYNC, "msync.11.02", (msync_react->return_value == -1), msync_react->errno)
+        /*
+         * The msync() function shall fail if:
+         *
+         * [EBUSY]
+         *
+         * Some or all of the addresses in the range starting at addr and continuing for
+         * len bytes are locked, and MS_INVALIDATE is specified.
+         *
+         */
+            ERROR_SHALL(POSIX_MSYNC, EBUSY, "msync.12.01", TODO_ERR(EBUSY))
+
+        /*
+         * The flags argument is constructed from the bitwise-inclusive OR of one or more
+         * of the following flags defined in the <sys/mman.h> header:
+         *
+         * Either MS_ASYNC or MS_SYNC is specified, but not both.
+         *
+         */
+        /*
+         * The msync() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The value of flags is invalid.
+         *
+         */
+            ERROR_SHALL(POSIX_MSYNC, EINVAL, "msync.08.03;msync.12.02",
+                        (isValidMsyncFlags(flags) == false))
+
+        /*
+         * The implementation shall require that addr be a multiple of the page size as
+         * returned by sysconf().
+         *
+         */
+        /*
+         * The msync() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The value of addr is not a multiple of the page size {PAGESIZE}.
+         *
+         */
+            ERROR_SHALL(POSIX_MSYNC, EINVAL, "msync.04;msync.12.03", !isRounded(addr, pagesize))
+
+        /*
+         * The msync() function shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * The addresses in the range starting at addr and continuing for len bytes are
+         * outside the range allowed for the address space of a process or specify one or
+         * more pages that are not mapped.
+         *
+         */
+            ERROR_SHALL(POSIX_MSYNC, ENOMEM, "msync.12.04", TODO_ERR(ENOMEM))
+
+        ERROR_END()
+
+         /*
+         * The msync() function shall write all modified data to permanent storage
+         * locations, if any, in those whole pages containing any part of the address
+         * space of the process starting at address addr and continuing for len bytes.
+         *
+         */
+        REQ("msync.01", "Checked when model updates", true);
+
+        /*
+         * If no such storage exists, msync() need not have any effect.
+         *
+         */
+        REQ("msync.02", "", TODO_REQ());
+
+        /*
+         * If requested, the msync() function shall then invalidate cached copies of data.
+         *
+         */
+        REQ("msync.03", "", TODO_REQ());
+
+        /*
+         * For mappings to files, the msync() function shall ensure that all write
+         * operations are completed as defined for synchronized I/O data integrity
+         * completion.
+         *
+         */
+        REQ("msync.05", "", TODO_REQ());
+
+        /*
+         * When the msync() function is called on MAP_PRIVATE mappings, any modified data
+         * shall not be written to the underlying object and shall not cause such data to
+         * be made visible to other processes.
+         *
+         */
+        REQ("msync.06", "Checked when model updates", true);
+
+        /*
+         * The flags argument is constructed from the bitwise-inclusive OR of one or more
+         * of the following flags defined in the <sys/mman.h> header:
+         *
+         * When MS_ASYNC is specified, msync() shall return immediately once all the write
+         * operations are initiated or queued for servicing;
+         *
+         */
+        REQ("msync.08.01", "", TODO_REQ());
+
+        /*
+         * The flags argument is constructed from the bitwise-inclusive OR of one or more
+         * of the following flags defined in the <sys/mman.h> header:
+         *
+         * when MS_SYNC is specified, msync() shall not return until all write operations
+         * are completed as defined for synchronized I/O data integrity completion.
+         *
+         */
+        REQ("msync.08.02", "", TODO_REQ());
+
+        /*
+         * When MS_INVALIDATE is specified, msync() shall invalidate all cached copies of
+         * mapped data that are inconsistent with the permanent storage locations such
+         * that subsequent references shall obtain data that was consistent with the
+         * permanent storage locations sometime between the call to msync() and the first
+         * subsequent memory reference to the data.
+         *
+         */
+        REQ("msync.09", "", TODO_REQ());
+
+        /*
+         * If msync() causes any write to a file, the file's st_ctime and st_mtime fields
+         * shall be marked for update.
+         *
+         */
+        REQ("msync.10", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, msync() shall return 0
+         *
+         */
+        REQ("msync.11.01",
+            "Upon successful completion, msync() shall return 0",
+            msync_react->return_value == 0);
+        return true;
+    }
+}
+
+void onMSync(CallContext context, VoidTPtr addr, SizeT len, MsyncFlags flags)
+{
+    bool msync_07_res;
+    int i, size;
+    MMapState* elem;
+    VoidTPtr endAddr;
+
+    ProcessState* prSt;
+    List* MapsForUpdate;
+
+    endAddr = addr;
+    endAddr.address += len;
+    prSt = getProcessState_CallContext(context);
+    MapsForUpdate = mMapsInInterval(prSt->MMaps, addr, endAddr);
+
+    size = size_List(MapsForUpdate);
+    //TODO update files for 0 and size-1 elements of MapsForUpdate
+    for (i = 1; i < size - 1; i++)
+    {
+        ;//TODO update files
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    mlock, munlock - lock or unlock a range of process address space (REALTIME)
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int mlock(const void *addr, size_t len);
+    int munlock(const void *addr, size_t len);
+
+DESCRIPTION
+
+    The mlock() function shall cause those whole pages containing any part of
+    the address space of the process starting at address addr and continuing
+    for len bytes to be memory-resident until unlocked or until the process
+    exits or execs another process image. The implementation may require that
+    addr be a multiple of {PAGESIZE}.
+
+    The munlock() function shall unlock those whole pages containing any part
+    of the address space of the process starting at address addr and
+    continuing for len bytes, regardless of how many times mlock() has been
+    called by the process for any of the pages in the specified range. The
+    implementation may require that addr be a multiple of {PAGESIZE}.
+
+    If any of the pages in the range specified to a call to munlock() are also
+    mapped into the address spaces of other processes, any locks established
+    on those pages by another process are unaffected by the call of this
+    process to munlock().If any of the pages in the range specified by a call
+    to munlock() are also mapped into other portions of the address space of
+    the calling process outside the range specified, any locks established on
+    those pages via the other mappings are also unaffected by this call.
+
+    Upon successful return from mlock(), pages in the specified range shall be
+    locked and memory-resident. Upon successful return from munlock(), pages
+    in the specified range shall be unlocked with respect to the address space
+    of the process.Memory residency of unlocked pages is unspecified.
+
+    The appropriate privilege is required to lock process memory with mlock().
+
+RETURN VALUE
+
+    Upon successful completion, the mlock() and munlock() functions shall
+    return a value of zero. Otherwise, no change is made to any locks in the
+    address space of the process, and the function shall return a value of -1
+    and set errno to indicate the error.
+
+ERRORS
+
+    The mlock() and munlock() functions shall fail if:
+
+    [ENOMEM]
+
+        Some or all of the address range specified by the addr and len
+        arguments does not correspond to valid mapped pages in the address
+        space of the process.
+        The mlock() function shall fail if:
+
+    [EAGAIN]
+
+        Some or all of the memory identified by the operation could not be
+        locked when the call was made.
+        The mlock() and munlock() functions may fail if:
+
+    [EINVAL]
+
+        The addr argument is not a multiple of {PAGESIZE}.
+        The mlock() function may fail if:
+
+    [ENOMEM]
+
+        Locking the pages mapped by the specified range would exceed an
+        implementation-defined limit on the amount of memory that the process
+        may lock.
+
+    [EPERM]
+
+        The calling process does not have the appropriate privilege to perform
+        the requested operation.
+*/
+specification
+IntT munlock_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        LongT pagesize;
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+
+        /*
+         * Otherwise,
+         *
+         * and the function shall return a value of -1 and set errno to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_MUNLOCK, "munlock.08.02",munlock_spec == -1, *errno)
+        /*
+         * The mlock() and munlock() functions shall fail if:
+         *
+         * [ENOMEM]
+         *
+         * Some or all of the address range specified by the addr and len arguments does
+         * not correspond to valid mapped pages in the address space of the process.
+         *
+         */
+            ERROR_SHALL(POSIX_MUNLOCK, ENOMEM, "munlock.09.01", isNotValidMlockRange(context, addr, len))
+
+        /*
+         * The implementation may require that addr be a multiple of {PAGESIZE}.
+         *
+         */
+        /*
+         * The mlock() and munlock() functions may fail if:
+         *
+         * [EINVAL]
+         *
+         * The addr argument is not a multiple of {PAGESIZE}.
+         *
+         */
+            ERROR_MAY(POSIX_MUNLOCK, EINVAL, "munlock.10.01;munlock.02", (addr.address % pagesize) != 0)
+
+        ERROR_END()
+
+        /*
+         * The munlock() function shall unlock those whole pages containing any part of
+         * the address space of the process starting at address addr and continuing for
+         * len bytes, regardless of how many times mlock() has been called by the process
+         * for any of the pages in the specified range
+         *
+         */
+        REQ("munlock.01", "", TODO_REQ());
+
+        /*
+         * If any of the pages in the range specified to a call to munlock() are also
+         * mapped into the address spaces of other processes, any locks established on
+         * those pages by another process are unaffected by the call of this process to
+         * munlock()
+         *
+         */
+        REQ("munlock.03", "", TODO_REQ());
+
+        /*
+         * If any of the pages in the range specified by a call to munlock() are also
+         * mapped into other portions of the address space of the calling process outside
+         * the range specified, any locks established on those pages via the other
+         * mappings are also unaffected by this call.
+         *
+         */
+        REQ("munlock.04", "", TODO_REQ());
+
+        /*
+         * Upon successful return from munlock(), pages in the specified range shall be
+         * unlocked with respect to the address space of the process
+         *
+         */
+        REQ("munlock.05", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, the mlock() and munlock() functions shall return a
+         * value of zero.
+         *
+         */
+        REQ("munlock.07",
+            "Upon successful completion, the mlock() and munlock() functions "
+            "shall return a value of zero",
+            munlock_spec == 0);
+
+        /*
+         * Otherwise,
+         *
+         * no change is made to any locks in the address space of the process,
+         */
+        REQ("munlock.08.01", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    mlockall, munlockall - lock/unlock the address space of a process (REALTIME)
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int mlockall(int flags);
+    int munlockall(void);
+
+DESCRIPTION
+
+    The mlockall() function shall cause all of the pages mapped by the address
+    space of a process to be memory-resident until unlocked or until the
+    process exits or execs another process image. The flags argument
+    determines whether the pages to be locked are those currently mapped by
+    the address space of the process, those that are mapped in the future, or
+    both. The flags argument is constructed from the bitwise-inclusive OR of
+    one or more of the following symbolic constants, defined in <sys/mman.h>:
+
+    MCL_CURRENT
+    Lock all of the pages currently mapped into the address space of the
+    process.
+    MCL_FUTURE
+    Lock all of the pages that become mapped into the address space of the
+    process in the future, when those mappings are established.
+    If MCL_FUTURE is specified, and the automatic locking of future mappings
+    eventually causes the amount of locked memory to exceed the amount of
+    available physical memory or any other implementation-defined limit, the
+    behavior is implementation-defined. The manner in which the implementation
+    informs the application of these situations is also implementation-defined.
+
+    The munlockall() function shall unlock all currently mapped pages of the
+    address space of the process. Any pages that become mapped into the
+    address space of the process after a call to munlockall() shall not be
+    locked, unless there is an intervening call to mlockall() specifying
+    MCL_FUTURE or a subsequent call to mlockall() specifying MCL_CURRENT. If
+    pages mapped into the address space of the process are also mapped into
+    the address spaces of other processes and are locked by those processes,
+    the locks established by the other processes shall be unaffected by a call
+    by this process to munlockall().
+
+    Upon successful return from the mlockall() function that specifies
+    MCL_CURRENT, all currently mapped pages of the process' address space
+    shall be memory-resident and locked. Upon return from the munlockall()
+    function, all currently mapped pages of the process' address space shall
+    be unlocked with respect to the process' address space. The memory
+    residency of unlocked pages is unspecified.
+
+    The appropriate privilege is required to lock process memory with mlockall
+    ().
+
+RETURN VALUE
+
+    Upon successful completion, the mlockall() function shall return a value
+    of zero. Otherwise, no additional memory shall be locked, and the function
+    shall return a value of -1 and set errno to indicate the error. The effect
+    of failure of mlockall() on previously existing locks in the address space
+    is unspecified.
+
+    If it is supported by the implementation, the munlockall() function shall
+    always return a value of zero. Otherwise, the function shall return a
+    value of -1 and set errno to indicate the error.
+
+    ERRORS
+
+    The mlockall() function shall fail if:
+
+    [EAGAIN]
+
+        Some or all of the memory identified by the operation could not be
+        locked when the call was made.
+
+    [EINVAL]
+
+        The flags argument is zero, or includes unimplemented flags.
+        The mlockall() function may fail if:
+
+    [ENOMEM]
+
+        Locking all of the pages currently mapped into the address space of
+        the process would exceed an implementation-defined limit on the amount
+        of memory that the process may lock.
+
+    [EPERM]
+
+        The calling process does not have the appropriate privilege to perform
+        the requested operation.
+*/
+specification
+IntT munlockall_spec( CallContext context)
+{
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { UnlockAddressSpaceOfProcess, "Unlock the address space of a process" };
+    }
+    post
+    {
+        REQ("munlockall.01", "", TODO_REQ());
+
+        /*
+         * Any pages that become mapped into the address space of the process after a call
+         * to munlockall() shall not be locked, unless there is an intervening call to
+         * mlockall() specifying MCL_FUTURE or a subsequent call to mlockall() specifying
+         * MCL_CURRENT.
+         *
+         */
+        REQ("munlockall.02", "", TODO_REQ());
+
+        /*
+         * If pages mapped into the address space of the process are also mapped into the
+         * address spaces of other processes and are locked by those processes, the locks
+         * established by the other processes shall be unaffected by a call by this
+         * process to munlockall().
+         *
+         */
+        REQ("munlockall.03", "", TODO_REQ());
+
+        /*
+         * Upon return from the munlockall() function, all currently mapped pages of the
+         * process' address space shall be unlocked with respect to the process' address
+         * space.
+         *
+         */
+        REQ("munlockall.04", "", TODO_REQ());
+
+        /*
+         * If it is supported by the implementation, the munlockall() function shall
+         * always return a value of zero.
+         *
+         */
+        REQ("munlockall.05",
+            "If it is supported by the implementation, the munlockall() "
+            "function shall always return a value of zero",
+            munlockall_spec == 0);
+        /*
+         * Otherwise, the function shall return a value of -1 and set errno to indicate
+         * the error.
+         */
+        REQ("munlockall.06", "No errors are defined", true);
+
+
+        return true;
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    munmap - unmap pages of memory
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int munmap(void *addr, size_t len);
+
+DESCRIPTION
+
+    The munmap() function shall remove any mappings for those entire pages
+    containing any part of the address space of the process starting at addr
+    and continuing for len bytes. Further references to these pages shall
+    result in the generation of a SIGSEGV signal to the process. If there are
+    no mappings in the specified address range, then munmap() has no effect.
+
+    The implementation shall require that addr be a multiple of the page size
+    {PAGESIZE}.
+
+    If a mapping to be removed was private, any modifications made in this
+    address range shall be discarded.
+
+    [ML|MLR]  Any memory locks (see mlock() and mlockall() ) associated with
+    this address range shall be removed, as if by an appropriate call to
+    munlock().
+
+    [TYM]  If a mapping removed from a typed memory object causes the
+    corresponding address range of the memory pool to be inaccessible by any
+    process in the system except through allocatable mappings (that is,
+    mappings of typed memory objects opened with the
+    POSIX_TYPED_MEM_MAP_ALLOCATABLE flag), then that range of the memory pool
+    shall become deallocated and may become available to satisfy future typed
+    memory allocation requests.
+
+    A mapping removed from a typed memory object opened with the
+    POSIX_TYPED_MEM_MAP_ALLOCATABLE flag shall not affect in any way the
+    availability of that typed memory for allocation.
+
+    The behavior of this function is unspecified if the mapping was not
+    established by a call to mmap().
+
+RETURN VALUE
+
+    Upon successful completion, munmap() shall return 0; otherwise, it shall
+    return -1 and set errno to indicate the error.
+
+    ERRORS
+
+    The munmap() function shall fail if:
+
+    [EINVAL]
+
+        Addresses in the range [addr,addr+len) are outside the valid range for
+        the address space of a process.
+
+    [EINVAL]
+
+        The len argument is 0.
+
+    [EINVAL]
+
+        The addr argument is not a multiple of the page size as returned by
+        sysconf().
+*/
+specification
+IntT munmap_spec( CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    pre
+    {
+        /*
+         * The behavior of this function is unspecified if the mapping was not established
+         * by a call to mmap().
+         *
+         */
+        REQ("app.munmap.09",
+            "The behavior of this function is unspecified if the mapping was "
+            "not established by a call to mmap()",
+            isSolidMaps(context, addr, len));
+        return true;
+    }
+    post
+    {
+        LongT pagesize;
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+        /*
+         * otherwise, it shall return -1 and set errno to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_MUNMAP, "munmap.11", munmap_spec == -1, *errno)
+        /*
+         * The munmap() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * Addresses in the range [addr,addr+len) are outside the valid range for the
+         * address space of a process.
+         *
+         */
+            ERROR_SHALL(POSIX_MUNMAP, EINVAL, "munmap.12.01", TODO_ERR(EINVAL))
+
+        /*
+         * The munmap() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The len argument is 0.
+         *
+         */
+            ERROR_SHALL(POSIX_MUNMAP, EINVAL, "munmap.12.02", len == 0)
+
+        /*
+         * The implementation shall require that addr be a multiple of the page size {
+         * PAGESIZE}.
+         * munmap.04
+         */
+        /*
+         * The munmap() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The addr argument is not a multiple of the page size as returned by sysconf().
+         * munmap.12.03
+         */
+            ERROR_SHALL(POSIX_MUNMAP, EINVAL, "munmap.04;munmap.12.03", (addr.address % pagesize) != 0)
+
+        ERROR_END()
+
+        /*
+         * The munmap() function shall remove any mappings for those entire pages
+         * containing any part of the address space of the process starting at addr and
+         * continuing for len bytes
+         *
+         */
+        REQ("munmap.01", "Checked when model updates", true);
+
+        /*
+         * Further references to these pages shall result in the generation of a SIGSEGV
+         * signal to the process.
+         *
+         */
+        REQ("munmap.02", "", TODO_REQ());
+
+        /*
+         * If there are no mappings in the specified address range, then munmap() has no
+         * effect.
+         *
+         */
+        REQ("munmap.03", "", TODO_REQ());
+
+        /*
+         * If a mapping to be removed was private, any modifications made in this address
+         * range shall be discarded.
+         *
+         */
+        REQ("munmap.05", "Checked when model updates", true);
+
+        /*
+         * [ML|MLR] Any memory locks (see mlock() and mlockall() ) associated with this
+         * address range shall be removed, as if by an appropriate call to munlock().
+         *
+         */
+        REQ("munmap.06", "", TODO_REQ());
+
+        /*
+         * If a mapping removed from a typed memory object causes the corresponding
+         * address range of the memory pool to be inaccessible by any process in the
+         * system except through allocatable mappings (that is, mappings of typed memory
+         * objects opened with the POSIX_TYPED_MEM_MAP_ALLOCATABLE flag), then that range
+         * of the memory pool shall become deallocated and may become available to satisfy
+         * future typed memory allocation requests.
+         *
+         */
+        REQ("munmap.07", "", TODO_REQ());
+
+        /*
+         * A mapping removed from a typed memory object opened with the
+         * POSIX_TYPED_MEM_MAP_ALLOCATABLE flag shall not affect in any way the
+         * availability of that typed memory for allocation.
+         *
+         */
+        REQ("munmap.08", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, munmap() shall return 0
+         *
+         */
+        REQ("munmap.10",
+            "Upon successful completion, munmap() shall return 0",
+            munmap_spec == 0);
+
+        return true;
+    }
+}
+
+void onMunmap(CallContext context, VoidTPtr addr, SizeT len, IntT munmap_spec)
+{
+    ProcessState* prSt; //TODO delete if MAP_PRIVATE
+    MMapState* cur_map;
+    MMapState* temp_map;
+    VoidTPtr roundStartAddr;
+    VoidTPtr roundEndAddr;
+    LongT pagesize;
+    List* mmaps;
+    int start_index;
+
+    if(munmap_spec == 0)
+    {
+        pagesize = getSystemConfigurationValue(context, SUT_SC_PAGE_SIZE);
+        prSt = getProcessState_CallContext(context);
+
+        roundStartAddr = getRoundDownByPagesize(addr, pagesize);
+
+        roundEndAddr = addr;
+        roundEndAddr.address += len;
+        roundEndAddr = getRoundUpByPagesize(roundEndAddr, pagesize);
+
+        mmaps = mMapsInInterval(prSt->MMaps, roundStartAddr, roundEndAddr);
+        if (size_List(mmaps) > 1)
+        {
+            //TODO remove locked memory
+            cur_map = get_List(mmaps, 0);
+            start_index = getIndexMMapByStart(prSt->MMaps, cur_map->startAddr);
+            if (cur_map->startAddr.address < roundStartAddr.address)
+            {
+                cur_map->endAddr = roundStartAddr;
+                start_index++;
+            }
+            else
+            {
+                remove_List(prSt->MMaps, start_index);
+            }
+            remove_List(mmaps, 0);
+
+            cur_map = get_List(mmaps, size_List(mmaps) - 1);
+            if (cur_map->endAddr.address > roundEndAddr.address)
+            {
+                cur_map->startAddr = roundEndAddr;
+            }
+            else
+            {
+                remove_List(prSt->MMaps, start_index + size_List(mmaps) - 1);
+            }
+            remove_List(mmaps, size_List(mmaps) - 1);
+
+            while (size_List(mmaps) > 0)
+            {
+                remove_List(mmaps, 0);
+                remove_List(prSt->MMaps, start_index);
+            }
+        }
+        else if (size_List(mmaps) == 1)
+        {
+            cur_map = get_List(mmaps, 0);
+            start_index = getIndexMMapByStart(prSt->MMaps, cur_map->startAddr);
+            if (cur_map->begAddr.address < roundStartAddr.address)
+            {  //some of begining is saved
+                if (cur_map->endAddr.address > roundEndAddr.address)
+                { //some of ending is saved
+                  //existing map divides by 2 maps
+                    temp_map = clone(cur_map);
+                    temp_map->begAddr = roundEndAddr;
+                    cur_map->endAddr = roundStartAddr;
+                    add_List(prSt->MMaps, start_index + 1, temp_map);
+                }
+                else
+                { //remove ending of map
+                    cur_map->endAddr = roundStartAddr;
+                }
+            }
+            else if (cur_map->endAddr.address > roundEndAddr.address)
+            { //remove begining of map
+                cur_map->begAddr = roundEndAddr;
+            }
+            else
+            { //remove all map
+                remove_List(prSt->MMaps, start_index);
+            }
+            remove_List(mmaps, 0);
+        }
+        else
+        {
+            ;//do nothing
+        }
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    shm_open - open a shared memory object (REALTIME)
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int shm_open(const char *name, int oflag, mode_t mode);
+
+DESCRIPTION
+
+    The shm_open() function shall establish a connection between a shared
+    memory object and a file descriptor. It shall create an open file
+    description that refers to the shared memory object and a file descriptor
+    that refers to that open file description. The file descriptor is used by
+    other functions to refer to that shared memory object. The name argument
+    points to a string naming a shared memory object. It is unspecified
+    whether the name appears in the file system and is visible to other
+    functions that take pathnames as arguments. The name argument conforms to
+    the construction rules for a pathname. If name begins with the slash
+    character, then processes calling shm_open() with the same value of name
+    refer to the same shared memory object, as long as that name has not been
+    removed. If name does not begin with the slash character, the effect is
+    implementation-defined. The interpretation of slash characters other than
+    the leading slash character in name is implementation-defined.
+
+    If successful, shm_open() shall return a file descriptor for the shared
+    memory object that is the lowest numbered file descriptor not currently
+    open for that process. The open file description is new, and therefore the
+    file descriptor does not share it with any other processes. It is
+    unspecified whether the file offset is set. The FD_CLOEXEC file descriptor
+    flag associated with the new file descriptor is set.
+
+    The file status flags and file access modes of the open file description
+    are according to the value of oflag. The oflag argument is the bitwise-
+    inclusive OR of the following flags defined in the <fcntl.h> header.
+    Applications specify exactly one of the first two values (access modes)
+    below in the value of oflag:
+
+    O_RDONLY
+
+        Open for read access only.
+
+    O_RDWR
+
+        Open for read or write access.
+        Any combination of the remaining flags may be specified in the value of
+        oflag:
+
+    O_CREAT
+
+        If the shared memory object exists, this flag has no effect, except as
+        noted under O_EXCL below. Otherwise, the shared memory object is
+        created; the user ID of the shared memory object shall be set to the
+        effective user ID of the process; the group ID of the shared memory
+        object is set to a system default group ID or to the effective group
+        ID of the process. The permission bits of the shared memory object
+        shall be set to the value of the mode argument except those set in the
+        file mode creation mask of the process. When bits in mode other than
+        the file permission bits are set, the effect is unspecified. The mode
+        argument does not affect whether the shared memory object is opened
+        for reading, for writing, or for both. The shared memory object has a
+        size of zero.
+
+    O_EXCL
+
+        If O_EXCL and O_CREAT are set, shm_open() fails if the shared memory
+        object exists. The check for the existence of the shared memory object
+        and the creation of the object if it does not exist is atomic with
+        respect to other processes executing shm_open() naming the same shared
+        memory object with O_EXCL and O_CREAT set. If O_EXCL is set and
+        O_CREAT is not set, the result is undefined.
+
+    O_TRUNC
+
+        If the shared memory object exists, and it is successfully opened
+        O_RDWR, the object shall be truncated to zero length and the mode and
+        owner shall be unchanged by this function call. The result of using
+        O_TRUNC with O_RDONLY is undefined.
+
+        When a shared memory object is created, the state of the shared memory
+        object, including all data associated with the shared memory object,
+        persists until the shared memory object is unlinked and all other
+        references are gone. It is unspecified whether the name and shared
+        memory object state remain valid after a system reboot.
+
+RETURN VALUE
+
+    Upon successful completion, the shm_open() function shall return a non-
+    negative integer representing the lowest numbered unused file descriptor.
+    Otherwise, it shall return -1 and set errno to indicate the error.
+
+ERRORS
+
+    The shm_open() function shall fail if:
+
+    [EACCES]
+
+        The shared memory object exists and the permissions specified by oflag
+        are denied, or the shared memory object does not exist and permission
+        to create the shared memory object is denied, or O_TRUNC is specified
+        and write permission is denied.
+
+    [EEXIST]
+
+        O_CREAT and O_EXCL are set and the named shared memory object already
+        exists.
+
+    [EINTR]
+
+        The shm_open() operation was interrupted by a signal.
+
+    [EINVAL]
+
+        The shm_open() operation is not supported for the given name.
+
+    [EMFILE]
+
+        Too many file descriptors are currently in use by this process.
+
+    [ENAMETOOLONG]
+
+        The length of the name argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+    [ENFILE]
+
+        Too many shared memory objects are currently open in the system.
+
+    [ENOENT]
+
+        O_CREAT is not set and the named shared memory object does not exist.
+
+    [ENOSPC]
+
+        There is insufficient space for the creation of the new shared memory
+        object.
+*/
+specification
+FileDescId shm_open_spec( CallContext context, CString* name, Shm_openOflags oflag, FilePermissions* mode, ErrorCode* errno)
+{
+    //FileDescriptor
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        SystemState* sysSt;
+        sysSt = getSystemState_CallContext(context);
+        /*
+         * Otherwise, it shall return -1 and set errno to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_SHM_OPEN, "shm_open.20.02", shm_open_spec.filedesc == -1, *errno)
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * The shared memory object exists and the permissions specified by oflag are
+         * denied, or the shared memory object does not exist and permission to create the
+         * shared memory object is denied, or O_TRUNC is specified and write permission is
+         * denied.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, EACCES, "shm_open.21.01", TODO_ERR(EACCES))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [EEXIST]
+         *
+         * O_CREAT and O_EXCL are set and the named shared memory object already exists.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, EEXIST, "shm_open.21.02", TODO_ERR(EEXIST))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [EINTR]
+         *
+         * The shm_open() operation was interrupted by a signal.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, EINTR, "shm_open.21.03", TODO_ERR(EINTR))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [EINVAL]
+         *
+         * The shm_open() operation is not supported for the given name.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, EINVAL, "shm_open.21.04", TODO_ERR(EINVAL))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [EMFILE]
+         *
+         * Too many file descriptors are currently in use by this process.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, EMFILE, "shm_open.21.05", TODO_ERR(EMFILE))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * The length of the name argument exceeds {PATH_MAX} or a pathname component is
+         * longer than {NAME_MAX}.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, ENAMETOOLONG, "shm_open.21.06", TODO_ERR(ENAMETOOLONG))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [ENFILE]
+         *
+         * Too many shared memory objects are currently open in the system.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, ENFILE, "shm_open.21.07", TODO_ERR(ENFILE))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [ENOENT]
+         *
+         * O_CREAT is not set and the named shared memory object does not exist.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, ENOENT, "shm_open.21.08",
+                        (oflag.O_CREAT_Flag == false) &&
+                        (!containsKey_Map(sysSt->shared_memory_system->shm_names, name)))
+
+        /*
+         * The shm_open() function shall fail if:
+         *
+         * [ENOSPC]
+         *
+         * There is insufficient space for the creation of the new shared memory object.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_OPEN, ENOSPC, "shm_open.21.09", TODO_ERR(ENOSPC))
+
+        ERROR_END()
+
+        /*
+         * The shm_open() function shall establish a connection between a shared memory
+         * object and a file descriptor. It shall create an open file description that
+         * refers to the shared memory object and a file descriptor that refers to that
+         * open file description.
+         *
+         */
+        REQ("shm_open.01", "", TODO_REQ());
+
+        /*
+         * The name argument points to a string naming a shared memory object
+         *
+         */
+        REQ("shm_open.02", "", TODO_REQ());
+
+        /*
+         * The name argument conforms to the construction rules for a pathname.
+         *
+         */
+        REQ("shm_open.03", "", TODO_REQ());
+
+        /*
+         * If name begins with the slash character, then processes calling shm_open() with
+         * the same value of name refer to the same shared memory object, as long as that
+         * name has not been removed.
+         *
+         */
+        REQ("shm_open.04", "", TODO_REQ());
+
+        /*
+         * If successful, shm_open() shall return a file descriptor for the shared memory
+         * object that is the lowest numbered file descriptor not currently open for that
+         * process.
+         *
+         */
+        REQ("shm_open.05", "", TODO_REQ());
+
+        /*
+         * The open file description is new, and therefore the file descriptor does not
+         * share it with any other processes.
+         *
+         */
+        REQ("shm_open.06", "", TODO_REQ());
+
+        /*
+         * The FD_CLOEXEC file descriptor flag associated with the new file descriptor is
+         * set.
+         *
+         */
+        REQ("shm_open.07", "", TODO_REQ());
+
+        /*
+         * The file status flags and file access modes of the open file description are
+         * according to the value of oflag. The oflag argument is the bitwise-
+         * inclusive OR of the following flags defined in the <fcntl.h> header.
+         *
+         */
+        REQ("shm_open.08", "", TODO_REQ());
+
+        /*
+         * Applications specify exactly one of the first two values (access modes) below
+         * in the value of oflag:
+         *
+         * O_RDONLY
+         *
+         * Open for read access only.
+         *
+         */
+        REQ("shm_open.09.01", "", TODO_REQ());
+
+        /*
+         * Applications specify exactly one of the first two values (access modes) below
+         * in the value of oflag:
+         *
+         * O_RDWR
+         *
+         * Open for read or write access.
+         *
+         */
+        REQ("shm_open.09.02", "", TODO_REQ());
+
+        /*
+         * If the shared memory object exists, this flag has no effect, except as noted
+         * under O_EXCL below.
+         *
+         */
+        REQ("shm_open.10", "", TODO_REQ());
+
+        /*
+         * Otherwise, the shared memory object is created;
+         *
+         */
+        REQ("shm_open.11.01", "", TODO_REQ());
+
+        /*
+         * the user ID of the shared memory object shall be set to the effective user ID
+         * of the process;
+         *
+         */
+        REQ("shm_open.11.02", "", TODO_REQ());
+
+        /*
+         * the group ID of the shared memory object is set to a system default group ID or
+         * to the effective group ID of the process.
+         *
+         */
+        REQ("shm_open.11.03", "", TODO_REQ());
+
+        /*
+         * The permission bits of the shared memory object shall be set to the value of
+         * the mode argument except those set in the file mode creation mask of the
+         * process.
+         *
+         */
+        REQ("shm_open.12", "", TODO_REQ());
+
+        /*
+         * The mode argument does not affect whether the shared memory object is opened
+         * for reading, for writing, or for both.
+         *
+         */
+        REQ("shm_open.13", "", TODO_REQ());
+
+        /*
+         * The shared memory object has a size of zero.
+         *
+         */
+        REQ("shm_open.14", "", TODO_REQ());
+
+        /*
+         * If O_EXCL and O_CREAT are set, shm_open() fails if the shared memory object
+         * exists.
+         *
+         */
+        REQ("shm_open.15", "", TODO_REQ());
+
+        /*
+         * The check for the existence of the shared memory object and the creation of the
+         * object if it does not exist is atomic with respect to other processes executing
+         * shm_open() naming the same shared memory object with O_EXCL and O_CREAT set.
+         *
+         */
+        REQ("shm_open.16", "", TODO_REQ());
+
+        /*
+         * If the shared memory object exists, and it is successfully opened O_RDWR, the
+         * object shall be truncated to zero length
+         *
+         */
+        REQ("shm_open.17", "", TODO_REQ());
+
+        /*
+         * the mode shall be unchanged by this function call.
+         *
+         */
+        REQ("shm_open.18.01", "", TODO_REQ());
+
+        /*
+         * owner shall be unchanged by this function call.
+         *
+         */
+        REQ("shm_open.18.02", "", TODO_REQ());
+
+        /*
+         * When a shared memory object is created, the state of the shared memory object,
+         * including all data associated with the shared memory object, persists until the
+         * shared memory object is unlinked and all other references are gone.
+         *
+         */
+        REQ("shm_open.19", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, the shm_open() function shall return a non-negative
+         * integer representing the lowest numbered unused file descriptor.
+         *
+         */
+        REQ("shm_open.20.01", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+void onShm_open(CallContext context, CString* name, Shm_openOflags oflag,
+                FilePermissions* mode, FileDescId shm_open_spec)
+{
+    ProcessState* prSt;
+    SystemState* sysSt;
+    SharedMemorySystem* shmSys;
+    FileId fid;
+    AccessMode am;
+    BlockMode bm;
+    FileKind fk;
+    SharedMemoryFileDescriptor* descriptor;
+
+
+    prSt = getProcessState_CallContext(context);
+    sysSt = getSystemState_CallContext(context);
+    shmSys = sysSt->shared_memory_system;
+
+    if (oflag.O_RDONLY_Flag == true)
+    {
+        am = ReadOnly;
+    }
+    else if (oflag.O_RDWR_Flag == true)
+    {
+        am = ReadWrite;
+    }
+    bm = Nonblocking;
+    fk = SharedMemoryObject;
+
+    if (containsKey_Map(shmSys->shm_names, name))
+    {//shared memory object is already exists
+        ; //do nothing
+    }
+    else
+    {//add new shared memory object to system
+        fid = createNewShmFileId(sysSt, prSt);
+        put_Map(shmSys->shm_files, create_FileIdObj(fid),
+                create_Map(&type_Integer, &type_Integer));
+        put_Map(shmSys->shm_names, name, create_FileIdObj(fid));
+    }
+    descriptor = create_SharedMemoryFileDescriptor( (OffT)0);
+    registerFileDescriptor(shm_open_spec, fid, name, am, bm, fk, true, (OffT)0, false, false, descriptor);
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    shm_unlink - remove a shared memory object (REALTIME)
+
+SYNOPSIS
+
+    #include <sys/mman.h>
+
+    int shm_unlink(const char *name);
+
+DESCRIPTION
+
+    The shm_unlink() function shall remove the name of the shared memory
+    object named by the string pointed to by name.
+
+    If one or more references to the shared memory object exist when the
+    object is unlinked, the name shall be removed before shm_unlink() returns,
+    but the removal of the memory object contents shall be postponed until all
+    open and map references to the shared memory object have been removed.
+
+    Even if the object continues to exist after the last shm_unlink(), reuse
+    of the name shall subsequently cause shm_open() to behave as if no shared
+    memory object of this name exists (that is, shm_open() will fail if
+    O_CREAT is not set, or will create a new shared memory object if O_CREAT
+    is set).
+
+RETURN VALUE
+
+    Upon successful completion, a value of zero shall be returned. Otherwise,
+    a value of -1 shall be returned and errno set to indicate the error. If -1
+    is returned, the named shared memory object shall not be changed by this
+    function call.
+
+ERRORS
+
+    The shm_unlink() function shall fail if:
+
+    [EACCES]
+
+        Permission is denied to unlink the named shared memory object.
+
+    [ENAMETOOLONG]
+
+        The length of the name argument exceeds {PATH_MAX} or a pathname
+        component is longer than {NAME_MAX}.
+
+    [ENOENT]
+
+        The named shared memory object does not exist.
+*/
+specification
+IntT shm_unlink_spec( CallContext context, CString* name, ErrorCode* errno)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        SystemState* sysSt;
+        sysSt = getSystemState_CallContext(context);
+        /*
+         * Otherwise, a value of -1 shall be returned and errno set to indicate the error.
+         *
+         */
+        ERROR_BEGIN(POSIX_SHM_UNLINK, "shm_unlink.04.02", shm_unlink_spec == -1, *errno)
+        /*
+         * The shm_unlink() function shall fail if:
+         *
+         * [EACCES]
+         *
+         * Permission is denied to unlink the named shared memory object.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_UNLINK, EACCES, "shm_unlink.06.01", TODO_ERR(EACCES))
+
+        /*
+         * The shm_unlink() function shall fail if:
+         *
+         * [ENAMETOOLONG]
+         *
+         * The length of the name argument exceeds {PATH_MAX} or a pathname component is
+         * longer than {NAME_MAX}.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_UNLINK, ENAMETOOLONG, "shm_unlink.06.02", TODO_ERR(ENAMETOOLONG))
+
+        /*
+         * The shm_unlink() function shall fail if:
+         *
+         * [ENOENT]
+         *
+         * The named shared memory object does not exist.
+         *
+         */
+            ERROR_SHALL(POSIX_SHM_UNLINK, ENOENT, "shm_unlink.06.03",
+                        !containsKey_Map(sysSt->shared_memory_system->shm_names, name))
+
+            if (shm_unlink_spec == -1)
+            {
+                /*
+                 * If -1 is returned, the named shared memory object shall not be changed by this
+                 * function call.
+                 *
+                 */
+                REQ("shm_unlink.05", "", TODO_REQ());
+            }
+
+        ERROR_END()
+
+         /*
+         * The shm_unlink() function shall remove the name of the shared memory object
+         * named by the string pointed to by name.
+         *
+         */
+        REQ("shm_unlink.01", "", TODO_REQ());
+
+        /*
+         * If one or more references to the shared memory object exist when the object is
+         * unlinked, the name shall be removed before shm_unlink() returns, but the
+         * removal of the memory object contents shall be postponed until all open and map
+         * references to the shared memory object have been removed.
+         *
+         */
+        REQ("shm_unlink.02", "", TODO_REQ());
+
+        /*
+         * Even if the object continues to exist after the last shm_unlink(), reuse of the
+         * name shall subsequently cause shm_open() to behave as if no shared memory
+         * object of this name exists (that is, shm_open() will fail if O_CREAT is not set
+         *
+         */
+        REQ("shm_unlink.03.01", "", TODO_REQ());
+
+        /*
+         * or will create a new shared memory object if O_CREAT is set).
+         *
+         */
+        REQ("shm_unlink.03.02", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, a value of zero shall be returned.
+         *
+         */
+        REQ("shm_unlink.04.01",
+            "Upon successful completion, a value of zero shall be returned",
+            shm_unlink_spec == 0);
+
+        return true;
+    }
+}
+
+void onShm_unlink(CallContext context, CString* name, IntT shm_unlink_spec)
+{
+    SystemState* sysSt;
+
+    if (shm_unlink_spec == 0)
+    {
+        sysSt = getSystemState_CallContext(context);
+        remove_Map(sysSt->shared_memory_system->shm_names, name);
+    }
+    return;
+}
+
+/** write_mapped_mem_block_spec **/
+specification
+void write_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, MappedMemoryBlock* mb, ErrorCode* errno)
+{
+    pre
+    {
+        //memory block is all inside one map
+        ProcessState* prSt;
+        List* maps_in_interval;
+        MMapState* mSt;
+        VoidTPtr endAddr;
+
+        prSt = getProcessState_CallContext(context);
+        endAddr = addr;
+        endAddr.address += len;
+        maps_in_interval = mMapsInInterval(prSt->MMaps, addr, endAddr);
+        if(size_List(maps_in_interval) != 1) //checking if interval intersects only 1 map area
+        {
+            return false;
+        }
+        mSt = get_List(maps_in_interval, 0);
+         //checking if interval is inside
+        if((addr.address < mSt->startAddr.address) || (endAddr.address > mSt->endAddr.address))
+        {
+            return false;
+        }
+
+        return true;
+    }
+    post
+    {
+        return true;
+    }
+}
+
+void onWrite_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, MappedMemoryBlock* mb)
+{
+    ProcessState* prSt;
+    SystemState* sysSt;
+    List* maps_in_interval;
+    MMapState* mSt;
+    VoidTPtr endAddr;
+    IntT i, j;
+    Map* file_data;
+
+    prSt = getProcessState_CallContext(context);
+    sysSt = getSystemState_CallContext(context);
+
+    endAddr = addr;
+    endAddr.address += len;
+    maps_in_interval = mMapsInInterval(prSt->MMaps, addr, endAddr);
+    mSt = get_List(maps_in_interval, 0);
+    //in pre condition it was checked that memory block was all inside one map
+
+    file_data = get_Map(sysSt->shared_memory_system->shm_files, create_FileIdObj(mSt->file));
+
+    for (i = 0; i < len; i++)
+    {
+        j = i + addr.address - mSt->begAddr.address + mSt->off;
+        put_Map(file_data,
+                create_Integer(j),
+                create_Integer(byteAt_CByteArray(mb->data, i)));
+    }
+    return;
+}
+
+/** read_mapped_mem_block_spec **/
+specification
+MappedMemoryBlock* read_mapped_mem_block_spec(CallContext context, VoidTPtr addr, SizeT len, ErrorCode* errno)
+{
+    pre
+    {
+        //memory block is all inside one map
+        ProcessState* prSt;
+        List* maps_in_interval;
+        MMapState* mSt;
+        VoidTPtr endAddr;
+
+        prSt = getProcessState_CallContext(context);
+        if (isInvalid_VoidTPtr(addr))
+        {
+            return false;
+        }
+        endAddr = addr;
+        endAddr.address += (sut_ptr_t)len;
+        maps_in_interval = mMapsInInterval(prSt->MMaps, addr, endAddr);
+        if(size_List(maps_in_interval) != 1) //checking if interval intersects only 1 map area
+        {
+            return false;
+        }
+        mSt = get_List(maps_in_interval, 0);
+         //checking if interval is inside
+        if((addr.address < mSt->startAddr.address) || (endAddr.address > mSt->endAddr.address))
+        {
+            return false;
+        }
+        return true;
+    }
+    post
+    {
+        ProcessState* prSt;
+        SystemState* sysSt;
+        List* maps_in_interval;
+        MMapState* mSt;
+        VoidTPtr endAddr;
+        IntT i,j;
+        Map* file_data;
+        Integer *int1;
+        Integer *int2;
+        CByteArray* ba;
+
+        prSt = getProcessState_CallContext(context);
+        sysSt = getSystemState_CallContext(context);
+
+        endAddr = addr;
+        endAddr.address += len;
+        maps_in_interval = mMapsInInterval(prSt->MMaps, addr, endAddr);
+        /*
+         * in pre condition it was checked that memory block was all inside one map
+         */
+        mSt = get_List(maps_in_interval, 0);
+
+        /*
+         * if read access is denied, read_mapped_mem_block_spec should be NULL
+         */
+        if ((!mSt->curentProt.PROT_READ_Flag) && (!READ_ACCESS_ALWAYS_ALLOWED))
+        {
+            return read_mapped_mem_block_spec == NULL;
+        }
+
+        file_data = get_Map(sysSt->shared_memory_system->shm_files, create_FileIdObj(mSt->file));
+
+        j = size_Map(file_data);
+        for (i = 0; i < j; i++)
+        {
+            int1 = key_Map(file_data, i);
+            int1 = get_Map(file_data, key_Map(file_data, i));
+        };
+
+        for (i = 0; i < len; i++)
+        {
+            if (containsKey_Map(file_data, create_Integer(i + addr.address - mSt->begAddr.address + mSt->off)))
+            {
+                int1 = get_Map(file_data, create_Integer(i + addr.address - mSt->begAddr.address + mSt->off));
+            }
+            else
+            {
+                int1 = create_Integer(0);
+            }
+            ba = read_mapped_mem_block_spec->data;
+            int2 = create_Integer(byteAt_CByteArray(ba, i));
+            if (!equals(int1 , int2))
+            {
+                return false;
+            }
+
+        }
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                     Specification Types                        **/
+/********************************************************************/
+
+specification typedef struct MsyncReactionType  MsyncReactionType = {};
+specification typedef struct MsyncParamsType MsyncParamsType = {};
+specification typedef struct MMapState MMapState = {};
+specification typedef struct MappedMemoryBlock MappedMemoryBlock = {};
+//specification typedef struct SharedMemoryEntity SharedMemoryEntity = {};
+specification typedef struct SharedMemorySystem SharedMemorySystem = {};
+specification typedef struct SharedMemoryFileDescriptor SharedMemoryFileDescriptor  = {};
+
+MsyncParamsType * create_MsyncParamsType(
+    CallContext context,
+    VoidTPtr addr,
+    SizeT len,
+    MsyncFlags flags
+)
+{
+    return create(&type_MsyncParamsType,
+        context,
+        addr,
+        len,
+        flags
+        );
+}
+
+
+SharedMemoryFileDescriptor * create_SharedMemoryFileDescriptor(
+    OffT offset
+)
+{
+    return create(&type_SharedMemoryFileDescriptor, offset);
+}
+
+/********************************************************************/
+/**                  Memory model for Shm files                    **/
+/********************************************************************/
+
+MappedMemoryBlock* create_MappedMemoryBlock(OffT start_off, SizeT size, CByteArray* data)
+{
+    return create(&type_MappedMemoryBlock, start_off, size, data);
+}
+
+/*SharedMemoryEntity* create_SharedMemoryEntity()
+{
+    Map* mem;
+    mem = create_Map(&type_Integer, &type_Integer);
+    return create(&type_SharedMemoryEntity, mem);
+}
+
+void add_MappedMemoryBlockToSharedMemoryEntity(MappedMemoryBlock* mb, SharedMemoryEntity* obj)
+{
+    int i;
+    for (i = 0; i < mb->size; i++)
+    {
+        put_Map(obj->memory, create_Integer(i + mb->start_off), create_Integer(mb->data->data[i]));
+    }
+    return;
+}
+
+void read_MappedBlockFromSharedMemoryEntity(MappedMemoryBlock* mb, SharedMemoryEntity* obj)
+{
+    int i;
+    for (i = 0; i < mb->size; i++)
+    {
+        if (containsKey_Map(obj->memory, create_Integer(i + mb->start_off)))
+        {
+            mb->data->data[i] = (int)get_Map(obj->memory, create_Integer(i + mb->start_off));
+        }
+        else
+        {
+            mb->data->data[i] = 0;
+        }
+    }
+    return;
+}
+*/
+SharedMemorySystem* create_SharedMemorySystem()
+{
+    Map* relations;
+    Map* names;
+    relations = create_Map(&type_FileIdObj, &type_Map);
+    names = create_Map(&type_CString, &type_FileIdObj);
+    return create(&type_SharedMemorySystem, relations, names, 0);
+}
+
+
+/********************************************************************/
+/**                     MMap Model Functions                       **/
+/********************************************************************/
+
+MMapState* create_MMapState(VoidTPtr startAddr, VoidTPtr endAddr,
+              MmanProtFlags curentProt, MmapFlags flags, OffT off,
+              VoidTPtr begAddr, SizeT len, FileId file, AccessMode mode)
+{
+    return create(&type_MMapState, startAddr, endAddr,
+                  curentProt, flags, off, begAddr, len, file, mode);
+}
+
+void addMMapToMMapsList(List* MMaps, MMapState* elem)
+{
+    int size, i;
+    MMapState* TempElem;
+    MMapState* TempElem2;
+    size = size_List(MMaps);
+    for (i = 0; i < size;)
+    {
+        TempElem = get_List(MMaps, i);
+
+        if ((elem->startAddr.address <= TempElem->startAddr.address) &&
+            (elem->endAddr.address >= TempElem->endAddr.address))
+        { //TempElem all covered by new map. It deleted.
+            removeMMapFromMMapsList(MMaps, i);
+            size--;
+            continue;
+        }
+
+        if ((elem->endAddr.address > TempElem->startAddr.address) &&
+            (elem->startAddr.address <= TempElem->startAddr.address))
+        { //Begining of TempElem covered by new elem
+            TempElem->startAddr = elem->endAddr;
+            add_List(MMaps, i, elem);
+            size++;
+            break;
+        }
+
+        if ((elem->startAddr.address > TempElem->startAddr.address) &&
+            (elem->startAddr.address < TempElem->endAddr.address))
+        { //New map started inside TempElem map
+            if (elem->endAddr.address < TempElem->endAddr.address)
+            { // New map is all inside TempElem map, TempElem map devides by 2
+                TempElem2 = clone(TempElem);
+                TempElem->endAddr = elem->startAddr;
+                TempElem2->startAddr = elem->endAddr;
+                add_List(MMaps, i + 1, elem);
+                add_List(MMaps, i + 2, TempElem2);
+                size += 2;
+                break;
+            }
+            else
+            { //New map covers all ending of TempElem
+                TempElem->endAddr = elem->startAddr;
+                i++;
+                continue;
+            }
+        }
+
+        // New map doesn't intersect with curent map
+        if (elem->startAddr.address < TempElem->startAddr.address)
+        { // New map doesn't intersect with other maps
+            add_List(MMaps, i, elem);
+            size++;
+            break;
+        }
+        i++;
+    };
+    if (i == size)
+    {
+        append_List(MMaps, elem);
+    }
+    return;
+}
+
+void addMProtectInterval(List* MMaps, VoidTPtr addr, SizeT len, MmanProtFlags newProt)
+{
+    int size, i;
+    MMapState* TempElem;
+    MMapState* TempElem2;
+    MMapState* TempElem3;
+    VoidTPtr endaddr;
+
+    endaddr = addr;
+    endaddr.address += len;
+    size = size_List(MMaps);
+
+    for (i = 0; i < size;)
+    {
+        TempElem = get_List(MMaps, i);
+
+        if ((addr.address <= TempElem->startAddr.address) &&
+            (endaddr.address >= TempElem->endAddr.address))
+        { //TempElem all covered by new interval. Prot changes
+            TempElem->curentProt = newProt;
+            i++;
+            continue;
+        }
+
+        if ((endaddr.address > TempElem->startAddr.address) &&
+            (addr.address <= TempElem->startAddr.address))
+        { //Begining of TempElem covered by Interval
+            TempElem2 = clone(TempElem);
+
+            TempElem->startAddr = endaddr;
+            TempElem2->endAddr = endaddr;
+            add_List(MMaps, i, TempElem2);
+            size++;
+            break;
+        }
+
+        if ((addr.address > TempElem->startAddr.address) &&
+            (addr.address < TempElem->endAddr.address))
+        { //Interval started inside TempElem map
+            if (endaddr.address < TempElem->endAddr.address)
+            { // New protection interval is all inside TempElem map, TempElem map devides by 3 or 2
+                TempElem2 = clone(TempElem);
+                TempElem3 = clone(TempElem);
+
+                TempElem->endAddr = addr;
+
+                TempElem2->startAddr = addr;
+                TempElem2->endAddr = endaddr;
+                TempElem2->curentProt = newProt;
+                add_List(MMaps, i + 1, TempElem2);
+                TempElem3->startAddr = endaddr;
+                add_List(MMaps, i + 2, TempElem3);
+                size += 2;
+                break;
+            }
+            else
+            { //Interval covers all ending of TempElem
+                TempElem2 = clone(TempElem);
+
+                TempElem->endAddr = addr;
+
+                TempElem2->startAddr = addr;
+                TempElem2->curentProt = newProt;
+                add_List(MMaps, i + 1, TempElem2);
+                i += 2;
+                size++;
+                continue;
+            }
+        }
+
+
+
+        // Interval doesn't intersect with curent map
+        if (endaddr.address < TempElem->startAddr.address)
+        { // Interval doesn't intersect with other maps
+            break;
+        }
+        i++;
+    };
+    return;
+}
+
+void removeMMapFromMMapsList(List* MMaps, int ind)
+{
+    remove_List(MMaps, ind);
+    return;
+}
+
+void deleteMMapFromMMapsList(List* MMaps, MMapState* elem)
+{
+    int i;
+    MMapState* curElem;
+
+    if (i = conteinedMMapInMMapsList(MMaps, elem) != -1)
+    {
+        curElem = get_List(MMaps, i);
+        if (elem->begAddr.address <= curElem->begAddr.address)
+        {
+            if (elem->endAddr.address < curElem->endAddr.address)
+            {
+                ;//elem->endAddr,
+            }
+        }
+        else if (true)
+        {
+        }
+        else
+        {
+        }
+    }
+    return;
+}
+
+int conteinedMMapInMMapsList(List* MMaps, MMapState* elem)
+{
+    int i, size;
+    MMapState* curElem;
+
+    size = size_List(MMaps);
+    for (i = 0; i < size; i++)
+    {
+        curElem = get_List(MMaps, i);
+        if (elem->begAddr.address >= curElem->begAddr.address)
+        {
+            if (elem->endAddr.address <= curElem->endAddr.address)
+            {
+                return i;
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+    return -1;
+}
+
+List* mMapsInIntervalOfMap(List* MMaps, MMapState* elem)
+{
+    int i, size;
+    List* res;
+    MMapState* curElem;
+    res = create_List(&type_Integer);
+    if (elem->begAddr.address >= elem->endAddr.address)
+    {
+        return res;
+    }
+    size = size_List(MMaps);
+    for (i = 0; i < size; i++)
+    {
+        curElem = get_List(MMaps, i);
+        if (((elem->begAddr.address <= curElem->begAddr.address) &&
+             (elem->endAddr.address > curElem->begAddr.address))    ||
+            ((elem->begAddr.address < curElem->endAddr.address) &&
+             (elem->endAddr.address >= curElem->endAddr.address))    ||
+            ((curElem->begAddr.address <= elem->begAddr.address) &&
+             (curElem->endAddr.address < elem->begAddr.address)))
+        { //curElem intersects with elem
+            append_List(res, create_Integer(i));
+        }
+    }
+    return res;
+}
+
+List* mMapsInInterval(List* MMaps, VoidTPtr startAddr, VoidTPtr endAddr)
+{
+    int i, size;
+    List* res;
+    MMapState* curElem;
+    res = create_List(&type_MMapState);
+    if (startAddr.address >= endAddr.address)
+    {
+        return res;
+    }
+    size = size_List(MMaps);
+    for (i = 0; i < size; i++)
+    {
+        curElem = get_List(MMaps, i);
+        if (((startAddr.address <= curElem->startAddr.address) &&
+             (endAddr.address > curElem->startAddr.address))    ||
+            ((startAddr.address < curElem->endAddr.address) &&
+             (endAddr.address >= curElem->endAddr.address))    ||
+            ((curElem->startAddr.address <= startAddr.address) &&
+             (curElem->endAddr.address > startAddr.address)))
+        { //curElem intersects with elem
+            append_List(res, curElem);
+        }
+    }
+    return res;
+}
+
+int getIndexMMapByStart(List* MMaps, VoidTPtr startAddr)
+{
+    int i, size;
+    MMapState* TempElem;
+    size = size_List(MMaps);
+    for (i = 0; i < size; i++)
+    {
+        TempElem = get_List(MMaps, i);
+        if (equals_VoidTPtr(TempElem->startAddr, startAddr))
+        {
+            return i;
+        }
+        else if (startAddr.address < TempElem->startAddr.address )
+        {
+            break;
+        }
+    }
+    return -1;
+}
+
+int getIndexMMapByAddr(List* MMaps, VoidTPtr addr)
+{
+    int i, size;
+    MMapState* TempElem;
+    size = size_List(MMaps);
+    for (i = 0; i < size; i++)
+    {
+        TempElem = get_List(MMaps, i);
+        if (addr.address < TempElem->startAddr.address)
+        {
+            break;
+        }
+        else if (addr.address < TempElem->endAddr.address)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+MmanProtFlags getProtByAddress(List* MMaps, VoidTPtr addr)
+{
+    MmanProtFlags res;
+    int i, size;
+    MMapState* TempElem;
+
+    res.PROT_EXEC_Flag = false;
+    res.PROT_NONE_Flag = false;
+    res.PROT_READ_Flag = false;
+    res.PROT_WRITE_Flag = false;
+    size = size_List(MMaps);
+
+    for (i = 0; i < size; i++)
+    {
+        TempElem = get_List(MMaps, i);
+        if (addr.address < TempElem->startAddr.address)
+        {
+            break;
+        }
+        else if (addr.address < TempElem->endAddr.address)
+        {
+            res = TempElem->curentProt;
+            break;
+        }
+    }
+    return res;
+}
+
+bool isIntersect(List* MMaps, VoidTPtr startAddr, SizeT len)
+{
+    MMapState* curMap;
+    int size, i;
+
+    size = size_List(MMaps);
+    for (i = 0; i < size; i++)
+    {
+        curMap = get_List(MMaps, i);
+        if (((startAddr.address <= curMap->begAddr.address) && (startAddr.address + len > curMap->begAddr.address)) ||
+            ((startAddr.address < curMap->endAddr.address) && (startAddr.address >= curMap->begAddr.address)))
+        {
+            return true;
+        }
+        else if (startAddr.address + len <= curMap->begAddr.address)
+        {
+            break;
+        }
+    }
+    return false;
+}
+
+bool isSolidMaps(CallContext context, VoidTPtr addr, SizeT len)
+{
+    List* coveredMaps;
+    bool res;
+    int i, size;
+    MMapState* elem;
+    MMapState* elem2;
+    VoidTPtr endAddr;
+    ProcessState* prSt;
+
+    if (len <= 0)
+    {
+        return true;
+    }
+
+    endAddr = addr;
+    endAddr.address += len;
+    prSt = getProcessState_CallContext(context);
+    coveredMaps = mMapsInInterval(prSt->MMaps, addr, endAddr);
+
+    res = true;
+    size = size_List(coveredMaps);
+    if (size == 0)
+    {
+        return false;
+    }
+    elem = get_List(coveredMaps, 0);
+    if (elem->startAddr.address > addr.address)
+    {
+        return false;
+    }
+    elem = get_List(coveredMaps, size - 1);
+    if (elem->endAddr.address < addr.address + len)
+    {
+        return false;
+    }
+    for (i = 0; i < size - 1; i++)
+    {
+        elem  = get_List(coveredMaps, i);
+        elem2 = get_List(coveredMaps, i + 1);
+        if (elem->endAddr.address != elem2->startAddr.address)
+        {
+            res = false;
+            break;
+        }
+    }
+    return res;
+}
+
+/********************************************************************/
+/**              Pointers and PageSize Halper Functions            **/
+/********************************************************************/
+
+VoidTPtr getRoundDownByPagesize(VoidTPtr addr, LongT pagesize)
+{
+    VoidTPtr res;
+    sut_ptr_t temp;
+
+    temp = addr.address % pagesize;
+    res = addr;
+    res.address -= temp;
+    return res;
+}
+
+VoidTPtr getRoundUpByPagesize(VoidTPtr addr, LongT pagesize)
+{
+    VoidTPtr res;
+    sut_ptr_t temp;
+
+    temp = addr.address % pagesize;
+    res = addr;
+    if (temp != 0)
+    {
+        res.address += (pagesize - temp);
+    }
+    return res;
+}
+
+bool isRounded(VoidTPtr addr, LongT pagesize)
+{
+    return (addr.address % pagesize) == 0;
+}
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+bool isNotValidMlockRange(CallContext context, VoidTPtr addr, SizeT len)
+{
+    addr.address += len;
+    if (isInvalid_VoidTPtr(addr))
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool hasPrivilegeToLock(CallContext context, VoidTPtr addr, SizeT len)
+{
+    return true;
+}
+
+bool hasPrivilegeToLockall(CallContext context, MLockallFlags flags)
+{
+    return true;
+}
+
+bool isValidProt(MmanProtFlags prot)
+{
+    if(!prot.PROT_NONE_Flag)
+    {
+        return (prot.PROT_EXEC_Flag == false);
+    }
+    else
+    {
+
+        return true;
+    }
+}
+
+bool isImplementedProt(MmanProtFlags prot)
+{
+    return isValidProt(prot);
+}
+
+bool isAccessAllowable(MmanProtFlags prot, AccessMode mode)
+{
+    bool res;
+    res = true;
+    if (prot.PROT_READ_Flag)
+    {
+        res = (mode == ReadOnly) || (mode == ReadWrite);
+    }
+    if (prot.PROT_WRITE_Flag)
+    {
+        res = ((mode == WriteOnly) || (mode == ReadWrite)) && res;
+    }
+    return res;
+}
+
+bool isAccessAllowableToAllMaps(CallContext context, VoidTPtr addr,
+                                SizeT len, MmanProtFlags prot)
+{
+    List* maps;
+    VoidTPtr endAddr;
+    ProcessState* prSt;
+    int i, size;
+    MMapState* elem;
+
+    endAddr = addr;
+    endAddr.address += len;
+    prSt = getProcessState_CallContext(context);
+    maps = mMapsInInterval(prSt->MMaps, addr, endAddr);
+
+    size = size_List(maps);
+    for (i = 0; i < size; i++)
+    {
+        elem = get_List(maps, i);
+        if (!isAccessAllowable(prot, elem->mode))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isValidMsyncFlags(MsyncFlags flags)
+{
+    if (flags.MS_ASYNC_Flag == true)
+    {
+        return (flags.MS_SYNC_Flag == false);
+    }
+    else
+    {
+        return (flags.MS_SYNC_Flag == true);
+    }
+}
+
+MsyncReactionType* create_MsyncReactionType(ThreadState*  thr_st, IntT res, IntT er, MsyncParamsType* params)
+{
+    return create(&type_MsyncReactionType, thr_st, res, er, params);
+}
+
+FileId createNewShmFileId(SystemState* sysSt, ProcessState* prSt)
+{
+    FileId fid;
+    fid.system = prSt->processid.system;
+    fid.file = sysSt->shared_memory_system->last_fid;
+    sysSt->shared_memory_system->last_fid++;
+    return fid;
+}
+
+/********************************************************************/
+/**                  Flag Conversion Functions                     **/
+/********************************************************************/
+
+/* MLockallFlags */
+IntT convertMLockallFlagsToIntT(MLockallFlags flag)
+{
+    IntT res = 0;
+
+    if(flag.MCL_CURRENT_Flag)
+    {
+        res = res | SUT_MCL_CURRENT;
+    }
+    if (flag.MCL_FUTURE_Flag)
+    {
+        res = res | SUT_MCL_FUTURE;
+    }
+
+    return res;
+}
+
+MLockallFlags convertIntToMLockallFlags(IntT value)
+{
+    MLockallFlags res;
+
+    if (value & SUT_MCL_CURRENT)
+    {
+        res.MCL_CURRENT_Flag = true;
+    }
+    else
+    {
+        res.MCL_CURRENT_Flag = false;
+    }
+
+    if (value & SUT_MCL_FUTURE)
+    {
+        res.MCL_FUTURE_Flag = true;
+    }
+    else
+    {
+        res.MCL_FUTURE_Flag = false;
+    }
+
+    return res;
+}
+
+/* MmanProtFlags */
+IntT convertMmanProtFlagsToIntT(MmanProtFlags flag)
+{
+    IntT res = 0;
+
+    if(flag.PROT_EXEC_Flag)
+    {
+        res = res | SUT_PROT_EXEC;
+    }
+    if (flag.PROT_NONE_Flag)
+    {
+        res = res | SUT_PROT_NONE;
+    }
+    if (flag.PROT_READ_Flag)
+    {
+        res = res | SUT_PROT_READ;
+    }
+    if (flag.PROT_WRITE_Flag)
+    {
+        res = res | SUT_PROT_WRITE;
+    }
+
+    return res;
+}
+
+MmanProtFlags convertIntToMmanProtFlags(IntT value)
+{
+    MmanProtFlags res;
+
+    if (value & SUT_PROT_EXEC)
+    {
+        res.PROT_EXEC_Flag = true;
+    }
+    else
+    {
+        res.PROT_EXEC_Flag = false;
+    }
+
+    if (value & SUT_PROT_NONE)
+    {
+        res.PROT_NONE_Flag = true;
+    }
+    else
+    {
+        res.PROT_NONE_Flag = false;
+    }
+
+    if (value & SUT_PROT_READ)
+    {
+        res.PROT_READ_Flag = true;
+    }
+    else
+    {
+        res.PROT_READ_Flag = false;
+    }
+
+    if (value & SUT_PROT_WRITE)
+    {
+        res.PROT_WRITE_Flag = true;
+    }
+    else
+    {
+        res.PROT_WRITE_Flag = false;
+    }
+
+    return res;
+}
+
+/* MmapFlags */
+IntT convertMmapFlagsToIntT(MmapFlags flag)
+{
+    IntT res = 0;
+
+    if(flag.MAP_FIXED_Flag)
+    {
+        res = res | SUT_MAP_FIXED;
+    }
+    if (flag.MAP_PRIVATE_Flag)
+    {
+        res = res | SUT_MAP_PRIVATE;
+    }
+    if (flag.MAP_SHARED_Flag)
+    {
+        res = res | SUT_MAP_SHARED;
+    }
+
+    return res;
+}
+
+MmapFlags convertIntToMmapFlags(IntT value)
+{
+    MmapFlags res;
+
+    if (value & SUT_MAP_FIXED)
+    {
+        res.MAP_FIXED_Flag = true;
+    }
+    else
+    {
+        res.MAP_FIXED_Flag = false;
+    }
+
+    if (value & SUT_MAP_PRIVATE)
+    {
+        res.MAP_PRIVATE_Flag = true;
+    }
+    else
+    {
+        res.MAP_PRIVATE_Flag = false;
+    }
+
+    if (value & SUT_MAP_SHARED)
+    {
+        res.MAP_SHARED_Flag = true;
+    }
+    else
+    {
+        res.MAP_SHARED_Flag = false;
+    }
+
+    return res;
+}
+
+/* MsyncFlags */
+IntT convertMsyncFlagsToIntT(MsyncFlags flag)
+{
+    IntT res = 0;
+
+    if(flag.MS_ASYNC_Flag)
+    {
+        res = res | SUT_MS_ASYNC;
+    }
+    if (flag.MS_INVALIDATE_Flag)
+    {
+        res = res | SUT_MS_INVALIDATE;
+    }
+    if (flag.MS_SYNC_Flag)
+    {
+        res = res | SUT_MS_SYNC;
+    }
+
+    return res;
+}
+
+MsyncFlags convertIntToMsyncFlags(IntT value)
+{
+    MsyncFlags res;
+
+    if (value & SUT_MS_ASYNC)
+    {
+        res.MS_ASYNC_Flag = true;
+    }
+    else
+    {
+        res.MS_ASYNC_Flag = false;
+    }
+
+    if (value & SUT_MS_INVALIDATE)
+    {
+        res.MS_INVALIDATE_Flag = true;
+    }
+    else
+    {
+        res.MS_INVALIDATE_Flag = false;
+    }
+
+    if (value & SUT_MS_SYNC)
+    {
+        res.MS_SYNC_Flag = true;
+    }
+    else
+    {
+        res.MS_SYNC_Flag = false;
+    }
+
+    return res;
+}
+
+/* Shm_openOflags */
+IntT convertShm_openOflagsToIntT(Shm_openOflags flag)
+{
+    IntT res = 0;
+
+    if(flag.O_CREAT_Flag)
+    {
+        res = res | SUT_O_CREAT;
+    }
+    if (flag.O_EXCL_Flag)
+    {
+        res = res | SUT_O_EXCL;
+    }
+    if (flag.O_RDONLY_Flag)
+    {
+        res = res | SUT_O_RDONLY;
+    }
+    if (flag.O_RDWR_Flag)
+    {
+        res = res | SUT_O_RDWR;
+    }
+    if (flag.O_TRUNC_Flag)
+    {
+        res = res | SUT_O_TRUNC;
+    }
+
+    return res;
+}
+
+Shm_openOflags convertIntToShm_openOflags(IntT value)
+{
+    Shm_openOflags res;
+
+    if (value & SUT_O_CREAT)
+    {
+        res.O_CREAT_Flag = true;
+    }
+    else
+    {
+        res.O_CREAT_Flag = false;
+    }
+
+    if (value & SUT_O_EXCL)
+    {
+        res.O_EXCL_Flag = true;
+    }
+    else
+    {
+        res.O_EXCL_Flag = false;
+    }
+
+    if (value & SUT_O_RDONLY)
+    {
+        res.O_RDONLY_Flag = true;
+    }
+    else
+    {
+        res.O_RDONLY_Flag = false;
+    }
+
+    if (value & SUT_O_RDWR)
+    {
+        res.O_RDWR_Flag = true;
+    }
+    else
+    {
+        res.O_RDWR_Flag = false;
+    }
+
+    if (value & SUT_O_TRUNC)
+    {
+        res.O_TRUNC_Flag = true;
+    }
+    else
+    {
+        res.O_TRUNC_Flag = false;
+    }
+
+    return res;
+}
+

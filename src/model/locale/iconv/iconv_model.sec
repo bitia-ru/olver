@@ -1,0 +1,669 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#include "locale/iconv/iconv_model.seh"
+#include "config/interpretation.seh"
+#include "locale/iconv/iconv_config.h"
+
+#pragma SEC subsystem iconv "locale.iconv"
+
+/*
+   The group of functions 'locale.iconv' consists of:
+       iconv [2]
+       iconv_close [2]
+       iconv_open [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    iconv - codeset conversion function
+
+SYNOPSIS
+
+    #include <iconv.h>
+
+    size_t iconv(iconv_t cd, char **restrict inbuf,
+           size_t *restrict inbytesleft, char **restrict outbuf,
+           size_t *restrict outbytesleft);
+
+DESCRIPTION
+
+    The iconv() function shall convert the sequence of characters from one codeset,
+    in the array specified by inbuf, into a sequence of corresponding characters
+    in another codeset, in the array specified by outbuf. The codesets are those
+    specified in the iconv_open() call that returned the conversion descriptor, cd.
+    The inbuf argument points to a variable that points to the first character in
+    the input buffer and inbytesleft indicates the number of bytes to the end of
+    the buffer to be converted. The outbuf argument points to a variable that
+    points to the first available byte in the output buffer and outbytesleft
+    indicates the number of the available bytes to the end of the buffer.
+
+    For state-dependent encodings, the conversion descriptor cd is placed into its
+    initial shift state by a call for which inbuf is a null pointer, or for
+    which inbuf points to a null pointer. When iconv() is called in this way, and
+    if outbuf is not a null pointer or a pointer to a null pointer, and
+    outbytesleft points to a positive value, iconv() shall place, into the output
+    buffer, the byte sequence to change the output buffer to its initial shift
+    state. If the output buffer is not large enough to hold the entire reset
+    sequence, iconv() shall fail and set errno to [E2BIG]. Subsequent calls with
+    inbuf as other than a null pointer or a pointer to a null pointer cause the
+    conversion to take place from the current state of the conversion descriptor.
+
+    If a sequence of input bytes does not form a valid character in the specified
+    codeset, conversion shall stop after the previous successfully converted
+    character. If the input buffer ends with an incomplete character or shift
+    sequence, conversion shall stop after the previous successfully converted
+    bytes. If the output buffer is not large enough to hold the entire converted
+    input, conversion shall stop just prior to the input bytes that would cause
+    the output buffer to overflow. The variable pointed to by inbuf shall be
+    updated to point to the byte following the last byte successfully used in the
+    conversion. The value pointed to by inbytesleft shall be decremented to
+    reflect the number of bytes still not converted in the input buffer. The
+    variable pointed to by outbuf shall be updated to point to the byte following
+    the last byte of converted output data. The value pointed to by outbytesleft
+    shall be decremented to reflect the number of bytes still available in the
+    output buffer. For state-dependent encodings, the conversion descriptor shall
+    be updated to reflect the shift state in effect at the end of the last
+    successfully converted byte sequence.
+
+    If iconv() encounters a character in the input buffer that is valid, but for
+    which an identical character does not exist in the target codeset, iconv()
+    shall perform an implementation-defined conversion on this character.
+
+RETURN VALUE
+
+    The iconv() function shall update the variables pointed to by the arguments to
+    reflect the extent of the conversion and return the number of non-identical
+    conversions performed. If the entire string in the input buffer is converted,
+    the value pointed to by inbytesleft shall be 0. If the input conversion is
+    stopped due to any conditions mentioned above, the value pointed to by
+    inbytesleft shall be non-zero and errno shall be set to indicate the condition.
+    If an error occurs, iconv() shall return (size_t)-1 and set errno to
+    indicate the error.
+
+ERRORS
+
+    The iconv() function shall fail if:
+
+    [EILSEQ]
+
+        Input conversion stopped due to an input byte that does not belong to the input
+        codeset.
+
+    [E2BIG]
+
+        Input conversion stopped due to lack of space in the output buffer.
+
+    [EINVAL]
+
+        Input conversion stopped due to an incomplete character or shift sequence at
+        the end of the input buffer.
+
+    The iconv() function may fail if:
+
+    [EBADF]
+
+        The cd argument is not a valid open conversion descriptor.
+
+*/
+
+specification
+SizeT iconv_spec(CallContext context, IconvTObj* cd,
+                 StringTPtr* inbuf, SizeT* inbytesleft,
+                 StringTPtr* outbuf, SizeT* outbytesleft,
+                 ErrorCode* errno)
+{
+    StringTPtr pre_inbuf;
+    SizeT      pre_inbytesleft;
+    StringTPtr pre_outbuf;
+    SizeT      pre_outbytesleft;
+
+    pre
+    {
+        pre_inbuf = *inbuf;
+        pre_inbytesleft = *inbytesleft;
+        pre_outbuf = *outbuf;
+        pre_outbytesleft = *outbytesleft;
+
+        if(!POSIX_ICONV_FAILS_WITH_EBADF)
+        {
+            /* [Implicit precondition] */
+            REQ("", "cd should be initialized", cd->initialized);
+        }
+
+        /*
+         * The inbuf argument points to a variable that points to the first character in
+         * the input buffer
+         */
+        REQ("app.iconv.02", "", TODO_REQ());
+
+        /*
+         * inbytesleft indicates the number of bytes to the end of the buffer to be
+         * converted.
+         */
+        REQ("app.iconv.03", "", TODO_REQ());
+
+        /*
+         * The outbuf argument points to a variable that points to the first available
+         * byte in the output buffer
+         */
+        REQ("app.iconv.04", "", TODO_REQ());
+
+        /*
+         * outbytesleft indicates the number of the available bytes to the end of the
+         * buffer.
+         */
+        REQ("app.iconv.05", "", TODO_REQ());
+
+        return true;
+    }
+    post
+    {
+        StringTPtr post_inbuf = *inbuf;
+        SizeT      post_inbytesleft = *inbytesleft;
+        StringTPtr post_outbuf = *outbuf;
+        SizeT      post_outbytesleft = *outbytesleft;
+
+        /*
+         * If the input conversion is stopped due to any conditions mentioned above, the
+         * value pointed to by inbytesleft shall be non-zero and errno shall be set to
+         * indicate the condition.
+         */
+        /*
+         * If an error occurs, iconv() shall return (size_t)-1 and set errno to indicate
+         * the error.
+         */
+
+        ERROR_BEGIN(POSIX_ICONV, "iconv.21;iconv.22",
+                    ((iconv_spec == (SizeT)-1) || (*inbytesleft != 0)), *errno
+                   )
+            /*
+             * The iconv() function shall fail if:
+             *
+             * [EILSEQ]
+             *
+             * Input conversion stopped due to an input byte that does not belong to the input
+             * codeset.
+             */
+            ERROR_SHALL(POSIX_ICONV, EILSEQ, "iconv.23.01",
+                        T(iconv_spec != (SizeT)-1)
+                        &&
+                        T(iconv_spec != (SizeT)0)
+                       )
+
+            /*
+             * The iconv() function shall fail if:
+             *
+             * [E2BIG]
+             *
+             * Input conversion stopped due to lack of space in the output buffer.
+             */
+            ERROR_SHALL(POSIX_ICONV, E2BIG, "iconv.23.02",
+                        T(iconv_spec != (SizeT)-1)
+                        &&
+                        T(iconv_spec != (SizeT)0)
+                       )
+
+            /*
+             * The iconv() function shall fail if:
+             *
+             * [EINVAL]
+             *
+             * Input conversion stopped due to an incomplete character or shift sequence at
+             * the end of the input buffer.
+             */
+            ERROR_SHALL(POSIX_ICONV, EINVAL, "iconv.23.03",
+                        T(iconv_spec != (SizeT)-1)
+                        &&
+                        T(iconv_spec != (SizeT)0)
+                       )
+
+            /*
+             * The iconv() function may fail if:
+             *
+             * [EBADF]
+             *
+             * The cd argument is not a valid open conversion descriptor.
+             */
+            ERROR_MAY(POSIX_ICONV, EBADF, "iconv.24.01",
+                      T(iconv_spec == (SizeT)-1) && F(cd->initialized)
+                     )
+
+        ERROR_END()
+
+        /* [Implicit postcondition] */
+        REQ("", "cd should be initialized", cd->initialized);
+
+        /*
+         * The iconv() function shall convert the sequence of characters from one codeset,
+         * in the array specified by inbuf, into a sequence of corresponding characters
+         * in another codeset, in the array specified by outbuf. The codesets are those
+         * specified in the iconv_open() call that returned the conversion descriptor, cd.
+         */
+        REQ("iconv.01", "", TODO_REQ());
+
+        /*
+         * For state-dependent encodings, the conversion descriptor cd is placed into its
+         * initial shift state by a call for which inbuf is a null pointer, or for
+         * which inbuf points to a null pointer.
+         */
+        REQ("iconv.06", "", TODO_REQ());
+
+        /*
+         * When iconv() is called in this way, and if outbuf is not a null pointer or a
+         * pointer to a null pointer, and outbytesleft points to a positive value, iconv()
+         * shall place, into the output buffer, the byte sequence to change the output
+         * buffer to its initial shift state.
+         */
+        REQ("iconv.07", "", TODO_REQ());
+
+        /*
+         * If the output buffer is not large enough to hold the entire reset sequence,
+         * iconv() shall fail and set errno to [E2BIG].
+         */
+        REQ("iconv.08", "", TODO_REQ());
+
+        /*
+         * Subsequent calls with inbuf as other than a null pointer or a pointer to a null
+         * pointer cause the conversion to take place from the current state of the
+         * conversion descriptor.
+         */
+        REQ("iconv.09", "", TODO_REQ());
+
+        /*
+         * If a sequence of input bytes does not form a valid character in the specified
+         * codeset, conversion shall stop after the previous successfully converted
+         * character.
+         */
+        REQ("iconv.10", "", TODO_REQ());
+
+        /*
+         * If the input buffer ends with an incomplete character or shift sequence,
+         * conversion shall stop after the previous successfully converted bytes.
+         */
+        REQ("iconv.11", "", TODO_REQ());
+
+        /*
+         * If the output buffer is not large enough to hold the entire converted input,
+         * conversion shall stop just prior to the input bytes that would cause the output
+         * buffer to overflow.
+         */
+        REQ("iconv.12", "", TODO_REQ());
+
+        /*
+         * The variable pointed to by inbuf shall be updated to point to the byte
+         * following the last byte successfully used in the conversion.
+         */
+        /*
+         * The value pointed to by inbytesleft shall be decremented to reflect the number
+         * of bytes still not converted in the input buffer.
+         */
+        REQ("iconv.13;iconv.14", "inbuf and inbytesleft should change accordingly",
+            post_inbuf.address - pre_inbuf.address == pre_inbytesleft - post_inbytesleft
+           );
+
+        /*
+         * The variable pointed to by outbuf shall be updated to point to the byte
+         * following the last byte of converted output data.
+         */
+        /*
+         * The value pointed to by outbytesleft shall be decremented to reflect the
+         * number of bytes still available in the output buffer.
+         */
+        REQ("iconv.15;iconv.16", "outbuf and outbytesleft should change accordingly",
+            post_outbuf.address - pre_outbuf.address == pre_outbytesleft - post_outbytesleft
+           );
+
+        /*
+         * For state-dependent encodings, the conversion descriptor shall be updated to
+         * reflect the shift state in effect at the end of the last successfully
+         * converted byte sequence.
+         */
+        REQ("iconv.17", "", TODO_REQ());
+
+        /*
+         * The iconv() function shall update the variables pointed to by the arguments to
+         * reflect the extent of the conversion and return the number of non-identical
+         * conversions performed.
+         */
+        REQ("iconv.19", "", TODO_REQ());
+
+        /*
+         * If the entire string in the input buffer is converted, the value pointed to by
+         * inbytesleft shall be 0.
+         */
+        REQ("iconv.20", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    iconv_close - codeset conversion deallocation function
+
+SYNOPSIS
+
+    #include <iconv.h>
+
+    int iconv_close(iconv_t cd);
+
+DESCRIPTION
+
+    The iconv_close() function shall deallocate the conversion descriptor cd and
+    all other associated resources allocated by iconv_open().
+
+    If a file descriptor is used to implement the type iconv_t, that file
+    descriptor shall be closed.
+
+RETURN VALUE
+
+    Upon successful completion, 0 shall be returned; otherwise, -1 shall be
+    returned and errno set to indicate the error.
+
+ERRORS
+
+    The iconv_close() function may fail if:
+
+    [EBADF]
+
+        The conversion descriptor is invalid.
+
+*/
+
+specification
+IntT iconv_close_spec(CallContext context, IconvTObj* cd, ErrorCode* errno)
+{
+    IconvTObj* pre_cd = clone(cd);
+
+    pre
+    {
+        if(!POSIX_ICONV_CLOSE_FAILS_WITH_EBADF)
+        {
+            /* [Implicit precondition] */
+            REQ("", "cd should be initialized", pre_cd->initialized);
+        }
+
+        return true;
+    }
+    coverage C
+    {
+        return { DeallocateConversionDescriptor, "Deallocate the conversion descriptor" };
+    }
+    post
+    {
+        /*
+         * otherwise, -1 shall be returned and errno set to indicate the error.
+         */
+        ERROR_BEGIN(POSIX_ICONV_CLOSE, "iconv_close.04",
+                    iconv_close_spec == -1, *errno
+                   )
+            /*
+             * The iconv_close() function may fail if:
+             *
+             * [EBADF]
+             *
+             * The conversion descriptor is invalid.
+             */
+            ERROR_MAY(POSIX_ICONV_CLOSE, EBADF, "iconv_close.05.01", !(pre_cd->initialized))
+
+        ERROR_END()
+
+        /* [Implicit postcondition] */
+        REQ("", "cd should be initialized", pre_cd->initialized);
+
+        /*
+         * The iconv_close() function shall deallocate the conversion descriptor cd and
+         * all other associated resources allocated by iconv_open().
+         */
+        REQ("iconv_close.01",
+            "Shall deallocate the conversion descriptor cd and all other "
+            "associated resources allocated by iconv_open()",
+            !(cd->initialized));
+
+        /*
+         * If a file descriptor is used to implement the type iconv_t, that file
+         * descriptor shall be closed.
+         */
+        REQ("iconv_close.02", "", TODO_REQ());
+
+        /*
+         * Upon successful completion, 0 shall be returned;
+         */
+        REQ("iconv_close.03", "return value should be zero", iconv_close_spec == 0);
+
+        return true;
+    }
+}
+
+void onIconvClose(IconvTObj* cd)
+{
+    cd->initialized = false;
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    iconv_open - codeset conversion allocation function
+
+SYNOPSIS
+
+    #include <iconv.h>
+
+    iconv_t iconv_open(const char *tocode, const char *fromcode);
+
+DESCRIPTION
+
+    The iconv_open() function shall return a conversion descriptor that describes a
+    conversion from the codeset specified by the string pointed to by the fromcode
+    argument to the codeset specified by the string pointed to by the tocode
+    argument. For state-dependent encodings, the conversion descriptor shall be in
+    a codeset-dependent initial shift state, ready for immediate use with iconv().
+
+    Settings of fromcode and tocode and their permitted combinations are
+    implementation-defined.
+
+    A conversion descriptor shall remain valid until it is closed by iconv_close()
+    or an implicit close.
+
+    If a file descriptor is used to implement conversion descriptors, the
+    FD_CLOEXEC flag shall be set; see <fcntl.h>.
+
+RETURN VALUE
+
+    Upon successful completion, iconv_open() shall return a conversion descriptor
+    for use on subsequent calls to iconv(). Otherwise, iconv_open() shall return
+    (iconv_t)-1 and set errno to indicate the error.
+
+ERRORS
+
+    The iconv_open() function may fail if:
+
+    [EMFILE]
+
+        {OPEN_MAX} file descriptors are currently open in the calling process.
+
+    [ENFILE]
+
+        Too many files are currently open in the system.
+
+    [ENOMEM]
+
+        Insufficient storage space is available.
+
+    [EINVAL]
+
+        The conversion specified by fromcode and tocode is not supported by the
+        implementation.
+
+*/
+
+specification
+IconvTObj* iconv_open_spec(CallContext context, CString* tocode, CString* fromcode,
+                           ErrorCode* errno)
+{
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        /*
+         * Otherwise, iconv_open() shall return (iconv_t)-1 and set errno to indicate the
+         * error.
+         */
+        ERROR_BEGIN(POSIX_ICONV_OPEN, "iconv_open.06",
+                    isInvalid_VoidTPtr(iconv_open_spec->iconvtValue), *errno
+                   )
+            /*
+             * The iconv_open() function may fail if:
+             *
+             * [EMFILE]
+             *
+             * {OPEN_MAX} file descriptors are currently open in the calling process.
+             */
+            ERROR_MAY(POSIX_ICONV_OPEN, EMFILE, "iconv_open.07.01", TODO_ERR(EMFILE))
+
+            /*
+             * The iconv_open() function may fail if:
+             *
+             * [ENFILE]
+             *
+             * Too many files are currently open in the system.
+             */
+            ERROR_MAY(POSIX_ICONV_OPEN, ENFILE, "iconv_open.07.02", TODO_ERR(ENFILE))
+
+            /*
+             * The iconv_open() function may fail if:
+             *
+             * [ENOMEM]
+             *
+             * Insufficient storage space is available.
+             */
+            ERROR_MAY(POSIX_ICONV_OPEN, ENOMEM, "iconv_open.07.03", TODO_ERR(ENOMEM))
+
+            /*
+             * The iconv_open() function may fail if:
+             *
+             * [EINVAL]
+             *
+             * The conversion specified by fromcode and tocode is not supported by the
+             * implementation.
+             */
+            ERROR_MAY(POSIX_ICONV_OPEN, EINVAL, "iconv_open.07.04", TODO_ERR(EINVAL))
+
+        ERROR_END()
+
+        /*
+         * The iconv_open() function shall return a conversion descriptor that describes a
+         * conversion from the codeset specified by the string pointed to by the fromcode
+         * argument to the codeset specified by the string pointed to by the tocode
+         * argument.
+         */
+        REQ("iconv_open.01", "", TODO_REQ());
+
+        /*
+         * For state-dependent encodings, the conversion descriptor shall be in a codeset-
+         * dependent initial shift state, ready for immediate use with iconv().
+         */
+        REQ("iconv_open.02", "", TODO_REQ());
+
+        /*
+         * A conversion descriptor shall remain valid until it is closed by iconv_close()
+         * or an implicit close
+         */
+        REQ("iconv_open.03", "", TODO_REQ());
+
+        /*
+         * If a file descriptor is used to implement conversion descriptors, the
+         * FD_CLOEXEC flag shall be set; see <fcntl.h>.
+         */
+        REQ("iconv_open.04", "", TODO_REQ());
+
+        return true;
+    }
+}
+
+/********************************************************************/
+/**                             IconvTObj Type                     **/
+/********************************************************************/
+specification typedef struct IconvTObj IconvTObj = {};
+
+
+IconvTObj* create_IconvTObj(IconvT iconvt, bool initialized)
+{
+    return create(&type_IconvTObj, iconvt, initialized);
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+
+bool isPermitted_Recoding(CString* from, CString* to)
+{
+    return compare(from, _CS("POSIX")) && compare(to, _CS("POSIX"));
+}

@@ -1,0 +1,238 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "time/time/time_media.seh"
+#include "common/common_media.seh"
+#include "process/process/process_common.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initTimeTimeSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_adjtime_spec     ( adjtime_media      );
+    set_mediator_difftime_spec    ( difftime_media     );
+    set_mediator_ftime_spec       ( ftime_media        );
+    set_mediator_gettimeofday_spec( gettimeofday_media );
+    set_mediator_stime_spec       ( stime_media        );
+    set_mediator_time_spec        ( time_media         );
+    set_mediator_tzset_spec       ( tzset_media        );
+
+    // Set up formatters
+    registerTSFormatter( "timeval", (TSFormatterFuncType)timeval_formatter  );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** adjtime_spec **/
+mediator adjtime_media for specification
+IntT adjtime_spec( CallContext context, TimeValTObj * delta, TimeValTObj * olddelta, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "adjtime:$(timeval)$(int)", delta, create_IntTObj( olddelta == NULL ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            if ( olddelta != NULL ) { copy( readTimeVal_TSStream( & command.response ), olddelta ); }
+            copy( readErrorCode_TSStream( & command.response ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** difftime_spec **/
+mediator difftime_media for specification
+DoubleT difftime_spec( CallContext context, TimeT time1, TimeT time0 )
+{
+    call
+    {
+        DoubleT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "difftime:$(long)$(long)", create_TimeTObj( time1 ), create_TimeTObj( time0 ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            // res = readDouble_TSStream( & command.response );
+            res = readInt_TSStream( & command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** ftime_spec **/
+mediator ftime_media for specification
+IntT ftime_spec( CallContext context, TimeBTObj * tp )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "ftime" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            TimeT   time   ;
+            UShortT millitm;
+            ShortT  stuff  ;
+            timestamp = command.meta.timestamp;
+            res     = readInt_TSStream( & command.response );
+            time    = readInt_TSStream( & command.response );
+            millitm = readInt_TSStream( & command.response );
+            copy( create_TimeBTObj( time, millitm, stuff, stuff ), tp );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        recordKnownTime( context, tp->time, 1000 * tp->millitm, 1000 * tp->millitm + 999 );
+    }
+}
+
+/** gettimeofday_spec **/
+mediator gettimeofday_media for specification
+IntT gettimeofday_spec( CallContext context, TimeValTObj * tp, VoidTPtr tzp )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "gettimeofday" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            copy( readTimeVal_TSStream( & command.response ), tp );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        recordKnownTime( context, tp->sec, 1000 * tp->usec, 1000 * tp->usec + 999 );
+    }
+}
+
+/** stime_spec **/
+mediator stime_media for specification
+IntT stime_spec( CallContext context, TimeTObj * t, ErrorCode * errno )
+{
+    call
+    {
+        IntT res;
+
+        TSCommand command = create_TSCommand();
+
+        TimeTObj * tForSend;
+        if ( t == NULL ) { tForSend = create_TimeTObj( 0 ); }
+                    else { tForSend = t                   ; }
+        format_TSCommand( &command, "stime:$(int)$(long)", create_IntTObj( t == NULL ), tForSend );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream      ( & command.response )         ;
+            copy( readErrorCode_TSStream( & command.response ), errno );
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( stime_spec == 0 ) { recordKnownTime( context, * t, 0, 0 ); }
+    }
+}
+
+/** time_spec **/
+mediator time_media for specification
+TimeT time_spec( CallContext context, TimeTObj * tloc )
+{
+    call
+    {
+        TimeT res;
+
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "time:$(int)", create_IntTObj( tloc == NULL ) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream( & command.response );
+            if ( tloc != NULL ) { copy( create_TimeTObj( readInt_TSStream( & command.response ) ), tloc ); }
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state
+    {
+        if ( time_spec != (TimeT)-1 ) { recordKnownTime( context, time_spec, 0, 999999999 ); }
+    }
+}
+
+/** tzset_spec **/
+mediator tzset_media for specification
+void tzset_spec( CallContext context )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "tzset" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+
+        destroy_TSCommand(&command);
+    }
+}

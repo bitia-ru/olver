@@ -1,0 +1,371 @@
+  /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <atl/integer.h>
+
+#include "fs/dir/tests/dir_scenario.seh"
+
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "process/meta/fs_model.seh"
+
+#include "fs/symlink/symlink_model.seh"
+
+#include "fs/fs/tests/fs_scenario.seh"
+
+static CallContext context;
+
+//#define TS_DEBUG
+
+#ifdef TS_DEBUG
+/********************************************************************/
+/**                          Debug Functions                       **/
+/********************************************************************/
+
+static AssertionExit system_assertion_handler;
+
+static void myAssertionExit(const char * format, va_list  arg_list)
+{
+    DUMPV(format, arg_list);
+    getchar();
+    system_assertion_handler(format, arg_list);
+}
+
+static void assert_init()
+{
+    system_assertion_handler = atAssertion(myAssertionExit);    
+   
+}
+#endif
+
+/********************************************************************/
+bool init_dir_scenario(int argc, char** argv)
+{
+#ifdef TS_DEBUG
+    assert_init();
+    VERBOSE_ON()
+#endif
+
+    context = getContext();
+    initPathSystemConfiguration();    
+    setTSTimeModel(DistributedTSTime);
+
+    // make sure process has appropriate priviledges
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    return true;
+}
+
+void finish_dir_scenario(void)
+{
+    //clean up
+    CallContext rmContext = createProcess();
+    removeTestScenarioSandboxDir(rmContext);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+// makes full path string
+#define P(path)  (create_CString(path))
+
+#define MKDIR_A(path, perms)\
+    mkdir_spec(context, path, create_FilePermissions_String(perms), requestErrorCode())
+
+#define RMDIR_A(path)\
+    rmdir_spec(context, path, requestErrorCode());
+
+
+scenario
+bool makeremove_scen()
+{
+    CString *res ;
+    bool loop=false;
+    int nl=0;
+    FileSystem *fs = getFileSystem(context);
+    List *links = create_List(&type_FileIdObj);
+
+
+    // normal create
+    MKDIR_A(SANDBOX_FILE("dir1"), "rwxrwxrwx");
+
+    MKDIR_A(SANDBOX_FILE("dir1/dir11"), "rwxrwxrwx");
+
+    MKDIR_A(SANDBOX_FILE("dir1/dir12"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir1/dir12/dir121"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir1/dir12/dir122"), "rwxrwxrwx");
+
+    createTestFile(context, SANDBOX_FILE("dir1/file11"), create_CString("Test\nSuite"));
+
+    // EEXIST
+    MKDIR_A(SANDBOX_FILE("dir1/dir12/dir122"), "rwxrwxrwx");  
+
+    // ENOENT
+    MKDIR_A(SANDBOX_FILE("dir1/dirz/dirx"), "rwxrwxrwx");  
+
+    // EACCES
+    MKDIR_A(SANDBOX_FILE("dir1/dir13"), "-w-------");         
+    MKDIR_A(SANDBOX_FILE("dir1/dir13/dir131"), "---------");
+    
+    // normal remove 
+    RMDIR_A(SANDBOX_FILE("dir1/dir12/dir122"));
+
+    // ENOTEMPTY
+    RMDIR_A(SANDBOX_FILE("dir1"));
+
+    // ENOENT
+    RMDIR_A(SANDBOX_FILE("dirz/dirx"));
+    
+    MKDIR_A(P("//"), "rwxrwxrwx");
+
+    // EACESS
+    MKDIR_A(P("/__test_suite_test_dir"), "rwxrwxrwx");
+    RMDIR_A(P("/__test_suite_test_dir"));
+
+    // root
+    MKDIR_A(P("/"), "rwxrwxrwx");
+
+    // empty
+    MKDIR_A(P(""), "rwxrwxrwx");
+    RMDIR_A(P(""));
+
+    // non-relative
+    MKDIR_A(P("some"),"rwxrwxrwx");
+    RMDIR_A(P("some"));
+
+    // invalid
+    MKDIR_A(P("/@#^&#$@"), "rwxrwxrwx");
+    RMDIR_A(P("/@#^&#$@"));
+    return true;
+}
+
+scenario
+bool makeremove2_scen()
+{
+    RMDIR_A(SANDBOX_FILE("dir1/dir13"));
+    MKDIR_A(SANDBOX_FILE("dir1/dir17"),  "rwxrwxrwx");
+    RMDIR_A(SANDBOX_FILE("dir1"));
+    
+    return true;
+}
+
+scenario
+bool openread_scen()
+{
+
+    DIRTPtr dirp = opendir_spec(context, SANDBOX_FILE("dir1"), requestErrorCode(), cancel_status);
+
+    if(!isNULL_VoidTPtr(dirp))
+    {
+        DirEntT *dirEnt;
+
+        do {
+            
+            dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+        } while(!isNULL_VoidTPtr(dirEnt->pdirent));
+
+        closedir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+        readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+    }
+
+    return true;
+}
+
+scenario
+bool openread2_scen()
+{
+
+    DIRTPtr dirp = opendir_spec(context, SANDBOX_FILE("dir1"), requestErrorCode(), cancel_status);
+
+    DUMP("openread2\n");
+    
+    if(!isNULL_VoidTPtr(dirp))
+    {
+        DirEntT *dirEnt;
+
+        dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+        dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+        dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+        MKDIR_A(SANDBOX_FILE("dir1/dir15"),"rwxrwxrwx");
+        do {
+            
+            dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+        } while(!isNULL_VoidTPtr(dirEnt->pdirent));
+
+        closedir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+        readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+    }
+
+    return true;
+}
+
+#define OPENCLOSE_A(name)\
+    dirp = opendir_spec(context, name, requestErrorCode(), cancel_status);\
+    if(!isNULL_VoidTPtr(dirp))\
+        closedir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+scenario
+bool openclose_scen()
+{
+    DIRTPtr dirp;
+
+    OPENCLOSE_A(SANDBOX_FILE("dir1"))
+    OPENCLOSE_A(SANDBOX_FILE("dir1/dir12/dir121"))
+    OPENCLOSE_A(SANDBOX_FILE("dirz"))
+    OPENCLOSE_A(P("/"))
+    OPENCLOSE_A(P("dirz"))
+    OPENCLOSE_A(P(""))
+
+    return true;
+}
+
+scenario
+bool openread64_scen()
+{
+
+    DIRTPtr dirp = opendir_spec(context, SANDBOX_FILE("dir1"), requestErrorCode(), cancel_status);
+
+    if(!isNULL_VoidTPtr(dirp))
+    {
+        DirEntT *dirEnt;
+
+        do {
+            
+            dirEnt = readdir64_spec(context, dirp, requestErrorCode());
+        } while(!isNULL_VoidTPtr(dirEnt->pdirent));
+
+        closedir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+        readdir64_spec(context, dirp, requestErrorCode());
+
+    }
+
+    return true;
+}
+
+scenario
+bool openread_r_scen()
+{
+
+    DIRTPtr dirp = opendir_spec(context, SANDBOX_FILE("dir1"), requestErrorCode(), cancel_status);
+
+    if(!isNULL_VoidTPtr(dirp))
+    {
+        DirEntT *dirEnt;
+        DirEntTPtr entry;
+        do {
+            dirEnt = readdir_r_spec(context, dirp, &entry, requestErrorCode(), cancel_status);
+        } while(!isNULL_VoidTPtr(dirEnt->pdirent));
+
+        closedir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+        readdir_r_spec(context, dirp, &entry, requestErrorCode(), cancel_status);
+    }
+
+    return true;
+}
+
+
+scenario
+bool openreadseek_scen()
+{
+
+    DIRTPtr dirp = opendir_spec(context, SANDBOX_FILE("dir1"), requestErrorCode(), cancel_status);
+
+    if(!isNULL_VoidTPtr(dirp))
+    {
+        DirEntT *dirEnt;
+        LongT pos;
+        int i;
+        List *positions = create_List(&type_LongTObj);
+
+        pos = telldir_spec(context, dirp);
+        append_List(positions, create_LongTObj(pos));
+
+        while(dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status), 
+            !isNULL_VoidTPtr(dirEnt->pdirent))   // read 
+        {
+            pos = telldir_spec(context, dirp);
+            append_List(positions, create_LongTObj(pos));
+        }
+
+        // go in back order
+        for(i=size_List(positions)-1; i>=0; i--)
+        {
+            LongTObj *posObj = get_List(positions, i);
+            pos = *posObj;
+            dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status);   
+            seekdir_spec(context ,dirp, pos, cancel_status);       
+        }
+        rewinddir_spec(context, dirp, cancel_status);
+
+        readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+        readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+        
+        // for rewinddir_spec "dirp in the middle" coverage
+        rewinddir_spec(context, dirp, cancel_status);
+        
+        while(dirEnt = readdir_spec(context, dirp, requestErrorCode(), cancel_status), 
+            !isNULL_VoidTPtr(dirEnt->pdirent));
+
+        // for rewinddir_spec "dirp in the end" coverage
+        rewinddir_spec(context, dirp, cancel_status);
+
+        readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+        // for closedir_spec "dirp in the end" coverage
+        closedir_spec(context, dirp, requestErrorCode(), cancel_status);
+     }
+
+    return true;
+}
+
+
+scenario dfsm dir_scenario =
+{
+    .init=init_dir_scenario,
+      
+    .actions=
+    {
+        makeremove_scen,
+        openread_scen,
+        openread2_scen,
+        makeremove2_scen,
+        openread_scen,
+        openread_r_scen,
+        openread64_scen,
+        openreadseek_scen,
+        openclose_scen,
+        NULL
+    },
+    .finish=finish_dir_scenario
+};
+
+

@@ -1,0 +1,247 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "ncurses/terminal/tests/terminfo_scenario.seh"
+
+#include "common/init.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "ncurses/terminal/terminal_model.seh"
+#include "process/process/process_model.seh"
+#include "ncurses/char/add_model.seh"
+#include "ncurses/terminal/terminfo_model.seh"
+#include "ncurses/string/add_model.seh"
+
+
+bool main_terminfo(int argc, char** argv);
+
+static CallContext context;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_terminfo_scenario(int argc,char** argv)
+{
+    context = createDefaultProcessForNCurses();
+    
+    initReqFilters();
+    terminfo = create_NCursesTerminfo();
+
+    return true;
+}
+
+
+static void finish_terminfo_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(terminfo_scenario);
+    terminateNCursesProcess(context);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool setupterm_scen()
+{
+    TerminalTPtr olver_term, xterm;
+    CallContext newCont=createDefaultProcessForNCurses();
+    ProcessState* ps =getProcessState_CallContext(newCont);
+
+
+    setupterm_spec(newCont, NULL, false);
+    termname_spec(newCont);
+    olver_term = ps->cur_term;
+    setupterm_spec(newCont, create_CString("xterm"), false);
+    termname_spec(newCont);
+    xterm = ps->cur_term;
+
+    set_curterm_spec(newCont, olver_term);
+    set_curterm_spec(newCont, xterm);
+    set_curterm_spec(newCont, olver_term);
+
+    del_curterm_spec(newCont, olver_term);
+    del_curterm_spec(newCont, xterm);
+
+    initscr_spec(newCont);
+    setupterm_spec(newCont, NULL, true);
+    termname_spec(newCont);
+    olver_term = ps->cur_term;
+    del_curterm_spec(newCont, olver_term);
+
+    terminateNCursesProcess(newCont);
+
+    return true;
+}
+
+
+ChTypeTArray* doScreenDump(CallContext context)
+{
+    CByteArray*    ba     = ncursesScreenDump(context);
+    ChTypeTArray*  charr  = create_ChTypeTArray_ScreenDump(ba, NCURSES_DEFY, NCURSES_DEFX);
+    return charr;
+}
+
+scenario
+bool putp_scen()
+{
+    NCursesWindow * stdwnd;
+    ChTypeTArray*  charr, *newarr;
+
+    setupterm_spec(context, NULL, false);
+    
+    putp_spec(context, create_CString(""), NCURSES_DEFY, false, PUTP_HOME);
+    putp_spec(context, create_CString(""), NCURSES_DEFY, false, PUTP_CR);
+    putp_spec(context, create_CString(""), NCURSES_DEFY, false, PUTP_CR);
+    putp_spec(context, create_CString(""), NCURSES_DEFY, false, PUTP_CLEAR);
+  
+    putp_spec(context, create_CString(""), NCURSES_DEFY, true, PUTP_HOME);
+    putp_spec(context, create_CString(""), NCURSES_DEFY, true, PUTP_CR);
+    putp_spec(context, create_CString(""), NCURSES_DEFY, true, PUTP_CR);
+    putp_spec(context, create_CString(""), NCURSES_DEFY, true, PUTP_CLEAR);
+
+    endwin_spec(context);
+
+    return true;
+}
+
+void printStringTPtr(char* prefix, StringTPtr ptr, char* postfix)
+{
+    if (isNULL_VoidTPtr(ptr))
+        traceFormattedUserInfo("%s<null>%s", prefix, postfix);
+    else if (isInvalid_VoidTPtr(ptr))
+        traceFormattedUserInfo("%s<-1>%s", prefix, postfix);
+    else
+    {
+        CString* str = readCString_VoidTPtr(ptr);
+        traceFormattedUserInfo("%s%s%s", prefix, toCharArray_CString(str), postfix);
+    }
+}
+
+scenario
+bool tigetters_scen()
+{
+    IntT res_int;
+    StringTPtr res_str;
+
+    res_int = tigetflag_spec(context, create_CString("am"));
+traceFormattedUserInfo("good: am:b   == %d\n", res_int);
+    res_int = tigetflag_spec(context, create_CString("xyzt"));
+traceFormattedUserInfo("bad:  xyzt:b == %d\n", res_int);
+    res_int = tigetnum_spec(context, create_CString("cols"));
+traceFormattedUserInfo("good: cols:n == %d\n", res_int);
+    res_int = tigetnum_spec(context, create_CString("xyzt"));
+traceFormattedUserInfo("bad:  xyzt:n == %d\n", res_int);
+    res_str = tigetstr_spec(context, create_CString("acsc"));
+printStringTPtr("good: acsc:s == ", res_str, "\n");
+    res_str = tigetstr_spec(context, create_CString("xyzt"));
+printStringTPtr("bad:  xyzt:s == ", res_str, "\n");
+    res_str = tparm_spec(context, create_CString("test %p1, %p2, %p3, %p4, %p5, %p6, %p7, %p8, %p9"),
+                         11, 32, 65, 1, 0, -1, 34, 65536, -345);
+printStringTPtr("tparm result == ", res_str,"\n");
+
+    initscr_spec(context);
+
+    readTerminfo_Terminfo(context, terminfo, create_CString(OLVERCT_TERMINFO_PATH));
+traceFormattedUserInfo("\n");
+
+    res_int = tigetflag_spec(context, create_CString("am"));
+traceFormattedUserInfo("good: am:b   == %d\n", res_int);
+    res_int = tigetflag_spec(context, create_CString("xyzt"));
+traceFormattedUserInfo("bad:  xyzt:b == %d\n", res_int);
+    res_int = tigetnum_spec(context, create_CString("cols"));
+traceFormattedUserInfo("good: cols:n == %d\n", res_int);
+    res_int = tigetnum_spec(context, create_CString("xyzt"));
+traceFormattedUserInfo("bad:  xyzt:n == %d\n", res_int);
+    res_str = tigetstr_spec(context, create_CString("acsc"));
+printStringTPtr("good: acsc:s == ", res_str, "\n");
+    res_str = tigetstr_spec(context, create_CString("xyzt"));
+printStringTPtr("bad:  xyzt:s == ", res_str, "\n");
+    res_str = tparm_spec(context, create_CString("test %p1, %p2, %p3, %p4, %p5, %p6, %p7, %p8, %p9"),
+                         11, 32, 65, 1, 0, -1, 34, 65536, -345);
+printStringTPtr("tparm result == ", res_str,"\n");
+
+    endwin_spec(context);
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm terminfo_scenario =
+{
+        .init = init_terminfo_scenario,
+        .finish = finish_terminfo_scenario,
+        .actions = {
+            tigetters_scen,
+             setupterm_scen,
+             putp_scen,
+            NULL
+    }
+};
+
+#ifdef NCURSES_TERMINFO_LOCAL_MAIN
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initProcessModel();
+    initPThreadModel();
+
+    initNcurses();
+}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+    //    system_assertion_handler = atAssertion( myAssertionExit );
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+    addTraceToFile("trace.xml");
+    // Run test scenario
+    main_terminfo(argc,argv);
+    
+    //  unloadSUT();
+    return 0;
+}
+
+#endif
+
+bool main_terminfo( int argc, char** argv )
+{
+    terminfo_scenario(argc, argv);
+    
+    return true;
+}

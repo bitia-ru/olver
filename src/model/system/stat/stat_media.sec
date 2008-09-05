@@ -1,0 +1,178 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/common_media.seh"
+#include "math/math/math_data.seh"
+#include "system/stat/stat_media.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+
+void initSystemStatSubsystem(void)
+{
+    // Set up mediators
+    set_mediator_acct_spec      ( acct_media       );
+    set_mediator_clock_spec     ( clock_media      );
+    set_mediator_getloadavg_spec( getloadavg_media );
+    set_mediator_times_spec     ( times_media      );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** acct_spec **/
+mediator acct_media for specification
+IntT acct_spec( CallContext context, CString* filename, ErrorCode * errno )
+{
+    call
+    {
+        IntT res ;
+        TSCommand command = create_TSCommand();
+
+        if (filename!=NULL)
+        {
+            format_TSCommand( &command, "acct:$(int)$(str)", create_IntTObj(1), filename);
+        }
+        else
+        {
+            format_TSCommand( &command, "acct:$(int)", create_IntTObj(0));
+        }
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state {
+        if ( acct_spec == 0 ) {
+            SystemState * systemState = getSystemState_CallContext( context );
+            if ( filename == NULL ) { clearFilename_StatState( systemState->statState           ); }
+                               else { setFilename_StatState  ( systemState->statState, filename ); }
+        }
+    }
+}
+
+
+/** clock_spec **/
+mediator clock_media for specification
+ClockT clock_spec( CallContext context )
+{
+    call
+    {
+        ClockT res ;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "clock");
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readLong_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+    state {
+        SystemState * systemState = getSystemState_CallContext( context );
+        setClock_StatState( systemState->statState, clock_spec );
+    }
+}
+
+
+/** getloadavg_spec **/
+mediator getloadavg_media for specification
+GetLoadAvgReturnType * getloadavg_spec( CallContext context, IntT nelem )
+{
+    call
+    {
+        GetLoadAvgReturnType*  res;
+        List * loadAvg = create_List( & type_Unifloat );
+        IntT retVal, i;
+        TSCommand command = create_TSCommand();
+
+        format_TSCommand( &command, "getloadavg:$(int)", create_IntTObj(nelem));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            for (i=0;i<nelem;i++)
+            {
+                Unifloat* d = readUnifloat_TSStream(&command.response);
+                append_List(loadAvg, d);
+            }
+            retVal = readInt_TSStream(&command.response);
+        }
+
+        destroy_TSCommand(&command);
+
+        return create_GetLoadAvgReturnType( loadAvg, retVal );
+    }
+    state {
+        SystemState * systemState = getSystemState_CallContext( context );
+        setLoadAvg_StatState( systemState->statState, getloadavg_spec->retVal );
+    }
+}
+
+/** times_spec **/
+mediator times_media for specification
+TimesReturnType * times_spec( CallContext context, ErrorCode * errno )
+{
+    call
+    {
+        TimesReturnType * res;
+        ClockT tms_utime;
+        ClockT tms_stime;
+        ClockT tms_cutime;
+        ClockT tms_cstime;
+        ClockT retVal;
+        TSCommand command = create_TSCommand();
+
+
+        format_TSCommand( &command, "times");
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            tms_utime  = readLong_TSStream( & command.response );
+            tms_stime  = readLong_TSStream( & command.response );
+            tms_cutime = readLong_TSStream( & command.response );
+            tms_cstime = readLong_TSStream( & command.response );
+            retVal     = readLong_TSStream( & command.response );
+            * errno    = readInt_TSStream ( & command.response );
+        }
+
+        destroy_TSCommand(&command);
+
+        return create_TimesReturnType( retVal, create_TmsT(tms_utime, tms_stime, tms_cutime, tms_cstime));
+    }
+}

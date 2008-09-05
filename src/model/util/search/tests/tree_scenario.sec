@@ -1,0 +1,264 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/search/tests/tree_scenario.seh"
+#include "util/search/tree_model.seh"
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+#define MAX_TREE_SIZE   65536
+
+static VoidTPtr    arrPointers[MAX_TREE_SIZE];
+
+static int treeData1[] = {1, 2, 3, 4, 5, 6, 7, 8};
+static int treeData2[] = {5, 8, 3, 7, 11, 24, 0};
+static int treeData3[] = {1, 0, 3, 0x80001001 , 0x7FFFFFFF, 0x80002000, 7};
+static int treeData4[] = {5, 4, 16, 13};
+
+#define TREE_TEST_SEQUENCE(arr) \
+    {(int)sizeof(arr)/sizeof(int), (int*)arr}
+
+struct TreeTestSequence
+{
+    int size;
+    int *data;
+} static treeTestSequence[] = 
+{
+    TREE_TEST_SEQUENCE(treeData1),
+    TREE_TEST_SEQUENCE(treeData2),
+    TREE_TEST_SEQUENCE(treeData3),
+    TREE_TEST_SEQUENCE(treeData4)
+};
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_tree_scenario(int argc, char** argv)
+{
+
+    /* Init test scenario data */
+    context = getContext();
+    
+    return true;
+}
+
+static void finish_tree_scenario(void)
+{
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool tree_scen()
+{
+    int itree, inode;
+    for(itree=0;itree<sizeof(treeTestSequence)/sizeof(struct TreeTestSequence);
+                                        itree++)
+    {
+        TreeNodeFunctionResult  *rootres;
+        TreeNodeFunctionResult  *searchRes;
+
+        /* Add first pointer and remember the address of the rootp */
+        arrPointers[0] = createVirtualPointer(context,
+            (sut_ptr_t)(unsigned int)treeTestSequence[itree].data[0]);
+        rootres = tsearch_spec(context, arrPointers[0], NULL_VoidTPtr);
+
+        /* Add all nodes */
+        for(inode=1;inode<treeTestSequence[itree].size;inode++)
+        {
+            arrPointers[inode] = createVirtualPointer(context,
+                (sut_ptr_t)(unsigned int)treeTestSequence[itree].data[inode]);
+            
+            rootres = tdelete_spec(context, arrPointers[inode],
+                rootres->returned_proot);
+
+            // Try to find this node (we know it does not exist)
+            twalk_spec(context, rootres->returned_proot,
+                rootres->returned_proot);
+            tfind_spec(context, arrPointers[inode], rootres->returned_proot);
+            rootres = tsearch_spec(context, arrPointers[inode],
+                rootres->returned_proot);
+        }
+
+        /* Search each node again without twalk */
+        for(inode=0;inode<treeTestSequence[itree].size;inode++)
+        {
+            rootres = tsearch_spec(context, arrPointers[inode],
+                rootres->returned_proot);
+        }
+
+        /* Find each node without twalk */
+        for(inode=treeTestSequence[itree].size-1;inode>=0;inode--)
+        {
+            tfind_spec(context, arrPointers[inode], rootres->returned_proot);
+        }
+
+        /* Search each node again */
+        for(inode=0;inode<treeTestSequence[itree].size;inode++)
+        {
+            twalk_spec(context, rootres->returned_proot,
+                rootres->returned_proot);
+            rootres = tsearch_spec(context, arrPointers[inode],
+                rootres->returned_proot);
+        }
+
+        /* Find each node */
+        for(inode=treeTestSequence[itree].size-1;inode>=0;inode--)
+        {
+            twalk_spec(context, rootres->returned_proot,
+                rootres->returned_proot);
+            tfind_spec(context, arrPointers[inode], rootres->returned_proot);
+        }
+
+
+        /* Find each node */
+        for(inode=treeTestSequence[itree].size-1;inode>=0;inode--)
+        {
+            twalk_spec(context, rootres->returned_proot,
+                rootres->returned_proot);
+            searchRes=tsearch_spec(context, arrPointers[inode],
+                rootres->returned_proot);
+            twalk_spec(context, searchRes->returned_proot,
+                searchRes->returned_value->address);
+        }
+
+        rootres=searchRes;
+        
+        /* Delete each node */
+        for(inode=0;inode<treeTestSequence[itree].size;inode++)
+        {
+            twalk_spec(context, rootres->returned_proot,
+                rootres->returned_proot);
+            rootres = tdelete_spec(context, arrPointers[inode],
+                rootres->returned_proot);
+
+            if( !isNULL_VoidTPtr(rootres->returned_proot))
+            {
+                twalk_spec(context, rootres->returned_proot,
+                    rootres->returned_proot);
+                /* we're deleting already deleted node, no need to
+                    remember rootres */
+                tdelete_spec(context, arrPointers[inode],
+                    rootres->returned_proot);
+            } else break;
+
+         }
+
+
+    }
+    
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm tree_scenario =
+{
+    .init = init_tree_scenario,
+    .finish = finish_tree_scenario,
+    .actions = {
+        tree_scen,
+        NULL
+    }
+};
+
+#ifdef UTIL_SEARCH_TREE_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "util/search/tree_media.seh"
+
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+  reinitControlCenter();
+  initCommonModel();
+  initCommonMedia();
+  //initCommonScenarioState();
+
+  initSystemConfiguration();
+  initSystemModel();
+  initProcessModel();
+  initPThreadModel();
+
+  initUtilSearchTreeSubsystem();
+}
+
+bool main_util_search_tree( int argc, char** argv )
+{
+    addTraceToFile("trace.xml");
+  tree_scenario(argc,argv);
+  return true;
+}
+
+
+int main(int argc, char** argv)
+{
+  //
+  initTestSystem();
+  loadSUT();
+
+  addTraceToFile("test.xml");
+
+  // Set up tracer
+  //setTraceEncoding("windows-1251");
+
+  // Run test scenario
+  main_util_search_tree(argc,argv);
+
+//  unloadSUT();
+  return 0;
+}
+#endif
+

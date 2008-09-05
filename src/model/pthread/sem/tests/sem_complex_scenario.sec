@@ -1,0 +1,541 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/sem/sem_model.seh"
+#include "pthread/sem/tests/sem_scenario.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include <atl/integer.h>
+
+#include "sem_scenario.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+// has to be bigger than 1
+#define SEM_THREAD_NUM 3
+#define SEM_SEMAPHORE_NUMBER 2
+#define COUNTER_MAX 1
+
+int USE_NAMED_OR_UNNAMED_SEMAPHORE = 1; // 1 - named 2 - unnamed
+
+int getSemaphoreInitValue(int i, int j)
+{
+    return 1;
+}
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static CallContext contexts[SEM_THREAD_NUM];
+static PThreadSemaphoreTPtr sems[SEM_THREAD_NUM][SEM_SEMAPHORE_NUMBER];
+static PThreadSemaphoreTPtr sems_area[SEM_THREAD_NUM][SEM_SEMAPHORE_NUMBER]; // only for unnamed semaphores
+
+#define maxSize 1024
+
+static StringTPtr semaphore_name[SEM_THREAD_NUM][SEM_SEMAPHORE_NUMBER];
+static char* sem_name[SEM_SEMAPHORE_NUMBER] = {"/semaphore-1043", "/semaphore-10043"};
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+void printScenarioModel(void)
+{
+    int j;
+    for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+    {
+        printfSemaphoreModel(getSemaphore(sems[0][j], contexts[0]));
+    }
+}
+
+/* Scenario model state.*/
+typedef struct
+{
+    bool initialized; // Answer to question - have the semaphores been opened ?
+    List *sems_model; // List of the semaphores
+} Complex_Scen_State;
+
+specification typedef Complex_Scen_State Complex_Scen_State_Spec = {
+};
+
+Complex_Scen_State_Spec * create_Complex_Scen_State_Spec(
+    bool initialized,
+    List *sems_model
+)
+{
+    return create(&type_Complex_Scen_State_Spec,
+        initialized,
+        sems_model);
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+bool isScenarioSemsInitialized(void)
+{
+    int i,j;
+    for (i=0; i<SEM_THREAD_NUM; i++)
+    {
+        for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+        {
+            if (equals_VoidTPtr(SUT_SEM_FAILED, sems[i][j]))
+                return false;
+        }
+    }
+    return true;
+}
+
+bool isCloseCanBePerfomed(void)
+{
+    int j;
+
+    if (!isScenarioSemsInitialized())
+        return false;
+
+    for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+    {
+        Semaphore* sem_m = getSemaphore(sems[0][j], contexts[0]);
+        if (size_List(sem_m->wait_list)!=0)
+            return false;
+    }
+    return true;
+}
+
+bool isThreadBlockedCS(CallContext thread)
+{
+    int j;
+    Set *locked_threads = create_Set(&type_ThreadIdObj);
+    Semaphore *sem_m_tmp;
+    for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+    {
+        sem_m_tmp = getSemaphore(sems[0][j], contexts[0]);
+        addAll_Set(locked_threads, toSet_List(sem_m_tmp->wait_list));
+    }
+
+    if (contains_Set(locked_threads, create_ThreadIdObj(thread)))
+        return true;
+    return false;
+}
+
+Complex_Scen_State_Spec* get_Sem_Complex_State(void)
+{
+    bool initialized = false;
+    int j;
+
+    List *returned_state = create_List(&type_Semaphore);
+    if (isScenarioSemsInitialized())
+        initialized = true;
+
+    if (initialized)
+    {
+        for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+        {
+            append_List(returned_state, getSemaphore(sems[0][j], contexts[0]));
+        }
+    }
+
+    return create_Complex_Scen_State_Spec(initialized, returned_state);
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+void cleanup_complex_scenario(void)
+{
+    int i, j;
+
+    /* delete threads */
+    for (i = 1; i < SEM_THREAD_NUM; i++)
+    {
+        if (!isWrong_ThreadId(contexts[i]))
+        {
+            // TODO: delete thread
+        }
+    }
+
+    /* deallocate memory */
+    /*
+    for (i=1; i<SEM_THREAD_NUM; i++)
+    {
+        for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+        {
+            if (!isNULL_VoidTPtr(semaphore_name[i][j]))
+            {
+                deallocateMemoryBlock(contexts[i], semaphore_name[i][j]);
+                if (USE_NAMED_OR_UNNAMED_SEMAPHORE == 2)
+                {
+                    if (i==0) deallocateMemoryBlock(contexts[i], sems_area[i][j]);
+                }
+            }
+        }
+    }*/
+}
+
+void clean_sems(void)
+{
+    int j;
+    for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+    {
+        sem_unlink_spec(contexts[0], semaphore_name[0][j], errno_model);
+    }
+}
+
+
+bool init_sem_complex_scen_data()
+{
+    int i, j;
+    for (i=0; i<SEM_THREAD_NUM; i++)
+    {
+        for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+        {
+            writeCString_VoidTPtr(semaphore_name[i][j], create_CString(sem_name[j]));
+        }
+    }
+
+    clean_sems();
+    
+    return true;
+}
+
+bool open_sems()
+{
+    if (USE_NAMED_OR_UNNAMED_SEMAPHORE == 1)
+    {
+        int i,j;
+
+        /* create open flags */
+        OpenFlags openFlags = {ReadOnly, Blocking, false, true, false, false, false, false};
+
+        FilePermission* owner = create_FilePermission(true, true, false);
+        FilePermission* group = create_FilePermission(false, false, false);
+        FilePermission* other = create_FilePermission(false, false, false);
+        FilePermissions *filePermisions = create_FilePermissions(owner, group, other, Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+
+        if (isScenarioSemsInitialized())
+            return true;
+        verbose("open_sems_scen\n");
+        for (i=0; i<SEM_THREAD_NUM; i++)
+        {
+            for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+            {
+                 sems[i][j] = sem_open_spec(contexts[i], semaphore_name[i][j], openFlags, filePermisions, getSemaphoreInitValue(0, 0), errno_model);
+            }
+        }
+    }
+    else if (USE_NAMED_OR_UNNAMED_SEMAPHORE == 2)
+    {
+        int init_pshared = 1, i, j;
+        if (isScenarioSemsInitialized())
+            return true;
+        verbose("open_sems_scen unnamed\n");
+        for (i=0; i<SEM_THREAD_NUM; i++)
+        {
+            for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+            {
+                sems[i][j] = sems_area[i][j];
+                if (i==0)
+                    sem_init_spec(contexts[i], sems[i][j], init_pshared, getSemaphoreInitValue(0, 0), errno_model);
+            }
+        }
+    }
+    else
+        return false;
+
+    return true;
+}
+
+bool close_sems()
+{
+    if (USE_NAMED_OR_UNNAMED_SEMAPHORE == 1)
+    {
+        int i,j;
+        if (!isCloseCanBePerfomed())
+            return true;
+        verbose("close_sems_scen\n");
+        for (i=0; i<SEM_THREAD_NUM; i++)
+        {
+            for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+            {
+                sem_close_spec(contexts[i], sems[i][j], errno_model);
+                sems[i][j] = NULL_VoidTPtr;
+            }
+        }
+
+        for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+        {
+            sem_unlink_spec(contexts[0], semaphore_name[0][j], errno_model);
+        }
+    }
+    else if (USE_NAMED_OR_UNNAMED_SEMAPHORE == 2)
+    {
+        int init_pshared = 1, i, j;
+        if (!isCloseCanBePerfomed())
+            return true;
+        verbose("close_sems_scen unnamed\n");
+        for (i=0; i<SEM_THREAD_NUM; i++)
+        {
+            for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+            {
+                if (i==0)
+                    sem_destroy_spec(contexts[i], sems[i][j], errno_model);
+                sems[i][j] = NULL_VoidTPtr;
+            }
+        }
+    }
+    else
+        return false;
+
+    return true;
+}
+
+bool init_sem_complex_scenario(int argc, char** argv)
+{
+    int i, j;
+    bool result = true;
+
+    setFindFirstSeriesOnly(true);
+    setTSTimeModel(NotUseTSTime);
+    setWTimeMSec(SERIALIZATION_TIME*3);
+
+    /* Create threads */
+    context = getContext();
+    contexts[0] = context;
+    for (i=1; i<SEM_THREAD_NUM; i++)
+    {
+        contexts[i] = createThread();
+        if (isWrong_ThreadId(contexts[i]))
+            result = false;
+    }
+
+    /* Allocate memory for semaphore names */
+    for (i=0; i<SEM_THREAD_NUM; i++)
+    {
+        for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+        {
+            semaphore_name[i][j] = allocateMemoryBlock(contexts[i], maxSize);
+            if (isNULL_VoidTPtr(semaphore_name[i][j]))
+                return false;
+            if (USE_NAMED_OR_UNNAMED_SEMAPHORE == 2)
+            {
+                // Use unnamed semaphore
+                if (i==0)
+                    sems_area[i][j] = allocateMemoryBlock(contexts[i], 256);
+                else
+                    sems_area[i][j] = sems_area[0][j];
+                if (isNULL_VoidTPtr(sems_area[i][j]))
+                    return false;
+            }
+        }
+    }
+
+    /* Initialize scenario data */
+    if (!init_sem_complex_scen_data())
+        result = false;
+
+    set_assertion_exit_callback();
+
+    if (!result)
+        cleanup_complex_scenario();
+
+    if (result)
+    {
+        result = open_sems();
+    }
+
+    return result;
+}
+
+void finish_sem_complex_scenario(void)
+{
+    close_sems();
+    cleanup_complex_scenario();
+    TEST_SCENARIO_VERDICT_VERBOSE(sem_complex_scenario);
+}
+
+bool isComplexModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+Map* saveComplexModelState(void)
+{
+    return clone(systems);
+}
+
+void restoreComplexModelState(Map* saved_state)
+{
+    systems = saved_state;
+}
+
+bool isDeadlockIfThreadLocked(CallContext thread)
+{
+    int j;
+    Set *locked_threads = create_Set(&type_ThreadIdObj);
+    Semaphore *sem_m_tmp;
+    for (j=0; j<SEM_SEMAPHORE_NUMBER; j++)
+    {
+        sem_m_tmp = getSemaphore(sems[0][j], contexts[0]);
+        addAll_Set( locked_threads, toSet_List(sem_m_tmp->wait_list));
+    }
+    //verbose("size_Set(locked_threads) %d\n", size_Set(locked_threads));
+
+    if (contains_Set(locked_threads, create_ThreadIdObj(thread)))
+        return true;
+    if (size_Set(locked_threads) >= SEM_THREAD_NUM - 1)
+        return true;
+
+    return false;
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+static scenario
+bool sem_post_scen()
+{
+    Semaphore* sem_m_tmp;
+    if (!isScenarioSemsInitialized())
+        return true;
+    iterate(int i=0;i<SEM_THREAD_NUM; i++;)
+        iterate(int j=0;j<SEM_SEMAPHORE_NUMBER; j++;)
+        {
+            verbose("try to call post [%d][%d]\n", i, j);
+            if (!isThreadBlockedCS(contexts[i]))
+//            if (sem_m_tmp->counter > 0)
+            {
+                verbose("post: not blocked\n");
+                sem_m_tmp = getSemaphore(sems[i][j], contexts[i]);
+
+                if (sem_m_tmp->counter<COUNTER_MAX)
+                {
+                    verbose("POST [%d][%d] %d\n", i, j, sem_m_tmp->counter);
+                    sem_post_spec(contexts[i], sems[i][j]);
+                    ts_sleep_msec(300);
+                }
+            }
+            else
+                verbose("post: blocked\n");
+        }
+    return true;
+}
+
+static scenario
+bool sem_wait_scen()
+{
+    Semaphore* sem_m_tmp;
+    if (!isScenarioSemsInitialized())
+        return true;
+    iterate(int i=0;i<SEM_THREAD_NUM; i++;)
+        iterate(int j=0;j<SEM_SEMAPHORE_NUMBER; j++;)
+        {
+            verbose("try to call wait [%d][%d]\n", i, j);
+            if (!isThreadBlockedCS(contexts[i]))
+//            if (((i == 0) && !isThreadBlockedCS(contexts[i])) ||
+//                ((i > 0) && (sem_m_tmp->counter > 0)))
+            {
+                verbose("wait: not blocked\n");
+
+                sem_m_tmp = getSemaphore(sems[i][j], contexts[i]);
+                if (sem_m_tmp->counter>0 || !isDeadlockIfThreadLocked(contexts[i]))
+                {
+                    verbose("WAIT [%d][%d] %d\n", i, j, sem_m_tmp->counter);
+                    sem_wait_spec(contexts[i], sems[i][j]);
+                }
+            }
+            else
+                verbose("wait: blocked\n");
+        }
+    return true;
+}
+
+static scenario
+bool sem_trywait_scen()
+{
+    Semaphore* sem_m_tmp;
+    if (!isScenarioSemsInitialized())
+        return true;
+    iterate (int i=0; i<SEM_THREAD_NUM; i++;)
+        iterate (int j=0; j<SEM_SEMAPHORE_NUMBER; j++;)
+        {
+            //verbose("try to call wait\n");
+            if (!isThreadBlockedCS(contexts[i]))
+            {
+                sem_m_tmp = getSemaphore(sems[i][j], contexts[i]);
+                verbose("TRYWAIT [%d][%d]: %d\n", i, j, sem_m_tmp->counter);
+                sem_trywait_spec(contexts[i], sems[i][j], errno_model);
+            }
+        }
+    return true;
+}
+
+static scenario
+bool sem_getvalue_scen()
+{
+    IntT val, *sval = &val;
+    if (!isScenarioSemsInitialized())
+        return true;
+    iterate(int i=0;i<SEM_THREAD_NUM; i++;)
+        iterate(int j=0;j<SEM_SEMAPHORE_NUMBER; j++;)
+        {
+            verbose("threads: %d %d %d\n", isThreadBlockedCS(contexts[0]), isThreadBlockedCS(contexts[1]), isThreadBlockedCS(contexts[2]));
+            if (!isThreadBlockedCS(contexts[i]))
+            {
+                verbose("GETVALUE [%d][%d]\n", i, j);
+                sem_getvalue_spec(contexts[i], sems[i][j], sval, errno_model);
+            }
+            else
+            {
+                verbose("cannot GETVALUE [%d][%d]\n", i, j);
+            }
+        }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm sem_complex_scenario =
+{
+    .init = init_sem_complex_scenario,
+    .finish = finish_sem_complex_scenario,
+    .getState = (PtrGetState)get_Sem_Complex_State,
+    .saveModelState = (PtrSaveModelState)saveComplexModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreComplexModelState,
+    .isStationaryState = (PtrIsStationaryState)isComplexModelStateStationary,
+    .actions = {
+        sem_wait_scen,
+        sem_trywait_scen,
+        sem_post_scen,
+        sem_getvalue_scen,
+        NULL
+    }
+};

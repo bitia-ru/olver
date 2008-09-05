@@ -1,0 +1,972 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+#include "config/system_config.seh"
+#include "pthread/tls/tls_config.h"
+#include "pthread/tls/tls_model.seh"
+#include "memory/heap/heap_model.seh"
+#include "data/errno_model.seh"
+
+#pragma SEC subsystem tls "pthread.tls"
+
+
+/* 
+   The group of functions 'pthread.tls' consists of: 
+       pthread_getspecific [2]
+       pthread_setspecific [2]
+       pthread_key_create [2]
+       pthread_key_delete [2]
+ */
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+    
+    refers
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+NAME
+
+    pthread_getspecific, pthread_setspecific - thread-specific data management
+
+SYNOPSIS
+
+    [THR] [Option Start] #include <pthread.h>
+
+    void *pthread_getspecific(pthread_key_t key);
+    int pthread_setspecific(pthread_key_t key, const void *value); [Option End]
+
+DESCRIPTION
+
+    The pthread_getspecific() function shall return the value currently bound 
+    to the specified key on behalf of the calling thread.
+
+    The pthread_setspecific() function shall associate a thread-specific value 
+    with a key obtained via a previous call to pthread_key_create(). Different 
+    threads may bind different values to the same key. These values are 
+    typically pointers to blocks of dynamically allocated memory that have been 
+    reserved for use by the calling thread.
+
+    The effect of calling pthread_getspecific() or pthread_setspecific() with a 
+    key value not obtained from pthread_key_create() or after key has been 
+    deleted with pthread_key_delete() is undefined.
+
+    Both pthread_getspecific() and pthread_setspecific() may be called from a 
+    thread-specific data destructor function. A call to pthread_getspecific() 
+    for the thread-specific data key being destroyed shall return the value 
+    NULL, unless the value is changed (after the destructor starts) by a call 
+    to pthread_setspecific(). Calling pthread_setspecific() from a 
+    thread-specific data destructor routine may result either in lost storage 
+    (after at least PTHREAD_DESTRUCTOR_ITERATIONS attempts at destruction) or 
+    in an infinite loop.
+
+    Both functions may be implemented as macros.
+
+RETURN VALUE
+
+    The pthread_getspecific() function shall return the thread-specific data 
+    value associated with the given key. If no thread-specific data value is 
+    associated with key, then the value NULL shall be returned.
+
+    If successful, the pthread_setspecific() function shall return zero; 
+    otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    No errors are returned from pthread_getspecific().
+
+    The pthread_setspecific() function shall fail if:
+
+    [ENOMEM]
+        Insufficient memory exists to associate the non-NULL value with the key.
+
+    The pthread_setspecific() function may fail if:
+
+    [EINVAL]
+        The key value is invalid.
+
+    These functions shall not return an error code of [EINTR].
+*/
+#include "system/system/system_model.seh"
+specification
+ThreadSpecific* pthread_getspecific_spec( CallContext context, PThreadKey* key, ErrorCode * errno)
+{
+    ThreadState *thread = getThreadState_CallContext(context);
+
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("","Key != NULL", key != NULL );
+
+        /* [Implicit precondition] */
+        REQ("","Key address should not be NULL", !isNULL_VoidTPtr(key->address) );
+
+        /* [Implicit precondition] */
+        REQ("","ThreadState is required", thread !=NULL );
+        
+        /* The effect of calling pthread_getspecific() or pthread_setspecific()
+         * with a key value not obtained from pthread_key_create() or after key has 
+         * been deleted with pthread_key_delete() is undefined.
+         */
+
+        // TODO: set this REQ optional, maybe function will return error.
+        REQ("app.pthread_getspecific.08","The effect of calling with invalid key is undefined",
+             containsKey_Map(thread->key_specific, key) 
+           );
+
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        ThreadSpecific *foundSpecif = get_Map(thread->key_specific, key);     
+
+        ERROR_BEGIN(POSIX_PTHREAD_GETSPECIFIC, "", *errno!= SUT_EOK, *errno)
+
+           /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_GETSPECIFIC, EINTR,"pthread_getspecific.03");
+        
+        ERROR_END()
+
+        /*
+         *  The pthread_getspecific() function shall return the thread-specific
+         *  data value associated with the given key. If no thread-specific 
+         *  data value is associated with key, then the value NULL shall be 
+         *  returned.
+         */
+        REQ("pthread_getspecific.01.01;pthread_getspecific.01.02;pthread_getspecific.05",
+            "pthread_getspecific() function shall return valid value or NULL", 
+            equals(
+                foundSpecif,
+                pthread_getspecific_spec
+                )
+            );
+
+        /* 
+         * Both pthread_getspecific() and pthread_setspecific() may be called from 
+         * a thread-specific data destructor function. 
+         */
+        if(inDestructor(context))
+        {
+            REQ("pthread_getspecific.04", "shall be callable from a destructor function",
+                true
+                );
+        }
+
+        return true;
+    }
+}
+
+specification
+IntT pthread_setspecific_spec( CallContext context, PThreadKey* key, VoidTPtr value)
+{
+    ThreadState *thread = getThreadState_CallContext(context);
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("","Key address should not be NULL", !isNULL_VoidTPtr(key->address) );
+        
+        /* The effect of calling pthread_getspecific() or pthread_setspecific()
+         * with a key value not obtained from pthread_key_create() or after key has 
+         * been deleted with pthread_key_delete() is undefined.
+         */
+        if(!PTHREAD_TLS_TEST_DELETED_KEYS)
+        {
+            REQ("app.pthread_setspecific.08","The effect of calling with invalid key is undefined",
+                 containsKey_Map(thread->key_specific, key) 
+               );
+        }
+
+        return true;
+    }
+    coverage C
+    {
+        return { TheOnlyBranch, "The only branch" };
+    }
+    post
+    {
+        ThreadSpecific * thread_specif;
+
+        ERROR_BEGIN(POSIX_PTHREAD_SETSPECIFIC, "pthread_setspecific.04.02", pthread_setspecific_spec != 0, pthread_setspecific_spec)
+           /*
+            * The pthread_setspecific() function shall fail if:
+            *  [ENOMEM]
+            *      Insufficient memory exists to associate the non-NULL value with the key.
+            */
+            ERROR_UNCHECKABLE(POSIX_PTHREAD_SETSPECIFIC, ENOMEM, "pthread_setspecific.05.01","insufficient memory")
+        
+           /*
+            * The pthread_setspecific() function may fail if:
+            *  [EINVAL]
+            *      The key value is invalid.
+            */
+            ERROR_MAY(POSIX_PTHREAD_SETSPECIFIC, EINVAL,"pthread_setspecific.06.01", 
+                      !containsKey_Map(thread->key_specific, key) 
+                     );
+        
+           /*
+            * These functions shall not return an error code of [EINTR].
+            */
+            ERROR_NEVER(POSIX_PTHREAD_SETSPECIFIC, EINTR,"pthread_setspecific.07")
+        
+        ERROR_END()
+
+        /*
+         * If successful, the pthread_setspecific() function shall return zero;
+         */
+        REQ("pthread_setspecific.04.01","If successful, the function shall return zero", pthread_setspecific_spec==0)
+
+        thread_specif = get_Map(thread->key_specific, key);
+
+        /* The pthread_setspecific() function shall associate a thread-specific 
+         * value with a key obtained via a previous call to pthread_key_create().
+         */
+        REQ("?pthread_setspecific.01","shall associate a thread-specific value with a key",
+            (thread_specif != NULL) && equals_VoidTPtr(thread_specif->address, value)
+           );
+       
+        /* 
+         * Both pthread_getspecific() and pthread_setspecific() may be called from 
+         * a thread-specific data destructor function. 
+         */
+        if(inDestructor(context))
+        {
+            REQ("pthread_setspecific.03", "shall be callable from a destructor function",
+                true
+                );
+        }
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_key_create - thread-specific data key creation
+
+SYNOPSIS
+
+    [THR] [Option Start] #include <pthread.h>
+
+    int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)); [Option End]
+
+DESCRIPTION
+
+    The pthread_key_create() function shall create a thread-specific data key 
+    visible to all threads in the process. Key values provided by 
+    pthread_key_create() are opaque objects used to locate thread-specific 
+    data. Although the same key value may be used by different threads, the 
+    values bound to the key by pthread_setspecific() are maintained on a 
+    per-thread basis and persist for the life of the calling thread.
+
+    Upon key creation, the value NULL shall be associated with the new key in 
+    all active threads. Upon thread creation, the value NULL shall be 
+    associated with all defined keys in the new thread.
+
+    An optional destructor function may be associated with each key value. At 
+    thread exit, if a key value has a non-NULL destructor pointer, and the 
+    thread has a non-NULL value associated with that key, the value of the key 
+    is set to NULL, and then the function pointed to is called with the 
+    previously associated value as its sole argument. The order of destructor 
+    calls is unspecified if more than one destructor exists for a thread when 
+    it exits.
+
+    If, after all the destructors have been called for all non-NULL values with 
+    associated destructors, there are still some non-NULL values with 
+    associated destructors, then the process is repeated. If, after at least 
+    {PTHREAD_DESTRUCTOR_ITERATIONS} iterations of destructor calls for 
+    outstanding non-NULL values, there are still some non-NULL values with 
+    associated destructors, implementations may stop calling destructors, or 
+    they may continue calling destructors until no non-NULL values with 
+    associated destructors exist, even though this might result in an infinite 
+    loop.
+
+RETURN VALUE
+
+    If successful, the pthread_key_create() function shall store the newly 
+    created key value at *key and shall return zero. Otherwise, an error number 
+    shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_key_create() function shall fail if:
+
+    [EAGAIN]
+        The system lacked the necessary resources to create another 
+        thread-specific data key, or the system-imposed limit on the total 
+        number of keys per process {PTHREAD_KEYS_MAX} has been exceeded.
+    [ENOMEM]
+        Insufficient memory exists to create the key.
+
+    The pthread_key_create() function shall not return an error code of [EINTR].
+
+*/
+specification
+IntT pthread_key_create_spec( CallContext context, VoidTPtr keyaddress, PThreadKeyDestructor destruct )
+{
+IntT valMax = getSystemConfigurationValue(context,SUT_SC_THREAD_KEYS_MAX);
+IntT numKeys = getNumberOfKeysByProcess(context.process);
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("","Key address should not be NULL", !isNULL_VoidTPtr(keyaddress) );
+
+        /* [Implicit precondition] */
+        REQ("","THREAD_KEYS_MAX expected to have definite limitation for this specification to have full coverage", 
+            valMax!=SC_VALUE_NO_LIMIT && valMax!=SC_VALUE_UNKNOWN);
+        
+        /* [INFORMATIVE SECTION: RATIONALE]
+         * The pthread_key_create() function performs no implicit 
+         * synchronization. It is the responsibility of the programmer to 
+         * ensure that it is called exactly once per key before use of the key. 
+         */
+        REQ("","pthread_key_delete shall be called before calling pthread_key_create again for this key", 
+            NULL==getObjectInMemory(keyaddress) );
+
+        /* [Consistency with legacy memory management mode] */
+        REQ("app.brk.04;app.sbrk.04","Consistency with legacy memory management mode", isMallocAllowed(context) );
+        
+        return true;
+    }
+    coverage C
+    {
+        if(destruct)
+        {
+            if(numKeys < valMax)
+                return {KeyDestructNotMax, "The key has destructor, number of keys less than PTHREAD_KEYS_MAX"};
+            else
+                return {KeyDestructMax, "The key has destructor, number of keys is more or equal to PTHREAD_KEYS_MAX"};
+        } else {
+            if(numKeys < valMax)
+                return {KeyNoDestructNotMax, "The key has no destructor, number of keys less than PTHREAD_KEYS_MAX"};
+            else
+                return {KeyNoDestructMax, "The key has no destructor, number of keys is more or equal to PTHREAD_KEYS_MAX"};
+        }
+    }
+    post
+    {
+        PThreadKey *key;
+        ProcessId currProcess = {context.system, context.process};
+        Map* threads;
+        int mapSize;
+        int ind;
+
+        ERROR_BEGIN(POSIX_PTHREAD_KEY_CREATE, "pthread_key_create.04.02", pthread_key_create_spec!=0, pthread_key_create_spec)
+        /*
+         * The pthread_key_create() function shall fail if:
+         * [EAGAIN]
+         *      The system lacked the necessary resources to create another thread-specific 
+         *      data key, or the system-imposed limit on the total number of keys per process 
+         *      {PTHREAD_KEYS_MAX} has been exceeded.
+         */
+            ERROR_SHALL(POSIX_PTHREAD_KEY_CREATE, EAGAIN, "pthread_key_create.05.01", numKeys+1 > valMax)
+
+        /*
+         * The pthread_key_create() function shall fail if:
+         * [ENOMEM]
+         *      Insufficient memory exists to create the key.
+         */
+            ERROR_SHALL3(POSIX_PTHREAD_KEY_CREATE, ENOMEM, "pthread_key_create.05.02", Unknown_Bool3)
+
+        /*
+         * The pthread_key_create() function shall not return an error code of [EINTR].
+         */
+            ERROR_NEVER(POSIX_PTHREAD_KEY_CREATE, EINTR, "pthread_key_create.40")
+
+        ERROR_END()
+
+        /* If successful, the pthread_key_create() function shall store the
+         * newly created key value at *key and shall return zero.
+         */
+        REQ("pthread_key_create.04.01","If successful, the pthread_key_create() function shall return zero", 
+             pthread_key_create_spec==0 );
+
+        key = (PThreadKey*)getObjectInMemory(keyaddress);
+        threads = getThreads_ProcessId(currProcess);
+        mapSize = size_Map(threads);      
+        
+        for(ind=0;ind<mapSize; ind++)
+        {
+           /* The pthread_key_create() function shall create a thread-specific data
+            * key visible to all threads in the process.
+            */
+           /* Upon key creation, the value NULL shall be associated with the new key in 
+            * all active threads. 
+            */
+            ThreadIdObj *mapKey = key_Map(threads, ind);
+            if( isThreadActive(*mapKey) )
+            {
+                ThreadState    *threadState = get_Map(threads, key_Map(threads, ind));
+                ThreadSpecific *threadSpecific = get_Map(threadState->key_specific, key);
+                
+                REQ("?pthread_key_create.01","Each thread in the process has some value associated with the new key",
+                    threadSpecific!=NULL 
+                   );
+                REQ("?pthread_key_create.02","the value NULL shall be associated with the new key in all active threads", 
+                    isNULL_VoidTPtr(threadSpecific->address)
+                   );
+                /* An optional destructor function may be associated with each key value.
+                 */
+                if(destruct)
+                {  
+                    REQ("?pthread_key_create.10","destructor shall be associated",
+                         threadSpecific->key->destruct == destruct
+                       );
+                }                
+            }
+        }
+
+        return true;
+    }
+}
+
+
+/*
+
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    pthread_key_delete - thread-specific data key deletion
+
+SYNOPSIS
+
+    [THR] [Option Start] #include <pthread.h>
+
+    int pthread_key_delete(pthread_key_t key); [Option End]
+
+DESCRIPTION
+
+    The pthread_key_delete() function shall delete a thread-specific data key 
+    previously returned by pthread_key_create(). The thread-specific data 
+    values associated with key need not be NULL at the time 
+    pthread_key_delete() is called. It is the responsibility of the application 
+    to free any application storage or perform any cleanup actions for data 
+    structures related to the deleted key or associated thread-specific data in 
+    any threads; this cleanup can be done either before or after 
+    pthread_key_delete() is called. Any attempt to use key following the call 
+    to pthread_key_delete() results in undefined behavior.
+
+    The pthread_key_delete() function shall be callable from within destructor 
+    functions. No destructor functions shall be invoked by pthread_key_delete(). 
+    Any destructor function that may have been associated with key shall no 
+    longer be called upon thread exit.
+
+RETURN VALUE
+
+    If successful, the pthread_key_delete() function shall return zero; 
+    otherwise, an error number shall be returned to indicate the error.
+
+ERRORS
+
+    The pthread_key_delete() function may fail if:
+
+    [EINVAL]
+        The key value is invalid.
+
+    The pthread_key_delete() function shall not return an error code of [EINTR].
+
+*/
+specification
+PThreadKeyFunctionResult* pthread_key_delete_spec( CallContext context, PThreadKey* key )
+{
+    DestructorState * pre_destr_state;
+    pre
+    {
+        ThreadState * thread_state = getThreadState_CallContext(context);
+        ThreadSpecific * thread_specif;
+        DestrSpecif * destr_specif;
+        
+        /* [Implicit precondition] */
+        REQ("","Key should not be NULL", key!=NULL );
+
+        /* Any attempt to use key following the call to pthread_key_delete() results in undefined behavior.
+         */
+        if(!PTHREAD_TLS_TEST_DELETED_KEYS)
+        {
+            REQ("app.pthread_key_delete.02", "shall not delete the key twice", 
+                NULL!=getObjectInMemory(key->address) 
+               );
+            REQ("app.pthread_key_delete.02","key shall be valid", 
+                containsKey_Map(thread_state->key_specific, key)
+               );
+        }
+       
+        // preparing pre-data for requirement `pthread_key_delete.08` check
+        REQ("","thread_state != NULL",thread_state != NULL);
+        
+        thread_specif = get_Map(thread_state->key_specific, key);     
+        if(!PTHREAD_TLS_TEST_DELETED_KEYS)
+        {
+            REQ("","thread_specif != NULL",thread_specif);
+        }
+        destr_specif = create_DestrSpecif(context, thread_specif);
+        pre_destr_state = get_Map(destructorCalls, destr_specif);
+
+        return true;
+    }
+    coverage C
+    {
+        if(key->destruct)
+            return { DeleteDestructor, "Deleting key with destructor" };
+        else
+            return { DeleteNoDestructor, "Deleting key with no destructor" };
+    }
+    post
+    {
+        ProcessId currProcess = {context.system, context.process};
+        Map* activeThreads;
+        int mapSize;
+        int ind;
+
+        ERROR_BEGIN(POSIX_PTHREAD_KEY_DELETE, "pthread_key_delete.05.02", pthread_key_delete_spec->errno!=0, pthread_key_delete_spec->errno)
+        /*
+         * The pthread_key_delete() function may fail if:
+         * [EINVAL]
+         *      The key value is invalid.
+         */
+            ERROR_MAY3(POSIX_PTHREAD_KEY_DELETE, EINVAL, "pthread_key_delete.06.01", Unknown_Bool3)
+
+        /*
+         * The pthread_key_delete() function shall not return an error code of [EINTR].
+         */
+            ERROR_NEVER(PTHREAD_KEY_DELETE, EINTR, "pthread_key_delete.07")
+
+        ERROR_END()
+
+
+        /* If successful, the pthread_key_delete() function shall return zero */
+        REQ("pthread_key_delete.05.01","If successful, the pthread_key_delete() function shall return zero",
+            pthread_key_delete_spec->errno == 0
+           );
+
+        /* The pthread_key_delete() function shall delete a thread-specific data key previously 
+         * returned by pthread_key_create().
+         */
+        REQ("?pthread_key_delete.01","Key shall not exist anymore", getObjectInMemory(key->address)==NULL);
+
+        activeThreads = getThreads_ProcessId(currProcess);
+        mapSize = size_Map(activeThreads);
+       
+        for(ind=0;ind<mapSize;ind++)
+        {
+            /* [ There is no "specific" associated with a that key ] */
+            ThreadState *threadState = (ThreadState*)get_Map(activeThreads, key_Map(activeThreads, ind));
+            ThreadSpecific *threadSpecific  = (ThreadSpecific*)get_Map(threadState->key_specific, key);
+            REQ("?pthread_key_delete.01","Upon key deletion no specifics associated with that key", 
+                threadSpecific == NULL);
+        }
+        
+        /* No destructor functions shall be invoked by pthread_key_delete(). */
+        REQ("pthread_key_delete.03","No destructor functions shall be invoked by pthread_key_delete().",
+            pthread_key_delete_spec->destructorCallsNum==0
+           );
+
+        /* The pthread_key_delete() function shall be callable from within
+         * destructor functions.
+         */
+        if( (pre_destr_state != NULL) && (pre_destr_state->isActive) )
+        {
+            REQ("pthread_key_delete.08",
+                "pthread_key_delete() function shall be callable from within destructor", 
+                true
+               );
+        }
+        return true;
+    }
+}
+
+specification typedef struct PThreadKeyDestructorReturnType  PThreadKeyDestructorReturnType = {};
+
+PThreadKeyDestructorReturnType * create_PThreadKeyDestructorReturnType
+(
+    CallContext context,
+    ThreadSpecific * threadSpecific,
+    ThreadSpecific * pre_threadSpecific,
+    IntT num_calls
+)
+{
+    return create(&type_PThreadKeyDestructorReturnType,
+        context,
+        threadSpecific,
+        pre_threadSpecific,
+        num_calls
+        );
+}
+
+reaction PThreadKeyDestructorReturnType* pthread_key_destructor_call(void)
+{
+    post
+    {
+        ThreadState * a_thState;
+        ThreadState * thState;
+        LongT valMax = getSystemConfigurationValue(pthread_key_destructor_call->context,SUT_SC_THREAD_DESTRUCTOR_ITERATIONS);
+
+        /*
+         * At thread exit, if a key value has a non-NULL destructor pointer, and the 
+         * thread has a non-NULL value associated with that key, the value of the key is 
+         * set to NULL, and then the function pointed to is called with the previously 
+         * associated value as its sole argument.
+         */
+
+        REQ("pthread_key_create.06.02.call_allowed","key value has a non-NULL destructor pointer",
+            (pthread_key_destructor_call->pre_threadSpecific->key->destruct)
+            &&
+            !equals_VoidTPtr(pthread_key_destructor_call->pre_threadSpecific->address, NULL_VoidTPtr)
+           );
+        
+        REQ("?pthread_key_create.06.01","the value of the key is set to NULL",
+            equals_VoidTPtr(pthread_key_destructor_call->threadSpecific->address, NULL_VoidTPtr)
+           );
+
+        REQ("pthread_key_create.06.02.is_called","Destructor has been called",true);
+        
+
+        a_thState=get_Map(beforeTerminating,create_ThreadIdObj(pthread_key_destructor_call->context)); // stored state
+
+        if(  ( a_thState!=NULL ) && 
+             ( size_List(a_thState->cleanupArgs)>0 ) 
+          ) // if there was cleanup handlers
+        {
+            /* {pthread_cancel.04} When the last cancellation cleanup handler returns, the thread-specific 
+             * data destructor functions shall be called for thread. 
+             */
+            /* {pthread_exit.03} After all cancellation cleanup handlers have been executed, if the thread has any 
+             * thread-specific data, appropriate destructor functions shall be called in an unspecified order.
+             */
+            thState=getThreadState_CallContext(pthread_key_destructor_call->context);
+            REQ("pthread_exit.03;pthread_cancel.04",
+                "All cleanup handlers shall be called before destructors",
+                size_List(thState->cleanupArgs)==0
+               );
+        }
+
+        if(PTHREAD_TLS_DESTRUCTOR_SHALL_NOT_EXCEED_MAX_ITERATIONS)
+        {
+            REQ("pthread_key_create.08.02"," Number of calls shall not exceed {PTHREAD_DESTRUCTOR_ITERATIONS}.",
+                pthread_key_destructor_call->num_calls <= valMax);
+        }
+
+        return true;
+    }
+}
+
+/* [Sets destructor's isActive state to TRUE
+ *  Returns num_calls.] 
+ */
+int registerStartDestructorCall(CallContext context, ThreadSpecific * specific)
+{   
+    DestrSpecif * destr_specif = create_DestrSpecif(context, specific);
+
+    DestructorState * destrState = get_Map(destructorCalls, destr_specif);
+    if(NULL!=destrState)
+    {
+        put_Map(destructorCalls, destr_specif, create_DestructorState(destrState->num_calls,true) );
+        return destrState->num_calls;
+    } else {
+        put_Map(destructorCalls, destr_specif, create_DestructorState(0,true) );
+        return 0;
+    }
+}
+
+bool _check_destr_args(PThreadKeyDestructorReturnType * data)
+{
+    REQ("","data!=NULL",data!=NULL);
+
+    /* At thread exit, if a key value has a non-NULL destructor pointer, and the thread 
+     * has a non-NULL value associated with that key, <...> the function pointed 
+     * to is called with the previously associated value as its sole    
+     */
+    /* [If the previously associated value isn't found in the model, data->threadSpecific will be equal to NULL.] */
+    REQ("pthread_key_create.06.02.right_params","right argument in destructor function.",data->threadSpecific != NULL);
+
+    /* Any destructor function that may have been associated with key shall no longer be called upon thread exit. */
+    /* [If the key has been deleted, then it can't be found in the model.] */
+    REQ("pthread_key_delete.04","the destructor can't be called after pthread_key_delete",data->threadSpecific != NULL);
+
+    return true;
+}
+
+void onPThreadKeyDestructor(PThreadKeyDestructorReturnType * data)
+{
+    ThreadState * thState = getThreadState_CallContext(data->context);
+
+    if( !_check_destr_args(data) )
+        return;
+
+    /* [Increment the number of destructor calls registered] */
+    data->num_calls = registerStartDestructorCall(data->context,data->threadSpecific);
+    
+    /* [Set specific's address to NULL.] */
+    data->threadSpecific = (ThreadSpecific *)get_Map(thState->key_specific,data->threadSpecific->key);
+    data->threadSpecific->address = NULL_VoidTPtr;
+}
+
+
+/* [This function checks that all destuctors have been called 
+ *  for the thread specified by `context`] 
+ */
+bool checkAllDestructorsHaveBeenCalled(CallContext context)
+{
+    LongT valMax = getSystemConfigurationValue(context,SUT_SC_THREAD_DESTRUCTOR_ITERATIONS);
+    ThreadState * thState=getThreadState_CallContext(context);
+
+    Map * map_specif = thState->key_specific;
+
+    int map_sz = size_Map(map_specif);
+    int i;
+    
+    for(i=0;i<map_sz;i++)
+    {
+        ThreadSpecific * thread_specif;
+        DestrSpecif * destr_specif;
+        DestructorState * destr_state;
+        int numcalls;
+
+        PThreadKey * thread_key = key_Map(map_specif,i);      
+
+        if(thread_key->destruct == false)
+            continue;
+
+        thread_specif = get_Map(map_specif,thread_key);
+        if( isNULL_VoidTPtr(thread_specif->address) )
+        {
+            continue;
+        }
+
+        // the specific hasn't been deleted. May be destructor's overcall.
+
+        destr_specif = create_DestrSpecif( context, thread_specif);
+        
+        destr_state = get_Map(destructorCalls, destr_specif);
+        if(destr_state==NULL)
+            numcalls = 0;
+        else
+            numcalls = destr_state->num_calls;
+        
+        if(  !( (valMax!=SC_VALUE_NO_LIMIT)&&(numcalls >= valMax) )  )
+        {
+            DUMP("pid: %d ",context.process);
+            DUMP("tid: %d ",context.thread);
+            DUMP("key: %d ",thread_key->address.address);
+            DUMP("data: %d ",destr_specif->specific->address.address);
+            DUMP("calls: %d ",numcalls);
+            DUMP("valmax: %d \n",valMax);
+        }/**/
+
+        /* If, after all the destructors have been called for all non-NULL values with 
+         * associated destructors, there are still some non-NULL values with associated 
+         * destructors, then the process is repeated. 
+         */
+        /* If, after at least {PTHREAD_DESTRUCTOR_ITERATIONS} iterations of destructor 
+         * calls for outstanding non-NULL values, there are still some non-NULL values 
+         * with associated destructors, implementations may stop calling destructors, 
+         * or they may continue calling destructors until no non-NULL values with 
+         * associated destructors exist, even though this might result in an infinite loop.
+         */
+
+        REQ("pthread_key_create.08.01;pthread_key_create.08.02", "all destructors have been called", 
+            (valMax!=SC_VALUE_NO_LIMIT)&&(numcalls >= valMax)
+           );
+    }
+
+    REQ("pthread_key_create.08.01;pthread_key_create.08.02", "all destructors have been called", true );
+
+    return true;
+}
+
+/********************************************************************/
+/**                        Specificaton types                      **/
+/********************************************************************/
+
+specification typedef struct PThreadKeyFunctionResult PThreadKeyFunctionResult = {};
+
+PThreadKeyFunctionResult *create_PThreadKeyFunctionResult(
+    IntT    errno,
+    IntT    destructorCallsNum
+    )
+{
+    PThreadKeyFunctionResult *res = create(&type_PThreadKeyFunctionResult,
+        errno, destructorCallsNum);
+    return res;
+}
+
+specification typedef struct DestructorState DestructorState = {};
+
+DestructorState *create_DestructorState(
+    IntT num_calls,
+    bool isActive
+    )
+{
+    DestructorState *res = create(&type_DestructorState, num_calls, isActive);
+    return res;
+}
+
+specification typedef struct DestrSpecif DestrSpecif = {};
+
+DestrSpecif *create_DestrSpecif(
+    ThreadId threadId,
+    ThreadSpecific *specific
+    )
+{
+    DestrSpecif *res = create(&type_DestrSpecif, threadId, specific);
+    return res;
+}
+
+Map *destructorCalls; // DestrSpecif -> DestructorState
+Map * beforeTerminating; // ThreadIdObj -> @ThreadState
+
+/********************************************************************/
+/**                        Helper Functions                        **/
+/********************************************************************/
+
+int getNumberOfKeysByProcess(PidT pid)
+{
+    int i;
+    int res = 0;
+    ObjectsInMemory *allKeys = getAllTypedObjectsInMemory(&type_PThreadKey);
+    int mapSize = size_Map(allKeys);
+
+    for( i = 0 ; i<mapSize; i++)
+    {
+        if(  ((PThreadKey*)get_Map(allKeys, key_Map(allKeys, i)))->address.process == pid )
+            res++;
+    }
+
+    return res;
+}
+
+Set* getSpecificsByKey(PThreadKey *key)
+{
+    Set *res = create_Set(&type_ThreadSpecific);
+    int mapSize, ind;
+    ProcessId processId = {key->address.system, key->address.process};
+    Map *threads = getThreads_ProcessId(processId); //ThreadId -m-> ThreadState
+
+
+    mapSize = size_Map(threads);
+    for(ind = 0; ind<mapSize; ind++)
+    {
+        Object *mapKey = key_Map(threads, ind);
+        ThreadState *thread = (ThreadState*)get_Map(threads, mapKey);
+
+        add_Set(res, get_Map(thread->key_specific, key));
+    }
+
+    return res;
+}
+
+Set* getNonNullSpecificsByKey(PThreadKey *key)
+{
+    Set *allSet = getSpecificsByKey(key);
+    Set *res = clone(allSet);
+
+    int i;
+    for(i=0;i<size_Set(allSet); i++)
+    {
+        ThreadSpecific *ts = get_Set(allSet, i);
+        if( !isNULL_VoidTPtr(ts->address) )
+        {
+            add_Set(res, ts);
+        }
+    }
+
+    return res;
+}
+
+int getNumberOfNonNullSpecificsByKey(PThreadKey *key)
+{
+    return size_Set(getNonNullSpecificsByKey(key));
+}
+
+void initDestructorCounter(void)
+{
+    destructorCalls = create_Map(&type_DestrSpecif, &type_DestructorState); 
+}
+
+void store_ThreadState(ThreadId threadId)
+{
+    ThreadState *thstate = getThreadState_CallContext(threadId);
+   
+    put_Map(beforeTerminating,create_ThreadIdObj(threadId),clone(thstate));
+}
+
+void initBeforeTerminating(void)
+{
+    beforeTerminating = create_Map(&type_ThreadIdObj, &type_ThreadState); 
+}
+
+bool inDestructor(CallContext context)
+{
+    int i;
+    for(i=0;i<size_Map(destructorCalls);i++)
+    {
+        DestrSpecif * key = key_Map(destructorCalls,i);
+        if(equals_ThreadId(key->threadId, context) )
+        {
+            DestructorState * dstate = get_Map(destructorCalls,key);
+          
+            if(dstate->isActive)
+                return true;
+        }
+    }
+
+    return false;
+}

@@ -1,0 +1,2693 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+
+
+#define DUMPREQ
+
+#include "common/common_model.seh"
+
+#include "fs/dir/dir_config.h"
+#include "fs/dir/dir_model.seh"
+#include "config/interpretation.seh"
+
+#include "fs/name/name_model.seh"
+#include "fs/fs/fs_model.seh"
+#include "system/system/system_model.seh"
+#include "data/errno_model.seh"
+#include "process/process/process_model.seh"
+#include "io/file/file_model.seh"
+#include <atl/integer.h>
+
+#include "common/common_media.seh"  // Tmp: timestamp
+
+#pragma SEC subsystem dir "fs.dir"
+
+/* 
+   The group of functions 'fs.dir' consists of: 
+       closedir [2]
+       mkdir [2]
+       opendir [2]
+       readdir [2]
+       readdir64 [2]
+       readdir_r [2]
+       rewinddir [2]
+       rmdir [2]
+       seekdir [2]
+       telldir [2]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+NAME
+
+    closedir - close a directory stream
+
+SYNOPSIS
+
+    #include <dirent.h>
+
+    int closedir(DIR *dirp);
+
+DESCRIPTION
+
+    The closedir() function shall close the directory stream referred to by the
+    argument dirp. Upon return, the value of dirp may no longer point to an 
+    accessible object of the type DIR. If a file descriptor is used to 
+    implement type DIR, that file descriptor shall be closed.
+
+RETURN VALUE
+
+    Upon successful completion, closedir() shall return 0; otherwise, -1 shall 
+    be returned and errno set to indicate the error.
+
+ERRORS
+
+    The closedir() function may fail if:
+
+    [EBADF]
+        The dirp argument does not refer to an open directory stream.
+    [EINTR]
+        The closedir() function was interrupted by a signal.
+
+*/
+
+specification
+IntT closedir_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno, CancelStatus status )
+{
+  DIRT *pre_dir = clone(getDIR(dirp));
+  FileSystem *pre_fs = getFileSystem(context);
+  pre
+  {
+    /* [Implicit precondition] */
+    REQ("", "dirp is not NULL", !isNULL_VoidTPtr(dirp));
+ 
+    /* [Consistency of test suite] */
+    REQ("", "Memory pointed to by dirp is available in the context", isValidPointer(context, dirp));
+
+    return true;
+  }
+  coverage DIR_C
+  {
+    DIRSTREAM_COVERAGE( pre_fs, pre_dir );
+  }
+  
+  CANCELPOINT_COVERAGE(context)
+  
+  post
+  {
+    DIRT *dir = getDIR(dirp);
+    
+    DUMP("closedir_spec($(obj)) errno $(obj)\n", dir, create_ErrorCode(*errno));
+
+    CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+        
+    if(closedir_spec==0)
+    {
+        /*
+         * Upon successful completion, closedir() shall return 0;
+         */
+       /*
+        * The closedir() function shall close the directory stream referred to by 
+        & the argument dirp. Upon return, the value
+        * of dirp may no longer point to an accessible object of the type DIR.
+        */
+        REQ("closedir.01", "closedir() shall close the directroy stream", 
+            dir==NULL);
+
+        if(POSIX_DIR_IMPLEMENTED_VIA_FILEDESC)
+        {
+            /*
+             * If a file descriptor is used to implement type
+             * DIR, that file descriptor shall be closed.
+             */
+            REQ("closedir.03", "file descriptor shall be closed", TODO_REQ());  
+        }
+    }else if(closedir_spec==-1)
+    {
+       /*
+        * otherwise, -1 shall be returned and errno set to indicate the error.
+        */
+        REQ("closedir.05", 
+            "Upon successful completion -1 shall be returned and errno set to indicate the error", 
+            *errno!=SUT_EOK);
+    }
+     
+    ERROR_BEGIN(POSIX_CLOSEDIR, "closedir.05", -1==closedir_spec,  *errno)
+        /*
+        * The closedir() function may fail if:
+        * [EBADF]
+        * The dirp argument does not refer to an open directory stream.
+        */
+        ERROR_MAY(POSIX_CLOSEDIR, EBADF,"closedir.90.01", pre_dir==NULL)
+    
+        /*
+        * The closedir() function may fail if:
+        * [EINTR]
+        * The closedir() function was interrupted by a signal.
+        */
+        ERROR_MAY(POSIX_CLOSEDIR, EINTR,"closedir.90.02", TODO_ERR(EINTR))
+    
+    ERROR_END()
+
+    return true;
+  }
+}
+
+void onClosedir( CallContext context, DIRTPtr dirp, ErrorCode *errno)
+{
+    DIRT *dir = getDIR(dirp);
+    if(*errno==0 && NULL!=dir)
+    {
+        unregisterDIR(context, dirp);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+    
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+NAME
+
+    mkdir - make a directory
+
+SYNOPSIS
+
+    #include <sys/stat.h>
+
+    int mkdir(const char *path, mode_t mode);
+
+DESCRIPTION
+
+    The mkdir() function shall create a new directory with name path. The file 
+    permission bits of the new directory shall be initialized from mode. These 
+    file permission bits of the mode argument shall be modified by the process'
+    file creation mask.
+
+    When bits in mode other than the file permission bits are set, the meaning
+    of these additional bits is implementation-defined.
+
+    The directory's user ID shall be set to the process' effective user ID. The
+    directory's group ID shall be set to the group ID of the parent directory 
+    or to the effective group ID of the process. Implementations shall provide 
+    a way to initialize the directory's group ID to the group ID of the parent
+    directory. Implementations may, but need not, provide an 
+    implementation-defined way to initialize the directory's group ID to 
+    the effective group ID of the calling process.
+
+    The newly created directory shall be an empty directory.
+
+    If path names a symbolic link, mkdir() shall fail and set errno to [EEXIST].
+
+    Upon successful completion, mkdir() shall mark for update the st_atime, 
+    st_ctime, and st_mtime fields of the directory. Also, the st_ctime and 
+    st_mtime fields of the directory that contains the new entry shall be 
+    marked for update.
+
+RETURN VALUE
+
+    Upon successful completion, mkdir() shall return 0. Otherwise, -1 shall 
+    be returned, no directory shall be created, and errno shall be set to 
+    indicate the error.
+
+ERRORS
+
+    The mkdir() function shall fail if:
+
+    [EACCES]
+        Search permission is denied on a component of the path prefix, or 
+        write permission is denied on the parent directory of the directory 
+        to be created.
+    [EEXIST]
+        The named file exists.
+    [ELOOP]
+        A loop exists in symbolic links encountered during resolution of the 
+        path argument.
+    [EMLINK]
+        The link count of the parent directory would exceed {LINK_MAX}.
+    [ENAMETOOLONG]
+        The length of the path argument exceeds {PATH_MAX} or a pathname 
+        component is longer than {NAME_MAX}.
+    [ENOENT]
+        A component of the path prefix specified by path does not name an 
+        existing directory or path is an empty string.
+    [ENOSPC]
+        The file system does not contain enough space to hold the contents 
+        of the new directory or to extend the parent directory of the new 
+        directory.
+    [ENOTDIR]
+        A component of the path prefix is not a directory.
+    [EROFS]
+        The parent directory resides on a read-only file system.
+
+    The mkdir() function may fail if:
+
+    [ELOOP]
+        More than {SYMLOOP_MAX} symbolic links were encountered during 
+        resolution of the path argument.
+    [ENAMETOOLONG]
+        As a result of encountering a symbolic link in resolution of the path 
+        argument, the length of the substituted pathname string 
+        exceeded {PATH_MAX}.
+
+*/
+
+specification
+IntT mkdir_spec( CallContext context, CString *path, FilePermissions *mode, ErrorCode *errno)
+{
+    Bool3 isELOOP;
+    
+    FileSystem *pre_fs = clone(getFileSystem(context));
+    CString *abspath = resolvePath_Ext(context, pre_fs, path, &isELOOP);
+
+    pre
+    {
+        /*[Implicit precondition]*/
+        REQ("", "path is NULL", path!=NULL);
+
+        /*[Implicit precondition]*/
+        REQ("", "errno is NULL", errno!=NULL);
+
+        /*[Implicit precondition]*/
+        REQ("", "File system is NULL", pre_fs!=NULL)
+        return true;
+    }
+
+    coverage Exist_C
+    {
+        DIREXIST_COVERAGE(pre_fs, abspath)
+    }
+    coverage Path_C
+    {
+        PATH_COVERAGE(pre_fs, path);
+    }
+#if POSIX_DIR_ENABLE_ERROR_COVERAGE
+    coverage EACCES_C
+    {
+        ERROR_COVERAGE3(EACCES, isEACCES_dir_mkrm(context, pre_fs, abspath));
+    }
+    coverage EEXIST_C
+    {
+        ERROR_COVERAGE3(EEXIST, doesFileExist_FileSystem(pre_fs, abspath));
+    }
+    coverage ENOENT_C
+    {
+        ERROR_COVERAGE3(ENOENT, isENOENT_dir(context, pre_fs, getParentDir_Path(abspath)));
+    }
+    coverage ENAMETOOLONG_C
+    {
+        ERROR_COVERAGE3(ENAMETOOLONG, isENAMETOOLONG(context, abspath));
+    }
+    coverage ELOOP_C
+    {
+        ERROR_COVERAGE3(ELOOP, isELOOP);
+    }
+    coverage ENOTDIR_C
+    {
+        ERROR_COVERAGE3(ENOTDIR, isENOTDIR_dir(context, pre_fs, abspath));
+    }
+#endif
+    post
+    {
+
+        FileSystem *file_system = getFileSystem(context);
+        File *new_directory= getFile_FileSystem(file_system, abspath);
+        ProcessId processId = getProcessId_CallContext(context);
+        File *parent_directory = new_directory? getTheOnlyParentDirectory_File(file_system, new_directory) : NULL;        
+        FileSystem *expected_fs = clone(pre_fs);
+
+       
+        DUMP("mkdir_spec($(obj)->$(obj),$(obj)) returns $(obj), errno=$(obj)\n",path,abspath,
+            mode, create_Integer(mkdir_spec), create_ErrorCode(*errno));
+        if(mkdir_spec==0)   // success
+        {
+            REQ("", "should be new directory in the model",
+                mkdir_new_FileSystem(expected_fs, processId, abspath, mode));
+
+            /*
+            * The mkdir() function shall create a new directory with name path.
+            */
+            REQ("mkdir.01", "The mkdir() function shall create a directory"
+                " with name path", 
+                NULL!=new_directory     
+                && equals(expected_fs, file_system)
+                );
+ 
+            /* [Directory should have one parent (no hard links possible to dirs)] */
+            REQ("","Directory created should have parent directory", 
+                NULL!=parent_directory
+                && getUpwardLinksCount_File(new_directory)==1);
+
+            /*
+            * The file permission bits of the new directory
+            * shall be initialized from mode.
+            * These file permission bits of the mode argument shall be modified
+            * by the process' file creation mask
+            */
+            REQ("mkdir.02","File permission bits of the new directory "
+                "shall be initialized from mode",
+                equals(
+                    getPermissions_File(new_directory),
+                    getProcessModifiedFilePermissions(
+                        processId, mode)));
+            
+            /*
+            * The directory's user ID shall be set to the process' effective user ID
+            */
+            REQ("mkdir.04", "The directory's user ID shall be set to the process' user ID",
+                equals(getUserId_File(new_directory),
+                    getEffectiveUserId_ProcessId(processId)));
+            
+            /*
+            * The directory's group ID shall be set to the group ID of
+            * the parent directory or to the effective group ID of the process.
+            * Implementations shall provide a way to initialize the directory's
+            * group ID to the group ID of the parent directory.            
+            * Implementations may, but need not, provide an 
+            * implementation-defined way to initialize the directory's group ID 
+            * to the effective group ID of the calling process.
+            */
+            REQ("mkdir.05", "The directory's group ID shall be set to the group ID of"
+            " the parent directory or to the effective group ID of the process", 
+                equals(getGroupId_File(new_directory),
+                    getEffectiveGroupId_ProcessId(processId))   // process effective ID
+
+                || equals(getGroupId_File(new_directory),   
+                    getGroupId_File(parent_directory)));
+          
+            /*
+             * The newly created directory shall be an empty directory.
+             */
+            REQ("mkdir.06", "created directory shall be an empty directory", 
+                False_Bool3!=isEmpty_Directory(file_system, new_directory));
+          
+            
+            /*
+            * Upon successful completion, mkdir() shall mark for update the 
+            * st_atime, st_ctime, and st_mtime fields of the directory.
+            */
+            REQ("mkdir.08", "mkdir() shall mark for update st_atime, st_ctime, st_mtime", 
+                !new_directory->atime_updated && 
+                !new_directory->ctime_updated && 
+                !new_directory->mtime_updated);
+            
+            /*
+            * Also, the st_ctime and st_mtime fields of the directory that 
+            * contains the new entry shall be marked for update.
+            */
+            REQ("mkdir.09", "st_ctime and st_mtime fields of the parent"
+                " directory shall be marked for update", 
+                !parent_directory->ctime_updated && 
+                !parent_directory->mtime_updated);
+            
+            /*
+            * Upon successful completion, mkdir() shall return 0.
+            */
+
+            REQ("mkdir.10", "Upon successful completion mkdir() shall return 0",   
+                *errno==0); // errno set to 0 in agent
+            
+        }else if(mkdir_spec==-1)
+        {
+            if(*errno==SUT_EEXIST)
+                fileExist_FileSystem(expected_fs, abspath, DirectoryFile);
+
+            /*
+            * Otherwise, -1 shall be returned, no directory shall be created, and
+            * errno shall be set to indicate the error
+            */
+            REQ("mkdir.11", "-1 shall be returned, no directory shall be"
+                " created, and errno shall be set", 
+                equals(expected_fs, file_system) // file system hasn't changed
+                && *errno!=0
+                );
+        }else
+        {
+            REQ("", "mkdir should return 0 or -1", false);
+        }
+        
+
+        ERROR_BEGIN(POSIX_MKDIR, "mkdir.11", mkdir_spec==-1,  *errno )
+        /*
+         * The mkdir() function shall fail if:
+        */
+        /* [EACCES]
+         *  Search permission is denied on a component of the path prefix, or 
+         *  write permission is denied on the parent directory of the
+         *  directory to be created.
+         */
+            ERROR_SHALL3(POSIX_MKDIR, EACCES,"mkdir.12.01", isEACCES_dir_mkrm(context, pre_fs, abspath))
+        /*
+         * The mkdir() function shall fail if:
+         * [EEXIST]
+         *  The named file exists.
+         */
+            ERROR_SHALL3(POSIX_MKDIR, EEXIST,"mkdir.12.02", 
+                doesFileExist_FileSystem(pre_fs, abspath))
+
+        /*
+         * The mkdir() function shall fail if:
+         * [ELOOP]
+         *  A loop exists in symbolic links encountered during resolution of 
+         *  the path argument.
+         */
+            ERROR_SHALL3(POSIX_MKDIR, ELOOP,"mkdir.12.03", isELOOP)
+
+        /*
+         * The mkdir() function shall fail if:
+         * [EMLINK]
+         *  The link count of the parent directory would exceed {LINK_MAX}.
+         */
+            ERROR_SHALL3(POSIX_MKDIR, EMLINK,"mkdir.12.04", 
+                isEMLINK(context, pre_fs, abspath))
+
+        /*
+         * The mkdir() function shall fail if:
+         * [ENAMETOOLONG]
+         *  The length of the path argument exceeds {PATH_MAX} or a pathname 
+         *  component is longer than {NAME_MAX}.
+         */
+            ERROR_SHALL3(POSIX_MKDIR, ENAMETOOLONG,"mkdir.12.05", 
+                isENAMETOOLONG(context, path))
+
+        /*
+         * The mkdir() function shall fail if:
+         * [ENOENT]
+         *  A component of the path prefix specified by path does not name an 
+         *  existing directory or path is an empty
+         *  string.
+         */
+            ERROR_SHALL3(POSIX_MKDIR, ENOENT,"mkdir.12.06", 
+             isENOENT_dir(context, pre_fs, getParentDir_Path(abspath)))
+
+        /*
+         * The mkdir() function shall fail if:
+         * [ENOSPC]
+         *  The file system does not contain enough space to hold the contents 
+         *  of the new directory or to extend the parent directory of
+         *  the new directory.
+         */
+            ERROR_UNCHECKABLE(POSIX_MKDIR, ENOSPC, "mkdir.12.07",
+                "Disk space not modeled")
+
+        /*
+         * The mkdir() function shall fail if:
+         * [ENOTDIR]
+         *  A component of the path prefix is not a directory.
+         */
+            ERROR_SHALL3(POSIX_MKDIR, ENOTDIR,"mkdir.12.08", 
+                isENOTDIR_dir(context, pre_fs, getParentDir_Path(abspath)))
+
+        /*
+         * The mkdir() function shall fail if:
+         * [EROFS]
+         *  The parent directory resides on a read-only file system.
+         */
+            ERROR_SHALL(POSIX_MKDIR, EROFS,"mkdir.12.09", TODO_ERR(EROFS))
+        /*
+         * The mkdir() function may fail if:
+         * [ELOOP]
+         *  More than {SYMLOOP_MAX} symbolic links were encountered during 
+         *  resolution of the path argument.
+         */
+            ERROR_MAY3(POSIX_MKDIR, ELOOP,"mkdir.13.01", isELOOP) 
+            // TODO: not checked with any scenario yet (lack of symlinks)
+
+        /*
+         * The mkdir() function may fail if:
+         * [ENAMETOOLONG]
+         *  As a result of encountering a symbolic link in resolution of the 
+         *  path argument, the length of the substituted pathname
+         *  string exceeded {PATH_MAX}.
+         */
+            ERROR_MAY3(POSIX_MKDIR, ENAMETOOLONG,"mkdir.13.02", 
+                isENAMETOOLONG(context, abspath))
+         ERROR_END()    
+        return true;
+    }
+}
+
+void onMkdir( CallContext context, CString* path, FilePermissions *mode, IntT mkdir_spec, ErrorCode *errno)
+{
+    Bool3 isELOOP;
+    FileSystem* file_system = getFileSystem(context);
+    ProcessId processId = getProcessId_CallContext(context);
+    CString *abspath = resolvePath_Ext(context, file_system, path, &isELOOP);
+
+    if (mkdir_spec == 0)  // on success
+    {
+        if(!mkdir_new_FileSystem(file_system, processId, abspath, mode))
+            setBadVerdict("mkdir() couldn't successfully create existing directory");
+ 
+    }else if(mkdir_spec == -1 && *errno==SUT_EEXIST)
+    {
+        fileExist_FileSystem(file_system, abspath, DirectoryFile);
+    }
+
+}
+
+File *mkdir_new_FileSystem( FileSystem *file_system, ProcessId processId, CString* path, FilePermissions *mode )
+{
+    File* new_directory;
+    File* parent_directory;
+    
+    assertion( file_system != NULL,  "update_model_newdir: File system not found" );
+    
+    if((new_directory = getFile_FileSystem( file_system, path ))!=NULL)
+    {
+        traceFormattedUserInfo("mkdir_new_FileSystem: directory $(obj) shouldn't exist", path);
+        return NULL;
+    }
+    
+    // add directory to model
+    new_directory = registerDirectory( file_system, path );
+    
+    // mark new directory as uptodate 
+    setUptodate_Directory(new_directory, true);
+
+    // set permissions 
+    setPermissions_File(new_directory, getProcessModifiedFilePermissions(processId,mode));
+    
+    // set effective uid
+    setUserId_File(new_directory, getEffectiveUserId_ProcessId(processId));
+
+    // set effective gid
+    setGroupId_File(new_directory, getEffectiveGroupId_ProcessId(processId));
+
+    // increment hardlinks count
+    incLinksCount_File( file_system, new_directory, (NLinkT)1 );
+    
+    // mark times for update
+    new_directory->atime_updated = false;
+    new_directory->mtime_updated = false;
+    new_directory->ctime_updated = false;
+    
+    parent_directory = getTheOnlyParentDirectory_File(file_system, new_directory);
+    
+    // mark parent dir ctime and mtime for update
+    if(parent_directory)
+    {
+        parent_directory->atime_updated = false;
+        parent_directory->ctime_updated = false;
+        parent_directory->mtime_updated = false;
+    }
+
+    return new_directory;
+}
+
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+    
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+NAME
+
+    opendir - open a directory
+
+SYNOPSIS
+
+    #include <dirent.h>
+
+    DIR *opendir(const char *dirname);
+
+DESCRIPTION
+
+    The opendir() function shall open a directory stream corresponding to the 
+    directory named by the dirname argument. The directory stream ispositioned 
+    at the first entry. If the type DIR is implemented using a file  descriptor,
+    applications shall only be able to open up to a total of {OPEN_MAX} files 
+    and directories.
+
+RETURN VALUE
+
+    Upon successful completion, opendir() shall return a pointer to an object 
+    of type DIR. Otherwise, a null pointer shall be returned and errno set to 
+    indicate the error.
+
+ERRORS
+
+    The opendir() function shall fail if:
+
+    [EACCES]
+        Search permission is denied for the component of the path prefix of 
+        dirname or read permission is denied for dirname.
+    [ELOOP]
+        A loop exists in symbolic links encountered during resolution of the 
+        dirname argument.
+    [ENAMETOOLONG]
+        The length of the dirname argument exceeds {PATH_MAX} or a pathname 
+        component is longer than {NAME_MAX}.
+    [ENOENT]
+        A component of dirname does not name an existing directory or dirname 
+        is an empty string.
+    [ENOTDIR]
+        A component of dirname is not a directory.
+
+    The opendir() function may fail if:
+
+    [ELOOP]
+        More than {SYMLOOP_MAX} symbolic links were encountered during 
+        resolution of the dirname argument.
+    [EMFILE]
+        {OPEN_MAX} file descriptors are currently open in the calling process.
+    [ENAMETOOLONG]
+        As a result of encountering a symbolic link in resolution of the 
+        dirname argument, the length of the substituted pathname string 
+        exceeded {PATH_MAX}.
+    [ENFILE]
+        Too many files are currently open in the system. 
+*/
+
+specification
+DIRTPtr opendir_spec( CallContext context, CString *dirname, ErrorCode *errno, CancelStatus status )
+{
+    FileSystem *pre_fs = clone(getFileSystem(context));
+    Bool3 isELOOP;
+    CString *abspath = resolvePath_Ext(context, pre_fs, dirname, &isELOOP);
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "dirname is NULL", dirname!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "errno is NULL", errno!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "File system is NULL", pre_fs!=NULL)
+            
+            return true;
+    }
+    
+    coverage Exist_C
+    {
+        DIREXIST_COVERAGE(pre_fs, abspath)
+    }
+
+    coverage Path_C
+    {
+        PATH_COVERAGE(pre_fs, dirname);
+    }
+    
+    CANCELPOINT_COVERAGE(context)
+
+#if POSIX_DIR_ENABLE_ERROR_COVERAGE
+    coverage EACCES_C
+    {
+        ERROR_COVERAGE3(EACCES, isEACCES_dir_mkrm(context, pre_fs, abspath));
+    }
+    coverage ELOOP_C
+    {
+        ERROR_COVERAGE3(ELOOP, isELOOP);
+    }
+    coverage ENAMETOOLONG_C
+    {
+        ERROR_COVERAGE3(ENAMETOOLONG, isENAMETOOLONG(context, dirname));
+    }
+    coverage ENOENT_C
+    {
+        ERROR_COVERAGE3(ENOENT, isENOENT_dir(context, pre_fs, abspath));
+    }
+    coverage ENOTDIR_C
+    {
+        ERROR_COVERAGE3(ENOTDIR, isENOTDIR_dir(context, pre_fs, abspath));
+    }
+    coverage EMFILE_C
+    {
+        ERROR_COVERAGE3(EMFILE, isOpenFileDescNumberExceedMax(context));
+    }
+#endif    
+    post
+    {
+      DIRT *dir = getDIR(opendir_spec);
+      FileSystem *fs = getFileSystem(context);
+
+      DUMP("opendir_spec($(obj)) returns $(obj) errno $(obj)\n", dirname, create_VoidTPtrObj(opendir_spec), create_ErrorCode(*errno));     
+      
+      CANCELLATION_POINT_MAY_OCCUR_REQ(context, status)
+      
+      if(!isNULL_VoidTPtr(opendir_spec))
+      {
+          /*
+          * The directory stream is positioned at the first entry.
+          */
+          REQ("opendir.02", "directory stream is positioned at the first entry",
+              isDirectoryStreamStart(fs, dir));
+          
+        if(POSIX_DIR_IMPLEMENTED_VIA_FILEDESC)
+        {
+             /*
+              * If the type DIR is implemented using a file descriptor, applications
+              * shall only be able to open up to a total of {OPEN_MAX} files and 
+              * directories.
+              */
+              REQ("opendir.03", "{OPEN_MAX} limit exceeded", 
+                    isDirCountExceedOpenMax()!=True_Bool3);
+        }
+          /*
+          * Upon successful completion, opendir() shall return a pointer to an 
+          * object of type DIR
+          */
+          REQ("opendir.04", "opendir shall return pointer to object of type DIR", 
+              NULL!=dir);
+
+      }else // Null pointer returned
+      {
+/*
+ * Otherwise, a null pointer shall be returned and errno set to indicate the 
+ * error.
+ */
+        REQ("opendir.05", "errno should be set to indicate the error", 
+            *errno!=SUT_EOK);          
+      }
+
+
+      ERROR_BEGIN(POSIX_OPENDIR, "opendir.05",  isNULL_VoidTPtr(opendir_spec) ,  *errno )
+        /*
+         * The opendir() function shall fail if:
+         * [EACCES]
+         *  Search permission is denied for the component of the path prefix of
+         *  dirname or read permission is denied for
+         *  dirname.
+         */
+            ERROR_SHALL3(POSIX_OPENDIR, EACCES,"opendir.06.01", 
+                isEACCES_dir_open(context, pre_fs, abspath))
+
+        /*
+         * The opendir() function shall fail if:
+         * [ELOOP]
+         *  A loop exists in symbolic links encountered during resolution of 
+         *  the dirname argument.
+         */
+            ERROR_SHALL3(POSIX_OPENDIR, ELOOP,"opendir.06.02", isELOOP)
+
+        /*
+         * The opendir() function shall fail if:
+         * [ENAMETOOLONG]
+         *  The length of the dirname argument exceeds {PATH_MAX} or a pathname 
+         *  component is longer than {NAME_MAX}.
+         */
+            ERROR_SHALL3(POSIX_OPENDIR, ENAMETOOLONG,"opendir.06.03", 
+                isENAMETOOLONG(context, dirname))
+    
+        /*
+         * The opendir() function shall fail if:
+         * [ENOENT]
+         *  A component of dirname does not name an existing directory or 
+         *  dirname is an empty string.
+         */
+            ERROR_SHALL3(POSIX_OPENDIR, ENOENT,"opendir.06.04", 
+            isENOENT_dir(context, pre_fs, abspath))
+
+        /*
+         * The opendir() function shall fail if:
+         * [ENOTDIR]
+         * A component of dirname is not a directory.
+         */
+            ERROR_SHALL3(POSIX_OPENDIR, ENOTDIR,"opendir.06.05", 
+                isENOTDIR_dir(context, pre_fs, abspath))
+
+        /*
+         * The opendir() function may fail if:
+         * [ELOOP]
+         *  More than {SYMLOOP_MAX} symbolic links were encountered during 
+         *  resolution of the dirname argument.
+         */
+            ERROR_MAY3(POSIX_OPENDIR, ELOOP,"opendir.07.01", isELOOP)
+
+        /*
+         * The opendir() function may fail if:
+         * [EMFILE]
+         * {OPEN_MAX} file descriptors are currently open in the calling process.
+         */
+            ERROR_MAY3(POSIX_OPENDIR, EMFILE,"opendir.07.02", 
+                isOpenFileDescNumberExceedMax(context))
+
+        /*
+         * The opendir() function may fail if:
+         * [ENAMETOOLONG]
+         *  As a result of encountering a symbolic link in resolution of the 
+         *  dirname argument, the length of the substituted pathname
+         *  string exceeded {PATH_MAX}.
+         */
+            ERROR_MAY3(POSIX_OPENDIR, ENAMETOOLONG,"opendir.07.03", 
+                isENAMETOOLONG(context, abspath))
+
+        /*
+         * The opendir() function may fail if:
+         * [ENFILE]
+         * Too many files are currently open in the system.
+         */
+            ERROR_UNCHECKABLE(POSIX_OPENDIR, ENFILE,"opendir.07.04", "ENFILE couldn't be checked")
+       ERROR_END()
+       return true; 
+    }
+}
+
+void onOpendir( CallContext context, CString *dirname, DIRTPtr opendir_spec)
+{
+    FileSystem *fs = getFileSystem(context);
+    Bool3 isELOOP;
+    CString *abspath = resolvePath_Ext(context, fs, dirname, &isELOOP);
+    if(!isNULL_VoidTPtr(opendir_spec))
+    {
+        FileSystem *file_system = getFileSystem(context);
+        File *dir = fileExist_FileSystem(file_system, abspath, DirectoryFile);
+        setModified_Directory(file_system, dir, false);
+        registerDIR(context, opendir_spec, abspath);
+        
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+    
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+NAME
+
+    readdir, readdir_r - read a directory
+
+SYNOPSIS
+
+    #include <dirent.h>
+
+    struct dirent *readdir(DIR *dirp);
+    [TSF] [Option Start] int readdir_r(DIR *restrict dirp, 
+    struct dirent *restrict entry, struct dirent **restrict result); [Option End]
+
+DESCRIPTION
+
+    The type DIR, which is defined in the <dirent.h> header, represents a 
+    directory stream, which is an ordered sequence of all the directory entries
+    in a particular directory. Directory entries represent files; files may be
+    removed from a directory or added to a directory asynchronously to the 
+    operation of readdir().
+
+    The readdir() function shall return a pointer to a structure representing 
+    the directory entry at the current position in the directory stream 
+    specified by the argument dirp, and position the directory stream at the 
+    next entry. It shall return a null pointer upon reaching the end of the 
+    directory stream. The structure dirent defined in the <dirent.h> header 
+    describes a directory entry.
+
+    The readdir() function shall not return directory entries containing empty
+    names. If entries for dot or dot-dot exist, one entry shall be returned 
+    for dot and one entry shall be returned for dot-dot; otherwise, they shall
+    not be returned.
+
+    The pointer returned by readdir() points to data which may be overwritten 
+    by another call to readdir() on the same directory stream. This data is 
+    not overwritten by another call to readdir() on a different directory 
+    stream.
+
+    If a file is removed from or added to the directory after the most recent 
+    call to opendir() or rewinddir(), whether a subsequent call to readdir() 
+    returns an entry for that file is unspecified.
+
+    The readdir() function may buffer several directory entries per actual 
+    read operation; readdir() shall mark for update the st_atime field of the
+    directory each time the directory is actually read.
+
+    After a call to fork(), either the parent or child (but not both) may 
+    continue processing the directory stream using readdir(), rewinddir(), 
+    [XSI] [Option Start]  or seekdir(). [Option End] If both the parent and 
+    child processes use these functions, the result is undefined.
+
+    If the entry names a symbolic link, the value of the d_ino member is 
+    unspecified.
+
+    The readdir() function need not be reentrant. A function that is not 
+    required to be reentrant is not required to be thread-safe.
+
+    [TSF] [Option Start] The readdir_r() function shall initialize the dirent 
+    structure referenced by entry to represent the directory entry at the 
+    current position in the directory stream referred to by dirp, store a 
+    pointer to this structure at the location referenced by result, and 
+    position the directory stream at the next entry.
+
+    The storage pointed to by entry shall be large enough for a dirent with 
+    an array of char d_name members containing at least {NAME_MAX}+1 elements.
+
+    Upon successful return, the pointer returned at *result shall have the 
+    same value as the argument entry. Upon reaching the end of the directory 
+    stream, this pointer shall have the value NULL.
+
+    The readdir_r() function shall not return directory entries containing 
+    empty names.
+
+    If a file is removed from or added to the directory after the most recent 
+    call to opendir() or rewinddir(), whether a subsequent call to readdir_r()
+    returns an entry for that file is unspecified.
+
+    The readdir_r() function may buffer several directory entries per actual
+    read operation; the readdir_r() function shall mark for update the st_atime
+    field of the directory each time the directory is actually read. [Option End]
+
+    Applications wishing to check for error situations should set errno to 0 
+    before calling readdir(). If errno is set to non-zero on return, an error 
+    occurred.
+
+RETURN VALUE
+
+    Upon successful completion, readdir() shall return a pointer to an object
+    of type struct dirent. When an error is encountered, a null pointer shall
+    be returned and errno shall be set to indicate the error. When the end of
+    the directory is encountered, a null pointer shall be returned and errno 
+    is not changed.
+
+    [TSF] [Option Start] If successful, the readdir_r() function shall return
+    zero; otherwise, an error number shall be returned to indicate the error.
+    [Option End]
+
+ERRORS
+
+    The readdir() function shall fail if:
+
+    [EOVERFLOW]
+        One of the values in the structure to be returned cannot be represented
+        correctly.
+
+    The readdir() function may fail if:
+
+    [EBADF]
+        The dirp argument does not refer to an open directory stream.
+    [ENOENT]
+        The current position of the directory stream is invalid.
+
+    The readdir_r() function may fail if:
+
+    [EBADF]
+        The dirp argument does not refer to an open directory stream.
+
+
+*/
+
+specification
+DirEntT *readdir_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno, CancelStatus status )
+{
+  DIRT *pre_dir = clone(getDIR(dirp));
+  FileSystem *pre_fs = clone(getFileSystem(context));
+  
+  pre
+  {
+    /* [Implicit precondition] */
+    REQ("", "dirp is not NULL", !isNULL_VoidTPtr(dirp));
+ 
+    /* [Consistency of test suite] */
+    REQ("", "Memory pointed to by dirp is available in the context", isValidPointer(context, dirp));
+
+    /* [Implicit precondition] */
+    REQ("", "errno is NULL", errno!=NULL);
+
+    /* [Implicit precondition] */
+    REQ("", "File system is NULL", pre_fs!=NULL)
+
+    return true;
+  }
+
+  coverage DIR_C
+  {
+      DIRSTREAM_COVERAGE(pre_fs, pre_dir);
+  }
+
+  CANCELPOINT_COVERAGE(context)
+
+  post
+  {
+    FileSystem *file_system = getFileSystem(context);
+    
+    DIRT *dir = getDIR(dirp);
+
+    DIRT *expected_dir = clone(pre_dir);
+    FileSystem *expected_fs = clone(pre_fs);
+    File *directory = NULL;
+
+    if(NULL!=dir)
+    {
+        bool readdir_success = readdir_DIR(expected_fs, expected_dir, readdir_spec);
+        directory = getFile_FileSystem(file_system, dir->dirpath);
+        REQ("","readdir requirements failed", readdir_success);
+    }
+
+    
+    DUMP("readdir_spec returns $(obj) errno $(obj)\n", readdir_spec, create_ErrorCode(*errno));
+    
+    CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) 
+
+    if(!isNULL_VoidTPtr(readdir_spec->pdirent))
+    {
+/*
+ * The readdir() function shall return a pointer to a structure representing the
+ * directory entry at the current position in the directory stream specified by
+ * the argument dirp, and position the directory stream at the next entry.
+ *
+ * Upon successful completion, readdir() shall return a pointer to an object of
+ * type struct dirent
+ */
+        REQ("readdir.01", 
+            "readdir should return directory entry at current position",
+            not_Bool3(isDirectoryStreamEnd(file_system, pre_dir)) // == T or U
+            && equals_current_entry_DIR(dir, readdir_spec)
+            && equals(dir, expected_dir));  
+        
+/*
+* The readdir() function shall not return directory entries containing empty 
+* names
+*/
+        REQ("readdir.03", "directory entries shall not contain empty names", 
+            !isEmpty_Path(readdir_spec->name));
+
+
+/*
+ * If a file is removed from or added to the directory after the most recent call
+ * to opendir() or rewinddir(), whether asubsequent call to readdir() returns an
+ * entry for that file is unspecified.
+ */
+/* TODO: 
+    Currently POSIX_READDIR_SHALL_RETURN_MODIFIED_FILES constant
+    regulates indirect checking of this requirement
+*/
+        REQ("readdir.07", "", TODO_REQ());
+
+/*
+* The readdir() function may buffer several directory entries per actual 
+* read operation; 
+*/
+        REQ_UNCHECKABLE("readdir.08", 
+            "Readdir buffering behaviour inacessible");
+        
+/*
+* readdir() shall mark for update the st_atime field of the
+* directory each time the directory is actually read.
+*/
+        REQ("readdir.09", "readdir() shall mark for update the st_atime",
+            !directory->atime_updated);
+
+/*
+* If the entry names a symbolic link, the value of the d_ino member is 
+* unspecified
+*/
+        REQ_UNCHECKABLE("readdir.12", "no checks could be done");
+
+    }else if(*errno==SUT_EOK) //readdir_spec->pdirent is NULL
+    {
+/*
+* It shall return a null pointer upon reaching the end of the directory stream.
+*
+* When the end of the directory is encountered, a null pointer shall be returned
+* and errno is not changed
+*/
+        if(isDirectoryStreamEnd(file_system, pre_dir))
+            REQ("readdir.02", "NULL shall be returned when "
+                "directory stream end is encountered", 
+                readdir_spec==NULL || isNULL_VoidTPtr(readdir_spec->pdirent)
+                );
+        
+    }
+ 
+/*
+ * Applications wishing to check for error situations should set errno to 0 before
+ * calling readdir(). If errno is set to non-zero on return, an error occurred.
+ *
+ * When an error is encountered, a null pointer shall be returned and errno shall
+ * be set to indicate the error.
+ */
+
+    ERROR_BEGIN(POSIX_READDIR, "readdir.16",  *errno!=0 && isNULL_VoidTPtr(readdir_spec->pdirent) ,  *errno )
+        /*
+        * The readdir() function shall fail if:
+        * [EOVERFLOW]
+        *  One of the values in the structure to be returned cannot be 
+        *  represented correctly.
+        */
+        ERROR_UNCHECKABLE(POSIX_READDIR, EOVERFLOW,"readdir.90.01","EOVERFLOW not checked")
+    
+        /*
+        * The readdir() function may fail if:
+        * [EBADF]
+        *  The dirp argument does not refer to an open directory stream.
+        */
+        ERROR_MAY(POSIX_READDIR, EBADF,"readdir.91.01", dir==NULL)
+    
+        /*
+        * The readdir() function may fail if:
+        * [ENOENT]
+        *  The current position of the directory stream is invalid.
+        */
+        ERROR_UNCHECKABLE(POSIX_READDIR, ENOENT,"readdir.91.02", 
+            "Unable to check due to closed state")
+    
+    ERROR_END()
+    return true;
+  }
+}
+
+bool readdir_DIR(FileSystem *fs, DIRT *dir, DirEntT *dirent)
+{
+    if(!isNULL_VoidTPtr(dirent->pdirent))
+    {
+        if(dir->index == size_List(dir->sequence))
+        {
+            bool dirContainsName = containsName_DIR(dir, dirent->name);
+            
+            REQ("","directory stream already contains entry", 
+                !dirContainsName);
+/*
+* If entries for dot or dot-dot exist,one entry shall be returned for dot and
+* one entry shall be returned for dot-dot; otherwise, they shall not be returned
+*/
+            REQ("readdir.04", 
+                "one entry for dot and for dot-dot shall be returned", 
+                !dirContainsName);
+
+            append_List(dir->sequence, dirent);
+        }
+        dir->index++;
+
+        return readdir_FileSystem(fs, dir->dirpath, dirent);
+    }
+    return true;
+}
+
+bool readdir_FileSystem(FileSystem *fs, CString *dirpath, DirEntT*dirent)
+{
+    File *directory = fileExist_FileSystem(fs, dirpath, DirectoryFile);
+    if(directory)
+    {
+        if(!isNULL_VoidTPtr(dirent->pdirent))
+        {
+            File *file = fileExistInDir_FileSystem(fs, directory, dirent->name);
+/*
+ * The opendir() function shall open a directory stream corresponding to the
+ * directory named by the dirname argument.
+ */
+            REQ("app.opendir.01", "readdir has read entry that doesn't exist"
+                " in the directory", 
+                file!=NULL);            
+
+            if(file->ino!=NULL)
+            {
+                // if we have ino, check that it is equal to received
+                if(!equals(file->ino, create_InoTObj(dirent->ino)))
+                    REQ("","Requirements Failed: file "
+                    "found to have invalid Ino in model", false);
+            }else 
+/* 
+*    readdir.12
+* If the entry names a symbolic link, the value of the d_ino member is unspecified
+*/                
+            if(file->kind!=SymbolicLinkFile)
+            {
+                file->ino = create_InoTObj(dirent->ino);
+            }
+                
+        }
+        else
+            setUptodate_Directory(directory, true);
+
+        directory->atime_updated = false;
+    }
+    return true;
+}
+ 
+void onReaddir(CallContext context, DIRTPtr dirp, DirEntT *readdir_spec, ErrorCode *errno)
+{
+    DIRT *dir = getDIR(dirp);
+    if(NULL!=dir)
+    {
+        
+        readdir_DIR(getFileSystem(context), dir, readdir_spec);
+    }
+}
+
+specification
+DirEntT *readdir64_spec( CallContext context, DIRTPtr dirp, ErrorCode *errno )
+{
+    DIRT *pre_dir = clone(getDIR(dirp));
+    FileSystem *pre_fs = clone(getFileSystem(context));
+    
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "dirp is not NULL", !isNULL_VoidTPtr(dirp));
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by dirp is available in the context", isValidPointer(context, dirp));
+        
+        /* [Implicit precondition] */
+        REQ("", "errno is NULL", errno!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "File system is NULL", pre_fs!=NULL)
+            
+            return true;
+    }
+    
+    coverage DIR_C
+    {
+        DIRSTREAM_COVERAGE(pre_fs, pre_dir);
+    }
+    
+    post
+    {
+        FileSystem *file_system = getFileSystem(context);
+        File *directory = NULL;
+        
+        DIRT *dir = getDIR(dirp);
+        
+        DIRT *expected_dir = clone(pre_dir);
+        FileSystem *expected_fs = clone(pre_fs);
+        
+        if(NULL!=dir)
+        {
+            REQ("", "readdir64 requirements failed",
+                readdir_DIR(expected_fs, expected_dir, readdir64_spec));
+            directory = getFile_FileSystem(file_system, dir->dirpath);
+        }
+        
+        DUMP("readdir64_spec returns $(obj) errno $(obj)\n", readdir64_spec, create_ErrorCode(*errno));
+        
+        
+        
+        if(!isNULL_VoidTPtr(readdir64_spec->pdirent))
+        {
+            /*
+            * The readdir() function shall return a pointer to a structure representing the
+            * directory entry at the current position inthe directory stream specified by
+            * the argument dirp, and position the directory stream at the next entry.
+            *
+            * Upon successful completion, readdir() shall return a pointer to an object of
+            * type struct dirent
+            */
+            REQ("readdir64.readdir.01", 
+                "readdir should return directory entry at current position",
+                not_Bool3(isDirectoryStreamEnd(file_system, pre_dir)) // == T or U
+                && equals_current_entry_DIR(dir, readdir64_spec)
+                && equals(dir, expected_dir));  
+            
+            /*
+            * The readdir() function shall not return directory entries containing empty 
+            * names
+            */
+            REQ("readdir64.readdir.03", "directory entries shall not contain empty names", 
+                !isEmpty_Path(readdir64_spec->name));
+            
+            /*
+            * If a file is removed from or added to the directory after the most recent call
+            * to opendir() or rewinddir(), whether asubsequent call to readdir() returns an
+            * entry for that file is unspecified.
+            */
+            
+            /* TODO: 
+            Currently POSIX_READDIR_SHALL_RETURN_MODIFIED_FILES constant
+            regulates indirect checking of this requirement
+            */
+            REQ("readdir64.readdir.07", "", TODO_REQ());
+            
+            
+            
+            /*
+            * The readdir() function may buffer several directory entries per actual 
+            * read operation; 
+            */
+            REQ_UNCHECKABLE("readdir64.readdir.08", 
+                "Readdir buffering behaviour inacessible");
+            
+            /*
+            * readdir() shall mark for update the st_atime field of the
+            * directory each time the directory is actually read.
+            */
+            REQ("readdir64.readdir.09", "readdir64() shall mark for update the st_atime",
+                !directory->atime_updated);
+            
+            
+            /*
+            * If the entry names a symbolic link, the value of the d_ino member is 
+            * unspecified
+            */
+            REQ_UNCHECKABLE("readdir64.readdir.12", "no checks could be done");
+            
+        }else if(*errno==SUT_EOK) //readdir64_spec->pdirent is NULL
+        {
+            /*
+            * It shall return a null pointer upon reaching the end of the directory stream.
+            *
+            * When the end of the directory is encountered, a null pointer shall be returned
+            * and errno is not changed
+            */
+            if(isDirectoryStreamEnd(file_system, pre_dir))
+                REQ("readdir64.readdir.02", "NULL shall be returned when "
+                    "directory stream end is encountered", 
+                    readdir64_spec||isNULL_VoidTPtr(readdir64_spec->pdirent)
+                    );
+            
+        }
+        
+        /*
+        * Applications wishing to check for error situations should set errno to 0 before
+        * calling readdir(). If errno is set to non-zero on return, an error occurred.
+        *
+        * When an error is encountered, a null pointer shall be returned and errno shall
+        * be set to indicate the error.
+        */
+        
+        ERROR_BEGIN(POSIX_READDIR, "readdir64.readdir.16",  *errno!=0 && isNULL_VoidTPtr(readdir64_spec->pdirent) ,  *errno )
+        /*
+        * The readdir() function shall fail if:
+        * [EOVERFLOW]
+        *  One of the values in the structure to be returned cannot be 
+        *  represented correctly.
+        */
+        ERROR_UNCHECKABLE(POSIX_READDIR, EOVERFLOW,"readdir64.readdir.90.01","EOVERFLOW not checked")
+        
+        /*
+        * The readdir() function may fail if:
+        * [EBADF]
+        *  The dirp argument does not refer to an open directory stream.
+        */
+        ERROR_MAY(POSIX_READDIR, EBADF,"readdir64.readdir.91.01", dir==NULL)
+        
+        /*
+        * The readdir() function may fail if:
+        * [ENOENT]
+        *  The current position of the directory stream is invalid.
+        */
+        ERROR_UNCHECKABLE(POSIX_READDIR, ENOENT,"readdir64.readdir.91.02", 
+        "Unable to check due to closed state")
+        
+        ERROR_END()
+        return true;
+  }
+}
+
+specification
+DirEntT *readdir_r_spec( CallContext context, DIRTPtr dirp, DirEntTPtr *entry, ErrorCode *errno, CancelStatus status )
+{
+    DIRT *pre_dir = clone(getDIR(dirp));
+    FileSystem *pre_fs = clone(getFileSystem(context));
+    pre
+    {
+        /* [Implicit precondition] */
+        REQ("", "dirp is not NULL", !isNULL_VoidTPtr(dirp));
+        
+        /* [Consistency of test suite] */
+        REQ("", "Memory pointed to by dirp is available in the context", isValidPointer(context, dirp));
+        
+        /* [Implicit precondition] */
+        REQ("", "errno is NULL", errno!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "entry is NULL", entry!=NULL);
+        
+        /* [Implicit precondition] */
+        REQ("", "File system is NULL", pre_fs!=NULL);
+        
+        return true;
+    }
+    
+    coverage DIR_C
+    {
+        DIRSTREAM_COVERAGE(pre_fs, pre_dir);
+    }
+    
+    CANCELPOINT_COVERAGE(context)
+        
+        post
+    {
+        
+        FileSystem *file_system = getFileSystem(context);
+        
+        DIRT *dir = getDIR(dirp);
+        
+        File *directory = NULL;
+        
+        DIRT *expected_dir = clone(pre_dir);
+        FileSystem *expected_fs = clone(pre_fs);
+        
+        if(NULL!=dir)
+        {
+            REQ("","readdir_r requirements failed",
+                readdir_DIR(expected_fs, expected_dir, readdir_r_spec));
+            directory = getFile_FileSystem(file_system, dir->dirpath);
+        }
+        
+        DUMP("readdir_r_spec() returns $(obj) errno $(obj)\n", readdir_r_spec, create_ErrorCode(*errno));
+        
+        
+        CANCELLATION_POINT_MAY_OCCUR_REQ(context, status)
+            
+            if(!isNULL_VoidTPtr(readdir_r_spec->pdirent))
+            {
+            /*
+            * The readdir_r() function shall initialize the dirent structure referenced
+            * by entry to represent the directory
+            * entry at the current position in the directory stream referred to by dirp,
+            * store a pointer to this structure at the location
+            * referenced by result, and position the directory stream at the next entry.
+                */
+                REQ("readdir_r.01", "readdir_r should return directory entry at current position", 
+                    equals_current_entry_DIR(dir, readdir_r_spec)
+                    && equals(dir,expected_dir));
+                
+                    /*
+                    * Upon successful return, the pointer returned at *result shall have the 
+                    * same value as the argument entry. 
+                */
+                REQ("readdir_r.03", "*result shall be equal to entry", 
+                    equals(create_VoidTPtrObj(readdir_r_spec->pdirent), create_VoidTPtrObj(*entry)));
+                
+                    /*
+                    * The readdir_r() function shall not return directory entries containing 
+                    * empty names
+                */
+                REQ("readdir_r.05", "readdir_r shall not return empty names",
+                    !isEmpty_Path(readdir_r_spec->name));
+                    /*
+                    * The readdir_r() function may buffer several directory entries per actual 
+                    * read operation; the readdir_r() function
+                    * shall mark for update the st_atime field of the directory each time the 
+                    * directory is actually read
+                */
+                REQ("readdir_r.07", "readdir_r should mark for update st_atime",
+                    !directory->atime_updated); 
+                
+                    /*
+                    * If a file is removed from or added to the directory after the most recent call
+                    * to opendir() or rewinddir(), whether asubsequent call to readdir_r() returns
+                    * an entry for that file is unspecified.
+                */
+                REQ("readdir_r.06", "", TODO_REQ());
+            }
+            
+            
+            ERROR_BEGIN(POSIX_READDIR_R, "readdir_r.91",  
+                *errno!=0 && isNULL_VoidTPtr(readdir_r_spec->pdirent),  *errno )
+                /*
+                * The readdir_r() function may fail if:
+                * [EBADF]
+                *   The dirp argument does not refer to an open directory stream.
+                */
+                ERROR_MAY(POSIX_READDIR_R, EBADF,"readdir.91.01", dir==NULL)
+                ERROR_END()    
+                
+                /*
+                * Upon
+                * reaching the end of the directory stream, this [*result] pointer 
+                * shall have the value NULL.
+                */
+                if(True_Bool3==isDirectoryStreamEnd(file_system, pre_dir) && *errno==SUT_EOK)
+                    REQ("readdir_r.04", 
+                    "*result==NULL at the end of the stream", 
+                    readdir_r_spec==NULL
+                    ||
+                    isNULL_VoidTPtr(readdir_r_spec->pdirent)
+                    );
+                
+                return true;
+    }
+}
+
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+NAME
+
+    rewinddir - reset the position of a directory stream to the beginning of a 
+    directory
+
+SYNOPSIS
+
+    #include <dirent.h>
+
+    void rewinddir(DIR *dirp);
+
+DESCRIPTION
+
+    The rewinddir() function shall reset the position of the directory stream 
+    to which dirp refers to the beginning of the directory. It shall also cause
+    the directory stream to refer to the current state of the corresponding 
+    directory, as a call to opendir() would have done. If dirp does not refer 
+    to a directory stream, the effect is undefined.
+
+    After a call to the fork() function, either the parent or child (but not
+    both) may continue processing the directory stream using readdir(), 
+    rewinddir(), or [XSI] [Option Start] seekdir(). [Option End] If both the 
+    parent and child processes use these functions, the result is undefined.
+
+RETURN VALUE
+
+    The rewinddir() function shall not return a value.
+
+ERRORS
+
+    No errors are defined.
+
+
+*/
+specification
+void rewinddir_spec( CallContext context, DIRTPtr dirp, CancelStatus status)
+{
+  DIRT *pre_dir = getDIR(dirp);
+  FileSystem *pre_fs = getFileSystem(context);
+
+  pre
+  {
+    /* [Implicit precondition] */
+    REQ("", "dirp is not NULL", !isNULL_VoidTPtr(dirp));
+ 
+    /* [Consistency of test suite] */
+    REQ("", "Memory pointed to by dirp is available in the context", isValidPointer(context, dirp));
+
+    /* If dirp does not refer to a directory stream, the effect is undefined */
+    REQ("", "dirp doesn't refer to an opened directory stream", pre_dir!=NULL);
+    
+/*
+ * If dirp does not refer to a directory stream, the effect is undefined
+ */
+    REQ("app.rewinddir.03", "effect undefined when dirp doesn't refer"
+        " directory stream", NULL!=pre_dir);
+    return true;
+  }
+
+  coverage DIR_C
+  {
+    DIRSTREAM_COVERAGE(pre_fs, pre_dir)
+  }
+
+  CANCELPOINT_COVERAGE(context)
+
+  post
+  {
+    DIRT *dir = getDIR(dirp);
+
+    DUMP("rewinddir_spec($(obj))\n", getPath_DIR(dir));
+
+    CANCELLATION_POINT_MAY_OCCUR_REQ(context, status)
+
+    if(dir!=NULL)
+    {
+    
+/*
+ * The rewinddir() function shall reset the position of the directory stream 
+ * to which dirp refers to the beginning of
+ * the directory.
+ */
+      REQ("rewinddir.01", "rewinddir() shall reset position of the dirstream",
+        dir->index==0);
+/*
+ * It shall also cause the directory stream to refer to the current state of the
+ * corresponding directory, as a call toopendir() would have done.
+ */
+      REQ("rewinddir.02", "It shall cause the stream to refer to the current"
+          " state of the corresponding directory", TODO_REQ());
+    }
+
+    return true;
+  }
+}
+
+void rewindDIR(DIRT *dir)
+{
+    if(NULL!=dir)
+    {
+        dir->index = 0;
+/* we clear location history here because of
+*  seekdir.02
+* If the value of loc was not obtained from an earlier call to telldir(), or 
+* if a call to rewinddir() occurred between the call to telldir() and the call 
+* to seekdir(), the results of subsequent calls to readdir() are unspecified
+*/
+        clear_Map(dir->location_history);
+        clear_List(dir->sequence);
+
+    }
+}
+
+void onRewinddir(CallContext context, DIRTPtr dirp)
+{
+    DIRT *dir = getDIR(dirp);
+    rewindDIR(dir);
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+    
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+NAME
+
+    rmdir - remove a directory
+
+SYNOPSIS
+
+    #include <unistd.h>
+
+    int rmdir(const char *path);
+
+DESCRIPTION
+
+    The rmdir() function shall remove a directory whose name is given by path. 
+    The directory shall be removed only if it is an empty directory.
+    If the directory is the root directory or the current working directory of 
+    any process, it is unspecified whether the function succeeds, or whether 
+    it shall fail and set errno to [EBUSY].
+
+    If path names a symbolic link, then rmdir() shall fail and set errno to 
+    [ENOTDIR].
+
+    If the path argument refers to a path whose final component is either dot 
+    or dot-dot, rmdir() shall fail.
+
+    If the directory's link count becomes 0 and no process has the directory 
+    open, the space occupied by the directory shall be freed and the directory 
+    shall no longer be accessible. If one or more processes have the directory 
+    open when the last link is removed, the dot and dot-dot entries, if present
+    , shall be removed before rmdir() returns and no new entries may be created 
+    in the directory, but the directory shall not be removed until all 
+    references to the directory are closed.
+
+    If the directory is not an empty directory, rmdir() shall fail and set
+    errno to [EEXIST] or [ENOTEMPTY].
+
+    Upon successful completion, the rmdir() function shall mark for update the 
+    st_ctime and st_mtime fields of the parent directory.
+
+RETURN VALUE
+
+    Upon successful completion, the function rmdir() shall return 0. 
+    Otherwise, -1 shall be returned, and errno set to indicate the error. 
+    If -1 is returned, the named directory shall not be changed.
+
+ERRORS
+
+    The rmdir() function shall fail if:
+
+    [EACCES]
+        Search permission is denied on a component of the path prefix, or 
+        write permission is denied on the parent directory of the directory 
+        to be removed.
+    [EBUSY]
+        The directory to be removed is currently in use by the system or some 
+        process and the implementation considers this to be an error.
+    [EEXIST] or [ENOTEMPTY]
+        The path argument names a directory that is not an empty directory,
+        or there are hard links to the directory other than dot or a single 
+        entry in dot-dot.
+    [EINVAL]
+        The path argument contains a last component that is dot.
+    [EIO]
+        A physical I/O error has occurred.
+    [ELOOP]
+        A loop exists in symbolic links encountered during resolution of the 
+        path argument.
+    [ENAMETOOLONG]
+        The length of the path argument exceeds {PATH_MAX} or a pathname 
+        component is longer than {NAME_MAX}.
+    [ENOENT]
+        A component of path does not name an existing file, or the path 
+        argument names a nonexistent directory or points to an empty string.
+    [ENOTDIR]
+        A component of path is not a directory.
+    [EPERM] or [EACCES]
+        [XSI] [Option Start]
+        The S_ISVTX flag is set on the parent directory of the directory to 
+        be removed and the caller is not the owner of the directory to be 
+        removed, nor is the caller the owner of the parent directory, nor 
+        does the caller have the appropriate privileges. [Option End]
+    [EROFS]
+        The directory entry to be removed resides on a read-only file system.
+
+    The rmdir() function may fail if:
+
+    [ELOOP]
+        More than {SYMLOOP_MAX} symbolic links were encountered during 
+        resolution of the path argument.
+    [ENAMETOOLONG]
+        As a result of encountering a symbolic link in resolution of the path 
+        argument, the length of the substituted pathname string exceeded 
+        {PATH_MAX}.
+
+
+*/
+
+specification
+IntT rmdir_spec( CallContext context, CString *path, ErrorCode *errno )
+{
+  FileSystem *pre_fs = clone(getFileSystem(context));
+  Bool3 isELOOP;
+  CString *abspath = resolvePath_Ext(context, pre_fs, path, &isELOOP);
+
+  pre
+  {
+      /*[Implicit precondition]*/
+      REQ("", "path is NULL", path!=NULL);
+      
+      /*[Implicit precondition]*/
+      REQ("", "errno is NULL", errno!=NULL);
+      
+      /*[Implicit precondition]*/
+      REQ("", "File system is NULL", pre_fs!=NULL)
+
+      return true;
+  }
+  coverage Exist_C
+  {
+      DIREXIST_COVERAGE(pre_fs, abspath)
+  }
+  coverage Path_C
+  {
+      PATH_COVERAGE(pre_fs, path);
+  }
+#if POSIX_DIR_ENABLE_ERROR_COVERAGE
+  coverage EACCES_C
+  {
+      ERROR_COVERAGE3(EACCES, isEACCES_dir_mkrm(context, pre_fs, abspath));
+  }
+  coverage EEXIST_C
+  {
+      ERROR_COVERAGE3(EEXIST, doesFileExist_FileSystem(pre_fs, abspath));
+  }
+  coverage ENOENT_C
+  {
+      ERROR_COVERAGE3(ENOENT, isENOENT_dir(context, pre_fs, abspath));
+  }
+#endif
+  post
+  {
+     FileSystem *file_system = getFileSystem(context);
+          
+     File *pre_dir = getFile_FileSystem(pre_fs, abspath);
+
+     FileSystem *expected_fs = clone(pre_fs);
+    
+     File *parent_directory = pre_dir ? getTheOnlyParentDirectory_File(file_system, pre_dir) : NULL;
+     
+     DUMP("rmdir_spec($(obj)->$(obj)) returns $(obj), errno=$(obj)\n", path, abspath, create_Integer(rmdir_spec), create_ErrorCode(*errno));
+     //dump_FileSystem(file_system, file_system->root);
+    
+     if(rmdir_spec==0) 
+     {
+         rmdir_FileSystem(expected_fs, abspath);
+/*
+* Upon successful completion, the function rmdir() shall return 0.
+*/
+        REQ("rmdir.07", "rmdir should fail on non-existing directory",
+            doesFileExist_FileSystem(pre_fs, abspath));
+/*
+ * The rmdir() function shall remove a directory whose name is given by
+ * path. 
+ * The directory shall be removed only if
+ * it is an empty directory.
+ */
+
+         REQ("rmdir.01", "directory shall be removed only if it is an empty directory", 
+             getFile_FileSystem(file_system, abspath)==NULL // removed
+             && (pre_dir==NULL || False_Bool3!=isEmpty_Directory(pre_fs, pre_dir))
+             && equals(expected_fs, file_system)
+             );
+/*
+ * Upon successful completion, the rmdir() function shall mark for update 
+ * the st_ctime and st_mtime fields of
+ * the parent directory.
+ */
+        REQ("rmdir.06", "rmdir() shall mark for update"
+        "the st_ctime and st_mtime", 
+            !parent_directory->ctime_updated 
+            && !parent_directory->mtime_updated);
+
+/*
+ * If the directory's link count becomes 0 and no process has the directory 
+ * open, the space occupied by the directory shall be
+ * freed and the directory shall no longer be accessible.
+ */
+        REQ("rmdir.04", "", TODO_REQ()); // TODO
+    
+/* If one or more processes have the directory open when the last link is 
+ * removed, then no new entries may be created
+ * in the directory, but the directory shall not be removed until all 
+ * references to the directory are closed
+ */
+        REQ("rmdir.05", "", TODO_REQ()); // TODO
+     }else if(rmdir_spec==-1)
+     {
+/*
+ * Otherwise, -1 shall be returned, and errno set to
+ * indicate the error. If -1 is returned, the named directory shall not be 
+ * changed.
+ */
+        REQ("rmdir.07", "If -1 is returned, the named directory shall not be"
+            " changed", 
+            equals(expected_fs, file_system)
+            );
+     }else
+     {
+         REQ("","rmdir shall return 0 or -1", false);
+     }
+      
+
+    
+
+    ERROR_BEGIN(POSIX_RMDIR, "rmdir.07", rmdir_spec==-1,  *errno )
+            //errNo = SUT_EPERM;
+            //hasError=true;
+        /*
+         * The rmdir() function shall fail if
+         * [EACCES]
+         * Search permission is denied on a component of the path prefix, or 
+         * write permission is denied on the parent directory of the
+         * directory to be removed.
+         */
+            ERROR_SHALL3(POSIX_RMDIR, EACCES,"rmdir.90.01", isEACCES_dir_mkrm(context, pre_fs, abspath) )
+
+        /*
+         * The rmdir() function shall fail if
+         * [EBUSY]
+         * The directory to be removed is currently in use by the system or 
+         * some process and the implementation considers this to be an
+         * error.
+         */
+        
+        /*
+         * If the directory is the root directory or the current working 
+         * directory of any process, it is unspecified whether the function
+         * succeeds, or whether it shall fail and set errno to [EBUSY].
+         */            
+         
+         ERROR_SHALL(POSIX_RMDIR, EBUSY,"rmdir.90.02", TODO_ERR(EBUSY))
+
+        /*
+         * The rmdir() function shall fail if
+         * [EEXIST] or [ENOTEMPTY]
+         * The path argument names a directory that is not an empty directory, 
+         * or there are hard links to the directory other than dot
+         * or a single entry in dot-dot.
+         */
+           ERROR_SHALL3(POSIX_RMDIR, EEXIST ,"rmdir.90.03", 
+                isENOTEMPTY_dir(context, pre_fs, abspath))
+
+            ERROR_SHALL3(POSIX_RMDIR, ENOTEMPTY,"rmdir.90.03", 
+                isENOTEMPTY_dir(context, pre_fs, abspath))
+
+        /*
+         * The rmdir() function shall fail if
+         * [EINVAL]
+         * The path argument contains a last component that is dot.
+         */
+            ERROR_SHALL3(POSIX_RMDIR, EINVAL,"rmdir.90.04", 
+                isEINVAL_dir(context, path))
+
+        /*
+         * The rmdir() function shall fail if
+         * [EIO]
+         * A physical I/O error has occurred.
+         */
+            ERROR_SHALL(POSIX_RMDIR, EIO,"rmdir.90.05", TODO_ERR(EIO))
+
+        /*
+         * The rmdir() function shall fail if
+         * [ELOOP]
+         * A loop exists in symbolic links encountered during resolution of 
+         * the path argument.
+         */
+            ERROR_SHALL3(POSIX_RMDIR, ELOOP,"rmdir.90.06", isELOOP)
+
+        /*
+         * The rmdir() function shall fail if
+         * [ENAMETOOLONG]
+         * The length of the path argument exceeds {PATH_MAX} or a pathname 
+         * component is longer than {NAME_MAX}.
+         */
+            ERROR_SHALL3(POSIX_RMDIR, ENAMETOOLONG,"rmdir.90.07", 
+                isENAMETOOLONG(context, path))
+
+        /*
+         * The rmdir() function shall fail if
+         * [ENOENT]
+         *  A component of path does not name an existing file, or the path 
+         *  argument names a nonexistent directory or points to an empty string.
+         */
+            ERROR_SHALL3(POSIX_RMDIR, ENOENT,"rmdir.90.08", isENOENT_dir(context, pre_fs, abspath))
+
+        /*
+         * The rmdir() function shall fail if
+         * [ENOTDIR]
+         *  A component of path is not a directory.
+         */
+        /*
+         * If path names a symbolic link, then rmdir() shall fail and set 
+         * errno to [ENOTDIR].
+         */
+            ERROR_SHALL3(POSIX_RMDIR, ENOTDIR,"rmdir.90.10",  
+                isENOTDIR_dir(context, pre_fs, abspath))
+
+        
+           
+        /*
+         * The rmdir() function shall fail if
+         * [EPERM] or [EACCES]3
+         * [XSI]
+         * The S_ISVTX flag is set on the parent directory of the directory to be
+         * removed and the caller is not the owner of the directory to
+         * be removed, nor is the caller the owner of the parent directory, nor
+         * does the caller have the appropriate privileges.
+         */
+         if(POSIX_OPTION(context, XSI))
+         {
+            ERROR_SHALL3(POSIX_RMDIR, EPERM,"rmdir.90.11", isEPERM_rmdir(context, pre_fs, abspath))
+            ERROR_SHALL3(POSIX_RMDIR, EACCES,"rmdir.90.11", isEPERM_rmdir(context, pre_fs, abspath))
+         }
+            
+        /*
+         * The rmdir() function shall fail if
+         * [EROFS]
+         *  The directory entry to be removed resides on a read-only file system.
+         */
+            ERROR_SHALL(POSIX_RMDIR, EROFS,"rmdir.90.12", TODO_ERR(EROFS))
+
+        /*
+         * The rmdir() function may fail if:
+         * [ELOOP]
+         *  More than {SYMLOOP_MAX} symbolic links were encountered during 
+         *  resolution of the path argument.
+         */
+            ERROR_MAY3(POSIX_RMDIR, ELOOP,"rmdir.91.01", isELOOP)
+
+        /*
+         * The rmdir() function may fail if:
+         * [ENAMETOOLONG]
+         *  As a result of encountering a symbolic link in resolution of the 
+         *  path argument, the length of the substituted pathname
+         *  string exceeded {PATH_MAX}.
+         */
+            ERROR_MAY3(POSIX_RMDIR, ENAMETOOLONG,"rmdir.91.02", 
+                isENAMETOOLONG(context, abspath))
+
+   
+    ERROR_END()
+
+    return true;
+  }
+}
+
+bool rmdir_FileSystem( FileSystem *file_system, CString* path)
+{
+    File* directory = getFile_FileSystem(file_system, path);
+
+    if(NULL!=directory)
+    {
+        File *parent_directory = getTheOnlyParentDirectory_File(file_system, directory);
+        if(parent_directory)
+        {
+            parent_directory->ctime_updated = false;
+            parent_directory->mtime_updated = false;
+        }
+        unregisterFile(file_system, directory);
+        return true;
+    }
+    return false;
+}
+
+void onRmdir( CallContext context, CString* path,  IntT rmdir_spec )
+{
+    FileSystem* file_system = getFileSystem(context);
+    Bool3 isELOOP;
+    CString *abspath = resolvePath_Ext(context, file_system, path, &isELOOP);
+
+    if (rmdir_spec == 0)  // update FileSystem on success
+    {
+        rmdir_FileSystem(file_system, abspath);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+    
+  refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+
+  NAME
+
+    seekdir - set the position of a directory stream
+
+SYNOPSIS
+
+    [XSI] [Option Start] #include <dirent.h>
+
+    void seekdir(DIR *dirp, long loc); [Option End]
+
+DESCRIPTION
+    The seekdir() function shall set the position of the next readdir() 
+    operation on the directory stream specified by dirp to the position 
+    specified by loc. The value of loc should have been returned from an 
+    earlier call to telldir(). The new position reverts to the one associated 
+    with the directory stream when telldir() was performed.
+    If the value of loc was not obtained from an earlier call to telldir(), or 
+    if a call to rewinddir() occurred between the call to telldir() and the 
+    call to seekdir(), the results of subsequent calls to readdir() 
+    are unspecified.
+
+RETURN VALUE
+
+    The seekdir() function shall not return a value.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+void seekdir_spec( CallContext context, DIRTPtr dirp, LongT loc, CancelStatus status)
+{
+  DIRT *pre_dir = clone(getDIR(dirp));
+  FileSystem *pre_fs = getFileSystem(context);
+  pre
+  {
+    /* [Implicit precondition] */
+    REQ("", "dirp is not NULL", !isNULL_VoidTPtr(dirp));
+ 
+    /* [Consistency of test suite] */
+    REQ("", "Memory pointed to by dirp is available in the context", isValidPointer(context, dirp));
+
+ /*
+ * The value of loc shouldhave been returned from an earlier call to telldir()
+ *
+ * If the value of loc was not obtained from an earlier call to telldir(), or if a
+ * call to rewinddir() occurred between the call to telldir() and the call to
+ * seekdir(), the results of subsequent calls to readdir() are unspecified
+ */
+    /*[Behaviour unspecified"]*/
+    REQ("seekdir.02", "loc was not obtained from an earlier call to telldir", 
+        pre_dir==NULL || containsLoc_DIR(pre_dir, loc));
+
+    return true;
+  }
+  coverage DIR_C
+  {
+   DIRSTREAM_COVERAGE(pre_fs, pre_dir);
+  }
+
+  CANCELPOINT_COVERAGE(context)
+
+  post
+  {
+    DIRT *dir = getDIR(dirp);
+    DIRT *expected_dir = clone(pre_dir);
+
+    DUMP("seekdir_spec($(obj), $(obj))\n", getPath_DIR(dir),create_LongTObj(loc));
+
+    if(NULL!=pre_dir)
+        seekdir_DIR(expected_dir, loc);
+
+    CANCELLATION_POINT_MAY_OCCUR_REQ(context, status)
+        
+    /*
+    * The seekdir() function shall set the position of the next readdir()
+    * operation on the directory stream specified by dirp to the position 
+    * specified by loc
+    */
+    REQ("seekdir.01", "seekdir() function shall set the position of the"
+        "next readdir() operation to loc", equals(dir, expected_dir));
+    
+    return true;
+  }
+}
+
+void seekdir_DIR(DIRT *dir, LongT loc)
+{
+    int index = getLocHistoryIndex(dir, loc);
+    if(-1!=index)
+        dir->index = index;
+}
+
+void onSeekdir(CallContext context, DIRTPtr dirp, LongT loc)
+{
+    DIRT *dir = getDIR(dirp);
+    if(NULL!=dir)
+    {
+        seekdir_DIR(dir, loc);
+    }
+}
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+    
+    refers
+
+The Open Group Base Specifications Issue 6
+IEEE Std 1003.1, 2004 Edition
+Copyright (c) 2001-2004 The IEEE and The Open Group, All Rights reserved.
+NAME
+
+    telldir - current location of a named directory stream
+
+SYNOPSIS
+
+    [XSI] [Option Start] #include <dirent.h>
+
+    long telldir(DIR *dirp); [Option End]
+
+DESCRIPTION
+
+    The telldir() function shall obtain the current location associated with
+    the directory stream specified by dirp.
+
+    If the most recent operation on the directory stream was a seekdir(), the 
+    directory position returned from the telldir() shall be the same as that s
+    upplied as a loc argument for seekdir().
+
+RETURN VALUE
+
+    Upon successful completion, telldir() shall return the current location 
+    of the specified directory stream.
+
+ERRORS
+
+    No errors are defined.
+
+*/
+
+specification
+LongT telldir_spec( CallContext context, DIRTPtr dirp)
+{
+  DIRT *pre_dir = getDIR(dirp);
+  FileSystem *pre_fs = getFileSystem(context);
+
+  pre
+  {
+    /* [Implicit precondition] */
+    REQ("", "dirp is not NULL", !isNULL_VoidTPtr(dirp));
+ 
+    /* [Consistency of test suite] */
+    REQ("", "Memory pointed to by dirp is available in the context", 
+        isValidPointer(context, dirp));
+
+ 
+    return true;
+  }
+  coverage DIR_C
+  {
+    DIRSTREAM_COVERAGE(pre_fs, pre_dir);
+  }
+  post
+  {
+    DIRT *dir = getDIR(dirp);
+
+    DUMP("telldir_spec($(obj)) return $(obj)\n", getPath_DIR(dir),create_LongTObj(telldir_spec));
+    
+/*
+ * The telldir() function shall obtain the current location associated with the
+ * directory stream specified bydirp.
+ *
+ * Upon successful completion, telldir() shall return the current location of the
+ * specified directory stream.
+ */
+    if(dir!=NULL)
+    {
+        REQ("telldir.01", "telldir() shall obtain the current location", 
+            equalsCurrentLocation_DIR(dir, telldir_spec));
+    }
+    return true;
+  }
+}
+
+void onTelldir(CallContext context, DIRTPtr dirp, LongT telldir_spec)
+{
+    DIRT *dir;
+    
+    dir = getDIR(dirp);
+    if(NULL!=dir)
+    {
+        put_Map(dir->location_history, create_LongTObj(telldir_spec), create_Integer(dir->index));
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+void dump_FileSystem(FileSystem *fs, FileId root);
+CString *format_FileSystem(FileSystem *fs, FileId root);
+
+Bool3 isEACCES_dir_mkrm(CallContext context, FileSystem *fs, CString *path)
+{
+    Bool3 res = False_Bool3;
+
+    if(!isAbsolute_Path(path))
+        return Unknown_Bool3;
+
+    path = getParentDir_Path(path);
+
+    if(NULL==path)  // is child of root
+        return Unknown_Bool3;
+
+    res = or_Bool3(res, isNoPermOnPath(context, fs, path, false, true, false));  // check write
+
+    res = or_Bool3(res, isNoPermOnPathComponents(context, fs, path, false, false, true)); // check search
+
+    return res;
+} 
+
+Bool3 isEPERM_unlink(CallContext context, FileSystem *fs, CString *path)
+{
+    Bool3 isDir = isFileKindOf_FileSystem(fs, path, DirectoryFile);
+    // TODO: Appropriate priveleges (see unlink()'s REQ for EPERM)
+    return isDir;
+}
+
+Bool3 isEACCES_dir_open(CallContext context, FileSystem *fs, CString *path)
+{
+    Bool3 res = False_Bool3;
+    
+    if(!isAbsolute_Path(path))
+        return Unknown_Bool3;
+
+    res = or_Bool3(res, isNoPermOnPath(context, fs, path, true, false, true)); // check read
+   
+    path = getParentDir_Path(path);
+    
+    if(NULL==path)  // is child of root
+        return Unknown_Bool3;
+
+    res = or_Bool3(res, isNoPermOnPathComponents(context, fs, path, false, false, true)); // check search
+    
+    return res;
+}
+
+Bool3 isEINVAL_dir(CallContext context, CString *path)
+{
+    List *path_components = split_Path(path);
+    CString *comp;
+    int size;
+    if((size=size_List(path_components))==0)
+        return False_Bool3;
+    comp = get_List(path_components, size-1);
+    return equals(comp,create_CString(".")) ? True_Bool3:False_Bool3;
+}
+
+Bool3 isENOTDIR_dir(CallContext context, FileSystem *fs, CString *path)
+{
+    FileSearchResult *res = getFile_FileSystem_Ext(fs, path);
+    
+   /*
+    *  A component of path is not a directory.
+    */
+    File *file = res->file ? res->file : res->last;
+
+    return file ? not_Bool3(isOfKind_File(file, DirectoryFile)) : Unknown_Bool3;
+} 
+
+Bool3 isFileOwned(ProcessId processId, File *file)
+{
+    UidTObj *effectiveUserId = getEffectiveUserId_ProcessId(processId);
+    if(effectiveUserId==NULL || file->uid==NULL)
+        return Unknown_Bool3;
+    return equals(effectiveUserId, file->uid) ? True_Bool3:False_Bool3;
+}
+
+Bool3 isEPERM_rmdir(CallContext context, FileSystem *fs, CString *path)
+{
+    File *dir, *parent_dir = NULL;
+    FilePermissions *perms;
+    Bool3 res;
+    if(!isAbsolute_Path(path))
+        return Unknown_Bool3;
+
+    dir = getFile_FileSystem(fs, path);
+
+    path = getParentDir_Path(path);
+
+    if(NULL==path)
+        return False_Bool3; // we are root
+    
+    parent_dir = getFile_FileSystem(fs, path);
+
+    if(NULL==parent_dir)
+        return Unknown_Bool3;   // no parent dir
+
+    perms = getPermissions_File(parent_dir);
+
+    if(NULL==perms)
+        return Unknown_Bool3;
+/* rmdir.90.11
+
+The S_ISVTX flag is set on the parent directory of the directory to be removed 
+and the caller is not the owner of the directory to be removed, nor is the 
+caller the owner of the parent directory, nor does the caller have the 
+appropriate privileges.
+
+*/
+    if(True_Bool3!=perms->set_vtx)
+        return perms->set_vtx;  // only when set_vtx
+
+    res = isFileOwned(getProcessId_CallContext(context), dir);
+    if(res!=False_Bool3)
+        return not_Bool3(res);
+
+    res = isFileOwned(getProcessId_CallContext(context), parent_dir);
+    if(res!=False_Bool3)
+        return not_Bool3(res);
+
+    res = hasAppropriatePrivileges(context, rmdir_AccessPrivileges, dir->fileid);
+    if(res!=False_Bool3)
+        return not_Bool3(res);
+
+    return True_Bool3;
+}
+
+/*
+ The path argument names a directory that is not an empty directory, 
+ or there are hard links to the directory other than dot
+ or a single entry in dot-dot.
+ If the path argument refers to a path whose final component is 
+ either dot or dot-dot, rmdir() shall fail.
+*/
+
+static bool doesPathEndsWithDot(CString *path)
+{
+    CString *name = getBaseName_Path(path);
+    return equals(name, create_String(".")) 
+            || equals(name, create_String(".."));
+            
+
+}
+
+Bool3 isENOTEMPTY_dir(CallContext context, FileSystem *fs, CString *path)
+{
+   File *file = getFile_FileSystem(fs, path);
+    
+   return file ? not_Bool3(isEmpty_Directory(fs, file))    : Unknown_Bool3;
+} 
+
+Bool3 isENOENT_dir(CallContext context, FileSystem *fs, CString *path)
+{
+    if(NULL==path)
+        return Unknown_Bool3;
+    
+    if(length_CString(path)==0)
+        return True_Bool3;
+    while(NULL!=path)
+    {
+        if(False_Bool3==doesFileExist_FileSystem(fs, path))
+            return True_Bool3;
+        path = getParentDir_Path(path);
+    }
+    return Unknown_Bool3;
+}
+
+
+bool containsName_DIR(DIRT *dir, CString *filename)
+{
+    int i;
+    for(i=0;i<size_List(dir->sequence);i++)
+    {
+        DirEntT *dirent = get_List(dir->sequence, i);
+        if(equals(dirent->name, filename))
+            return true;
+    }
+    return false;
+}
+
+bool containsLoc_DIR(DIRT *dir, LongT loc)
+{
+    return containsKey_Map(dir->location_history, create_LongTObj(loc));
+}
+
+Bool3 isDirectoryStreamEnd(FileSystem *fs, DIRT *dir)
+{
+    File *directory = getFile_FileSystem(fs, dir->dirpath);
+    
+    DirectoryDescriptor *dd = directory->descriptor;
+
+    int count, i;
+    if(NULL==directory)
+        return Unknown_Bool3;
+
+    count = getFileCount_Directory(directory);
+
+    if(!dd->modified || POSIX_READDIR_SHALL_RETURN_MODIFIED_FILES)
+    {
+        for(i=0; i<count; i++)
+        {
+            CString *filename = getFileNameAt_Directory(fs, directory, i);
+            if(!containsName_DIR(dir, filename))
+                return False_Bool3;
+        }
+        if(dir->index!=size_List(dir->sequence))
+            return False_Bool3;
+        if(isUptodate_Directory(directory) )
+            return True_Bool3;
+    }
+    return Unknown_Bool3;
+}
+
+Bool3 isDirectoryStreamStart(FileSystem *fs, DIRT *dir)
+{
+    return dir->index==0 ? True_Bool3 : False_Bool3;
+}
+
+
+Bool3 isDirCountExceedOpenMax(void)
+{
+    /* TODO: */
+    return Unknown_Bool3;
+}
+
+FilePermission* maskFilePermission(FilePermission* perm, FilePermission* mask)
+{
+    if(mask==NULL)
+        return NULL;
+
+    if(mask->read)
+        perm->read = false;
+    if(mask->write)
+        perm->write = false;
+    if(mask->execute)
+        perm->execute = false;
+    return perm;
+}
+
+FilePermissions *getProcessModifiedFilePermissions(ProcessId processId, FilePermissions *perms)
+{
+    FilePermissions *modified_perms;
+
+    ProcessState *process_state = getProcessState(processId);
+
+    assertion(perms!=NULL, "getProcessModifiedFilePermissions: perms!=NULL");
+    assertion(process_state!=NULL && process_state->meta.umask!=NULL, 
+        "getProcessModifiedFilePermissions: umask!=NULL");
+
+    modified_perms = create_FilePermissions(
+        maskFilePermission(perms->owner, process_state->meta.umask->owner),
+        maskFilePermission(perms->group, process_state->meta.umask->group),
+        maskFilePermission(perms->other, process_state->meta.umask->other),
+        Unknown_Bool3, Unknown_Bool3, Unknown_Bool3);
+
+    return modified_perms;
+}
+
+bool equals_current_entry_DIR(DIRT *dir, DirEntT *dirent)
+{
+    int seq_size = size_List(dir->sequence);
+    if(dir->index>0 && dir->index<=seq_size)    
+    {
+        return equals(get_List(dir->sequence, dir->index-1), dirent);
+    }
+    return false;
+}
+
+void setUptodate_Directory(File *directory, bool uptodate)
+{
+    DirectoryDescriptor *dd;
+    assertion(directory->kind==DirectoryFile, 
+        "setUptodate_Directory: should be directory");
+    dd = directory->descriptor;
+    dd->uptodate = uptodate;
+}
+
+File *fileExistInDir_FileSystem(FileSystem *fs, File *directory, CString *filename)
+{
+    bool directory_uptodate = isUptodate_Directory(directory);
+
+    File *file = getFile_Directory_Ext(fs, directory, filename);
+    if(NULL==file)
+    {
+        if(directory_uptodate)
+        {
+            traceFormattedUserInfo("Requirements Failed: directory $(obj) "
+                "found to be uptodate while adding $(obj)",
+                getPath_File(fs,directory), filename);
+//            assertion(false, "fileExist_FileSystem: couldn't add to uptodate directory");
+            return NULL;
+        }
+        file = registerFileInDir(fs, directory, filename);
+    }
+    return file;
+}
+
+int getLocHistoryIndex(DIRT *dir, LongT loc)
+{
+    Integer *indexp = get_Map(dir->location_history, create_LongTObj(loc));
+    return indexp ? *indexp : -1;
+}
+
+bool equalsCurrentLocation_DIR(DIRT *dir, LongT telldir_spec)
+{
+    return equals(get_Map(dir->location_history, create_LongTObj(telldir_spec)), 
+        create_Integer(dir->index));
+}
+
+/********************************************************************/
+/** DirT                                                           **/
+/********************************************************************/
+
+specification typedef struct DIRT DIRT = {
+
+};
+
+DIRT *create_DIR(DIRTPtr pDIR, CString *dirpath)
+{
+  return create( &type_DIRT, pDIR, dirpath, create_List(&type_DirEntT), create_Map(&type_LongTObj, &type_Integer), 0);
+}
+
+DIRT* getDIR(DIRTPtr pDIR)
+{
+  return getObjectInMemory(pDIR);
+}
+
+CString *getPath_DIR(DIRT *dir)
+{
+    if(dir)
+        return dir->dirpath;
+    return NULL;
+}
+
+void registerDIR(CallContext context, DIRTPtr pDIR, CString *dirpath)
+{
+    ProcessState *pstate;
+    DIRT *dir;
+    registerObjectInMemory(
+        pDIR,
+        sizeof_SUTType("void*"),
+        dir = create_DIR( pDIR, dirpath)
+        );
+    pstate = getProcessState_CallContext(context);
+    add_Set(pstate->dir_descriptors, dir);
+}
+
+void unregisterDIR(CallContext context, DIRTPtr pDIR)
+{
+    ProcessState *pstate = getProcessState_CallContext(context);
+    DIRT *dir = getDIR(pDIR);
+    remove_Set(pstate->dir_descriptors, dir);
+
+    unregisterObjectInMemory(pDIR);
+}
+
+
+
+/********************************************************************/
+/** DirEntT                                                        **/
+/********************************************************************/
+
+String* to_string_DirEntT( struct DirEntT *dirent)
+{
+    String *res = !isNULL_VoidTPtr(dirent->pdirent) ?
+        concat_String(
+            create_String(toCharArray_CString(dirent->name)), 
+            format_String(" [%d]", dirent->ino))
+       : create_String("NULL");
+    return res;
+    
+}
+
+int compare_DirEntT( struct DirEntT *left, struct DirEntT *right)
+{
+    int c1 = compare(left->name, right->name);
+    InoT c2 = right->ino-left->ino;
+    return c1?c1:c2;
+}
+
+specification typedef struct DirEntT DirEntT= {
+    .to_string = (ToString)to_string_DirEntT,
+    .compare = (Compare)compare_DirEntT
+};
+
+DirEntT *create_DirEnt(DirEntTPtr pdirent, InoT ino, CString *name)
+{
+    return create( &type_DirEntT, pdirent, ino, name);
+}

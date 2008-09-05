@@ -1,0 +1,257 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "pthread/rwlock/tests/rwlock_scenario.seh"
+
+#include "pthread/rwlock/rwlock_model.seh"
+
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/control_center.seh"
+
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+/* a number of rwlocks */
+#define RWLOCK_NUM_ID 2
+
+/* a number of threads */
+#define THREAD_NUM_ID 5
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static VoidTPtr rwlocks[RWLOCK_NUM_ID];
+static VoidTPtr rwlocks_area[RWLOCK_NUM_ID];
+static CallContext context;
+static CallContext contexts[THREAD_NUM_ID];
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+specification typedef struct StateUnitSpec {
+    unsigned int rw;
+    int th;         // -1 if rwlock is initialized
+} StateUnitSpec;
+
+specification typedef struct StateUnitSpec StateUnitSpec = {};
+
+StateUnitSpec * create_StateUnitSpec(
+    unsigned int rw,
+    int th
+)
+{
+    return create(&type_StateUnitSpec, rw, th);
+}
+
+/* This is a list of pairs that contains a rwlock and its initialiser */
+List* rwlock_creates;
+
+/* scenario state that has to be saved and restore */
+specification typedef
+struct StateInDe
+{
+    Map* systems;
+    List* init_destroy_state;
+} StateInDe = 
+{
+};
+
+StateInDe * create_StateInDe(
+    Map* systems,
+    List* init_destroy_state
+)
+{
+    return create(&type_StateInDe,
+        systems,
+        init_destroy_state);
+}
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+StateInDe* saveRwlockInitDestroyState(void)
+{
+    return create_StateInDe(systems, rwlock_creates);
+}
+
+void restoreRwlockInitDestroyState(StateInDe* saved_state)
+{
+    systems = saved_state->systems;
+    rwlock_creates = saved_state->init_destroy_state;
+}
+
+bool isRwlockInitModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+List *get_RwlockInitDestroyState(void)
+{
+    return clone(rwlock_creates);
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+void cleanup_rwlock_init_destroy_scenario()
+{
+    int i,j;
+
+    /* delete threads */
+    for(i = 1; i < THREAD_NUM_ID; i++)
+    {
+        if(!isWrong_ThreadId(contexts[i]))
+        {
+            // TODO: delete thread
+        }
+    }    
+
+    /* deallocate memory */
+    for(j = 0; j < RWLOCK_NUM_ID; j++)
+    {
+        if (!isNULL_VoidTPtr(rwlocks_area[j]))
+        {
+            deallocateMemoryBlock(context, rwlocks_area[j]);
+        }
+    }
+}
+
+bool init_rwlock_init_destroy_scenario(int argc, char** argv)
+{
+    int i;
+    bool result = true;
+
+    /* fulfil rwlock_creates list */
+    rwlock_creates = create_List(&type_StateUnitSpec);
+    for(i=0;i<RWLOCK_NUM_ID;i++)
+    {
+        StateUnitSpec *tmp = create_StateUnitSpec(0, 0);
+        tmp->rw = i;
+        tmp->th = -1; //uninitialized
+        append_List(rwlock_creates, tmp);
+    }
+
+    /* create threads */
+    context = getContext();
+    contexts[0] = context;
+
+    for(i=1;i<THREAD_NUM_ID;i++)
+    {
+        contexts[i] = createThread();
+        if(isWrong_ThreadId(contexts[i])) result = false;
+    }
+    
+    /* initialize scenario state */
+    for(i=0;i<RWLOCK_NUM_ID;i++)
+    {
+        rwlocks_area[i] = allocateMemoryBlock(context, 1024);
+        if (isNULL_VoidTPtr(rwlocks_area[i])) result = false;
+        rwlocks[i] = NULL_VoidTPtr;
+    }
+
+    setTSTimeModel(NotUseTSTime);
+    if(!result)
+    {
+        cleanup_rwlock_init_destroy_scenario();
+    }
+    return result;
+}
+
+void finish_rwlock_init_destroy_scenario(void)
+{
+    cleanup_rwlock_init_destroy_scenario();
+    return;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+/*
+            
+*/
+scenario
+bool rwlock_init_scen()
+{
+    iterate(unsigned int i=0;i<THREAD_NUM_ID;i++;)
+    {
+        iterate(unsigned int j=0;j<RWLOCK_NUM_ID;j++;)
+        {
+            if (isNULL_VoidTPtr(rwlocks[j]))
+            {
+                StateUnitSpec *tmp;
+                pthread_rwlock_init_spec(contexts[i], rwlocks_area[j], NULL_VoidTPtr);    
+                rwlocks[j] = rwlocks_area[j];
+                tmp = get_List(rwlock_creates, j);
+                tmp->th = i;
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool rwlock_destroy_scen() 
+{
+    iterate(unsigned int i=0;i<THREAD_NUM_ID;i++;)
+    {
+        iterate(unsigned int j=0;j<RWLOCK_NUM_ID;j++;)
+        {
+            StateUnitSpec *tmp;
+            if(!isNULL_VoidTPtr(rwlocks[j]) && isDestroyPossible(rwlocks[j]))
+            {
+                pthread_rwlock_destroy_spec(contexts[i], rwlocks[j]);
+                rwlocks[j] = NULL_VoidTPtr;
+                tmp = get_List(rwlock_creates, j);
+                tmp->th = -1;
+            }
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm rwlock_init_destroy_scenario =
+{
+    .init = init_rwlock_init_destroy_scenario,
+    .finish = finish_rwlock_init_destroy_scenario,
+    .getState = (PtrGetState)get_RwlockInitDestroyState,
+    .saveModelState = (PtrSaveModelState)saveRwlockInitDestroyState,
+    .restoreModelState = (PtrRestoreModelState)restoreRwlockInitDestroyState,
+    .isStationaryState = (PtrIsStationaryState)isRwlockInitModelStateStationary,
+    .actions = {
+            rwlock_init_scen,
+            rwlock_destroy_scen,
+            NULL
+    }
+};
+

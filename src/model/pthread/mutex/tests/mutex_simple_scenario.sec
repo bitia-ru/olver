@@ -1,0 +1,141 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "pthread/mutex/mutex_model.seh"
+#include "pthread/mutex/tests/mutex_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static CallContext *contexts;
+static PThreadMutexAttrTPtr pattr;
+static PThreadMutexTPtr pmutex;
+static int numberOfThreads = 5;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_mutex_simple_scenario(int argc,char** argv)
+{
+    int i;
+
+    contexts = (CallContext*) calloc(numberOfThreads, sizeof(CallContext));
+
+    // Create additional threads
+    for(i=0; i<numberOfThreads; i++)
+    {
+        createThread();
+    }
+
+    // Init test scenario data
+    getContexts(numberOfThreads,contexts);
+    context  = contexts[0];
+    
+    pattr = allocateMemoryBlock(context,sizeof_Type(context,"pthread_mutexattr_t"));
+    pmutex = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutex_t"));
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec( 70 );
+    return true;
+}
+
+static void finish_mutex_simple_scenario(void)
+{
+    // Deallocate resources
+    deallocateMemoryBlock(context, pattr);
+    deallocateMemoryBlock(context, pmutex);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool mutexattr_simple_scen()
+{
+    ErrorCode *code;
+    
+    pthread_mutexattr_init_spec(context,pattr);
+    pthread_mutexattr_settype_spec(context,pattr,SUT_PTHREAD_MUTEX_ERRORCHECK);
+
+    pthread_mutex_init_spec(context,pmutex,pattr);
+    pthread_mutex_lock_spec(context,pmutex);
+
+    // This change shall not affect any previously initialized mutexes
+    pthread_mutexattr_settype_spec(context,pattr,SUT_PTHREAD_MUTEX_RECURSIVE);
+    
+    // If mutex is still ERRORCHECK, lock should fail with EBUSY
+    code = pthread_mutex_trylock_spec(context,pmutex);
+    /*
+     * After a mutex attributes object has been used to initialize one or more 
+     * mutexes, any function affecting the attributes object (including destruction) 
+     * shall not affect any previously initialized mutexes.
+     */
+    REQ("pthread_mutexattr.01", "Changes in the attributes object shall not affect any previously initialized mutexes", 
+        *code == SUT_EBUSY);
+    
+    // This change shall not affect any previously initialized mutexes
+    pthread_mutexattr_destroy_spec(context,pattr);
+
+    // If mutex is still ERRORCHECK, lock should fail with EBUSY
+    code = pthread_mutex_trylock_spec(context,pmutex);
+    /*
+     * After a mutex attributes object has been used to initialize one or more 
+     * mutexes, any function affecting the attributes object (including destruction) 
+     * shall not affect any previously initialized mutexes.
+     */
+    REQ("pthread_mutexattr.01", "Destruction of the attributes object shall not affect any previously initialized mutexes", 
+        *code == SUT_EBUSY);
+    
+    pthread_mutex_unlock_spec(context,pmutex);
+    pthread_mutex_destroy_spec(context,pmutex);
+
+    return true;
+}
+
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm mutex_simple_scenario = 
+{
+    .init = init_mutex_simple_scenario,
+    .finish = finish_mutex_simple_scenario,
+    .saveModelState = (PtrSaveModelState)saveMutexModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreMutexModelState,
+    .isStationaryState = (PtrIsStationaryState)isMutexModelStateStationary,
+    .actions = {
+        mutexattr_simple_scen,
+        NULL
+    }
+};

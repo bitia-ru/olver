@@ -1,0 +1,258 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "pthread/mutex/mutex_model.seh"
+#include "pthread/mutex/tests/mutex_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+typedef enum MutexInitializationAuthor
+{
+    None,
+    MutexInit,
+    MutexLock,
+    MutexTryLock,
+    MutexUnlock,
+} MutexInitializationAuthor;
+
+const char* to_cstring_MutexInitializationAuthor( MutexInitializationAuthor author )
+{
+    switch (author)
+    {
+        case None :
+            return "None";
+        case MutexInit :
+            return "MutexInit";
+        case MutexLock :
+            return "MutexLock";
+        case MutexTryLock :
+            return "MutexTryLock";
+        case MutexUnlock :
+            return "MutexUnlock";
+    }
+    assertion( false, "Incorrect MutexInitializationAuthor value: %d", author );
+}
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static CallContext context2;
+static CallContext context3;
+static VoidTPtr mutex_area;
+static PThreadMutexTPtr pmutex;
+static MutexInitializationAuthor mutex_initialization_author = None;
+
+static void update_author( MutexInitializationAuthor author )
+{
+    if ((mutex_initialization_author == None) || (author == None))
+        mutex_initialization_author = author;
+}
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_mutex_static_init_scenario(int argc,char** argv)
+{
+    CallContext contexts[3];
+
+    // Create additional threads
+    createThread();
+    createThread();
+
+    // Init test scenario data
+    getContexts(3,contexts);
+    context  = contexts[0];
+    context2 = contexts[1];
+    context3 = contexts[2];
+    //
+    mutex_area = allocateMemoryBlock(context,sizeof_Type(context,"pthread_mutex_t"));
+    pmutex = NULL_VoidTPtr;
+
+    mutex_initialization_author = None;
+    //
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec( 70 );
+    return true;
+}
+
+static void finish_mutex_static_init_scenario(void)
+{
+    // Deallocate resources
+    deallocateMemoryBlock(context,mutex_area);
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+String* to_string_MutexStaticInitGenState( MutexInitializationAuthor* gen_state )
+{
+    return create_String( to_cstring_MutexInitializationAuthor(*gen_state) );
+}
+
+specification typedef MutexInitializationAuthor MutexStaticInitGenState = {
+    .to_string = (ToString)to_string_MutexStaticInitGenState
+};
+
+MutexStaticInitGenState * create_MutexStaticInitGenState(
+    MutexInitializationAuthor author
+)
+{
+    return create(&type_MutexStaticInitGenState, author);
+}
+
+MutexStaticInitGenState* get_MutexStaticInitGenState(void)
+{
+    if (isNULL_VoidTPtr(pmutex))
+        return NULL;
+    return create_MutexStaticInitGenState( mutex_initialization_author );
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+static int pshared = 0;
+
+scenario
+bool mutex_static_init_scen()
+{
+    if (isNULL_VoidTPtr(pmutex))
+    {
+        pthread_mutex_static_init_spec(context,mutex_area);
+        pmutex = mutex_area;
+    }
+    return true;
+}
+
+scenario
+bool mutex_lock_static_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        if (pre pthread_mutex_lock_spec(context,pmutex))
+        {
+            pthread_mutex_lock_spec(context,pmutex);
+            update_author(MutexLock);
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_trylock_static_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        if (pre pthread_mutex_trylock_spec(context,pmutex))
+        {
+            pthread_mutex_trylock_spec(context,pmutex);
+            update_author(MutexTryLock);
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_unlock_static_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        if (pre pthread_mutex_unlock_spec(context,pmutex))
+        {
+            pthread_mutex_unlock_spec(context,pmutex);
+            update_author(MutexUnlock);
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_destroy_static_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex = getMutex(pmutex);
+
+        if (isLocked_Mutex(mutex))
+            pthread_mutex_unlock_spec(context,pmutex);
+        pthread_mutex_destroy_spec(context,pmutex);
+        pmutex = NULL_VoidTPtr;
+        update_author(None);
+    }
+    return true;
+}
+
+scenario
+bool mutex_verification_use_case1_static_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex = getMutex(pmutex);
+
+        if (!isLocked_Mutex(mutex))
+            pthread_mutex_lock_spec(context,pmutex);
+
+        pthread_mutex_trylock_spec(context2,pmutex);
+        pthread_mutex_trylock_spec(context3,pmutex);
+
+        pthread_mutex_unlock_spec(context,pmutex);
+
+        update_author(MutexLock);
+    }
+    return true;
+}
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm mutex_static_init_scenario = 
+{
+    .init = init_mutex_static_init_scenario,
+    .finish = finish_mutex_static_init_scenario,
+    .getState = (PtrGetState)get_MutexStaticInitGenState,
+    .saveModelState = (PtrSaveModelState)saveMutexModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreMutexModelState,
+    .isStationaryState = (PtrIsStationaryState)isMutexModelStateStationary,
+    .actions = {
+        mutex_static_init_scen,
+        mutex_lock_static_scen,
+        mutex_trylock_static_scen,
+        mutex_unlock_static_scen,
+        mutex_destroy_static_scen,
+        mutex_verification_use_case1_static_scen,
+        NULL
+    }
+};

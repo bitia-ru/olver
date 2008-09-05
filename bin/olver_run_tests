@@ -1,0 +1,183 @@
+#!/bin/bash
+#
+# This script runs the tests
+#
+
+TESTER=`cat ${0%/*}/../etc/olver.conf | grep USER_NAME_TESTER | awk '{print $3}'`
+id $TESTER > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+	echo "Error: there is no such a user '$TESTER'"
+	exit 1
+fi
+
+#
+# Prepare reports dir
+#
+export OLVER_REPORT_DIR=${OLVER_REPORT_DIR:-/var/opt/lsb/test/olver-core}
+mkdir -p $OLVER_REPORT_DIR
+chown $TESTER:"`id $TESTER -gn`" $OLVER_REPORT_DIR > /dev/null 2>&1
+chmod 755 $OLVER_REPORT_DIR > /dev/null 2>&1
+
+#
+# Change current user
+#
+if [ "`id -un`" != "$TESTER" ]; then
+    su $TESTER -c "${0%/*}/olver_run_tests $1"
+    exit $?
+fi
+
+#
+# Adjust Directory
+#
+pushd ${0%/*} > /dev/null 2>&1
+
+#
+# Check Prerequisites
+#
+./olver_pre
+if [ ! $? = 0 ]; then
+    exit 2
+fi
+
+#
+# Execution Parameters
+#
+export TTIMEMARK=${TTIMEMARK:-`date +%Y-%m-%d_%H-%M-%S`}
+export AGENT_LOG=${AGENT_LOG:-/tmp/olver-log/agent.log}
+export RUN_LOG=${RUN_LOG:-run.log}
+TEST_TIMEOUT=1800
+TEST_PLAN=testplan
+
+# External test plan specified
+if [ $# -gt 0 ]; then
+    if [ -f $1 ]; then
+        TEST_PLAN=$1
+    fi
+fi
+
+# External timeout specified
+if [ $# -gt 1 ]; then
+    TEST_TIMEOUT=$2
+fi
+
+#
+# Prepare dirs for logs
+#
+rm -rf /tmp/olver > /dev/null 2>&1
+rm -rf ${AGENT_LOG%/*} > /dev/null 2>&1
+rm -f *.log > /dev/null 2>&1
+rm -f $RUN_LOG > /dev/null 2>&1
+
+mkdir -p /tmp/olver
+chmod 755 /tmp/olver > /dev/null 2>&1
+
+mkdir -p ${AGENT_LOG%/*}
+chmod 755 ${AGENT_LOG%/*} > /dev/null 2>&1
+echo > $AGENT_LOG
+chmod 755 $AGENT_LOG > /dev/null 2>&1
+
+#
+# Count Scenarios
+#
+SCENARIO_CNT=`wc -l <$TEST_PLAN`
+
+echo "OLVER Test Suite"
+echo "Using test plan:                        $TEST_PLAN"
+echo "Number of scenarios in the test plan:   $SCENARIO_CNT"
+echo "Scenario execution timeout:             $TEST_TIMEOUT second(s)"
+
+count_scen=0
+
+count_pass=0
+count_fail=0
+count_exit=0
+count_unkn=0
+count_term=0
+count_known=0
+count_unknown=0
+
+#
+# Execute Function
+#
+run() {
+((count_scen++))
+echo "Running scenario $1 ($count_scen of $SCENARIO_CNT)"  | tee -a $RUN_LOG
+./olver -l -c "../etc/olver.conf"  -t $TEST_TIMEOUT $1
+code=$?
+
+echo " "
+
+zip -q -j $1.utz $1.utt
+rm -f $1.utt > /dev/null 2>&1
+
+echo -n Scenario $1 status: | tee -a $RUN_LOG
+if [ $code = 0 ]; then
+    echo " PASS" | tee -a $RUN_LOG
+    ((count_pass++))
+elif [ $code = 137 ]; then
+    echo " TERMINATED" | tee -a $RUN_LOG
+    ((count_term++))
+elif [ $code = 143 ]; then
+    echo " TERMINATED" | tee -a $RUN_LOG
+    ((count_term++))
+elif [ $code = 2 ]; then
+    echo " FAIL" | tee -a $RUN_LOG
+    ((count_fail++))
+elif [ $code = 1 ]; then
+    echo " ABNORMAL" | tee -a $RUN_LOG
+    ((count_exit++))
+else
+    echo " UNKNOWN" | tee -a $RUN_LOG
+    ((count_unkn++))
+fi
+}
+
+#
+# Prepare for Execution
+#
+export TEST_SYSTEM_HOST=127.0.0.1
+export LD_LIBRARY_PATH=.
+
+#
+# Run Tests
+#
+echo Running... | tee -a $RUN_LOG
+
+for scen in `cat $TEST_PLAN`
+do
+    if [[ $scen == \#* ]]
+    then
+        echo Skipping commented:$scen | tee -a $RUN_LOG
+    else
+        run $scen
+    fi
+done
+
+cp times.log times.ref >/dev/null 2>&1
+
+#
+# Execution Status
+#
+echo PASSED: $count_pass, FAILED: $count_fail, TERMINATED: $count_term, ABNORMAL: $count_exit, UNKNOWN: $count_unkn | tee -a $RUN_LOG
+
+#
+# Process Results
+#
+echo
+echo
+echo Generating report...
+./olver_report
+
+#
+# Restore Directory
+#
+popd > /dev/null 2>&1
+
+#
+# Test Run Return Code
+#
+if [[ $count_term > 0 || $count_fail > 0 || $count_exit > 0 || $count_unkn > 0 ]]; then
+    exit 1
+else
+    exit 0
+fi

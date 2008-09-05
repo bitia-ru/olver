@@ -1,0 +1,186 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "util/inet/inet_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initUtilInetSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_inet_addr_spec(inet_addr_media);
+    set_mediator_inet_ntoa_spec(inet_ntoa_media);
+    set_mediator_inet_ntop_spec(inet_ntop_media);
+    set_mediator_inet_pton_spec(inet_pton_media);
+
+    //Set up formatters
+    registerTSFormatter("inaddrt",(TSFormatterFuncType)inaddrt_formatter);
+}
+void writeInAddrT_TSStream( TSStream* stream, InAddrT* address)
+{
+    int size, i;
+    writeTypeHeaderTSStream(stream,"inaddrt");    
+    size= sizeof(address->arr)/sizeof(CharT);
+    writeSize_TSStream( stream, size );
+    for(i=0;i<size;i++)
+        writeChar_TSStream( stream, address->arr[i] );    
+}
+static void inaddrt_formatter(TSStream* stream, InAddrT* value)
+{
+    VERIFY_TYPE( inaddrt_formatter, &type_InAddrT, value );
+
+    writeInAddrT_TSStream( stream, value );
+}
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+
+
+/** inet_addr_spec **/
+
+mediator inet_addr_media for specification
+InAddrT* inet_addr_spec( CallContext context, CString* address)
+{
+    call
+    {
+        int i, size;
+        CByteArray* res;
+        CharT param[4];
+        InAddrT* ret;
+        TSCommand command = create_TSCommand();
+        format_TSCommand( &command, "inet_addr:$(str)", address );
+        VERBOSE("%s\n", *address);
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {            
+            timestamp = command.meta.timestamp;            
+            res=readCByteArray_TSStream(&command.response);             
+            size=size_CByteArray(res);
+            for(i=0;i<size;i++)
+                param[i]=byteAt_CByteArray(res, i);  
+
+            for(i=0;i<size;i++)
+                VERBOSE("param[%d]==%d\n", i, (unsigned char)param[i]);            
+            VERBOSE("\n");
+            
+            DUMP("Before create...");
+            ret=create_InAddrT(param[0],param[1],param[2],param[3]);
+            DUMP("After create...");
+        }        
+        destroy_TSCommand(&command);        
+        return ret;
+    }
+}
+
+
+/** inet_ntoa_spec **/
+
+mediator inet_ntoa_media for specification
+CString* inet_ntoa_spec( CallContext context, InAddrT* address)
+{
+    call
+    {
+        CString* res;
+        TSCommand command = create_TSCommand();        
+
+        VERBOSE("%d %d %d %d\n", (unsigned char)address->arr[0],
+                                (unsigned char)address->arr[1],
+                                (unsigned char)address->arr[2],
+                                (unsigned char)address->arr[3]);
+        format_TSCommand( &command, "inet_ntoa:$(inaddrt)", address );        
+        executeCommandInContext( context, &command );        
+        if (!isBadVerdict())
+        {              
+            timestamp = command.meta.timestamp;            
+            res=readCString_TSStream(&command.response); 
+            VERBOSE("ret==%s\n", *res);
+        }        
+        destroy_TSCommand(&command);        
+        return res; 
+    }
+}
+
+
+
+/** inet_ntop_spec **/
+
+mediator inet_ntop_media for specification
+VoidTPtr inet_ntop_spec( CallContext context, IntT af, VoidTPtr src,
+                               VoidTPtr dst,  IntT size, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        VoidTPtr res;        
+        
+        format_TSCommand( &command, "inet_ntop:$(int)$(ptr)$(ptr)$(int)",
+            create_IntTObj(af), create_VoidTPtrObj(src),
+            create_VoidTPtrObj(dst), create_IntTObj(size));
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res=readPointer_TSStream(context, &command.response);
+            *errno=readInt_TSStream(&command.response);            
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+    }
+}
+
+
+
+/** inet_pton_spec **/
+mediator inet_pton_media for specification
+int inet_pton_spec( CallContext context, IntT af, VoidTPtr src,
+                               VoidTPtr dst, ErrorCode* errno)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        int res=0;        
+        format_TSCommand( &command, "inet_pton:$(int)$(ptr)$(ptr)",
+            create_IntTObj(af), create_VoidTPtrObj(src),
+            create_VoidTPtrObj(dst));       
+
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {            
+            timestamp = command.meta.timestamp;         
+            res=readInt_TSStream(&command.response);            
+            *errno=readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+}
+
+
+
+

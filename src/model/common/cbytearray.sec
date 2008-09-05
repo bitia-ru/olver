@@ -1,0 +1,259 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+
+#include "common/cbytearray.seh"
+
+#include <utils/boolean.h>
+#include <utils/assertion.h>
+
+#include <string.h>
+
+// Temporary
+#include "ts/version.hh"
+
+
+static void _init_cbyte_array( struct _cbyte_array* ba, ByteT* ptr, unsigned int len)
+{
+    ba->length = len;
+    if (ba->length == 0)
+    {
+        ba->data = NULL;
+        return;
+    }
+    ba->data = malloc(len*sizeof(ByteT));
+    assertion( ba->data != NULL, FORMAT("Failed to allocate memory, length %u"),
+               len*sizeof(ByteT)
+             );
+    if (ptr != NULL)
+     {
+      memcpy(ba->data, ptr, len*sizeof(ByteT));
+     }
+    else
+     {
+      memset(ba->data, 0, len*sizeof(ByteT));
+     }
+}
+
+static void init_CByteArray( struct _cbyte_array* ba, va_list *arg_list )
+{
+    ByteT* ptr = va_arg( *arg_list, void *);
+    unsigned int len = va_arg( *arg_list, unsigned int);
+    
+    _init_cbyte_array(ba, ptr, len);
+}
+
+static void copy_CByteArray( struct _cbyte_array* src, struct _cbyte_array* dst )
+{
+    _init_cbyte_array(dst, src->data, src->length);
+}
+
+static int compare_CByteArray( struct _cbyte_array* left, struct _cbyte_array* right )
+{
+    unsigned int cmp_len = (left->length < right->length)?left->length : right->length;
+    int cmp_result = 0;
+    
+    if (cmp_len == 0)
+    {
+        if (right->length > 0) return -1;
+        else if (left->length > 0) return 1;
+        else return 0;
+    }
+
+    cmp_result = memcmp(left->data, right->data, cmp_len*sizeof(ByteT));
+    if (cmp_result != 0) return cmp_result;
+    
+    if (left->length < right->length) return -1;
+    else if (left->length > right->length) return 1;
+    else return 0;
+}
+
+static String *to_string_CByteArray( struct _cbyte_array* ba )
+{
+    char buf[250];
+    int i;
+    //sprintf( buf, "<%p, %u>", ba->data, ba->length );
+      
+    buf[0] = '<';
+    for(i=0;(i<16) && (i<ba->length); i++)
+    {
+        sprintf( buf+1+i*3, "%.2x ", ba->data[i]);
+    }
+
+    sprintf( buf+1+i*3, "; length:%d>", ba->length);
+
+
+    return create_String( buf );
+}
+
+static void destroy_CByteArray( struct _cbyte_array* ba )
+{
+    if (ba->length != 0) free(ba->data);
+}
+
+#if CTESK_VERSION >= 25247
+static String* to_xml_CByteArray( struct _cbyte_array* ba )
+{
+ return to_XML_spec( "CByteArray", to_string_CByteArray( ba ) );
+} 
+
+specification invariant typedef struct _cbyte_array CByteArray = {
+    .init      = (Init)init_CByteArray,
+    .copy      = (Copy)copy_CByteArray,
+    .compare   = (Compare)compare_CByteArray,
+    .to_string = (ToString)to_string_CByteArray,
+    .to_XML    = (ToXML)to_xml_CByteArray,
+    .destroy   = (Destroy)destroy_CByteArray
+};
+
+invariant(CByteArray* self)
+{
+  return (self->data == NULL)? (self->length == 0) : 1;
+}
+
+#else // Old CTesK
+
+static bool check_invariant_CByteArray(struct _cbyte_array* ba)
+{
+    return (ba->data == NULL)? ba->length == 0 : 1;
+}
+
+const Type type_CByteArray
+    = { "CByteArray"
+      , sizeof(struct _cbyte_array)
+      , &type_Object
+      , (Init)init_CByteArray
+      , (Copy)copy_CByteArray
+      , (Compare)compare_CByteArray
+      , (ToString)to_string_CByteArray
+      , (CheckInvariant)check_invariant_CByteArray
+      , (Enumerate)enumerate_Default
+      , (Destroy)destroy_CByteArray
+      };
+#endif
+
+
+/*
+ * Constructs a newly allocated CByteArray object
+ * that represents a wide characters array.
+ *
+ * ptr can be NULL if and only if len is zero
+ */
+CByteArray* create_CByteArray( ByteT* ptr, unsigned int len )
+{
+    return create(&type_CByteArray, ptr, len);
+}
+
+/*
+ * Returns the value of this CByteArray as a ByteT*.
+ */
+ByteT* byteArray_CByteArray( CByteArray* self )
+{
+    return self->data;
+}
+
+/*
+ * Returns the size of this VoidAst.
+ */
+unsigned int size_CByteArray( CByteArray* self )
+{
+    return self->length;
+}
+
+/*
+ * Returns the byte at the specified offset from the beginning of this
+ * WCharArray.
+ */
+ByteT byteAt_CByteArray( CByteArray* self, unsigned int offset )
+{
+    assertion(offset < self->length, FORMAT("Index beyond array boundary, %u (boundary %u)"),
+              offset, self->length);
+    return ((ByteT*)(self->data))[offset];
+}
+
+/*
+ * Sets the value of the byte at the specified offset from the beginning of
+ * this CByteArray.
+ */
+void setByteAt_CByteArray( CByteArray* self, unsigned int offset, ByteT value )
+{
+    assertion(offset < self->length, FORMAT("Index beyond array boundary, %u (boundary %u)"),
+              offset, self->length);
+    ((ByteT*)(self->data))[offset] = value;
+}
+
+/*
+ * Creates a new array containing concatination of the specified arrays.
+ */
+CByteArray* concat_CByteArray( CByteArray* self, CByteArray* array )
+{
+CByteArray* res;
+  
+    assertion( self != NULL, FORMAT("self is NULL") );
+    assertion( array != NULL, FORMAT("array is NULL") );
+
+    if (self->length == 0)
+      return clone(array);
+    res = clone(self);
+    res->data = realloc( res->data, (self->length + array->length)*sizeof(ByteT) );
+    assertion( res->data != NULL, FORMAT("not enough memory") );
+    memcpy( res->data + self->length, array->data, array->length*sizeof(ByteT) );
+    res->length = self->length + array->length;
+    return res;
+}
+
+
+CByteArray* left_CByteArray(CByteArray* data, SSizeT sz)
+{
+    CByteArray* res=create_CByteArray(NULL, sz);
+    unsigned int i=0;
+    for (i=0;i<sz && i<size_CByteArray(data);i++)
+    {
+        setByteAt_CByteArray(res, i, byteAt_CByteArray(data, i));
+    }
+    
+    return res;
+}
+
+CByteArray* right_CByteArray(CByteArray* data, SSizeT pos)
+{
+    SSizeT newArrayLength=size_CByteArray(data)-pos;
+    CByteArray* res=create_CByteArray(NULL, newArrayLength);
+    unsigned int i=0;
+    for (i=0;i<newArrayLength;i++)
+    {
+        setByteAt_CByteArray(res, i, byteAt_CByteArray(data, pos+i));
+    }
+    
+    return res;
+}
+
+
+bool compare_CByteArrays(CByteArray* ar1, CByteArray* ar2, SSizeT nbytes)
+{
+    unsigned int i=0;
+    for (i=0;i<nbytes;i++)
+    {
+        if (byteAt_CByteArray(ar1, i)!=byteAt_CByteArray(ar2, i))
+        {
+            return false;
+        }
+    }
+    return true;
+}

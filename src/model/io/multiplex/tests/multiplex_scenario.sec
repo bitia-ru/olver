@@ -1,0 +1,429 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "io/multiplex/tests/multiplex_scenario.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "io/file/file_media.seh"
+#include "io/pipe/pipe_media.seh"
+#include "fs/fifo/fifo_media.seh"
+
+#include "io/multiplex/multiplex_model.seh"
+#include "io/multiplex/multiplex_media.seh"
+#include "data/sys/time_model.seh"
+
+/********************************************************************/
+/**                  Scenario configuration                        **/
+/********************************************************************/
+const int regular_num = 2;
+const int regular_max = 2;
+const char* regular_to_open[] = { "file", "abracadabra" };
+
+const int fifo_num = 2;
+const int fifo_max = 2;
+const char* fifo_to_open[] = { "fifo1", "fifo_test" };
+
+const int pipe_num = 2;
+const int pipe_max = 2;
+const char* pipe_to_open[] = { NULL, NULL };
+
+/********************************************************************/
+/**                     Specification Types                        **/
+/********************************************************************/
+
+specification typedef struct MultiplexScenStateSt MultiplexScenState = { };
+specification typedef struct FilePairSt FilePair = { };
+specification typedef struct MultiplexScenStateDataSt MultiplexScenStateData = { };
+
+MultiplexScenState* create_MultiplexScenState(unsigned int r,
+                                              unsigned int f,
+                                              unsigned int p)
+{
+    return create(&type_MultiplexScenState, r, f, p);
+}
+
+FilePair* create_FilePair(FileDescId idR, FileDescId idW)
+{
+    return create(&type_FilePair, idR, idW);
+}
+
+MultiplexScenStateData* create_MultiplexScenStateData(Set* rf, Set* ff, Set* pf)
+{
+    return create(&type_MultiplexScenStateData, rf, ff, pf);
+}
+
+/********************************************************************/
+/**                  Test Static Data                              **/
+/********************************************************************/
+
+static CallContext context;
+static MultiplexScenStateData* scenStateData;
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+static MultiplexScenState* getScenarioState(void)
+{
+    return create_MultiplexScenState
+                                    (
+                                    size_Set(scenStateData->RegularFiles),
+                                    size_Set(scenStateData->FIFOFiles),
+                                    size_Set(scenStateData->PipeFiles)
+                                    );
+}
+
+MultiplexScenStateData* savePollModelState(void)
+{
+    return clone(scenStateData);
+}
+
+void restorePollModelState(MultiplexScenStateData* saved_state)
+{
+    scenStateData = saved_state;
+}
+
+static bool isPipeModelStateStationary(void)
+{
+    return true;
+}
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_io_multiplex_scenario(int argc, char** argv)
+{
+    int res;
+    FilePermissions* fp = create_FilePermissions_String("rwxrwxrwx");
+
+    context = getContext();
+
+    scenStateData = create_MultiplexScenStateData(create_Set(&type_FilePair),
+                                                  create_Set(&type_FilePair),
+                                                  create_Set(&type_FilePair));
+
+    for(res = 0; res < regular_num; res++)
+        createTestFile (
+                        context,
+                        getRelativeTestPathCh(regular_to_open[res]),
+                        NULL
+                       );
+
+    for(res = 0; res < fifo_num; res++)
+        mkfifo_spec (
+                        context,
+                        getRelativeTestPathCh(fifo_to_open[res]),
+                        fp,
+                        requestErrorCode()
+                    );
+
+    return true;
+}
+
+static void finish_io_multiplex_scenario(void)
+{
+    int res;
+
+    for(res = 0; res < regular_num; res++)
+        remove_spec (
+                        context,
+                        getRelativeTestPathCh(regular_to_open[res]),
+                        requestErrorCode(),
+                        cancel_status
+                    );
+
+    for(res = 0; res < fifo_num; res++)
+        remove_spec (
+                        context,
+                        getRelativeTestPathCh(fifo_to_open[res]),
+                        requestErrorCode(),
+                        cancel_status
+                    );
+}
+
+/********************************************************************/
+/**                  Test Actions for poll                         **/
+/********************************************************************/
+
+scenario
+bool poll_scen()
+{
+    List* pollList = getPollList_Multiplex();
+
+    if(size_List(pollList) == 0) return true;
+
+    poll_spec(context, pollList, size_List(pollList), 0, requestErrorCode());
+
+    return true;
+}
+
+scenario
+bool select_scen()
+{
+    IntT nfds;
+    Set* readfds = create_Set(&type_IntTObj);
+    Set* writefds = create_Set(&type_IntTObj);
+    Set* errorfds = create_Set(&type_IntTObj);
+    
+    nfds = getSelectData_Multiplex(readfds, writefds, errorfds);
+
+    select_spec (   context,
+                    nfds,
+                    readfds,
+                    writefds,
+                    errorfds,
+                    create_TimeValTObj(1, 100),
+                    requestErrorCode()
+                );
+
+    return true;
+}
+
+scenario
+bool addfile_scen()
+{
+    Set* pFileSet;
+    int nFiles;
+    
+    iterate(int i = 0; i < 3; i++;
+        (nFiles = size_Set(pFileSet = __MGS_(i))) >= 0 &&
+        nFiles < __NGS_(i))
+    {
+        iterate(int j = 0; j < __OGS_(j); j++; )
+        {
+            const char** files_to_open = __PGS_(i);
+
+            OpenFile_Multiplex(context, files_to_open[j] ?
+                getRelativeTestPathCh(files_to_open[j]) : NULL);
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool writefile_scen()
+{
+}
+
+scenario
+bool closefile_scen()
+{
+    Set* pFileSet;
+    
+    iterate(int i = 0; i < 3; i++;
+        (size_Set(__MGS_(i)) > 0 &&
+        size_Set(__MGS_(i)) <= __NGS_(i)))
+    {
+        iterate(int j = 0; j < size_Set(__MGS_(i)); j++; )
+        {
+        	pFileSet = __MGS_(i);
+	        FilePair* filePair = get_Set(pFileSet, j);
+	        CloseFile_Multiplex(context, filePair);
+        }
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario ndfsm io_multiplex_scenario =
+{
+    .init = init_io_multiplex_scenario,
+    .finish = finish_io_multiplex_scenario,
+
+    .getState = (PtrGetState)getScenarioState,
+
+    .actions = {
+        poll_scen,
+        select_scen,
+        addfile_scen,
+        closefile_scen,
+        NULL
+    }
+};
+
+/********************************************************************/
+/**                        Helper Functions                        **/
+/********************************************************************/
+
+int OpenFile_Multiplex(CallContext context, CString* filePath)
+{
+    Set* pFileSet;
+    FileKind fk = UnknownFileKind;
+    FileDescId idRead, idWrite;
+    FileSystem* fileSystem = getFileSystem(context);
+    OpenFlags of = { WriteOnly, Nonblocking, false, false, false, false, false, false };
+    FilePermissions* fp = create_FilePermissions_String("rwxrwxrwx");
+
+    assertion(scenStateData != NULL, "OpenFile_Multiplex: scenStateData is NULL");
+
+    if(filePath == NULL)
+    {
+        FileDescId fdi = { context.system, context.process, -1 };
+        FileDescIdObj* fds[2] = { create_FileDescIdObj(fdi), create_FileDescIdObj(fdi) };
+        IntT res = pipe_spec(context, fds[0], fds[1], requestErrorCode());
+
+        if(res != 0) return -1;
+
+        idRead = *(fds[0]);
+        idWrite = *(fds[1]);
+        fk = FIFOFile;
+    }
+    else
+    {
+        File* file ;
+        
+        if((file = getFile_FileSystem(fileSystem, filePath)) == NULL) return -2;
+
+        fk = file->kind;
+
+        if(fk == RegularFile) of.block_mode = Blocking;
+        else if(fk == FIFOFile) of.block_mode = Nonblocking;
+        else assertion(false, "OpenFile_Multiplex: file type is invalid: %d!", fk);
+
+        of.access_mode = ReadOnly;
+        idWrite = open_spec(context, filePath, of, fp, requestErrorCode(), false);
+        if(idWrite.filedesc < 0) return -3;
+
+        of.access_mode = WriteOnly;
+        idRead = open_spec(context, filePath, of, fp, requestErrorCode(), false);
+        if(idRead.filedesc < 0) return -4;
+    }
+
+    switch(fk)
+    {
+    case FIFOFile:
+        if(filePath) pFileSet = scenStateData->FIFOFiles;
+        else pFileSet = scenStateData->PipeFiles;
+        break;
+
+    case RegularFile:
+        pFileSet = scenStateData->RegularFiles;
+        break;
+    }
+
+    add_Set(pFileSet, create_FilePair(idRead, idWrite));
+
+    return 0;
+}
+
+int CloseFile_Multiplex(CallContext context, FilePair* filePair)
+{
+    int i, j;
+    Set* pFileSet;
+    FilePair* pair;
+
+    assertion(scenStateData != NULL, "CloseFile_Multiplex: scenStateData is NULL");
+    assertion(filePair != NULL, "CloseFile_Multiplex: filePair is NULL");
+
+    for(j = 0, pair = NULL; j < 3 && pair == NULL; j++)
+    {
+        pFileSet = __MGS_(j);
+
+        if(isEmpty_Set(pFileSet)) continue;
+
+        for(i = 0; i < size_Set(pFileSet); i++)
+        {
+            pair = get_Set(pFileSet, i);
+            if(equals(pair, filePair)) break;
+            pair = NULL;
+        }
+    }
+
+    if(!pair || close_spec(context,  pair->idRead, requestErrorCode()) != 0 ||
+       close_spec(context, pair->idWrite, requestErrorCode()) != 0) return -1;
+
+    remove_Set(pFileSet, pair);
+
+    return 0;
+}
+
+List* getPollList_Multiplex(void)
+{
+    int i, j;
+    List* pollList = create_List(&type_PollFd);
+    Set* pFileSet;
+
+    assertion(scenStateData != NULL,
+        "GetPollList_Multiplex: scenStateData is NULL");
+
+    for(j = 0; j < 3; j++)
+        for(i = 0, pFileSet = __MGS_(j); i < size_Set(pFileSet); i++)
+    {
+        FilePair* fp = get_Set(pFileSet, i);
+        append_List(pollList, create_PollFd(fp->idRead, POLLIN | POLLOUT, 0));
+        append_List(pollList, create_PollFd(fp->idWrite, POLLIN | POLLOUT, 0));
+    }
+
+    return pollList;
+}
+
+IntT getSelectData_Multiplex (   Set*/*IntT*/ readfds,
+                                Set*/*IntT*/ writefds,
+                                Set*/*IntT*/ errorfds
+                            )
+{
+    IntT nfds = 0;
+    int i, j, szFileSet;
+    Set* pFileSet;
+
+    assertion(readfds != NULL, "GetSelectData_Multiplex: readfds == NULL");
+    assertion(writefds != NULL, "GetSelectData_Multiplex: writefds == NULL");
+    assertion(errorfds != NULL, "GetSelectData_Multiplex: errorfds == NULL");
+    assertion(scenStateData != NULL,
+        "GetSelectData_Multiplex: scenStateData is NULL");
+
+    clear_Set(readfds);
+    clear_Set(writefds);
+    clear_Set(errorfds);
+
+    for(j = 0; j < 3; j++)
+    {
+        pFileSet = __MGS_(j);
+        szFileSet = size_Set(pFileSet);
+
+        if(szFileSet < 1) continue;
+
+        for(i = 0; i < szFileSet; i++)
+        {
+            FilePair* fp = get_Set(pFileSet, i);
+            
+            if(nfds < fp->idRead.filedesc+1) nfds = fp->idRead.filedesc+1;
+            if(nfds < fp->idWrite.filedesc+1) nfds = fp->idWrite.filedesc+1;
+
+            add_Set(readfds, create_IntTObj(fp->idRead.filedesc));
+            add_Set(readfds, create_IntTObj(fp->idWrite.filedesc));
+        
+            add_Set(writefds, create_IntTObj(fp->idRead.filedesc));
+            add_Set(writefds, create_IntTObj(fp->idWrite.filedesc));
+        
+            add_Set(errorfds, create_IntTObj(fp->idRead.filedesc));
+            add_Set(errorfds, create_IntTObj(fp->idWrite.filedesc));
+        }
+    }
+
+    return nfds;
+}

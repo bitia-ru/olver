@@ -1,0 +1,1793 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * -- Portable Operating System Interface (POSIX), The Open Group Base
+ * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Electrical and Electronics Engineers, Inc and The Open Group. In the
+ * event of any discrepancy between this version and the original IEEE and
+ * The Open Group Standard, the original IEEE and The Open Group Standard
+ * is the referee document. The original Standard can be obtained online at
+ * http://www.opengroup.org/unix/online.html.
+ */
+
+#include "locale/textdomain/textdomain_model.seh"
+#include "locale/locale/locale_model.seh"
+#include "locale/iconv/iconv_model.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+
+#pragma SEC subsystem textdomain "locale.textdomain"
+
+
+
+/*
+   The group of functions 'locale.textdomain' consists of:
+       bind_textdomain_codeset [1]
+       bindtextdomain [1]
+       textdomain [1]
+       gettext [1]
+       ngettext [1]
+       dgettext [1]
+       dngettext [1]
+       dcgettext [1]
+       dcngettext [1]
+ */
+
+CString* Invalid_CString;
+ 
+/********************************************************************/
+/**                            Model State                         **/
+/********************************************************************/
+
+specification typedef struct DomainSt Domain = { };
+
+Domain* create_Domain(void)
+{
+    Domain* res = create (
+                          &type_Domain,
+                          NULL,                                 // name
+                          NULL,                                 // path
+                          NULL,                                 // codeset
+                          create_Map(&type_IntTObj, &type_Map), // msgMaps
+                          create_Map(&type_IntTObj, &type_Map)  // nmsgMaps
+                         );
+    
+    put_Map(res->msgMaps,  _NO( SUT_LC_COLLATE  ), create_Map(&type_CString, &type_CString));
+    put_Map(res->msgMaps,  _NO( SUT_LC_CTYPE    ), create_Map(&type_CString, &type_CString));
+    put_Map(res->msgMaps,  _NO( SUT_LC_MESSAGES ), create_Map(&type_CString, &type_CString));
+    put_Map(res->msgMaps,  _NO( SUT_LC_MONETARY ), create_Map(&type_CString, &type_CString));
+    put_Map(res->msgMaps,  _NO( SUT_LC_NUMERIC  ), create_Map(&type_CString, &type_CString));
+    put_Map(res->msgMaps,  _NO( SUT_LC_TIME     ), create_Map(&type_CString, &type_CString));
+
+    put_Map(res->nmsgMaps, _NO( SUT_LC_COLLATE  ), create_Map(&type_CString, &type_Map));
+    put_Map(res->nmsgMaps, _NO( SUT_LC_CTYPE    ), create_Map(&type_CString, &type_Map));
+    put_Map(res->nmsgMaps, _NO( SUT_LC_MESSAGES ), create_Map(&type_CString, &type_Map));
+    put_Map(res->nmsgMaps, _NO( SUT_LC_MONETARY ), create_Map(&type_CString, &type_Map));
+    put_Map(res->nmsgMaps, _NO( SUT_LC_NUMERIC  ), create_Map(&type_CString, &type_Map));
+    put_Map(res->nmsgMaps, _NO( SUT_LC_TIME     ), create_Map(&type_CString, &type_Map));
+    
+    return res;
+}
+
+void clearMsgMaps_Domain(Domain* dom)
+{
+    assertion(dom != NULL, "clearMsgMaps_Domain: dom is NULL");
+    
+    clear_Map(get_Map(dom->msgMaps,  _NO( SUT_LC_COLLATE  )));
+    clear_Map(get_Map(dom->msgMaps,  _NO( SUT_LC_CTYPE    )));
+    clear_Map(get_Map(dom->msgMaps,  _NO( SUT_LC_MESSAGES )));
+    clear_Map(get_Map(dom->msgMaps,  _NO( SUT_LC_MONETARY )));
+    clear_Map(get_Map(dom->msgMaps,  _NO( SUT_LC_NUMERIC  )));
+    clear_Map(get_Map(dom->msgMaps,  _NO( SUT_LC_TIME     )));
+    
+    clear_Map(get_Map(dom->nmsgMaps, _NO( SUT_LC_COLLATE  )));
+    clear_Map(get_Map(dom->nmsgMaps, _NO( SUT_LC_CTYPE    )));
+    clear_Map(get_Map(dom->nmsgMaps, _NO( SUT_LC_MESSAGES )));
+    clear_Map(get_Map(dom->nmsgMaps, _NO( SUT_LC_MONETARY )));
+    clear_Map(get_Map(dom->nmsgMaps, _NO( SUT_LC_NUMERIC  )));
+    clear_Map(get_Map(dom->nmsgMaps, _NO( SUT_LC_TIME     )));
+}
+
+void init_TextDomain(CallContext context)
+{
+    CString* path1 = getRelativeTestDataPathCh("locale.textdomain/Path1");
+    CString* path2 = getRelativeTestDataPathCh("locale.textdomain/Path2");
+
+    putDomain_SystemStateDomain(context, _CS("testdomain"),    path1);
+    putDomain_SystemStateDomain(context, _CS("anotherdomain"), path2);
+    
+    putMsg_SystemStateDomain(context,  _CS("testdomain"),    path1, _CS("Test text"),        _CS("Test test text"), SUT_LC_MESSAGES);
+    putMsg_SystemStateDomain(context,  _CS("testdomain"),    path1, _CS("0123456789!@#$%^"), _CS("PASS"),           SUT_LC_MESSAGES);
+    putMsg_SystemStateDomain(context,  _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES);
+    putMsg_SystemStateDomain(context,  _CS("anotherdomain"), path2, _CS("asdfgsad"),         _CS("234"),            SUT_LC_MESSAGES);
+    putMsg_SystemStateDomain(context,  _CS("anotherdomain"), path2, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES);
+    
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 0);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okno"),        SUT_LC_MESSAGES, 1);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okna"),        SUT_LC_MESSAGES, 2);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okna"),        SUT_LC_MESSAGES, 4);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 5);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 7);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 10);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 100);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okno"),        SUT_LC_MESSAGES, 101);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okna"),        SUT_LC_MESSAGES, 102);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okna"),        SUT_LC_MESSAGES, 104);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 105);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 107);
+    nputMsg_SystemStateDomain(context, _CS("testdomain"),    path1, _CS("%d window"),        _CS("%d okon"),        SUT_LC_MESSAGES, 110);
+}
+
+Map* getMap_Domain(CallContext context)
+{   
+    registerProcessStaticData(context, _CS("textdomain.Domains"), create_Map(&type_CString, &type_Domain));
+    
+    return getProcessStaticData(context, _CS("textdomain.Domains"));
+}
+
+Map* getCodesetMap_Domain(CallContext context)
+{   
+    registerProcessStaticData(context, _CS("textdomain.Codesets"), create_Map(&type_CString, &type_CString));
+    
+    return getProcessStaticData(context, _CS("textdomain.Codesets"));
+}
+
+CString* getCurrent_Domain(CallContext context)
+{
+    registerProcessStaticData(context, _CS("textdomain.currentDomain"), _CS("messages"));
+
+    return getProcessStaticData(context, _CS("textdomain.currentDomain"));
+}
+
+bool setCurrent_Domain(CallContext context, CString* Name)
+{
+    if(Name == NULL) return false;
+
+    registerProcessStaticData(context, _CS("textdomain.currentDomain"), _CS("messages"));
+
+    setProcessStaticData(context, _CS("textdomain.currentDomain"), Name);
+
+    return true;
+}
+
+Domain* get_Domain(CallContext context, CString* Name)
+{
+    Map* domainMap = getMap_Domain(context);
+
+    if(Name == NULL) return NULL;
+
+    return get_Map(domainMap, Name);
+}
+
+bool put_Domain(CallContext context, CString* Name, Domain* dom)
+{
+    Map* domainMap = getMap_Domain(context);
+
+    assertion(Name != NULL, "put_Domain: Name is NULL");
+    assertion(dom != NULL,  "put_Domain: dom is NULL");
+    
+    if(containsKey_Map(domainMap, Name)) return false;
+
+    put_Map(domainMap, Name, dom);
+    
+    return true;
+}
+
+void setCodeset_Domain(CallContext context, CString* Name, CString* codeSet)
+{
+    Map* cdmap = getCodesetMap_Domain(context);
+    
+    assertion(Name != NULL,    "setCodeset_Domain: Name is NULL");
+    assertion(codeSet != NULL, "setCodeset_Domain: codeSet is NULL");
+    
+    put_Map(cdmap, Name, codeSet);
+}
+
+CString* codeset_Domain(CallContext context, CString* Name)
+{
+    Map* cdmap = getCodesetMap_Domain(context);
+    
+    if(Name == NULL) return NULL;
+    
+    assertion(Name != NULL, "codeset_Domain: Name is NULL");
+    
+    return get_Map(cdmap, Name);
+}
+
+bool setPath_Domain(CallContext context, CString* Name, CString* path)
+{
+    Domain* dom = get_Domain(context, Name);
+
+    if(dom == NULL || path == NULL) return false;
+
+    dom->path = clone(path);
+    
+    updateBySystemState_Domain(context, Name);
+    
+    return true;
+}
+
+CString* path_Domain(CallContext context, CString* Name)
+{
+    Domain* dom = get_Domain(context, Name);
+    
+    if(dom == NULL) return NULL;
+
+    return dom->path;
+}
+
+CString* getText_Domain (
+                         CallContext context,
+                         CString*    domName,
+                         CString*    msg,
+                         IntT        category
+                        )
+{
+    Domain* dom = get_Domain(context, domName);
+    
+    return getMsg_Domain(dom, msg, category);
+}
+
+bool putText_Domain (
+                     CallContext context,
+                     CString*    domName,
+                     CString*    msg,
+                     IntT        category,
+                     CString*    text
+                    )
+{
+    Domain* dom = get_Domain(context, domName);
+
+    return putMsg_Domain(dom, msg, category, text);
+}
+
+CString* ngetText_Domain (
+                         CallContext   context,
+                         CString*      domName,
+                         CString*      msg,
+                         IntT          category,
+                         ULongT        n
+                        )
+{
+    Domain* dom = get_Domain(context, domName);
+
+    return getNMsg_Domain(dom, msg, category, n);
+}
+
+bool nputText_Domain (
+                     CallContext   context,
+                     CString*      domName,
+                     CString*      msg,
+                     IntT          category,
+                     ULongT        n,
+                     CString*      text
+                    )
+{
+    Domain* dom = get_Domain(context, domName);
+
+    return putNMsg_Domain(dom, msg, category, n, text);
+}
+
+bool updateBySystemState_Domain (CallContext context, CString* domainname)
+{
+    Domain* dom = get_Domain(context, domainname);
+    Domain* ssdom;
+    
+    if(dom == NULL) return false;
+    
+    ssdom = find_SystemStateDomain(context, domainname, dom->path);
+    
+    if(ssdom == NULL) clearMsgMaps_Domain(dom);
+    else
+    {
+        dom->msgMaps = clone(ssdom->msgMaps);
+        dom->nmsgMaps = clone(ssdom->nmsgMaps);
+    }
+    
+    return true;
+}
+
+
+CString* getMsg_Domain (Domain* dom, CString* msg, IntT category)
+{
+    Map* msgMap;
+    
+    if(dom == NULL) return NULL;
+
+    assertion(dom->msgMaps != NULL, "getText_Domain: msgMaps of domain is NULL");
+    assertion(isValid_Category(category), "getText_Domain: category is invalid");
+
+    msgMap = get_Map(dom->msgMaps, _NO(category));
+    
+    assertion(msgMap != NULL, "getText_Domain: msgMap is NULL");
+    
+    return get_Map(msgMap, msg);
+}
+
+bool putMsg_Domain (Domain* dom, CString* msg, IntT     category,
+                                               CString* text)
+{
+    Map* msgMap;
+
+    if(dom == NULL) return false;
+
+    assertion(dom->msgMaps != NULL, "putText_Domain: msgMaps of domain is NULL");
+    assertion(isValid_Category(category), "putText_Domain: category is invalid");
+
+    msgMap = get_Map(dom->msgMaps, _NO(category));
+
+    assertion(msgMap != NULL, "putText_Domain: msgMap is NULL");
+
+    put_Map(msgMap, msg, text);
+
+    return true;
+}
+
+CString* getNMsg_Domain (Domain* dom, CString* msg, IntT     category,
+                                                    ULongT   n)
+{
+    Map* msgMap;
+    Map* forms;
+
+    if(dom == NULL) return NULL;
+    
+    assertion(dom->nmsgMaps != NULL, "ngetText_Domain: nmsgMaps of domain is NULL");
+    assertion(isValid_Category(category), "ngetText_Domain: category is invalid");
+
+    msgMap = get_Map(dom->nmsgMaps, _NO(category));
+    
+    assertion(msgMap != NULL, "ngetText_Domain: msgMap is NULL");
+    
+    if((forms = get_Map(msgMap, msg)) == NULL) return NULL;
+    
+    return get_Map(forms, create_ULongTObj(n));
+}
+
+bool putNMsg_Domain (Domain* dom, CString* msg, IntT     category,
+                                                ULongT   n,
+                                                CString* text)
+{
+    Map* msgMap;
+    Map* forms;
+
+    if(dom == NULL) return false;
+
+    assertion(dom->nmsgMaps != NULL, "nputText_Domain: nmsgMaps of domain is NULL");
+    assertion(isValid_Category(category), "nputText_Domain: category is invalid");
+
+    msgMap = get_Map(dom->nmsgMaps, _NO(category));
+
+    assertion(msgMap != NULL, "nputText_Domain: msgMap is NULL");
+
+    forms = get_Map(msgMap, msg);
+    
+    if(forms == NULL) put_Map(msgMap, msg, forms = create_Map(&type_ULongTObj, &type_CString));
+
+    put_Map(forms, create_ULongTObj(n), text);
+
+    return true;
+}
+
+
+Set* init_SystemStateDomain(void)
+{
+    return create_Set(&type_Domain);
+}
+
+Set* get_SystemStateDomain(CallContext context)
+{
+    SystemState* systemState = getSystemState_CallContext(context);
+    
+    assertion(systemState != NULL, "get_SystemStateDomain: textdomain systemstate is NULL");
+    
+    return systemState->textdomainState;
+}
+
+Domain* find_SystemStateDomain (CallContext context, CString* domainname, CString* path)
+{
+    int i;
+    Set* textdomainState = get_SystemStateDomain(context);
+    
+    for(i = 0; i < size_Set(textdomainState); i++)
+    {
+        Domain* dom = get_Set(textdomainState, i);
+        
+        assertion(dom->name != NULL && dom->path != NULL, "find_SystemStateDomain: dom is invalid");
+        
+        if(compare(dom->name, domainname) == 0 && compare(dom->path, path) == 0) return dom;
+    }
+    
+    return NULL;
+}
+
+bool putDomain_SystemStateDomain (CallContext context, CString* domainname,
+                                                       CString* path)
+{
+    Set* textdomainState;
+    Domain* dom;
+    
+    dom = find_SystemStateDomain(context, domainname, path);
+    
+    if(dom != NULL) return false;
+    
+    textdomainState = get_SystemStateDomain(context);
+    
+    dom = create_Domain();
+    dom->name = clone(domainname);
+    dom->path = clone(path);
+    add_Set(textdomainState, dom);
+
+    return true;
+}
+
+bool putMsg_SystemStateDomain (CallContext context, CString* domainname,
+                                                    CString* path,
+                                                    CString* msgid,
+                                                    CString* text,
+                                                    IntT     category)
+{
+    Domain* dom = find_SystemStateDomain(context, domainname, path);
+    
+    return putMsg_Domain(dom, msgid, category, text);
+}
+
+bool nputMsg_SystemStateDomain (CallContext context, CString* domainname,
+                                                     CString* path,
+                                                     CString* msgid,
+                                                     CString* text,
+                                                     IntT     category,
+                                                     ULongT   n)
+{
+    Domain* dom = find_SystemStateDomain(context, domainname, path);
+    
+    return putNMsg_Domain(dom, msgid, category, n, text);
+}
+
+CString* getMsg_SystemStateDomain (CallContext context, CString* domainname,
+                                                        CString* path,
+                                                        CString* msgid,
+                                                        IntT     category)
+{
+    Domain* dom = find_SystemStateDomain(context, domainname, path);
+    
+    return getMsg_Domain(dom, msgid, category);
+}
+
+CString* ngetMsg_SystemStateDomain (CallContext context, CString* domainname,
+                                                         CString* path,
+                                                         CString* msgid,
+                                                         IntT     category,
+                                                         ULongT   n)
+{
+    Domain* dom = find_SystemStateDomain(context, domainname, path);
+    
+    return getNMsg_Domain(dom, msgid, category, n);
+}
+
+
+/********************************************************************/
+/**                   Specification Functions                      **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+bind_textdomain_codeset -- specify encoding for message retrieval
+
+SYNOPSIS
+
+#include <libintl.h>
+
+char * bind_textdomain_codeset (const char * domainname , const char * 
+codeset );
+
+DESCRIPTION
+
+The bind_textdomain_codeset() function can be used to specify the output 
+codeset for message catalogs for domain domainname. The codeset argument shall 
+be a valid codeset name which can be used tor the iconv_open function, or a 
+null pointer. If the codeset argument is the null pointer, then function 
+returns the currently selected codeset for the domain with the name domainname. 
+It shall return a null pointer if no codeset has yet been selected.
+
+Each successive call to bind_textdomain_codeset() function overrrides the 
+settings made by the preceding call with the same domainname.
+
+The bind_textdomain_codeset() function shall return a pointer to a string 
+containing the name of the selected codeset. The string shall be allocated 
+internally in the function and shall not be changed or freed by the user.
+
+The bind_textdomain_codeset() function returns a pointer to a string containing 
+the name of the selected codeset. The string is allocated internally in the 
+function and shall not be changed by the user.
+
+Parameters
+
+domainname The domainname argument is applied to the currently active 
+LC_MESSAGE locale. It is equivalent in syntax and meaning to the domainname 
+argument to textdomain, except that the selection of the domain is valid only 
+for the duration of the call.
+
+codeset The name of the output codeset for the selected domain, or NULL to 
+select the current codeset.
+
+If domainname is the null pointer, or is an empty string, 
+bind_textdomain_codeset() shall fail, but need not set errno.
+
+RETURN VALUE
+
+Returns the currently selected codeset name. It returns a null pointer if no 
+codeset has yet been selected.
+
+ERRORS
+
+[ENOMEM] Insufficient memory available to allocate return value.
+
+See Also
+
+gettext, dgettext, ngettext, dngettext, dcgettext, dcngettext, textdomain, 
+bindtextdomain
+*/
+
+/** bind_textdomain_codeset_spec **/
+specification
+CString* bind_textdomain_codeset_spec   (
+                                         CallContext context,
+                                         CString*    domainname,
+                                         CString*    codeset,
+                                         ErrorCode   *errno
+                                        )
+{
+    CString* oldmodel_codeset;
+    CString* model_codeset;
+
+    pre
+    {
+        if(domainname != NULL) oldmodel_codeset = codeset_Domain(context, domainname);
+        else oldmodel_codeset = NULL;
+    
+        /*
+         * The codeset argument shall be a valid codeset name which can be used tor the 
+         * iconv_open function, or a null pointer.
+         */
+        REQ("app.bind_textdomain_codeset.02", "codeset is not permitted",
+            isPermitted_Recoding(_CS(SUT_TEXTDOMAIN_TD_CODESET), codeset));
+    
+        return true;
+    }
+    
+    coverage DomainName
+    {
+        if(domainname == NULL) return { NULLDomainName, "NULL domain name" };
+        if(get_Domain(context, domainname) != NULL) return { KnownDomainName, "Known domain name" };
+        return { UndefinedDomainName, "Undefined domain name" };
+    }
+    
+    coverage DomainCodeset
+    {
+        if(codeset == NULL) return { NULLCodeset, "Codeset is NULL" };
+        if(isPermitted_Recoding(_CS(SUT_TEXTDOMAIN_TD_CODESET), codeset)) return { PermittedRecoding, "Permitted recoding" };
+        return { NotPermittedRecoding, "Not permitted recoding" };
+    }
+
+    post
+    {
+        model_codeset = codeset_Domain(context, domainname);
+    
+        ERROR_BEGIN(LSB_BIND_TEXTDOMAIN_CODESET, "bind_textdomain_codeset.19", *errno != 0, *errno)
+
+            /*
+             * [ENOMEM] Insufficient memory available to allocate return value.
+             */
+            ERROR_SHALL(LSB_BIND_TEXTDOMAIN_CODESET, ENOMEM, "bind_textdomain_codeset.19", TODO_ERR(ENOMEM))
+
+        ERROR_END()
+
+        if(domainname != NULL && !isEmpty_CString(domainname))
+        {
+            CString* cd = codeset_Domain(context, domainname);
+            bool bRes;
+        
+            if(cd != NULL && bind_textdomain_codeset_spec != NULL)
+                bRes = compare(bind_textdomain_codeset_spec, cd) == 0;
+            else bRes = (cd == NULL && bind_textdomain_codeset_spec == NULL);
+            
+            /*
+             * The bind_textdomain_codeset() function shall return a pointer to a string 
+             * containing the name of the selected codeset.
+             */
+            REQ("bind_textdomain_codeset.06", "", bRes);
+        
+            if(safeCompare_CString(oldmodel_codeset, codeset) != 0)
+            {
+                /*
+                 * The bind_textdomain_codeset() function can be used to specify the output 
+                 * codeset for message catalogs for domain domainname.
+                 */
+                /*
+                 * Each successive call to bind_textdomain_codeset() function overrrides the 
+                 * settings made by the preceding call with the same domainname.
+                 */
+                REQ("bind_textdomain_codeset.01;bind_textdomain_codeset.05",
+                    "can be used to specify the output codeset", bRes);
+            }
+        
+            if(codeset == NULL)
+            {
+                /*
+                 * If the codeset argument is the null pointer, then function returns the 
+                 * currently selected codeset for the domain with the name domainname.
+                 */
+                /*
+                 * or NULL to select the current codeset.
+                 */
+                REQ("bind_textdomain_codeset.03;bind_textdomain_codeset.15", "", bRes);
+            
+                if(oldmodel_codeset == NULL)
+                {
+                    /*
+                     * It shall return a null pointer if no codeset has yet been selected.
+                     */
+                    /*
+                     * It returns a null pointer if no codeset has yet been selected.
+                     */
+                    REQ("bind_textdomain_codeset.04;bind_textdomain_codeset.18", "", bRes);
+                }
+                else
+                {
+                    /*
+                     * Returns the currently selected codeset name.
+                     */
+                    REQ("bind_textdomain_codeset.17", "", bRes);
+                }
+            }
+            else
+            {
+                /*
+                 * The name of the output codeset for the selected domain
+                 */
+                REQ("bind_textdomain_codeset.14", "", bRes);
+            
+                if(oldmodel_codeset == NULL)
+                {
+                    /*
+                     * It shall return a null pointer if no codeset has yet been selected.
+                     */
+                    /*
+                     * It returns a null pointer if no codeset has yet been selected.
+                     */
+                    REQ("bind_textdomain_codeset.04;bind_textdomain_codeset.18", "", bRes);
+                }
+                else
+                {
+                    /*
+                     * Returns the currently selected codeset name.
+                     */
+                    REQ("bind_textdomain_codeset.17", "", bRes);
+                }
+            }
+        }
+        else
+        {
+            /*
+             * If domainname is the null pointer, or is an empty string, 
+             * bind_textdomain_codeset()
+             *
+             * shall fail
+             */
+            REQ("bind_textdomain_codeset.16.01", "", TODO_REQ());
+
+            /*
+             * If domainname is the null pointer, or is an empty string, 
+             * bind_textdomain_codeset()
+             *
+             * need not set errno.
+             */
+            REQ("bind_textdomain_codeset.16.02", "", *errno == 0);
+        }
+
+        /*
+         * The domainname argument is applied to the currently active LC_MESSAGE locale.
+         */
+        REQ("bind_textdomain_codeset.11", "", TODO_REQ());
+    
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+bindtextdomain -- specify the location of a message catalog
+
+SYNOPSIS
+
+#include <libintl.h>
+
+char * bindtextdomain(const char * domainname, const char * dirname);
+
+DESCRIPTION
+
+The bindtextdomain() shall set the the base directory of the hierarchy 
+containing message catalogs for a given message domain.
+
+The bindtextdomain() function specifies that the domainname message catalog can 
+be found in the dirname directory hierarchy, rather than in the system default 
+locale data base.
+
+If dirname is not NULL, the base directory for message catalogs belonging to 
+domain domainname shall be set to dirname. If dirname is NULL, the base 
+directory for message catalogs shall not be altered.
+
+The function shall make copies of the argument strings as needed.
+
+dirname can be an absolute or relative pathname. Note: Applications that wish 
+to use chdir() should always use absolute pathnames to avoid misadvertently 
+selecting the wrong or non-existant directory.
+
+If domainname is the null pointer, or is an empty string, bindtextdomain() 
+shall fail, but need not set errno.
+
+The bindtextdomain() function shall return a pointer to a string containing the 
+name of the selected directory. The string shall be allocated internally in the 
+function and shall not be changed or freed by the user.
+
+RETURN VALUE
+
+On success, bindtextdomain() shall return a pointer to a string containing the 
+directory pathname currently bound to the domain. On failure, a NULL pointer is 
+returned, and the global variable errno may be set to indicate the error.
+
+ERRORS
+
+[ENOMEM] Insufficient memory was available.
+
+See Also
+
+gettext, dgettext, ngettext, dngettext, dcgettext, dcngettext, textdomain, 
+bind_textdomain_codeset
+*/
+
+/** bindtextdomain_spec **/
+specification
+CString* bindtextdomain_spec            (
+                                         CallContext context,
+                                         CString*    domainname,
+                                         CString*    dirname,
+                                         ErrorCode   *errno
+                                        )
+{
+    pre
+    {
+        return true;
+    }
+    
+    coverage DomainName
+    {
+        if(domainname == NULL) return { NULLDomainName, "NULL domain name" };
+        if(get_Domain(context, domainname) != NULL) return { KnownDomainName, "Known domain name" };
+        return { UndefinedDomainName, "Undefined domain name" };
+    }
+    
+    coverage DirName
+    {
+        if(dirname == NULL) return { NULLDirName, "NULL nirectory name" };
+        if(charAt_CString(dirname, 0) == '/') return { AbsoluteDirName, "Absolute directory name" };
+        return { RelativeDirName, "Relative directory name" };
+    }
+
+    post
+    {
+        ERROR_BEGIN(LSB_BINDTEXTDOMAIN, "bindtextdomain.10", *errno != 0, *errno)
+
+            /*
+             * [ENOMEM] Insufficient memory was available.
+             */
+            ERROR_SHALL(LSB_BINDTEXTDOMAIN, ENOMEM, "bindtextdomain.10", TODO_ERR(ENOMEM) )
+
+        ERROR_END()
+        
+        if(domainname != NULL && !isEmpty_CString(domainname))
+        {
+            Bool3 bRes = (path_Domain(context, domainname) != NULL) ?
+                (compare(path_Domain(context, domainname), bindtextdomain_spec) == 0) :
+                Unknown_Bool3;
+        
+            /*
+             * The bindtextdomain() shall set the the base directory of the hierarchy 
+             * containing message catalogs for a given message domain.
+             *
+             * The bindtextdomain() function specifies that the domainname message catalog can 
+             * be found in the dirname directory hierarchy, rather than in the system default 
+             * locale data base.
+             */
+            /*
+             * The bindtextdomain() function shall return a pointer to a string containing the 
+             * name of the selected directory.
+             */
+            /*
+             * On success, bindtextdomain() shall return a pointer to a string containing the 
+             * directory pathname currently bound to the domain.
+             */
+            REQ3("bindtextdomain.01.01;bindtextdomain.06;bindtextdomain.08", "", bRes);
+            
+            if(charAt_CString(domainname, 0) == '/')
+            {
+                /*
+                 * dirname can be an absolute or relative pathname.
+                 */
+                REQ3("bindtextdomain.04", "can be an absolute pathname", bRes); 
+            }
+            else
+            {
+                /*
+                 * dirname can be an absolute or relative pathname.
+                 */
+                REQ3("bindtextdomain.04", "can be a relative pathname", bRes);
+            }
+        
+            if(dirname == NULL)
+            {
+                if(path_Domain(context, domainname) != NULL)
+                /*
+                 * If dirname is NULL, the base directory for message catalogs shall not be 
+                 * altered.
+                 */
+                REQ("bindtextdomain.03", "",
+                    safeCompare_CString(bindtextdomain_spec, path_Domain(context, domainname)) == 0);
+            }
+            else
+            {
+                /*
+                 * If dirname is not NULL, the base directory for message catalogs belonging to 
+                 * domain domainname shall be set to dirname.
+                 */
+                REQ("bindtextdomain.02", "", bRes);
+            }
+        }
+        else
+        {
+            /*
+             * If domainname is the null pointer, or is an empty string, bindtextdomain()
+             *
+             * shall fail
+             */
+            /*
+             * On failure,
+             *
+             * a NULL pointer is returned
+             */
+            REQ("bindtextdomain.05.01;bindtextdomain.09.01", "", bindtextdomain_spec == NULL);
+
+            /*
+             * If domainname is the null pointer, or is an empty string, bindtextdomain()
+             *
+             * need not set errno.
+             */
+            REQ("bindtextdomain.05.02", "", *errno == 0);
+        }
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+textdomain -- set the current default message domain
+
+SYNOPSIS
+
+#include <libintl.h>
+
+char * textdomain(const char * domainname);
+
+DESCRIPTION
+
+The textdomain() function shall set the current default message domain to 
+domainname. Subsequent calls to gettext() and ngettext() use the default 
+message domain.
+
+If domainname is NULL, the default message domain shall not be altered.
+
+If domainname is "", textdomain() shall reset the default domain to the system 
+default of "messages". 
+
+Return
+
+On success, textdomain() shall return the currently selected domain. Otherwise, 
+a null pointer shall be returned, and errno is set to indicate the error.
+
+ERRORS
+
+[ENOMEM] Insufficent memory available.
+*/
+
+/** textdomain_spec **/
+specification
+CString* textdomain_spec                (
+                                         CallContext context,
+                                         CString*    domainname,
+                                         ErrorCode   *errno
+                                        )
+{
+    pre
+    {
+        return true;
+    }
+
+    coverage DomainName
+    {
+        if(domainname == NULL) return { NULLDomainName, "NULL domain name" };
+        if(isEmpty_CString(domainname)) return { DefaultDomainName, "Default domain name" };
+        if(get_Domain(context, domainname) != NULL) return { KnownDomainName, "Known domain name" };
+        return { UndefinedDomainName, "Undefined domain name" };
+    }
+
+    post
+    {
+        bool bRes = safeCompare_CString(textdomain_spec, getCurrent_Domain(context)) == 0;
+    
+        /*
+         * and errno is set to indicate the error.
+         */
+        ERROR_BEGIN(LSB_TEXTDOMAIN, "textdomain.06", *errno != 0, *errno)
+
+            /*
+             * [ENOMEM] Insufficent memory available.
+             */
+            ERROR_SHALL(LSB_TEXTDOMAIN, ENOMEM, "textdomain.07", TODO_ERR(ENOMEM) )
+
+        ERROR_END()
+        
+        if(textdomain_spec == NULL)
+        {
+            /*
+             * Otherwise, a null pointer shall be returned
+             */
+            REQ("textdomain.05", "", *errno != 0);
+        }
+        else
+        {
+            /*
+             * On success, textdomain() shall return the currently selected domain.
+             */
+            REQ("textdomain.04", "", bRes);
+        }
+        
+        /*
+         * The textdomain() function shall set the current default message domain to 
+         * domainname.
+         */
+        REQ("textdomain.01", "", bRes);
+
+        if(domainname == NULL)
+        {
+            /*
+             * If domainname is NULL, the default message domain shall not be altered.
+             */
+            REQ("textdomain.02", "", bRes);
+        }
+        else if(isEmpty_CString(domainname))
+        {
+            /*
+             * If domainname is "", textdomain() shall reset the default domain to the system 
+             * default of "messages".
+             */
+            REQ("textdomain.03", "", safeCompare_CString(textdomain_spec, _CS("messages")) == 0);
+        }
+
+        return true;
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+gettext -- search message catalogs for a string
+
+SYNOPSIS
+
+#include <libintl.h>
+
+char * gettext(const char * msgid);
+
+DESCRIPTION
+
+The gettext() function shall search the currently selected message catalogs for 
+a string identified by the string msgid. If a string is located, that string 
+shall be returned.
+
+The gettext() function is equivalent to dcgettext(NULL, msgid, LC_MESSAGES).
+
+RETURN VALUE
+
+If a string is found in the currently selected message catalogs for msgid, then 
+a pointer to that string shall be returned. Otherwise, a pointer to msgid shall 
+be returned.
+
+Applications shall not modify the string returned by gettext().
+
+ERRORS
+
+None.
+
+The gettext() function shall not modify errno.
+
+See Also
+
+dgettext, ngettext, dngettext, dcgettext, dcngettext, textdomain, 
+bindtextdomain, bind_textdomain_codeset
+*/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+dgettext -- perform lookup in message catalog for the current LC_MESSAGES locale
+
+SYNOPSIS
+
+#include <libintl.h>
+
+char * dgettext(const char * domainname, const char * msgid);
+
+DESCRIPTION
+
+dgettext() is a domain specified version of gettext().
+
+The dgettext() function shall search the currently selected message catalogs in 
+the domain domainname for a string identified by the string msgid. If a string 
+is located, that string shall be returned. The domain specified by domainname 
+applies to the currently active LC_MESSAGE locale. The default domain shall not 
+be changed by a call to dgettext(). Note: The usage of domainanme is equivalent 
+in syntax and meaning to the textdomain() function's application of domainname, 
+except that the selection of the domain in dgettext() is valid only for the 
+duration of the call.
+
+The dgettext() function is equivalent to dcgettext(domainname, msgid, 
+LC_MESSAGES).
+
+RETURN VALUE
+
+On success of a msgid query, the translated NULL-terminated string is returned. 
+On error, the original msgid is returned. The length of the string returned is 
+undetermined until dgettext() is called.
+
+ERRORS
+
+dgettext() shall not modify the errno global variable.
+
+See Also
+
+gettext, dgettext, ngettext, dngettext, dcgettext, dcngettext, textdomain, 
+bindtextdomain, bind_textdomain_codeset
+*/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+dcgettext -- perform domain and category specific lookup in message catalog
+
+SYNOPSIS
+
+#include <libintl.h> #include <locale.h>
+
+char * dcgettext(const char * domainname, const char * msgid, int category);
+
+DESCRIPTION
+
+The dcgettext() function is a domain specified version of gettext().
+
+The dcgettext() function shall lookup the translation in the current locale of 
+the message identified by msgid in the domain specified by domainname and in 
+the locale category specified by category. If domainname is NULL, the current 
+default domain shall be used. The msgid argument shall be a NULL-terminated 
+string to be matched in the catalogue. category shall specify the locale 
+category to be used for retrieving message strings. The category parameter 
+shall be one of LC_CTYPE, LC_COLLATE, LC_MESSAGES, LC_MONETARY, LC_NUMERIC, or 
+LC_TIME. The default domain shall not be changed by a call to dcgettext().
+
+RETURN VALUE
+
+If a translation was found in one of the specified catalogs, it shall be 
+converted to the current locale's codeset and returned. The resulting NULL- 
+terminated string shall be allocated by the dcgettext function, and must not be 
+modified or freed. If no translation was found, or category was invalid, msgid 
+shall be returned.
+
+ERRORS
+
+dcgettext() shall not modify the errno global variable.
+
+See Also
+
+gettext, dgettext, ngettext, dngettext, dcngettext, textdomain, bindtextdomain, 
+bind_textdomain_codeset
+*/
+
+/** dcgettext_spec **/
+//This mediator refers to: gettext, dgettext, dcgettext
+specification
+CString* gettext_caller_spec            (
+                                         CallContext context,
+                                         CString*    domainname,
+                                         CString*    msgid,
+                                         IntT        category,
+                                         ErrorCode   *errno,
+                                         gettextT    funcType
+                                        )
+{
+    pre
+    {
+        if(funcType ==   gettextFunc) FILTER(   "gettext" );
+        if(funcType ==  dgettextFunc) FILTER(  "dgettext" );
+        if(funcType == dcgettextFunc) FILTER( "dcgettext" );
+    
+        /*
+         * The msgid argument shall be a NULL-terminated string to be matched in the 
+         * catalogue.
+         */
+        REQ("app.dcgettext.03;app.dgettext.03;app.gettext.03",
+            "msgid shall be a NULL-terminated string", msgid != NULL);
+    
+        if(funcType == dcgettextFunc)
+        {
+            /*
+             * The category parameter shall be one of LC_CTYPE, LC_COLLATE, LC_MESSAGES, 
+             * LC_MONETARY, LC_NUMERIC, or LC_TIME.
+             */
+            REQ("app.dcgettext.05", "category shall be one of the defined categories",
+                category == SUT_LC_CTYPE || category == SUT_LC_COLLATE || category == SUT_LC_MESSAGES ||
+                category == SUT_LC_MONETARY || category == SUT_LC_NUMERIC || category == SUT_LC_TIME);
+        }
+    
+        return true;
+    }
+    
+    coverage Func
+    {
+        if(funcType == gettextFunc)
+            return { Func_gettext, "gettext() func is being tested" };
+
+        if(funcType == dgettextFunc)
+            return { Func_dgettext, "dgettext() func is being tested" };
+
+            return { Func_dcgettext, "dcgettext() func is being tested" };
+    }
+    
+    coverage DomainName
+    {
+        if(funcType == gettextFunc)
+        {
+            CString* domname = getCurrent_Domain(context);
+
+            if(get_Domain(context, domname) != NULL) return { KnownCurrentDomainName, "Known current domain name" };
+            return { UndefinedCurrentDomainName, "Undefined current domain name" };
+        }
+
+        if(domainname == NULL) return { NULLDomainName, "NULL domain name" };
+        if(get_Domain(context, domainname) != NULL) return { KnownDomainName, "Known domain name" };
+        return { UndefinedDomainName, "Undefined domain name" };
+    }
+    
+    coverage DomainMessage
+    {
+        if(getText_Domain(context, domainname, msgid, category) != NULL) return { KnownMessage, "Known message" };
+        return { UndefinedMessage, "Undefined message" };
+    }
+    
+    coverage DomainPredefinedMessage
+    {
+        Domain* dom = get_Domain(context, domainname);
+
+        if(dom == NULL || getMsg_SystemStateDomain(context, domainname, dom->path, msgid, category) == NULL)
+            return { NotPredefinedMessage, "It isn't predefined message" };
+
+        return { PredefinedMessage, "It is predefined message" };
+    }
+
+    post
+    {
+        CString* model_domain   = funcType == gettextFunc   ? getCurrent_Domain(context) : domainname;
+        IntT     model_category = funcType == dcgettextFunc ? category                   : SUT_LC_MESSAGES;
+        CString* model_text     = isValid_Category(model_category) ?
+            getText_Domain(context, model_domain, msgid, model_category) : NULL;
+        bool     bRes = model_text == NULL ? Unknown_Bool3 : (safeCompare_CString(model_text, gettext_caller_spec) == 0);
+
+        /*
+         * The dcgettext() function shall lookup the translation in the current locale of 
+         * the message identified by msgid in the domain specified by domainname and in 
+         * the locale category specified by category.
+         */
+        /*
+         * The dgettext() function shall search the currently selected message catalogs in 
+         * the domain domainname for a string identified by the string msgid.
+         */
+        /*
+         * The gettext() function shall search the currently selected message catalogs for 
+         * a string identified by the string msgid.
+         */
+        REQ3("gettext.01;dgettext.01;dcgettext.01", "", bRes);
+
+        if(funcType != gettextFunc && domainname == NULL)
+            /*
+             * If domainname is NULL, the current default domain shall be used.
+             */
+             REQ3("dcgettext.02", "", bRes);
+
+        if(funcType == dcgettextFunc)
+        {
+            /*
+             * category shall specify the locale category to be used for retrieving message 
+             * strings.
+             */
+            REQ3("dcgettext.04", "", bRes);
+
+            /*
+             * The category parameter shall be one of LC_CTYPE, LC_COLLATE, LC_MESSAGES, 
+             * LC_MONETARY, LC_NUMERIC, or LC_TIME.
+             */
+            REQ("dcgettext.05", "", !isValid_Category(category) => (safeCompare_CString(gettext_caller_spec, msgid) == 0));
+        }
+
+        /*
+         * The default domain shall not be changed by a call to dcgettext().
+         */
+        /*
+         * The default domain shall not be changed by a call to dgettext().
+         */
+        REQ("dgettext.03;dcgettext.06", "", TODO_REQ());
+
+        if(model_text != NULL)
+        {
+            /*
+             * If a translation was found in one of the specified catalogs, it shall be 
+             * converted to the current locale's codeset and returned.
+             */
+            /*
+             * On success of a msgid query, the translated NULL-terminated string is returned.
+             */
+            /*
+             * If a string is found in the currently selected message catalogs for msgid, then 
+             * a pointer to that string shall be returned.
+             */
+            REQ3("gettext.04;dgettext.06;dcgettext.07", "", bRes);
+        }
+        else
+        {
+            /*
+             * If no translation was found, or category was invalid, msgid shall be returned.
+             */
+            /*
+             * On error, the original msgid is returned.
+             */
+            /*
+             * Otherwise, a pointer to msgid shall be returned.
+             */
+            REQ("gettext.05;dgettext.07;dcgettext.10", "", TODO_REQ());
+        }
+
+        /*
+         * The resulting NULL-terminated string
+         *
+         * shall be allocated by the dcgettext function
+         */
+        REQ("dcgettext.08.01", "", TODO_REQ());
+
+        /*
+         * dcgettext() shall not modify the errno global variable.
+         */
+        /*
+         * dgettext() shall not modify the errno global variable.
+         */
+        /*
+         * The gettext() function shall not modify errno.
+         */
+        REQ("gettext.07;dgettext.09;dcgettext.11", "", *errno == 0);
+
+        /*
+         * If a string is located, that string shall be returned. The domain specified by 
+         * domainname applies to the currently active LC_MESSAGE locale.
+         */
+        /*
+         * If a string is located, that string shall be returned.
+         */
+        REQ("gettext.02;dgettext.02", "", TODO_REQ());
+
+        /*
+         * The dgettext() function is equivalent to dcgettext(domainname, msgid, 
+         * LC_MESSAGES).
+         */
+        /*
+         * The gettext() function is equivalent to dcgettext(NULL, msgid, LC_MESSAGES).
+         */
+        REQ3("gettext.03;dgettext.05", "", bRes);
+    
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+ngettext -- search message catalogs for plural string
+
+SYNOPSIS
+
+#include <libintl.h>
+
+char * ngettext(const char * msgid1, const char * msgid2, unsigned long int n);
+
+DESCRIPTION
+
+The ngettext() function shall search the currently selected message catalogs 
+for a string matching the singular string msgid1. If a string is located, and 
+if n is 1, that string shall be returned. If n is not 1, a pluralized 
+version (dependent on n) of the string shall be returned.
+
+The ngettext() function is equivalent to dcngettext(NULL, msgid1, msgid2, n, 
+LC_MESSAGES)().
+
+RETURN VALUE
+
+If a string is found in the currently selected message catalogs for msgid1, 
+then if n is 1 a pointer to the located string shall be returned. If n is not 
+1, a pointer to an appropriately pluralized version of the string shall be 
+returned. If no message could be found in the currently selected mesage 
+catalogs, then if n is 1, a pointer to msgid1 shall be returned, otherwise a 
+pointer to msgid2 shall be returned.
+
+Applications shall not modify the string returned by ngettext().
+
+ERRORS
+
+None.
+
+The ngettext() function shall not modify errno.
+
+See Also
+
+gettext, dgettext, ngettext, dngettext, dcgettext, dcngettext, textdomain, 
+bindtextdomain, bind_textdomain_codeset
+*/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+dngettext -- perform lookup in message catalog for the current locale
+
+SYNOPSIS
+
+#include <libintl.h>
+
+char * dngettext(const char * domainname, const char * msgid1, const char * 
+msgid2, unsigned long int n);
+
+DESCRIPTION
+
+dngettext() shall be equivalent to a call to 
+
+
+dcngettext(domainname, msgid1, msgid2, n, LC_MESSAGES)
+
+See dcngettext() for more information.
+
+See Also
+
+gettext, dgettext, ngettext, dcgettext, dcngettext, textdomain, bindtextdomain,  
+bind_textdomain_codeset
+*/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+NAME
+
+dcngettext -- perform domain and category specific lookup in message catalog 
+with plural
+
+SYNOPSIS
+
+#include <libintl.h> #include <locale.h>
+
+char * dcngettext(const char * domainname, const char * msgid1, const char * 
+msgid2, unsigned long int n, int category);
+
+DESCRIPTION
+
+The dcngettext() function is a domain specific version of gettext, capable of 
+returning either a singular or plural form of the message. The dcngettext() 
+function shall lookup the translation in the current locale of the message 
+identified by msgid1 in the domain specified by domainname and in the locale 
+category specified by category. If domainname is NULL, the current default 
+domain shall be used. The msgid1 argument shall be a NULL-terminated string to 
+be matched in the catalogue. category shall specify the locale category to be 
+used for retrieving message strings. The category parameter shall be one of 
+LC_CTYPE, LC_COLLATE, LC_MESSAGES, LC_MONETARY, LC_NUMERIC, or LC_TIME. The 
+default domain shall not be changed by a call to dcngettext(). If n is 1 then 
+the singular version of the message is returned, otherwise one of the plural 
+forms is returned, depending on the value of n and the current locale settings.
+
+RETURN VALUE
+
+If a translation corresponding to the value of n was found in one of the 
+specified catalogs for msgid1, it shall be converted to the current locale's 
+codeset and returned. The resulting NULL-terminated string shall be allocated 
+by the dcngettext() function, and must not be modified or freed. If no 
+translation was found, or category was invalid, msgid1 shall be returned if n 
+has the value 1, otherwise msgid2 shall be returned.
+
+ERRORS
+
+dcngettext() shall not modify the errno global variable.
+
+See Also
+
+gettext, dgettext, ngettext, dngettext, dcgettext, textdomain, bindtextdomain, 
+bind_textdomain_codeset
+*/
+
+/** dcngettext_spec **/
+//This mediator refers to: ngettext, dngettext, dcngettext
+specification
+CString* ngettext_caller_spec           (
+                                         CallContext context,
+                                         CString*    domainname,
+                                         CString*    msgid1,
+                                         CString*    msgid2,
+                                         ULongT      n,
+                                         IntT        category,
+                                         ErrorCode   *errno,
+                                         ngettextT   funcType
+                                        )
+{
+    pre
+    {
+        if(funcType ==   ngettextFunc) FILTER(   "ngettext" );
+        if(funcType ==  dngettextFunc) FILTER(  "dngettext" );
+        if(funcType == dcngettextFunc) FILTER( "dcngettext" );
+    
+        /*
+         * The msgid1 argument shall be a NULL-terminated string to be matched in the 
+         * catalogue.
+         */
+        REQ("app.dcngettext.03;app.dngettext.03;app.ngettext.03", "msgid1 shall be a NULL-terminated string", msgid1 != NULL);
+       
+        if(funcType == dcngettextFunc)
+        {
+            /*
+             * The category parameter shall be one of LC_CTYPE, LC_COLLATE, LC_MESSAGES, 
+             * LC_MONETARY, LC_NUMERIC, or LC_TIME.
+             */
+            REQ("app.dcngettext.05", "category shall be one of the defined categories",
+                category == SUT_LC_CTYPE || category == SUT_LC_COLLATE || category == SUT_LC_MESSAGES ||
+                category == SUT_LC_MONETARY || category == SUT_LC_NUMERIC || category == SUT_LC_TIME);
+        }  
+    
+        return true;
+    }
+    
+    coverage Func
+    {
+        if(funcType == ngettextFunc)
+            return { Func_ngettext, "ngettext() func is being tested" };
+        
+        if(funcType == dngettextFunc)
+            return { Func_dngettext, "dngettext() func is being tested" };
+
+            return { Func_dcngettext, "dcngettext() func is being tested" };
+    }
+    
+    coverage DomainName
+    {
+        if(funcType == ngettextFunc)
+        {
+            CString* domname = getCurrent_Domain(context);
+
+            if(get_Domain(context, domname) != NULL) return { KnownCurrentDomainName, "Known current domain name" };
+            return { UndefinedCurrentDomainName, "Undefined current domain name" };
+        }
+
+        if(domainname == NULL) return { NULLDomainName, "NULL domain name" };
+        if(get_Domain(context, domainname) != NULL) return { KnownDomainName, "Known domain name" };
+        return { UndefinedDomainName, "Undefined domain name" };
+    }
+    
+    coverage DomainMessage
+    {
+        if(ngetText_Domain(context, domainname, msgid1, category, n) != NULL) return { KnownMessage, "Known message" };
+        return { UndefinedMessage, "Undefined message" };
+    }
+    
+    coverage DomainPredefinedMessage
+    {
+        Domain* dom = get_Domain(context, domainname);
+
+        if(dom == NULL || ngetMsg_SystemStateDomain(context, domainname, dom->path, msgid1, category, n) == NULL)
+            return { NotPredefinedMessage, "It isn't predefined message" };
+
+        return { PredefinedMessage, "It is predefined message" };
+    }
+
+    post
+    {
+        CString* model_domain   = ( funcType == ngettextFunc   ? getCurrent_Domain(context) : domainname      );
+        IntT     model_category = ( funcType == dcngettextFunc ? category                   : SUT_LC_MESSAGES );
+        CString* model_text     = isValid_Category(model_category) ?
+            ngetText_Domain(context, model_domain, msgid1, model_category, n) : NULL;
+        Bool3    bRes = model_text == NULL ? Unknown_Bool3 : (safeCompare_CString(model_text, ngettext_caller_spec) == 0);
+
+        /*
+         * The dcngettext() function shall lookup the translation in the current locale of 
+         * the message identified by msgid1 in the domain specified by domainname and in 
+         * the locale category specified by category.
+         */
+        /*
+         * The ngettext() function shall search the currently selected message catalogs 
+         * for a string matching the singular string msgid1.
+         */
+        REQ("ngettext.01;dngettext.01;dcngettext.01", "", bRes);
+
+        if(funcType != gettextFunc && domainname == NULL)
+            /*
+             * If domainname is NULL, the current default domain shall be used.
+             */
+            REQ("dngettext.02;dcngettext.02", "", bRes);
+        
+        if(funcType == dcngettextFunc)
+        {
+            /*
+             * category shall specify the locale category to be used for retrieving message 
+             * strings.
+             */
+            REQ("dcngettext.04", "", bRes);
+
+            /*
+             * The category parameter shall be one of LC_CTYPE, LC_COLLATE, LC_MESSAGES, 
+             * LC_MONETARY, LC_NUMERIC, or LC_TIME.
+             */
+            REQ("dcngettext.05", "", !isValid_Category(category) =>
+                (safeCompare_CString(ngettext_caller_spec, n == 1 ? msgid1 : msgid2) == 0));
+        }
+        
+        /*
+         * The default domain shall not be changed by a call to dcngettext().
+         */
+        REQ("dngettext.06;dcngettext.06", "", TODO_REQ());
+
+        if(n == 1)
+        {
+            /*
+             * If n is 1 then the singular version of the message is returned
+             */
+            /*
+             * If a string is found in the currently selected message catalogs for msgid1, 
+             * then
+             *
+             * if n is 1 a pointer to the located string shall be returned.
+             */
+            REQ("ngettext.06.01;dngettext.07;dcngettext.07", "", bRes);
+        }
+        else
+        {
+            /*
+             * otherwise one of the plural forms is returned, depending on the value of n and 
+             * the current locale settings.
+             */
+            /*
+             * If a string is found in the currently selected message catalogs for msgid1, 
+             * then
+             *
+             * If n is not 1, a pointer to an appropriately pluralized version of the string 
+             * shall be returned.
+             */
+            REQ("ngettext.06.02;dngettext.08;dcngettext.08", "", bRes);
+        }
+        
+        if(model_text == NULL)
+        {
+            if(n == 1)
+            {
+                /*
+                 * If no translation was found, or category was invalid, msgid1 shall be returned 
+                 * if n has the value 1
+                 */
+                /*
+                 * If no message could be found in the currently selected mesage catalogs, then if 
+                 * n is 1, a pointer to msgid1 shall be returned
+                 */
+                REQ("ngettext.07;dngettext.12;dcngettext.12", "", TODO_REQ());
+            }
+            else
+            {
+                /*
+                 * otherwise msgid2 shall be returned.
+                 */
+                /*
+                 * otherwise a pointer to msgid2 shall be returned.
+                 */
+                REQ("ngettext.08;dngettext.13;dcngettext.13", "", TODO_REQ());
+            }
+        }
+
+
+        if(funcType != ngettextFunc)
+            /*
+             * If a translation corresponding to the value of n was found in one of the 
+             * specified catalogs for msgid1, it shall be converted to the current locale's 
+             * codeset and returned.
+             */
+            REQ("dngettext.09;dcngettext.09", "", bRes);
+
+        /*
+         * The resulting NULL-terminated string
+         *
+         * shall be allocated by the dcngettext() function
+         */
+        REQ("dngettext.10.01;dcngettext.10.01", "", TODO_REQ());
+
+        /*
+         * dcngettext() shall not modify the errno global variable.
+         */
+        /*
+         * The ngettext() function shall not modify errno.
+         */
+        REQ("ngettext.10;dngettext.14;dcngettext.14", "", *errno == 0);
+        
+        /*
+         * dngettext() shall be equivalent to a call to
+         */
+        /*
+         * The ngettext() function is equivalent to dcngettext(NULL, msgid1, msgid2, n, 
+         * LC_MESSAGES)().
+         */
+        REQ("ngettext.05;dngettext.30", "", bRes);
+        
+        /*
+         * If a string is located, and if n is 1, that string shall be returned.
+         */
+        REQ("ngettext.02", "", TODO_REQ());
+        
+        /*
+         * [If a string is located, and ] If n is not 1, a pluralized version (dependent
+         * on n) of the string shall be returned.
+         */
+        REQ("ngettext.03", "", TODO_REQ());
+    
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+
+/********************************************************************/
+/**                         Update Functions                       **/
+/********************************************************************/
+
+void onBindTextDomainCodeset          (
+                                       CallContext context,
+                                       CString*    domainname,
+                                       CString*    codeset,
+                                       ErrorCode   *errno,
+                                       CString*    res
+                                      )
+{
+    if(domainname == NULL || codeset == NULL) return;
+
+    setCodeset_Domain(context, domainname, codeset);
+}
+
+void onBindTextDomain                 (
+                                       CallContext context,
+                                       CString*    domainname,
+                                       CString*    dirname,
+                                       ErrorCode   *errno,
+                                       CString*    res
+                                      )
+{
+    if(res == NULL) return;
+
+    put_Domain(context, domainname, create_Domain());
+    setPath_Domain(context, domainname, dirname);
+}
+
+void onTextDomain                     (
+                                       CallContext context,
+                                       CString*    domainname,
+                                       ErrorCode   *errno,
+                                       CString*    res
+                                      )
+{
+    if(res == NULL) return;
+
+    if(domainname != NULL && isEmpty_CString(domainname))
+        setCurrent_Domain(context, _CS("messages"));
+    else setCurrent_Domain(context, domainname);
+}
+
+void onGetText                        (
+                                       CallContext context,
+                                       CString*    domain,
+                                       CString*    msgid,
+                                       IntT        category,
+                                       ErrorCode   *errno,
+                                       CString*    res
+                                      )
+{
+    if(res == NULL) return;
+    
+    if(getText_Domain(context, domain, msgid, category) == NULL)
+        putText_Domain(context, domain, msgid, category, res);
+}
+
+void onNGetText                       (
+                                       CallContext context,
+                                       CString*    domain,
+                                       CString*    msgid1,
+                                       CString*    msgid2,
+                                       ULongT      n,
+                                       IntT        category,
+                                       ErrorCode   *errno,
+                                       CString*    res
+                                      )
+{
+    if(res == NULL) return;
+    
+    if(ngetText_Domain(context, domain, msgid1, category, n) == NULL)
+        nputText_Domain(context, domain, msgid1, category, n, res);
+}
+
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/

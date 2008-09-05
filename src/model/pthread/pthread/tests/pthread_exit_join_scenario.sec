@@ -1,0 +1,296 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "pthread/pthread/tests/pthread_scenario.seh"
+#include "common/common_model.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+#define NUM_THREADS 3
+#define MAX_SIZE    1000
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext     context;
+static ThreadId        toJoinThreads[NUM_THREADS];
+static ThreadId        threadIDs[NUM_THREADS];
+static IntT            curNumThreads=0;
+static bool threadsJoined=false;
+static bool threadsDetached=false;
+static bool equalChecked=false;
+static VoidTPtr value_ptr;
+static bool firstTime;
+static VoidTPtr oncePtr;
+static UCharT zeroBuff[]={0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+
+specification typedef struct PThreadExitJoinState
+{
+    IntT numThreads;
+    bool joined;
+    bool detached;
+    bool equalChecked;
+} PThreadExitJoinState;
+
+specification typedef struct PThreadExitJoinState PThreadExitJoinState = {};
+
+PThreadExitJoinState *create_PThreadExitJoinState(
+        IntT numThreads,
+        bool joined,
+        bool detached,
+        bool equalChecked
+        )
+{
+    return create(&type_PThreadExitJoinState, numThreads, joined, 
+        detached, equalChecked);
+
+}
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+
+
+static Object* getPthreadExitJoinState(void)
+{
+    return create_PThreadExitJoinState(curNumThreads, threadsJoined, 
+        threadsDetached, equalChecked);
+}
+
+
+static bool init_exit_join_scenario(int argc, char** argv)
+{
+    context = createProcess();//getContext();
+
+    // precache type size value
+    sizeof_Type(context, "pthread_attr_t");
+    
+    curNumThreads=0;
+    threadsJoined=false;
+    threadsDetached=false;
+    equalChecked=false;
+    
+    setTSTimeModel(LinearTSTime);
+    setFindFirstSeriesOnly(false);
+    setWTimeMSec(SERIALIZATION_TIME*100);
+    
+    
+    firstTime=true;
+    
+    oncePtr=allocateMemoryBlock(context, MAX_SIZE);
+    if (isNULL_VoidTPtr(oncePtr))
+        return false;
+    
+    writeCByteArray_VoidTPtr(oncePtr, create_CByteArray(zeroBuff, 
+        sizeof(zeroBuff)/sizeof(UCharT)));
+    
+    return true;
+    
+}
+
+static void finish_exit_join_scenario(void)
+{
+    terminateProcess(context);
+}
+
+scenario
+bool pthread_create_thread_scen()
+{
+    PThreadAttrTPtr attr=allocateMemoryBlock(context, MAX_SIZE);
+    int i=0;
+    
+    /*
+    if (firstTime)
+    {
+        for (i=0;i<20;i++)
+        {
+            pthread_self_spec(context);
+            __errno_location_spec(context);
+        }
+    }
+    */
+    if (isNULL_VoidTPtr(attr))
+        return false;
+    pthread_attr_init_spec(context, attr);
+    if (curNumThreads%2==0)
+    {
+        pthread_attr_setdetachstate_spec(context, attr,  
+            SUT_PTHREAD_CREATE_DETACHED);
+    }
+    if (curNumThreads<NUM_THREADS)
+    {
+        pthread_create_spec(context, &threadIDs[curNumThreads], attr, 
+            generateVirtualPointer(context));
+        curNumThreads++;
+        
+    }
+    
+    
+    if (firstTime)
+    {
+        attr=allocateMemoryBlock(context, MAX_SIZE);
+        
+        if (isNULL_VoidTPtr(attr))
+            return false;
+        pthread_attr_init_spec(context, attr);
+        
+        for (i=0;i<NUM_THREADS;i++)
+        {
+            pthread_create_spec(context, &toJoinThreads[i], attr, 
+                generateVirtualPointer(context));
+        }
+        firstTime=false;
+        
+    }
+    
+    return true;
+}
+
+scenario
+bool pthread_exit_scen()
+{
+    if (curNumThreads>0)
+    {
+        ThreadState *join;
+        pthread_exit_spec(threadIDs[curNumThreads-1],
+            generateVirtualPointer(context));
+       ts_sleep_msec(300);
+        //if(NULL!=getBlockedCall(threadIDs[curNumThreads-1]))
+        {
+            pthread_join_spec(toJoinThreads[curNumThreads-1], 
+                threadIDs[curNumThreads-1], NULL);
+        }
+       ts_sleep_msec(300);
+        
+        
+        curNumThreads--;
+    }
+    
+    if (curNumThreads==0)
+    {
+        threadsJoined=false;
+        threadsDetached=false;
+        equalChecked=false;
+    }
+    return true;
+}
+
+
+scenario
+bool pthread_equal_scen()
+{
+    int i=0;
+    for (i=0;i<curNumThreads;i++)
+    {
+        pthread_equal_spec(context, threadIDs[i], threadIDs[i]);
+        if (i>1)
+        {
+            pthread_equal_spec(context, threadIDs[i-1], 
+                threadIDs[i]);
+        }
+    }  
+    equalChecked=true;
+    return true;
+}
+
+scenario
+bool pthread_join_scen()
+{
+    int i=0;
+    if (threadsJoined)
+    {
+        return true;
+    }
+    
+    for (i=0;i<curNumThreads;i++)
+    {
+        pthread_join_spec(toJoinThreads[i], threadIDs[i], &value_ptr);
+    }
+    if (i!=0)
+    {
+        threadsJoined=true;
+    }
+    
+    return true;
+}
+
+
+scenario
+bool pthread_detach_scen()
+{
+    int i=0;
+    if (!threadsDetached)
+    {
+        for (i=0;i<curNumThreads;i++)
+        {
+            pthread_detach_spec(context, threadIDs[i]);
+        }
+        if (i!=0)
+        {
+            pthread_once_spec(threadIDs[i-1], oncePtr);
+            threadsDetached=true;
+        }
+    }
+    
+    return true;
+}
+
+
+
+/********************************************************************/
+/**                     Model State Operations                     **/
+/********************************************************************/
+
+static bool isPThreadExitModelStateStationary(void)
+{
+    return true;
+}
+
+
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario ndfsm pthread_exit_join_scenario =
+{
+    .init = init_exit_join_scenario,
+    .finish = finish_exit_join_scenario,
+    .getState = getPthreadExitJoinState,
+    .saveModelState = (PtrSaveModelState)savePThreadModelState,
+    .restoreModelState = (PtrRestoreModelState)restorePThreadModelState,
+    .isStationaryState=(PtrIsStationaryState)isPThreadExitModelStateStationary,
+    .actions = {
+      pthread_create_thread_scen,
+      pthread_exit_scen,
+      pthread_join_scen,
+      pthread_detach_scen,
+      pthread_equal_scen,
+      NULL
+  }
+};
+

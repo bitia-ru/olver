@@ -1,0 +1,182 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "system/sysconf/sysconf_model.seh"
+#include "system/sysconf/sysconf_media.seh"
+#include "system/user/user_model.seh"
+#include "system/user/user_media.seh"
+#include "process/process/tests/process_scenario.seh"
+#include "process/process/process_model.seh"
+#include "process/process/process_media.seh"
+#include "config/system_config.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "system/system/system_model.seh"
+#include "common/control_center.seh"
+#include "process/meta/user_model.seh"
+#include "process/meta/user_media.seh"
+#include "process/environ/environ_media.seh"
+#include "fs/meta/access_media.seh"
+#include "data/sys/wait_model.seh"
+#include "data/stdlib_model.seh"
+#include "process/process/process_common.seh"
+#include "process/goto/tests/goto_scenario.seh"
+#include "process/goto/goto_model.seh"
+#include "process/goto/goto_media.seh"
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+
+static CallContext context;
+static SigJmpBuf * sigJmpBuf;
+static JmpBuf    * jmpBuf1  ;
+static JmpBuf    * jmpBuf2  ;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+String * testingFuncName;
+
+static bool init_scenario( char * name )
+{
+    int i;
+    verbose( "%s\n", name );
+    dotPrint( 0, 0 );
+    testingFuncName = create_String( name );
+    context = getContext();
+    sigJmpBuf = createEmpty_SigJmpBuf( 1 );
+    jmpBuf1   = createEmpty_JmpBuf   ( 1 );
+    jmpBuf2   = createEmpty_JmpBuf   ( 2 );
+    setFinishMode( UNTIL_END );
+    return true;
+}
+
+#define finish_scenario( name ) \
+{ \
+    verbose( "\n" ); \
+    TEST_SCENARIO_VERDICT_VERBOSE( name##_scenario ); \
+}
+
+static bool init_goto_scenario( int argc, char ** argv ) { return init_scenario( "goto" ); }
+
+static void finish_goto_scenario( void ) finish_scenario( goto )
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool goto_scen()
+{
+    iterate ( int i = 1; i <= 6; i++; )
+    {
+        dotPrint( 10, 50 );
+        switch ( i ) {
+            case 1: verbose( "1" ); __sigsetjmp_spec( context, sigJmpBuf, 0 ); break;
+            case 2: verbose( "2" ); siglongjmp_spec ( context, sigJmpBuf, 1 ); break;
+            case 3: verbose( "3" ); _setjmp_spec    ( context, jmpBuf1      ); break;
+            case 4: verbose( "4" ); _longjmp_spec   ( context, jmpBuf1  , 1 ); break;
+            case 5: verbose( "5" ); _setjmp_spec    ( context, jmpBuf2      ); break;
+            case 6: verbose( "6" ); longjmp_spec    ( context, jmpBuf2  , 1 ); break;
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm goto_scenario =
+{
+    .init              = init_goto_scenario  ,
+    .finish            = finish_goto_scenario,
+    .actions           = { goto_scen,
+                           NULL
+                         }
+};
+
+#ifdef PROCESS_GOTO_LOCAL_MAIN
+
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+#include "config/system_config.seh"
+#include "system/system/system_model.seh"
+#include "process/process/process_model.seh"
+#include "pthread/pthread/pthread_media.seh"
+#include "pthread/mutex/mutexattr_media.seh"
+#include "pthread/mutex/mutex_media.seh"
+#include "process/process/process_media.seh"
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initSystemSysconfSubsystem();
+    initSystemUserSubsystem();
+    initProcessMetaUserSubsystem();
+
+    initProcessGotoSubsystem();
+}
+
+bool main_process_goto_local( int argc, char** argv )
+{
+    goto_scenario( argc, argv );
+    return true;
+}
+
+int main( int argc, char** argv )
+{
+    //
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+
+    addTraceToFile( "trace.xml_CTesK" );
+
+    // Run test scenario
+    main_process_goto_local( argc, argv );
+
+    //  unloadSUT();
+    return 0;
+}
+
+#endif

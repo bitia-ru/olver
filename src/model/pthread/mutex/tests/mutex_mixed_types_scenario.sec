@@ -1,0 +1,579 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "pthread/mutex/mutex_model.seh"
+#include "pthread/mutex/tests/mutex_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static int numberOfThreads = 5;
+static int maxNumberOfRecursiveLocks = 3;
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static CallContext *contexts;
+static PThreadMutexAttrTPtr pattr;
+static PThreadMutexTPtr pmutex;
+static bool mutex_destroyed = false;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_mutex_mixed_types_scenario(int argc,char** argv)
+{
+    int i;
+
+    contexts = (CallContext*) calloc(numberOfThreads, sizeof(CallContext));
+
+    // Create additional threads
+    for(i=0; i<numberOfThreads; i++)
+    {
+        createThread();
+    }
+
+    // Init test scenario data
+    getContexts(numberOfThreads,contexts);
+    context  = contexts[0];
+    
+    pattr = allocateMemoryBlock(context,sizeof_Type(context,"pthread_mutexattr_t"));
+    pmutex = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutex_t"));
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec( 200 );
+    return true;
+}
+
+static void finish_mutex_mixed_types_scenario(void)
+{
+    // Deallocate resources
+    deallocateMemoryBlock(context, pattr);
+    deallocateMemoryBlock(context, pmutex);
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+specification typedef
+struct MutexMixedTypesGenState
+{
+    MutexType   type;
+    int         numberOfLocks;
+    int         numberOfLockedThreads;
+
+} MutexMixedTypesGenState;
+
+MutexMixedTypesGenState * create_MutexMixedTypesGenState(
+    MutexType   type,
+    int         numberOfLocks,
+    int         numberOfLockedThreads
+)
+{
+    return create(&type_MutexMixedTypesGenState, type, numberOfLocks, numberOfLockedThreads);
+}
+
+static
+String* to_string_MutexMixedTypesGenState( struct MutexMixedTypesGenState* gen_state )
+{
+    String *stype, *res;
+
+    switch (gen_state->type)
+    {
+        case SUT_PTHREAD_MUTEX_NORMAL :
+            stype = create_String("PTHREAD_MUTEX_NORMAL");
+            break;
+        case SUT_PTHREAD_MUTEX_ERRORCHECK :
+            stype = create_String("PTHREAD_MUTEX_ERRORCHECK");
+            break;
+        case SUT_PTHREAD_MUTEX_RECURSIVE :
+            stype = create_String("PTHREAD_MUTEX_RECURSIVE");
+            break;
+        case SUT_PTHREAD_MUTEX_DEFAULT :
+            stype = create_String("PTHREAD_MUTEX_DEFAULT");
+            break;
+        default :
+            assertion( false, "Incorrect value of 'type': %d", gen_state->type );
+            break;
+    }
+
+    res = concat_String(stype, create_String("; "));
+    res = concat_String(res, format_String( "locks:%d; ", gen_state->numberOfLocks));
+    res = concat_String(res, format_String( "threads:%d", gen_state->numberOfLockedThreads));
+
+    return res;
+}
+
+specification typedef struct MutexMixedTypesGenState MutexMixedTypesGenState = {
+    .to_string = (ToString)to_string_MutexMixedTypesGenState
+};
+
+MutexMixedTypesGenState* get_MutexMixedTypesGenState(void)
+{
+    Mutex* mutex;
+
+    if (isNULL_VoidTPtr(pmutex)) 
+        return NULL;
+    mutex = getMutex(pmutex);
+
+    if(mutex == NULL) 
+        return NULL;
+
+    if (!isLocked_Mutex(mutex))
+        return create_MutexMixedTypesGenState( mutex->type, mutex->lock_count, -1);
+    return create_MutexMixedTypesGenState( mutex->type, mutex->lock_count, size_List(mutex->wait_list));
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+static int pshared = SUT_PTHREAD_PROCESS_PRIVATE;
+
+scenario
+bool mutex_init_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex) && getMutex(pmutex) == NULL)
+    {
+        iterate ( MutexType type = SUT_PTHREAD_MUTEX_NORMAL; type <= SUT_PTHREAD_MUTEX_DEFAULT; type++; )
+        {
+            ErrorCode* code;
+            
+            traceUserInfo("mutex_init_mixed_types_scen, pthread_mutexattr_init_spec");
+            pthread_mutexattr_init_spec(context, pattr);
+            traceUserInfo("mutex_init_mixed_types_scen, pthread_mutexattr_settype_spec");
+            pthread_mutexattr_settype_spec(context, pattr, type);
+            
+            traceUserInfo("mutex_init_mixed_types_scen, pthread_mutex_init_spec");
+            code = pthread_mutex_init_spec(context, pmutex, pattr);            
+            if (mutex_destroyed)
+            {
+                /*
+                 * A destroyed mutex object can be reinitialized using pthread_mutex_init();
+                 */
+                REQ("pthread_mutex_destroy.02", "destroyed mutex object can be reinitialized", *code == 0);
+            }       
+
+            traceUserInfo("mutex_init_mixed_types_scen, pthread_mutexattr_destroy_spec");
+            pthread_mutexattr_destroy_spec(context,pattr); 
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool mutex_init_initialized_mixed_types_scen()
+{
+    traceUserInfo("mutex_init_initialized_mixed_types_scen");
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+ 
+        if (mutex != NULL)
+        {
+            int i;
+
+            for(i = 0; i < numberOfThreads; i++)
+            {
+                traceFormattedUserInfo("mutex_init_initialized_mixed_types_scen, i = %d", i);
+                if(!contains_List(mutex->wait_list, create_ThreadIdObj(contexts[i])) 
+                && !isOwner_Mutex(mutex, contexts[i]))
+                    break;
+
+            }
+            if (i < numberOfThreads)
+            {
+                traceFormattedUserInfo("mutex_init_initialized_mixed_types_scen, found i = %d", i);
+                traceUserInfo("mutex_init_initialized_mixed_types_scen, checking pre");
+                if (pre pthread_mutex_init_spec(context, pmutex, NULL_VoidTPtr))
+                {
+                    traceUserInfo("mutex_init_initialized_mixed_types_scen, call pthread_mutex_init_spec");
+                    pthread_mutex_init_spec(context, pmutex, NULL_VoidTPtr);            
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool mutex_lock_uninitialized_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+ 
+        if (mutex == NULL)
+        {
+            traceUserInfo("mutex_lock_uninitialized_scen, mutex == NULL");
+            if (pre pthread_mutex_lock_spec(context, pmutex) )
+            {
+                traceFormattedUserInfo("mutex_lock_uninitialized_scen");
+                pthread_mutex_lock_spec(context, pmutex);
+            }
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool mutex_lock_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+ 
+        if (mutex != NULL)
+        {
+            traceUserInfo("mutex_lock_owner_mixed_types_scen, mutex != NULL");
+            if (!isWrong_ThreadId(mutex->owner))
+            {
+                traceUserInfo("mutex_lock_owner_mixed_types_scen, !isWrong_ThreadId(mutex->owner)");
+                if (pre pthread_mutex_lock_spec(mutex->owner, pmutex) 
+                 && mutex->type != SUT_PTHREAD_MUTEX_NORMAL
+                 && (mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE => mutex->lock_count < maxNumberOfRecursiveLocks)
+                   )
+                {
+                    traceFormattedUserInfo("mutex_lock_owner_mixed_types_scen, pthread_mutex_lock_spec, locks: %d", mutex->lock_count);
+                    pthread_mutex_lock_spec(mutex->owner, pmutex);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool mutex_lock_not_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex);
+        if (mutex != NULL)
+        {
+            int i;
+
+            traceUserInfo("mutex_lock_not_owner_mixed_types_scen, mutex != NULL");
+            for(i = 0; i < numberOfThreads; i++)
+            {
+                traceFormattedUserInfo("mutex_lock_not_owner_mixed_types_scen, i = %d", i);
+                if(!contains_List(mutex->wait_list, create_ThreadIdObj(contexts[i])) 
+                && !isOwner_Mutex(mutex, contexts[i]))
+                    break;
+
+            }
+            if (i < numberOfThreads)
+            {
+                traceFormattedUserInfo("mutex_lock_not_owner_mixed_types_scen, found i = %d", i);
+                if (pre pthread_mutex_lock_spec(contexts[i], pmutex))
+                {
+                    pthread_mutex_lock_spec(contexts[i], pmutex);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_trylock_uninitialized_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+ 
+        if (mutex == NULL)
+        {
+            if (pre pthread_mutex_trylock_spec(context, pmutex) )
+            {
+                pthread_mutex_trylock_spec(context, pmutex);
+            }
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool mutex_trylock_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+ 
+        if (mutex != NULL)
+        {
+            traceUserInfo("mutex_trylock_owner_mixed_types_scen, mutex != NULL");
+            if (!isWrong_ThreadId(mutex->owner))
+            {
+                traceUserInfo("mutex_trylock_owner_mixed_types_scen, !isWrong_ThreadId(mutex->owner)");
+                if (pre pthread_mutex_trylock_spec(mutex->owner, pmutex)
+                 && (mutex->type == SUT_PTHREAD_MUTEX_RECURSIVE => mutex->lock_count < maxNumberOfRecursiveLocks)
+                   )
+                {
+                    traceUserInfo("mutex_trylock_owner_mixed_types_scen, pthread_mutex_trylock_spec");
+                    pthread_mutex_trylock_spec(mutex->owner, pmutex);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool mutex_trylock_not_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex);
+        if (mutex != NULL)
+        {
+            int i;
+
+            traceUserInfo("mutex_trylock_not_owner_mixed_types_scen, mutex != NULL");
+            for(i = 0; i < numberOfThreads; i++)
+            {
+                traceFormattedUserInfo("mutex_trylock_not_owner_mixed_types_scen, i = %d", i);
+                if(!contains_List(mutex->wait_list, create_ThreadIdObj(contexts[i]))
+                && !isOwner_Mutex(mutex, contexts[i]))
+                    break;
+
+            }
+            if (i < numberOfThreads)
+            {
+                traceFormattedUserInfo("mutex_trylock_not_owner_mixed_types_scen, found i = %d", i);
+                if (pre pthread_mutex_trylock_spec(contexts[i], pmutex))
+                {
+                    pthread_mutex_trylock_spec(contexts[i], pmutex);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+
+scenario
+bool mutex_unlock_uninitialized_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+ 
+        if (mutex == NULL)
+        {
+            if (pre pthread_mutex_unlock_spec(context, pmutex) )
+            {
+                pthread_mutex_unlock_spec(context, pmutex);
+            }
+        }
+    }
+
+    return true;
+}
+
+
+scenario
+bool mutex_unlock_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+        
+        if (mutex != NULL
+         && !isWrong_ThreadId(mutex->owner)
+         && pre pthread_mutex_unlock_spec(mutex->owner, pmutex)
+           )
+        {
+            pthread_mutex_unlock_spec(mutex->owner, pmutex);
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_unlock_not_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex);
+        if (mutex != NULL)
+        {
+            int i;
+
+            traceUserInfo("mutex_unlock_not_owner_mixed_types_scen, mutex != NULL");
+            for(i = 0; i < numberOfThreads; i++)
+            {
+                traceFormattedUserInfo("mutex_unlock_not_owner_mixed_types_scen, i = %d", i);
+                if (!contains_List(mutex->wait_list, create_ThreadIdObj(contexts[i])) 
+                 && !isOwner_Mutex(mutex, contexts[i]))
+                    break;
+
+            }
+            if (i < numberOfThreads)
+            {
+                traceFormattedUserInfo("mutex_unlock_not_owner_mixed_types_scen, found i = %d", i);
+                if (pre pthread_mutex_unlock_spec(contexts[i], pmutex))
+                {
+                    pthread_mutex_unlock_spec(contexts[i], pmutex);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+
+
+scenario
+bool mutex_destroy_uninitialized_mixed_types_scen()
+{
+    if (
+        !isNULL_VoidTPtr(pmutex) 
+     && getMutex(pmutex) == NULL
+     && pre pthread_mutex_destroy_spec(context, pmutex)
+       )
+    {
+        pthread_mutex_destroy_spec(context, pmutex);
+    }
+    return true;
+}
+
+scenario
+bool mutex_destroy_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+
+        mutex = getMutex(pmutex);
+        
+        if (mutex != NULL
+         && !isWrong_ThreadId(mutex->owner)
+         && pre pthread_mutex_destroy_spec(mutex->owner, pmutex)
+           )
+        {
+            ErrorCode* code;
+            code = pthread_mutex_destroy_spec(mutex->owner, pmutex);
+            if (*code == 0) 
+            {
+                mutex_destroyed = true;
+            }        
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_destroy_not_owner_mixed_types_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex);
+        if (mutex != NULL)
+        {
+            int i;
+
+            for(i = 0; i < numberOfThreads; i++)
+            {
+                if (!contains_List(mutex->wait_list, create_ThreadIdObj(contexts[i])) 
+                 && !isOwner_Mutex(mutex, contexts[i]))
+                    break;
+
+            }
+            if (i < numberOfThreads)
+            {
+                if (pre pthread_mutex_destroy_spec(contexts[i], pmutex))
+                {
+                    pthread_mutex_destroy_spec(contexts[i], pmutex);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm mutex_mixed_types_scenario = 
+{
+    .init = init_mutex_mixed_types_scenario,
+    .finish = finish_mutex_mixed_types_scenario,
+    .getState = (PtrGetState)get_MutexMixedTypesGenState,
+    .saveModelState = (PtrSaveModelState)saveMutexModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreMutexModelState,
+    .isStationaryState = (PtrIsStationaryState)isMutexModelStateStationary,
+    .actions = {
+        mutex_init_initialized_mixed_types_scen,
+        mutex_init_mixed_types_scen,
+        mutex_lock_uninitialized_mixed_types_scen,
+        mutex_lock_owner_mixed_types_scen,
+        mutex_lock_not_owner_mixed_types_scen,
+        mutex_trylock_uninitialized_mixed_types_scen,
+        mutex_trylock_owner_mixed_types_scen,
+        mutex_trylock_not_owner_mixed_types_scen,
+        mutex_unlock_uninitialized_mixed_types_scen,
+        mutex_unlock_owner_mixed_types_scen,
+        mutex_unlock_not_owner_mixed_types_scen,
+        mutex_destroy_uninitialized_mixed_types_scen,
+        mutex_destroy_owner_mixed_types_scen,
+        mutex_destroy_not_owner_mixed_types_scen,
+        NULL
+    }
+};

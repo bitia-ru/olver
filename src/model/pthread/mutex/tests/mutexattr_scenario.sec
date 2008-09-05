@@ -1,0 +1,337 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "pthread/mutex/mutex_model.seh"
+#include "pthread/mutex/mutexattr_model.seh"
+#include "pthread/mutex/tests/mutex_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static CallContext context2;
+static CallContext context3;
+static PThreadMutexAttrTPtr pattr;
+static PThreadMutexTPtr pmutex;
+static bool attr_destroyed = false;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_mutexattr_scenario(int argc,char** argv)
+{
+
+    CallContext contexts[3];
+
+    // Create additional threads
+    createThread();
+    createThread();
+
+    // Init test scenario data
+    getContexts(3,contexts);
+    context  = contexts[0];
+    context2 = contexts[1];
+    context3 = contexts[2];
+
+    //
+    pattr = allocateMemoryBlock(context,sizeof_Type(context,"pthread_mutexattr_t"));
+    pmutex = allocateMemoryBlock(context,sizeof_Type(context,"pthread_mutex_t"));
+
+
+    //
+    // setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec( 70 );
+    return true;
+}
+
+static void finish_mutexattr_scenario(void)
+{
+    // Deallocate resources
+    deallocateMemoryBlock(context,pattr);
+    deallocateMemoryBlock(context,pmutex);
+
+    TEST_SCENARIO_VERDICT_VERBOSE(mutexattr_scenario);
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+specification typedef
+struct MutexAttrGenState
+{
+    MutexType       type;
+    PThreadPShared  pshared;
+
+} MutexAttrGenState;
+
+MutexAttrGenState * create_MutexAttrGenState(
+    MutexType       type,
+    PThreadPShared  pshared
+    )
+{
+    return create(&type_MutexAttrGenState, type, pshared);
+}
+
+static
+String* to_string_MutexAttrGenState( struct MutexAttrGenState* gen_state )
+{
+    String *stype, *spshared, *res;
+
+    switch (gen_state->type)
+    {
+        case SUT_PTHREAD_MUTEX_NORMAL :
+            stype = create_String("PTHREAD_MUTEX_NORMAL");
+            break;
+        case SUT_PTHREAD_MUTEX_ERRORCHECK :
+            stype = create_String("PTHREAD_MUTEX_ERRORCHECK");
+            break;
+        case SUT_PTHREAD_MUTEX_RECURSIVE :
+            stype = create_String("PTHREAD_MUTEX_RECURSIVE");
+            break;
+        case SUT_PTHREAD_MUTEX_DEFAULT :
+            stype = create_String("PTHREAD_MUTEX_DEFAULT");
+            break;
+        default :
+            assertion( false, "Incorrect value of 'type': %d", gen_state->type );
+            break;
+    }
+
+    switch (gen_state->pshared)
+    {
+        case SUT_PTHREAD_PROCESS_PRIVATE :
+            spshared = create_String("PTHREAD_PROCESS_PRIVATE");
+            break;
+        case SUT_PTHREAD_PROCESS_SHARED :
+            spshared = create_String("PTHREAD_PROCESS_SHARED");
+            break;
+        default :
+            assertion( false, "Incorrect  value of 'pshared': %d", gen_state->pshared );
+            break;
+    }
+
+    res = concat_String(stype, create_String("; "));
+    res = concat_String(res, spshared);
+
+    return res;
+}
+
+specification typedef struct MutexAttrGenState MutexAttrGenState = {
+    .to_string = (ToString)to_string_MutexAttrGenState
+};
+
+
+MutexAttrGenState* get_MutexAttrGenState(void)
+{
+    PThreadMutexAttrT* mutexAttr;
+
+    if (isNULL_VoidTPtr(pattr)) 
+        return NULL;
+
+    mutexAttr = getMutexAttributes(pattr);
+
+    if (mutexAttr == NULL)
+        return NULL;
+
+    return create_MutexAttrGenState( mutexAttr->type, mutexAttr->pshared );
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool mutexattr_init_scen()
+{
+    if (pre pthread_mutexattr_init_spec( context, pattr )) 
+    {
+        ErrorCode* code;
+        code = pthread_mutexattr_init_spec( context, pattr );
+        if (attr_destroyed)
+        {
+            /*
+             * A destroyed attr attributes object can be reinitialized using 
+             * pthread_mutexattr_init();
+             */
+            REQ("pthread_mutexattr_destroy.02", "A destroyed attr attributes object can be reinitialized", *code == 0);
+        }
+
+
+    }
+
+    return true;
+}
+
+scenario
+bool mutexattr_gettype_scen()
+{
+    IntT type;
+
+    if (pre pthread_mutexattr_gettype_spec( context, pattr, &type )) 
+    {
+        pthread_mutexattr_gettype_spec( context, pattr, &type );
+    }
+
+    return true;
+}
+      
+scenario
+bool mutexattr_settype_scen()
+{
+    PThreadMutexAttrT* mutexAttr;
+
+    mutexAttr = getMutexAttributes(pattr);
+    if (mutexAttr != NULL) 
+    {
+        iterate(IntT type = SUT_PTHREAD_MUTEX_NORMAL-1; type <= SUT_PTHREAD_MUTEX_DEFAULT+1; type ++; ) 
+        {
+            pthread_mutexattr_settype_spec( context, pattr, type );
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool mutexattr_getpshared_scen()
+{
+    IntT pshared;
+
+    if (pre pthread_mutexattr_getpshared_spec( context, pattr, &pshared )) 
+    {
+        pthread_mutexattr_getpshared_spec( context, pattr, &pshared );
+    }
+
+    return true;
+}
+      
+scenario
+bool mutexattr_setpshared_scen()
+{
+    PThreadMutexAttrT* mutexAttr;
+
+    mutexAttr = getMutexAttributes(pattr);
+    if (mutexAttr != NULL ) 
+    {
+        iterate(IntT pshared = SUT_PTHREAD_PROCESS_PRIVATE-1; pshared <= SUT_PTHREAD_PROCESS_SHARED+1; pshared ++; ) 
+        {
+            pthread_mutexattr_setpshared_spec( context, pattr, pshared );
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool mutexattr_destroy_scen()
+{
+    if (pre pthread_mutexattr_destroy_spec( context, pattr )) 
+    {
+        ErrorCode* code;
+        code = pthread_mutexattr_destroy_spec( context, pattr );
+        if (*code == 0) 
+        {
+            attr_destroyed = true;
+        }
+    }
+
+    return true;
+}
+
+scenario
+bool mutex_verification_use_case_scen()
+{
+    PThreadMutexAttrT* mutexAttr;
+    ErrorCode* trylock1;
+    ErrorCode* trylock2;
+
+    mutexAttr = getMutexAttributes(pattr);
+    if (mutexAttr != NULL ) 
+    {
+        if (!isNULL_VoidTPtr(pmutex))
+        {
+            pthread_mutex_init_spec(context, pmutex, pattr);
+            pthread_mutex_lock_spec(context, pmutex);
+
+            if(mutexAttr->type == SUT_PTHREAD_MUTEX_ERRORCHECK
+                || mutexAttr->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+            {
+                trylock1 = pthread_mutex_trylock_spec(context2, pmutex);
+                trylock2 = pthread_mutex_trylock_spec(context3, pmutex);
+            }
+
+            if(mutexAttr->type == SUT_PTHREAD_MUTEX_RECURSIVE)
+            {
+                if (*trylock1 == SUT_EOK)
+                {
+                    pthread_mutex_unlock_spec(context2, pmutex);
+                }
+                if (*trylock2 == SUT_EOK)
+                {
+                    pthread_mutex_unlock_spec(context3, pmutex);
+                }
+            }
+            
+            pthread_mutex_unlock_spec(context, pmutex);
+            ts_sleep_msec(300);
+            pthread_mutex_destroy_spec(context, pmutex);
+
+        }
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm mutexattr_scenario = 
+{
+    .init = init_mutexattr_scenario,
+    .finish = finish_mutexattr_scenario,
+    .getState = (PtrGetState)get_MutexAttrGenState,
+    .saveModelState = (PtrSaveModelState)saveMutexModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreMutexModelState,
+    .isStationaryState = (PtrIsStationaryState)isMutexModelStateStationary,
+    .actions = {
+        mutexattr_init_scen,
+        mutexattr_gettype_scen,
+        mutexattr_settype_scen,
+        mutexattr_getpshared_scen,
+        mutexattr_setpshared_scen,
+        mutexattr_destroy_scen,
+        mutex_verification_use_case_scen,
+        NULL
+    }
+};

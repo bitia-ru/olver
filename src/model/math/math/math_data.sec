@@ -1,0 +1,5238 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, 
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "math/math/math_data.seh"
+#include "math/math/math_config.h"
+#include "atl/integer.h"
+#include <data/embed_model.seh>
+#include "config/type_config.seh"
+#include "atl/char.h"
+#include "common/common_scenario.seh"
+
+#include <math.h>
+
+/*
+ * Maximum and minimum values of integer types on the only target 
+ * platform.
+ */
+
+Unifloat* maxLongLongT;
+Unifloat* maxLongT;
+
+/*
+ * Maximum and minimum values of floating point types on the only target 
+ * platform.
+ */
+Map* max_Unifloat;
+Map* min_Unifloat;
+Map* infinity_Unifloat;
+Map* nan_Unifloat;
+
+Map* maxExp_Unifloat;      /* max binary exponent */
+Map* minExp_Unifloat;      /* min binary exponent */
+Map* digMant_Unifloat;     /* # of bits of mantissa */
+Map* digExp_Unifloat;      /* # of bits of exponent */
+Map* size_Unifloat;        /* real size in bytes*/
+Map* sizeInLongs_Unifloat; /* real size in longs*/
+
+Unifloat* Pi[3];
+Unifloat* Ln_2[3];
+Unifloat* Log2_e[3];
+Unifloat* Log10_e[3];
+Unifloat* Log2_10[3];
+
+
+static IntT indexBuf;
+static ULongT buf;
+
+
+CallContext context;
+
+specification invariant typedef struct Unifloat Unifloat = 
+{       
+    .to_string = (ToString)to_string_Unifloat,
+    .compare = (Compare)compare_Unifloat
+};
+
+specification typedef struct UnifloatComplex UnifloatComplex = 
+{       
+    .to_string = (ToString)to_string_UnifloatComplex,
+    .compare = (Compare)compare_UnifloatComplex
+};
+
+invariant(Unifloat* x)
+{
+    if((x->sign != 1)&&(x->sign != - 1))
+        return false;
+
+    return true;
+}
+
+/************************************************************************/
+/*                          UNIFLOAT FUNCTIONS                          */
+/************************************************************************/
+
+//////////////////////////////////////////////////////////////////////////
+//                      create_Unifloat                                 //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* create_Unifloat(IntT sign, IntT exponent, UIntT kind, UnifloatType type)
+{   
+    IntT i;
+    UIntT mantissa[MAX_SIZE_UNIFLOAT];
+    
+    for(i = 0; i < MAX_SIZE_UNIFLOAT; i++)
+        mantissa[i] = 0;
+
+    return create(&type_Unifloat, sign, exponent, mantissa, kind, type);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      createZero_Unifloat                             //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* createZero_Unifloat(UnifloatType type)
+{
+    return create_Unifloat(1, 1, Normal, type);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      createOne_Unifloat                              //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* createOne_Unifloat(UnifloatType type)
+{
+    Unifloat* res;
+
+    res = create_Unifloat(1, 1, Normal, type);    
+    res->mant[0] = 0x1 << (sizeof_IntT * 8 - 1);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      compare_Unifloat                                //
+//////////////////////////////////////////////////////////////////////////
+IntT compare_Unifloat(Unifloat* x, Unifloat* y)
+{
+     /*return  1 if x > y
+      *return -1 if x < y
+      *return  0 if x = y
+      */
+    IntT i;
+
+    if(isNan_Unifloat(x) && isNan_Unifloat(y))
+        return 0;
+    if(isNan_Unifloat(x) && !isNan_Unifloat(y)
+     || !isNan_Unifloat(x) && isNan_Unifloat(y))
+        return 2;
+
+    if((isZero_Unifloat(x)) && (isZero_Unifloat(y)))
+        return 0;
+    if(isZero_Unifloat(x))
+        return -y->sign;
+    if(isZero_Unifloat(y)) 
+        return x->sign;
+    if(x->sign > y->sign) 
+        return 1;
+    if(x->sign < y->sign) 
+        return -1;
+    if(x->sign == -1)
+        return -compare_Unifloat(abs_Unifloat(x), abs_Unifloat(y));
+    
+    if(isInfinity_Unifloat(x))
+    {
+        if(isInfinity_Unifloat(y))
+            return 0;
+        else 
+            return 1;
+    }
+    if(isInfinity_Unifloat(y))
+    {
+        if(isInfinity_Unifloat(x))
+            return 0;
+        else 
+            return -1;
+    }
+
+     if(x->exp > y->exp) 
+        return 1;
+     if(x->exp < y->exp) 
+        return -1;
+     if(x->exp == y->exp)
+        for(i = 0; i < MAX_SIZE_UNIFLOAT; i++)
+        {
+            if(x->mant[i] > y->mant[i])
+            {
+                return 1;
+            }
+            if(x->mant[i] < y->mant[i])
+            {
+                return -1;
+            }
+        }
+    return 0;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      compareWithPrecision_Unifloat                   //
+//////////////////////////////////////////////////////////////////////////
+IntT compareWithPrecision_Unifloat(Unifloat* x, Unifloat* y, IntT amount)
+{
+    Unifloat* difference;
+
+    amount -= COMPARE_PRECISION;
+
+    if(isNan_Unifloat(x))
+    {
+        if(isNan_Unifloat(y))
+            return 0;
+        else
+            return 2;
+    }
+    else
+        if(isNan_Unifloat(y))
+            return 2;
+
+    if(isInfinity_Unifloat(x) && x->sign == 1)
+    {
+        if(isInfinity_Unifloat(y) && y->sign == 1)
+            return 0;
+        else 
+            return 1;
+    }
+    else 
+        if(isInfinity_Unifloat(x) && x->sign == -1)
+        {
+            if(isInfinity_Unifloat(y) && y->sign == -1)
+                return 0;
+            else 
+                return -1;
+        }
+    else
+    {
+        if(isInfinity_Unifloat(y) && y->sign == 1)
+            return -1;
+        else
+            if(isInfinity_Unifloat(y) && y->sign == -1)
+                return 1;
+    }
+
+     if((x->exp > y->exp + 1) && !isZero_Unifloat(x) && !isZero_Unifloat(y))
+        return x->sign;
+
+    else 
+    if((x->exp < y->exp - 1) && !isZero_Unifloat(x) && !isZero_Unifloat(y))
+        return -y->sign;
+    
+    else
+    {
+        if (isZero_Unifloat(x))
+            if (y->exp <= -amount)
+                return 0;
+        if (isZero_Unifloat(y))
+            if (x->exp <= -amount)
+                return 0;
+        difference = sub_Unifloat(x, y);
+
+        if(isZero_Unifloat(difference)) 
+            return 0;
+        if(difference->exp - x->exp - 1 <= - amount)
+            return 0;
+        return difference->sign;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      isNormal_Unifloat                               //
+//////////////////////////////////////////////////////////////////////////
+bool isNormal_Unifloat(Unifloat* x)
+{
+    if(x->kind == Normal) 
+        return true;
+    else 
+        return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      isInfinity_Unifloat                             //
+//////////////////////////////////////////////////////////////////////////
+bool isInfinity_Unifloat(Unifloat* x)
+{
+    if(x->kind == Infinity)
+        return true;
+    else 
+        return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      isNan_Unifloat                                  //
+//////////////////////////////////////////////////////////////////////////
+bool isNan_Unifloat(Unifloat* x)
+{
+    if(x->kind == NaN) 
+        return true;
+    else 
+        return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      isZero_Unifloat                                 //
+//////////////////////////////////////////////////////////////////////////
+bool isZero_Unifloat(Unifloat* x)
+{
+    UIntT i;
+    
+    if(x->kind != Normal)
+        return false;
+    for(i = 0; i < MAX_SIZE_UNIFLOAT; i++)
+        if(x->mant[i] != 0)
+            return false;
+    return true;
+}
+
+bool isOverflow_Unifloat(Unifloat* x)
+{
+    if(x->kind == NaN) 
+        return false;
+    if(x->kind == Infinity) 
+        return false;
+    return compare_Unifloat(abs_Unifloat(x), max_Unifloat(x->type)) == 1;
+}
+
+bool isUnderflow_Unifloat(Unifloat* x)
+{
+    if(x->kind == NaN)
+        return false;
+    if(isZero_Unifloat(x) == true)
+        return false;
+    return compare_Unifloat(abs_Unifloat(x), min_Unifloat(x->type)) == -1;   
+}
+
+bool isRepresentable_Unifloat(Unifloat* x)
+{
+    Unifloat* minSubnormal_Unifloat = createOne_Unifloat(x->type);
+    
+    minSubnormal_Unifloat->exp = minExp_Unifloat(x->type) - digMant_Unifloat(x->type) + 1;
+
+    if(isZero_Unifloat(x) == true)
+        return true;
+    else
+    if(compare_Unifloat(abs_Unifloat(x), minSubnormal_Unifloat) == -1)
+        return false;
+    else
+        return true;
+}
+
+bool isSubnormal_Unifloat(Unifloat* x)
+{
+    Unifloat* minSubnormal_Unifloat = createOne_Unifloat(x->type);
+    
+    minSubnormal_Unifloat->exp = minExp_Unifloat(x->type) - digMant_Unifloat(x->type) + 1;
+
+    if(compare_Unifloat(abs_Unifloat(x), minSubnormal_Unifloat) != -1 &&
+        compare_Unifloat(abs_Unifloat(x), min_Unifloat(x->type)) != 1)
+        return true;
+    else
+        return false;
+}
+
+bool isInteger_Unifloat(Unifloat* x)
+{
+    IntT i, res;
+    UIntT localIndex, globalIndex;
+
+    if(isNan_Unifloat(x) || isInfinity_Unifloat(x))
+        return false;
+
+    if(x->exp <= 0)
+        return false;
+    else
+    if(x->exp >= digMant_Unifloat(x->type))
+        return true;
+    else
+    {
+        res = 1;
+        localIndex = ((x->exp - 1) % (sizeof_IntT * 8)) + 1;
+        globalIndex = (x->exp - localIndex) / (sizeof_IntT * 8);
+
+        if(localIndex != sizeof_IntT * 8)
+            if(x->mant[globalIndex] << localIndex != 0x0)
+                res = 0;
+
+        for(i = globalIndex + 1; i < MAX_SIZE_UNIFLOAT; i++)
+            if(x->mant[i] != 0)
+                res = 0;
+
+        return res;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              add_Unifloat                            //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* add_Unifloat(Unifloat* x, Unifloat* y)    // x + y
+{
+    IntT i;
+    IntT significantSize = 
+        (PRECISION - 1 - ((PRECISION - 1) % (sizeof_IntT * 8))) / (sizeof_IntT * 8) + 1;
+    UIntT transposition;
+
+    UIntT temp;
+    Unifloat* res;
+
+    IntT localDisplacement;
+    IntT globalDisplacement;
+    
+    /* signs */
+    if((x->sign == -1) && (y->sign == 1))
+    {
+        x->sign = 1;
+        res = sub_Unifloat(y, x);
+        x->sign = -1;
+        return res;
+    }
+    if((x->sign == 1) && (y->sign == -1))
+    {
+        y->sign = 1;
+        res = sub_Unifloat(x, y);
+        y->sign = -1;
+        return res;
+    }
+
+    /* exceptions */
+    if(isNan_Unifloat(x) || isNan_Unifloat(y))              //if x or y is NaN
+        return clone(nan_Unifloat(x->type));
+
+    if(isInfinity_Unifloat(x) || isInfinity_Unifloat(y))    //inf + inf = inf
+    {
+        res = clone(infinity_Unifloat(x->type));
+        res->sign = x->sign;
+        return res;
+    }
+
+    if(isZero_Unifloat(x))
+        return clone(y);
+
+    if(isZero_Unifloat(y))
+        return clone(x);
+    
+    transposition = 0;
+
+    if(x->exp > y->exp)
+    {
+        res = clone(x);
+
+        localDisplacement = (x->exp - y->exp) % (sizeof_IntT * 8);
+        globalDisplacement = ((x->exp - y->exp) - localDisplacement) / (sizeof_IntT * 8);
+
+        /* addition */
+        for(i = significantSize; i >=0; i--)
+        {
+            temp = 0x0;
+
+            if(i - globalDisplacement - 1 >= 0 && localDisplacement != 0)
+                temp = y->mant[i - globalDisplacement - 1] << (sizeof_IntT * 8 - localDisplacement);
+
+            if(i - globalDisplacement >= 0)
+                temp += y->mant[i - globalDisplacement] >> localDisplacement;
+
+            res->mant[i] += temp + transposition;
+
+            if(x->mant[i] > max_UIntT - temp - transposition || (temp == max_UIntT && transposition == 1))
+                transposition = 1;
+            else
+                transposition = 0;
+        }
+    }
+    else
+    {
+        res = clone(y);
+
+        localDisplacement = (y->exp - x->exp) % (sizeof_IntT * 8);
+        globalDisplacement = ((y->exp - x->exp) - localDisplacement) / (sizeof_IntT * 8);
+
+        /* addition */
+        for(i = significantSize; i >=0; i--)
+        {
+            temp = 0x0;
+
+            if(i - globalDisplacement - 1 >= 0 && localDisplacement != 0)
+                temp = x->mant[i - globalDisplacement - 1] << (sizeof_IntT * 8 - localDisplacement);
+
+            if(i - globalDisplacement >= 0)
+                temp += x->mant[i - globalDisplacement] >> localDisplacement;
+
+            res->mant[i] += temp + transposition;
+
+            if(y->mant[i] > max_UIntT - temp - transposition || (temp == max_UIntT && transposition == 1))
+                transposition = 1;
+            else
+                transposition = 0;
+        }
+    }
+
+    /* normalization */
+    if(transposition == 1)
+    {
+        for(i = significantSize; i >=0; i--)
+        {
+            res->mant[i + 1] += res->mant[i] << (sizeof_IntT * 8 - 1);
+            res->mant[i] >>= 1;
+        }
+
+        res->mant[0] += 0x1 << (sizeof_IntT * 8 - 1);
+        res->exp++;
+    }
+
+    res = round_Unifloat(res, PRECISION);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              sub_Unifloat                            //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* sub_Unifloat(Unifloat* x, Unifloat* y)
+{
+    IntT i, j;
+    IntT significantSize = 
+        (PRECISION - 1 - ((PRECISION - 1) % (sizeof_IntT * 8))) / (sizeof_IntT * 8) + 1;
+    
+    UIntT transposition;
+
+    UIntT temp;
+    Unifloat* res;
+    
+    IntT localDisplacement;
+    IntT globalDisplacement;
+
+    /* signs */
+    if((x->sign ==  -1) && (y->sign == 1))
+    {
+        y->sign = -1;
+        res = add_Unifloat(x, y);
+        y->sign = 1;
+        return res;
+    }
+    if((x->sign == 1) && (y->sign == -1))
+    {
+        y->sign = 1;
+        res = add_Unifloat(x, y);
+        y->sign = -1;
+        return res;
+    }
+
+    /* exceptions */
+
+    /* if x or y - NaN */
+    if(isNan_Unifloat(x) || isNan_Unifloat(y))
+        return clone(nan_Unifloat(x->type));
+
+    /* +- (inf - inf) = NaN */
+    if(isInfinity_Unifloat(x) &&  isInfinity_Unifloat(y))
+        return clone(nan_Unifloat(x->type));
+
+    /* +- (inf - norm) =  +- (inf) */
+    if(isInfinity_Unifloat(x) &&  isNormal_Unifloat(y))
+    {
+        res = clone(infinity_Unifloat(x->type));
+        res->sign = x->sign;
+        return res;
+    }
+
+    /* +- (norm - inf) = -+ (inf) */
+    if(isInfinity_Unifloat(y) &&  isNormal_Unifloat(x))
+    {
+        res = clone(infinity_Unifloat(x->type));
+        res->sign = -y->sign;
+        return res;
+    }
+
+    /* +- (|x| - |y|);|x| >= |y| */
+    if(compare_Unifloat(x, y) * x->sign > -1) 
+    {
+        res = clone(x);
+
+        if(isZero_Unifloat(y))
+            return res;
+
+        localDisplacement = (x->exp - y->exp) % (sizeof_IntT * 8);
+        globalDisplacement = ((x->exp - y->exp) - localDisplacement) / (sizeof_IntT * 8);
+
+        transposition = 0;
+
+        /* subtraction */
+        for(i = significantSize; i >= 0; i--)
+        {
+            temp = 0x0;
+
+            if(i - globalDisplacement - 1 >= 0 && localDisplacement != 0)
+                temp = y->mant[i - globalDisplacement - 1] << (sizeof_IntT * 8 - localDisplacement);
+
+            if(i - globalDisplacement >= 0)
+                temp += y->mant[i - globalDisplacement] >> localDisplacement;
+
+            res->mant[i] -= (temp + transposition);
+
+            if((x->mant[i] < temp + transposition) || (temp == max_UIntT && transposition == 1))
+                transposition = 1;
+            else
+                transposition = 0;
+        }
+    }
+    else
+    {
+        res = clone(y);
+        res->sign = -res->sign;
+
+        if(isZero_Unifloat(x))
+            return res;
+
+        localDisplacement = (y->exp - x->exp) % (sizeof_IntT * 8);
+        globalDisplacement = ((y->exp - x->exp) - localDisplacement) / (sizeof_IntT * 8);
+
+        transposition = 0;
+
+        /* subtraction */
+        for(i = significantSize; i >= 0; i--)
+        {
+            temp = 0x0;
+
+            if(i - globalDisplacement - 1 >= 0 && localDisplacement != 0)
+                temp = x->mant[i - globalDisplacement - 1] << (sizeof_IntT * 8 - localDisplacement);
+
+            if(i - globalDisplacement >= 0)
+                temp += x->mant[i - globalDisplacement] >> localDisplacement;
+
+            res->mant[i] -= (temp + transposition);
+
+            if((y->mant[i] < temp + transposition) || (temp == max_UIntT && transposition == 1))
+                transposition = 1;
+            else
+                transposition = 0;
+        }
+    }
+
+    /* normalization */
+    if(getMant_Unifloat(res, 1) == 0 && !isZero_Unifloat(res))
+    {
+        for(j = 0; res->mant[j] == 0x0; j++);
+
+        if(j)
+        {
+            res->exp -= sizeof_IntT * 8 * j;
+            for(i = 0; i < significantSize + 1; i++)
+                res->mant[i] = (i + j < MAX_SIZE_UNIFLOAT) ? res->mant[i + j] : 0x0;
+        }
+
+        for(j = 0; (res->mant[0] >> sizeof_IntT * 8 - 1 - j) == 0; j++);
+
+        if(j)
+    {
+            res->exp -= j;
+        for(i = 0; i < significantSize + 1; i++)
+        {
+                res->mant[i] <<= j;
+                res->mant[i] += res->mant[i + 1] >> (sizeof_IntT * 8 - j);
+            }
+        }
+    }
+
+    res = round_Unifloat(res, PRECISION);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              mul_Unifloat                            //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* mul_Unifloat(Unifloat* x, Unifloat* y)
+{
+     IntT i, j, k;
+    IntT significantSize = 
+        (PRECISION - 1 - ((PRECISION - 1) % (sizeof_IntT * 8))) / (sizeof_IntT * 8) + 1;
+    
+    UIntT transposition;
+
+    UIntT temp;
+    UIntT low = 0x0;
+     Unifloat* res = createZero_Unifloat(x->type);
+    
+    /* if x or y - NaN */
+    if(isNan_Unifloat(x) || isNan_Unifloat(y))
+        return clone(nan_Unifloat(x->type));
+
+    /* if x and y - infinity then return infinity */
+     if(isInfinity_Unifloat(x))
+     {
+        if(isZero_Unifloat(y))
+            res = clone(nan_Unifloat(x->type));
+        else
+        {
+            res = clone(infinity_Unifloat(x->type));
+            res->sign = x->sign * y->sign;
+            return res;
+        }    
+    }
+
+     if(isInfinity_Unifloat(y))
+     {
+        if(isZero_Unifloat(x))
+            res = clone(nan_Unifloat(x->type));
+        else
+     {
+        res = clone(infinity_Unifloat(x->type));
+        res->sign = x->sign * y->sign;
+        return res;
+     }
+    }   
+
+    if(isZero_Unifloat(x) || isZero_Unifloat(y))
+        return res;
+
+    res->sign = x->sign * y->sign;
+    res->exp = x->exp + y->exp;
+
+    for(i = significantSize * 2 - 1; i >=0; i--)
+        for(j = significantSize * 2 - 1; j >=0; j--)
+        {
+            temp = 0x0;
+            low = 0x0;
+            low = ~low;
+            low >>= (sizeof_IntT * 4);
+
+            temp = ((i % 2) ? (x->mant[(i - 1) / 2] & low) : (x->mant[i / 2] >> (sizeof_IntT * 4))) 
+                * ((j % 2) ? (y->mant[(j - 1) / 2] & low) : (y->mant[j / 2] >> (sizeof_IntT * 4)));
+            
+            if((i + j) % 2 == 0)
+            {
+                k = (i + j) / 2;
+                while(res->mant[k] > max_UIntT - temp)
+                {
+                    res->mant[k] += temp;
+                    temp = 0x1;
+                    k--;
+                }
+                res->mant[k] += temp;
+            }
+            else
+            {
+                low = (temp & low) << (sizeof_IntT * 4);
+
+                k = (i + j + 1) / 2;
+                while(res->mant[k] > max_UIntT - low)
+                {
+                    res->mant[k] += low;
+                    low = 0x1;
+                    k--;
+                }
+                res->mant[k] += low;
+
+                temp >>= (sizeof_IntT * 4);
+
+                k = (i + j - 1) / 2;
+                while(res->mant[k] > max_UIntT - temp)
+                {
+                    res->mant[k] += temp;
+                    temp = 0x1;
+                    k--;
+                }
+                res->mant[k] += temp;
+            }
+        }
+
+    /* normalization */
+    if(getMant_Unifloat(res, 1) == 0)
+    {
+        for(i = 0; i < significantSize + 1; i++)
+        {
+            res->mant[i] <<= 1;
+            res->mant[i] += res->mant[i + 1] >> (sizeof_IntT * 8 - 1);
+        }
+
+        res->exp--;
+    }
+
+    res = round_Unifloat(res, PRECISION);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                                div_Unifloat                          //
+//////////////////////////////////////////////////////////////////////////
+
+Unifloat* div_Unifloat(Unifloat* x, Unifloat* y)
+{
+    UnifloatType type = x->type;
+    Unifloat *res, *two, *initial, *denom, *temp;
+
+    DoubleT doubleInitial = 1.0;
+    UIntT *bytes;
+    IntT inaccuracy;
+
+    if(isNan_Unifloat(x) || isNan_Unifloat(y))
+        return clone(nan_Unifloat(type));
+
+    if(isInfinity_Unifloat(x) && isInfinity_Unifloat(y))
+        return clone(nan_Unifloat(type));
+
+    if(isInfinity_Unifloat(x) && isNormal_Unifloat(y) )
+     {
+        temp = clone(infinity_Unifloat(type));
+        temp->sign = x->sign * y->sign;
+        return temp;
+     }
+
+    if(isNormal_Unifloat(x) && isInfinity_Unifloat(y))
+        return createZero_Unifloat(type);
+
+    if(isZero_Unifloat(x) && isZero_Unifloat(y))
+        return clone(nan_Unifloat(type));
+    
+    if(!isZero_Unifloat(x) && isZero_Unifloat(y))
+     {
+        temp = clone(infinity_Unifloat(type));
+        temp->sign = x->sign * y->sign;
+        return temp;
+     }
+
+    if(isZero_Unifloat(x))
+        return createZero_Unifloat(type);
+
+    /******************************************************/
+    /*check needed when sizeof(int) != 4  or endian differs;
+    /******************************************************/
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+    {
+        initial = createOne_Unifloat(type);
+    
+        bytes = (UIntT *)&doubleInitial;
+    
+        bytes[1] += (y->mant[0] << 1) >> 12;
+        bytes[0] = (y->mant[0] << 21) + (y->mant[1] >> 11);
+    
+        if(bytes[0] == ~0x0)
+            bytes[1] += 0x1;
+        bytes[0] += 0x1;
+    
+        doubleInitial = 1.0 / doubleInitial;
+    
+        initial->mant[0] += ((bytes[1] << 12) >> 1) + (bytes[0] >> 21);
+        initial->mant[1] = bytes[0] << 11;
+        initial->exp = ((bytes[1] << 1) >> 21) - maxExp_DoubleT + 2;
+    }
+    else
+    {
+        initial = createOne_Unifloat(type);
+    
+        bytes = (UIntT *)&doubleInitial;
+    
+        bytes[0] += (y->mant[0] << 1) >> 12;
+        bytes[1] = (y->mant[0] << 21) + (y->mant[1] >> 11);
+    
+        if(bytes[1] == ~0x0)
+            bytes[0] += 0x1;
+        bytes[1] += 0x1;
+    
+        doubleInitial = 1.0 / doubleInitial;
+    
+        initial->mant[0] += ((bytes[0] << 12) >> 1) + (bytes[1] >> 21);
+        initial->mant[1] = bytes[1] << 11;
+        initial->exp = ((bytes[0] << 1) >> 21) - maxExp_DoubleT + 2;
+    }
+    /******************************************************/
+    
+    two = createOne_Unifloat(type);
+    two->exp++;
+
+    denom = clone(y);
+    denom->sign = 1;
+    denom->exp = 1;
+
+    for(inaccuracy = digMant_DoubleT; inaccuracy < PRECISION; inaccuracy *= 2)
+    {
+        temp = sub_Unifloat(two, mul_Unifloat(initial, denom));
+        initial = mul_Unifloat(temp, initial);
+    }
+    
+    res = mul_Unifloat(initial, x);
+    res->sign *= y->sign;
+    res->exp -= y->exp - 1;
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              abs_Unifloat                            //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* abs_Unifloat(Unifloat* x)
+{
+    Unifloat* y = clone(x);
+    y->sign = 1;
+    return y;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              round_Unifloat                          //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* round_Unifloat(Unifloat* x, UIntT precision)
+{
+    UIntT localIndex = ((precision - 1) % (sizeof_IntT * 8)) + 1;
+    UIntT globalIndex = (precision - localIndex) / (sizeof_IntT * 8);
+    
+    IntT i;
+    bool needRound = false;
+    UIntT temp;
+    UIntT transposition;
+
+    if(isNormal_Unifloat(x) == false)
+        return x;
+
+    if(isZero_Unifloat(x))
+    {
+        x->exp = 1;
+        return x;
+    }
+    
+    /* is rounding needed*/
+    /* fulfilling with zeros*/
+
+    if((x->mant[globalIndex] << localIndex) != 0)
+        needRound = true;
+
+    for(i = globalIndex + 1; i < MAX_SIZE_UNIFLOAT; i++)
+        if(x->mant[i] != 0)
+            needRound = true; 
+
+    /* rounding */
+
+    if(needRound == false)
+    {
+        /* fulfilling with zeros*/
+        x->mant[globalIndex] >>= sizeof_IntT * 8 - localIndex;
+        x->mant[globalIndex] <<= sizeof_IntT * 8 - localIndex;
+
+        for(i = globalIndex + 1; i < MAX_SIZE_UNIFLOAT; i++)
+            x->mant[i] = 0x0;
+
+        return x;
+    }
+    
+    switch(ROUND)
+    {
+    case TOWARD_ZERO:
+    {
+        transposition = 0;
+        break;
+    }
+    case TO_NEAREST:
+    {
+        if(getMant_Unifloat(x, precision + 1) == 1) 
+            transposition = 1;
+        else
+            transposition = 0;
+        break;
+    }
+    case POSITIVE_INFINITY: 
+    {
+        if(x->sign == 1)
+            transposition = 1;
+        else
+            transposition = 0;
+        break;
+    }
+    case NEGATIVE_INFINITY:
+    {
+        if(x->sign == -1)
+            transposition = 1;
+        else
+            transposition = 0;
+        break;        
+    }
+    }
+
+    if(transposition == 1)
+    {
+        transposition <<= (sizeof_IntT * 8 - localIndex);
+
+        for(i = globalIndex; i >= 0; i--)
+        {
+            if(x->mant[i] > max_UIntT - transposition)
+            {
+                x->mant[i] += transposition;
+                transposition = 1;
+            }
+            else
+            {
+                x->mant[i] += transposition;
+                transposition = 0;
+            }
+        }
+    }
+    
+    if(transposition == 1)
+    {
+        for(i = globalIndex; i >=0; i--)
+        {
+            x->mant[i] >>= 1;
+
+            if(i > 0)
+                x->mant[i] += x->mant[i - 1] << (sizeof_IntT * 8 - 1);
+            else
+                x->mant[i] += 0x1 << (sizeof_IntT * 8 - 1);
+        }
+
+        x->exp++;
+    }
+    
+    /* fulfilling with zeros*/
+    x->mant[globalIndex] >>= sizeof_IntT * 8 - localIndex;
+    x->mant[globalIndex] <<= sizeof_IntT * 8 - localIndex;
+
+    for(i = globalIndex + 1; i < MAX_SIZE_UNIFLOAT; i++)
+        x->mant[i] = 0x0;
+
+    return x;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              checkRange_Unifloat                     //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* checkRange_Unifloat(Unifloat* x)
+{
+    IntT newPrec;
+
+    if(x->kind != Normal)
+        return x;
+    else
+    {
+        newPrec = digMant_Unifloat(x->type) - (minExp_Unifloat(x->type) - x->exp);
+        if(newPrec >= digMant_Unifloat(x->type))
+        {
+            x = round_Unifloat(x, digMant_Unifloat(x->type));
+            return x;
+        }
+        else
+        if(newPrec <= 0)
+            return createZero_Unifloat(x->type);
+        else
+        {
+            x = round_Unifloat(x, newPrec);
+            return x;
+        }
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                            changeSign_Unifloat                       //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* changeSign_Unifloat(Unifloat* x, IntT s) 
+{   
+    /* set sign times s. If s = 0 then invert sign */
+    Unifloat* res = clone(x);
+
+    if(s == 0) 
+        res->sign = -res->sign;
+    else
+        res->sign = res->sign * s;
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertFloat_Unifloat                      //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertFloat_Unifloat(FloatT number)
+{
+    Unifloat* res;
+
+    IntT i, j;
+    ULongT *bytes, mask;
+    UIntT bytesIndex;
+    UIntT digExp, digMant;
+    IntT maxExp;
+    IntT exponent = 0x0;
+
+    res = createZero_Unifloat(UniFloatT);
+
+    digExp = digExp_FloatT;
+    digMant = digMant_FloatT;
+    maxExp = maxExp_FloatT;
+
+    bytes = (ULongT *)&number;
+    mask = 0x1;
+    bytesIndex = 0;
+    
+    if(__BYTE_ORDER == __BIG_ENDIAN && sizeof_LongT == 8)
+        mask <<= (sizeof_LongT * 4);
+    
+    for(i = 0; i < digMant - 1; i++)
+    {
+        setMant_Unifloat(res, digMant - i, (bytes[bytesIndex] & mask) / mask);  
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    j = 0x1;
+    for(i = 0; i < digExp; i++)
+    {
+        exponent += ((bytes[bytesIndex] & mask) / mask * j);
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        setMant_Unifloat(res, 1, 1);
+
+        if(getMant_Unifloat(res, 2) == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+
+    res->sign = 1 - 2 * ((bytes[bytesIndex] & mask) / mask);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertDouble_Unifloat                     //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertDouble_Unifloat(DoubleT number)
+{
+    Unifloat* res;
+
+    IntT i, j;
+    ULongT *bytes, mask;
+    UIntT bytesIndex;
+    UIntT digExp, digMant, sizeInLongs;
+    IntT maxExp;
+    IntT exponent = 0x0;
+
+    res = createZero_Unifloat(UniDoubleT);
+
+    digExp = digExp_DoubleT;
+    digMant = digMant_DoubleT;
+    maxExp = maxExp_DoubleT;
+    sizeInLongs = sizeInLongs_DoubleT;
+
+    bytes = (ULongT *)&number;
+    mask = 0x1;
+    bytesIndex = 0;
+
+    for(i = 0; i < digMant - 1; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            setMant_Unifloat(res, digMant - i, (bytes[bytesIndex] & mask) / mask);
+        else
+            setMant_Unifloat(res, digMant - i, (bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    j = 0x1;
+    for(i = 0; i < digExp; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            exponent += ((bytes[bytesIndex] & mask) / mask * j);
+        else
+            exponent += ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask * j);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        setMant_Unifloat(res, 1, 1);
+
+        if(getMant_Unifloat(res, 2) == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+    
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+        res->sign = 1 - 2 * ((bytes[bytesIndex] & mask) / mask);
+    else
+        res->sign = 1 - 2 * ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+
+return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                       convertLongDouble_Unifloat                     //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertLongDouble_Unifloat(LongDoubleT number)
+{
+    Unifloat* res;
+    Unifloat* initRes;
+
+    IntT i, j, k;
+    ULongT *bytes, mask;
+    UIntT bytesIndex;
+    UIntT digExp, digMant, sizeInLongs, size;
+    IntT maxExp;
+    IntT exponent = 0x0;
+
+    res = createZero_Unifloat(UniLongDoubleT);
+
+    digExp = digExp_LongDoubleT;
+    digMant = digMant_LongDoubleT;
+    maxExp = maxExp_LongDoubleT;
+    sizeInLongs = sizeInLongs_LongDoubleT;
+    size = size_LongDoubleT;
+
+#if ( __powerpc64__ )
+    if(sizeof_LongDoubleT == 16)
+    {
+        digMant /= 2;
+    }
+#endif
+    bytes = (ULongT *)&number;
+    mask = 0x1;
+    bytesIndex = 0;
+    
+    for(i = 0; i < digMant - 1; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            setMant_Unifloat(res, digMant - i, (bytes[bytesIndex] & mask) / mask);
+        else
+            setMant_Unifloat(res, digMant - i, (bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    if(size == 10)
+    {
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    j = 0x1;
+    for(i = 0; i < digExp; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            exponent += ((bytes[bytesIndex] & mask) / mask * j);
+        else
+            exponent += ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask * j);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        setMant_Unifloat(res, 1, 1);
+
+        if(getMant_Unifloat(res, 2) == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+        res->sign = 1 - 2 * ((bytes[bytesIndex] & mask) / mask);
+    else
+        res->sign = 1 - 2 * ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+#if ( __powerpc64__ )
+    if(sizeof_LongDoubleT == 16)
+    {
+        initRes = clone(res);
+        res = createZero_Unifloat(UniLongDoubleT);
+
+    bytes = (ULongT *)&number;
+    mask = 0x1;
+    bytesIndex = 0;
+    
+    for(i = 0; i < digMant - 1; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            setMant_Unifloat(res, digMant - i, (bytes[bytesIndex] & mask) / mask);
+        else
+            setMant_Unifloat(res, digMant - i, (bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    if(size == 10)
+    {
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    j = 0x1;
+    for(i = 0; i < digExp; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            exponent += ((bytes[bytesIndex] & mask) / mask * j);
+        else
+            exponent += ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask * j);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        setMant_Unifloat(res, 1, 1);
+
+        if(getMant_Unifloat(res, 2) == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+        res->sign = 1 - 2 * ((bytes[bytesIndex] & mask) / mask);
+    else
+        res->sign = 1 - 2 * ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+        
+        if(isZero_Unifloat(initRes) == false)
+        {
+            res = add_Unifloat(res, initRes);
+        }
+    }
+#endif
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                       convertFloatPoint_Unifloat                     //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertFloatPoint_Unifloat(LongDoubleT number, UnifloatType type)
+{
+    Unifloat* res;
+    Unifloat* initRes;
+
+    FloatT numberFloat = (FloatT)number;
+    DoubleT numberDouble = (DoubleT)number;
+
+    IntT i, j, k;
+    ULongT *bytes, mask;
+    UIntT bytesIndex;
+    UIntT digExp, digMant, sizeInLongs, size;
+    IntT maxExp;
+    IntT exponent = 0x0;
+
+    res = createZero_Unifloat(type);
+
+    switch(type)
+    {
+        case UniFloatT:
+            digExp = digExp_FloatT;
+            digMant = digMant_FloatT;
+            maxExp = maxExp_FloatT;
+            sizeInLongs = sizeInLongs_FloatT;
+            size = size_FloatT;
+            bytes = (ULongT *)&numberFloat;
+            break;
+        case UniDoubleT:
+            digExp = digExp_DoubleT;
+            digMant = digMant_DoubleT;
+            maxExp = maxExp_DoubleT;
+            sizeInLongs = sizeInLongs_DoubleT;
+            size = size_DoubleT;
+            bytes = (ULongT *)&numberDouble;
+            break;
+        case UniLongDoubleT:
+            digExp = digExp_LongDoubleT;
+            digMant = digMant_LongDoubleT;
+            maxExp = maxExp_LongDoubleT;
+            sizeInLongs = sizeInLongs_LongDoubleT;
+            size = size_LongDoubleT;
+            bytes = (ULongT *)&number;
+            break;
+    }
+
+#if ( __powerpc64__ )
+    if(type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+    {
+        digMant /= 2;
+    }
+#endif
+    mask = 0x1;
+    bytesIndex = 0;
+
+    if(type == UniFloatT && __BYTE_ORDER == __BIG_ENDIAN && sizeof_LongT == 8)
+        mask <<= (sizeof_LongT * 4);
+
+    for(i = 0; i < digMant - 1; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            setMant_Unifloat(res, digMant - i, (bytes[bytesIndex] & mask) / mask);
+        else
+            setMant_Unifloat(res, digMant - i, (bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    if(type == UniLongDoubleT && size == 10)
+    {
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    j = 0x1;
+    for(i = 0; i < digExp; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            exponent += ((bytes[bytesIndex] & mask) / mask * j);
+        else
+            exponent += ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask * j);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        setMant_Unifloat(res, 1, 1);
+
+        if(getMant_Unifloat(res, 2) == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+    
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+        res->sign = 1 - 2 * ((bytes[bytesIndex] & mask) / mask);
+    else
+        res->sign = 1 - 2 * ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+#if ( __powerpc64__ )
+    if(type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+    {
+        initRes = clone(res);
+        res = createZero_Unifloat(type);
+
+    mask = 0x1;
+    bytesIndex = 0;
+
+    if(type == UniFloatT && __BYTE_ORDER == __BIG_ENDIAN && sizeof_LongT == 8)
+        mask <<= (sizeof_LongT * 4);
+
+    for(i = 0; i < digMant - 1; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            setMant_Unifloat(res, digMant - i, (bytes[bytesIndex] & mask) / mask);
+        else
+            setMant_Unifloat(res, digMant - i, (bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    if(type == UniLongDoubleT && size == 10)
+    {
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+    }
+
+    j = 0x1;
+    for(i = 0; i < digExp; i++)
+    {
+        if(__BYTE_ORDER == __LITTLE_ENDIAN)
+            exponent += ((bytes[bytesIndex] & mask) / mask * j);
+        else
+            exponent += ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask * j);
+        
+        mask <<= 1;
+        if(mask == 0x0)
+        {
+            bytesIndex++;
+            mask = 0x1;
+        }
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        setMant_Unifloat(res, 1, 1);
+
+        if(getMant_Unifloat(res, 2) == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+    
+    if(__BYTE_ORDER == __LITTLE_ENDIAN)
+        res->sign = 1 - 2 * ((bytes[bytesIndex] & mask) / mask);
+    else
+        res->sign = 1 - 2 * ((bytes[sizeInLongs - 1 - bytesIndex] & mask) / mask);
+        
+        if(isZero_Unifloat(initRes) == false)
+        {
+            res = add_Unifloat(res, initRes);
+        }
+    }
+#endif
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertString_Unifloat                     //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertString_Unifloat(CString* number, UnifloatType type)
+{
+    Unifloat* digit[10] = {
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type),
+        createZero_Unifloat(type)
+        };
+    Unifloat* base;
+    Unifloat* res = createZero_Unifloat(type);
+    Unifloat* power = createOne_Unifloat(type);
+    IntT i, exp = 0, err;
+    CharT c;
+    IntT point_position = 0;
+    IntT sign = 1;
+
+    digit[1] = createOne_Unifloat(type);
+    for (i = 2; i < 10; i++)
+        digit[i] = add_Unifloat(digit[i - 1], digit[1]);
+
+    base = add_Unifloat(digit[9], digit[1]);
+
+    if(charAt_CString(number, 0) == '-')
+    {
+        sign = -1;
+        number = substring_CString(number, 1, length_CString(number));
+    }
+    if(charAt_CString(number, 0) == '+')
+    {
+        sign = 1;
+        number = substring_CString(number, 1, length_CString(number));
+    }
+    if (indexOfChar_CString(number, 'e') != -1)
+    {
+        exp = convertUnifloat_Integer(
+                convertString_Unifloat(
+                    substring_CString(number, indexOfChar_CString(number, 'e') + 1, length_CString(number)), type), &err);
+        number = substring_CString(number, 0, indexOfChar_CString(number, 'e'));
+    }
+
+//    if(length_CString(number) > PRECISION / 3 + 1)
+//        number = substring_CString(number, 0, PRECISION / 3);
+    
+    for(i = length_CString(number) - 1; i>= 0 ; i--)
+    {
+        c = charAt_CString(number, i);
+        
+        if((c != '.') && (c != ','))
+        {
+            res = add_Unifloat(res, mul_Unifloat(digit[c - 48], power));
+            power = mul_Unifloat(power, base);
+        }
+        else
+            point_position = length_CString(number) - i - 1;
+    }
+    
+    power = createOne_Unifloat(type);
+    if (point_position - exp > 0)
+    {
+        for(i = point_position - exp; i > 0; i--)
+            power = mul_Unifloat(power, base);
+        res = div_Unifloat(res, power);
+    }
+    else
+    {
+        for(i = exp - point_position; i > 0; i--)
+            power = mul_Unifloat(power, base);
+        res = mul_Unifloat(res, power);
+    }
+
+    res->sign = sign;
+
+    normalize_Unifloat(res);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      convertBinaryString_Unifloat                    //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertBinaryString_Unifloat(CString* number, UnifloatType type)
+{
+    Unifloat* res = createZero_Unifloat(type);
+    IntT sign = 1, point_position = -1, i;
+    CharT c;
+    
+    if(charAt_CString(number, 0) == '-')
+    {
+        sign = -1;
+        number = substring_CString(number, 1, length_CString(number));
+    }
+
+    if (length_CString(number) > MAX_SIZE_UNIFLOAT*32)
+        number = substring_CString(number, 0, MAX_SIZE_UNIFLOAT* 32);
+    
+    for(i = 0; (charAt_CString(number, i) != '1')&&(i < length_CString(number)); i++)
+        if (charAt_CString(number, i) == '.') point_position = i;
+
+    if (point_position >= 0) 
+    {
+        res->exp = point_position - i + 1;
+        point_position = -1;
+    }
+    else
+        res->exp = length_CString(number);
+
+    if (i > 0)
+        number = substring_CString(number, i, length_CString(number));
+
+    for (i = 0; i < length_CString(number); i++)
+    {
+        c = charAt_CString(number, i);
+        if (c == '.')
+            point_position = i;
+        else
+            if (c == '1')
+                if (point_position == -1)
+                    setMant_Unifloat(res, i+1, 1);
+                else
+                    setMant_Unifloat(res, i, 1);
+    }
+     
+    if (point_position >= 0) 
+        res->exp = point_position;
+    
+    res->sign = sign;
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      convertHexString_Unifloat                       //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertHexString_Unifloat(CString* number, UnifloatType type)
+{
+    Map* hex_bin = create_Map(&type_Char, &type_CString);
+    Unifloat* res;
+    CString* st = create_CString("");
+    IntT i;
+
+    put_Map(hex_bin,create_Char('0'), create_CString("0000"));
+    put_Map(hex_bin,create_Char('1'), create_CString("0001"));
+    put_Map(hex_bin,create_Char('2'), create_CString("0010"));
+    put_Map(hex_bin,create_Char('3'), create_CString("0011"));
+    put_Map(hex_bin,create_Char('4'), create_CString("0100"));
+    put_Map(hex_bin,create_Char('5'), create_CString("0101"));
+    put_Map(hex_bin,create_Char('6'), create_CString("0110"));
+    put_Map(hex_bin,create_Char('7'), create_CString("0111"));
+    put_Map(hex_bin,create_Char('8'), create_CString("1000"));
+    put_Map(hex_bin,create_Char('9'), create_CString("1001"));
+    put_Map(hex_bin,create_Char('a'), create_CString("1010"));
+    put_Map(hex_bin,create_Char('b'), create_CString("1011"));
+    put_Map(hex_bin,create_Char('c'), create_CString("1100"));
+    put_Map(hex_bin,create_Char('d'), create_CString("1101"));
+    put_Map(hex_bin,create_Char('e'), create_CString("1110"));
+    put_Map(hex_bin,create_Char('f'), create_CString("1111"));
+
+    for (i = 0; i< length_CString(number); i++)
+        st = concat_CString(st, get_Map(hex_bin, create_Char(charAt_CString(number, i))));
+
+    res = convertBinaryString_Unifloat(st, type);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertUnifloat_String                     //
+//////////////////////////////////////////////////////////////////////////
+String* to_string_Unifloat(struct Unifloat* x)
+{
+    long double res = 0;
+    int i, n, pos; 
+    int exp = 0;
+    char st[105], st1[50] = "", st2[50];
+    char Hex[16][10] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"};
+    String* result;
+
+    switch (x->type)
+    {
+        case UniFloatT:
+            strcpy(st, "(float) ");
+            break;
+
+        case UniDoubleT:
+            strcpy(st, "(double) ");
+            break;
+
+        case UniLongDoubleT:
+            strcpy(st, "(long double) ");
+            break;
+    }
+
+    if (x->kind == NaN) 
+        strcat(st, "NaN");
+    if (x->kind == Infinity) 
+        if (x->sign ==1)
+            strcat(st, "Infinity");
+        else
+            strcat(st, "-Infinity");
+
+if (x->kind == Normal)
+{
+        for (i = digMant_Unifloat(x->type); i > 0; i--)
+        {
+            exp = x->exp - i;
+            res = res + powl(2, exp) * getMant_Unifloat((Unifloat*)x, i);
+        }
+        res = (x->sign) * res;
+        switch (x->type)
+        {
+            case UniFloatT:
+                sprintf(st2,"%.16e", (float)res);
+                break;
+
+            case UniDoubleT:
+                sprintf(st2,"%.16e", (double)res);
+                break;
+
+            case UniLongDoubleT:
+                if(sizeof_LongDoubleT == 8)
+                {
+                    sprintf(st2,"%.16e", (double)res);
+                }
+                else
+                {
+                    sprintf(st2,"%.20Le", res);
+                }
+                break;
+        }
+    strcat(st, st2);
+
+    exp = 0;
+    n = 0;
+    pos = 0;
+    for (i = digMant_Unifloat(x->type); i > 0; i--)
+    {
+        n = n + powl(2, exp) * getMant_Unifloat((Unifloat*)x, i);
+        exp++;
+        if ((exp == 4) || (i ==1))
+        {
+            exp = 0;
+            strcpy(st2, Hex[n]);
+            strcat(st2, st1);
+            strcpy(st1, st2);
+            n = 0;
+            pos++;
+        }
+        if (pos == 8)
+        {
+            strcpy(st2, " ");
+            strcat(st2, st1);
+            strcpy(st1, st2);
+            pos = 0;
+        }
+    }
+
+    if (pos != 0)
+        for (;pos != 8; pos++)
+        {
+            strcpy(st2, "0");
+            strcat(st2, st1);
+            strcpy(st1, st2);        
+        }
+
+    if (x->sign == 1)
+        strcpy(st2," (0x");
+    else
+        strcpy(st2," (-0x");
+    if (pos == 0) 
+        strcat(st2, st1+1);
+    else
+        strcat(st2, st1);
+    strcpy(st1, st2);
+
+    strcat(st1, "P");
+    sprintf(st2, "%d", x->exp-1);
+    strcat(st1, st2);
+    switch (x->type)
+    {
+        case UniFloatT:
+            strcat(st1, "F");
+            break;
+
+        case UniLongDoubleT:
+            strcat(st1, "L");
+            break;
+    }
+
+    strcat(st1, ")");
+
+    strcat(st, st1);
+}
+    result = create_String(st);
+    return result;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertInteger_Unifloat                    //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertInteger_Unifloat(IntT number, UnifloatType type)
+{
+    Unifloat* res = createZero_Unifloat(type);
+    
+    if(number < 0)
+    {
+        res->sign = -1;
+        res->mant[0] = ~number + 1;
+    }
+    else
+        res->mant[0] = number;
+
+    res->exp = sizeof_IntT * 8;
+    round_Unifloat(res, sizeof_IntT * 8 + 1);
+
+    res = normalize_Unifloat(res);
+    
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertLong_Unifloat                       //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* convertLong_Unifloat(LongT number, UnifloatType type)
+{
+    return convertInteger_Unifloat(number, type);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertUnifloat_Integer                    //
+//////////////////////////////////////////////////////////////////////////
+
+IntT convertUnifloat_Integer(Unifloat* x, IntT* error)
+{
+    LongT res = 0;
+    LongT power = 1;
+    IntT i;
+    *error = 0;// it means that it is possible to convert x to integer number
+    if (isNan_Unifloat(x) || (isInfinity_Unifloat(x))) 
+    {
+        *error = 1;// it means that conversion is impossible
+        return 0;
+    }
+    for (i = x->exp;i > 0;i--)
+    {
+        res += getMant_Unifloat(x,i) * power;
+        power = power*2;
+    }
+    if (x->exp > 0) 
+        i = x->exp+1;
+    else
+        i = 1;
+    for (;i <= PRECISION;i++)
+        if (getMant_Unifloat(x, i) == 1) *error = 2;
+                                // it means that conversion isn't precisely
+    if (res > SUT_INT_MAX) *error = 3;
+                    // it means that result isn't representable in 'int' type
+    res = res * x->sign;
+    return (IntT)res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           convertUnifloat_LongLong                   //
+//////////////////////////////////////////////////////////////////////////
+
+LLongT convertUnifloat_LongLong(Unifloat* x, IntT* error)
+{
+    LLongT res = 0;
+    LLongT power = 1;
+    IntT i;
+    *error = 0;// it means that it is possible to convert x to longlong number
+    if (isNan_Unifloat(x) || (isInfinity_Unifloat(x))) 
+    {
+        *error = 1;// it means that conversion is impossible
+        return 0;
+    }
+
+    if (compare_Unifloat(abs_Unifloat(x), maxLongLongT) == 1) *error = 3;
+                    // it means that result isn't representable in 'int' type
+
+    for (i = x->exp;i > 0;i--)
+    {
+        res += getMant_Unifloat(x,i) * power;
+        power = power*2;
+    }
+    if (x->exp > 0) 
+        i = x->exp+1;
+    else
+        i = 1;
+    for (;i <= PRECISION;i++)
+        if (getMant_Unifloat(x, i) == 1) *error = 2;
+                                // it means that conversion isn't precisely
+    res = res * x->sign;
+    return (LLongT)res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                               get_Unifloat                           //
+//////////////////////////////////////////////////////////////////////////
+
+Unifloat* get_Unifloat(Map* map, UnifloatType type)
+{
+    IntT i;
+    Unifloat* temp;
+    
+    if(!containsKey_Map(map, create_IntTObj(type)))
+    {
+        temp = createOne_Unifloat(type);
+    
+        temp->kind = NaN;
+        put_Map(nan_Unifloat, create_IntTObj(type), clone(temp));
+        
+        temp->kind = Infinity;
+        put_Map(infinity_Unifloat, create_IntTObj(type), clone(temp));
+        
+        temp->kind = Normal;
+        temp->exp = minExp_Unifloat(type);
+        setMant_Unifloat(temp, 1, 1);
+        put_Map(min_Unifloat, create_IntTObj(type), clone(temp));
+        
+        temp->exp = maxExp_Unifloat(type);
+        for(i = 0;i < digMant_Unifloat(type);i++)
+            setMant_Unifloat(temp, i + 1, 1);
+        put_Map(max_Unifloat, create_IntTObj(type), clone(temp));
+    }
+    
+       return get_Map(map, create_IntTObj(type));
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          getProperty_Unifloat                        //
+//////////////////////////////////////////////////////////////////////////
+
+IntT getProperty_Unifloat(Map* map, UnifloatType type)
+{
+    IntT* property;
+    SizeT real_sizeof_LongT;
+    
+    if(!containsKey_Map(map, create_IntTObj(type)))
+    {
+        sizeof_FloatT = sizeof_SUTType("float");
+        sizeof_DoubleT = sizeof_SUTType("double");
+        sizeof_LongDoubleT = sizeof_SUTType("long double");
+        real_sizeof_LongT = getSizeOfType(getContext(), "long");
+        if(real_sizeof_LongT != sizeof_SUTType("long"))
+        {
+            verbose("WARNING: sizeof_LongT was changed from %d to %d protecting Math from crash\n", sizeof_SUTType("long"), real_sizeof_LongT);
+            sizeof_LongT = real_sizeof_LongT;
+        }
+        
+        put_Map(maxExp_Unifloat, create_IntTObj(0), create_IntTObj(128));
+        put_Map(minExp_Unifloat, create_IntTObj(0), create_IntTObj(-125));
+        put_Map(digMant_Unifloat, create_IntTObj(0), create_IntTObj(24));
+        put_Map(digExp_Unifloat, create_IntTObj(0), create_IntTObj(8));
+        /* size = (digExp + digMant) / 8; */
+        put_Map(size_Unifloat, create_IntTObj(0), create_IntTObj(4));
+        /* sizeInLongs = (sizeof_FloatT - 4) / sizeof_LongT + 1; */
+        put_Map(sizeInLongs_Unifloat, create_IntTObj(0), 
+            create_IntTObj((sizeof_FloatT - 4) / sizeof_LongT + 1));
+    
+        put_Map(maxExp_Unifloat, create_IntTObj(1), create_IntTObj(1024));
+        put_Map(minExp_Unifloat, create_IntTObj(1), create_IntTObj(-1021));
+        put_Map(digMant_Unifloat, create_IntTObj(1), create_IntTObj(53));
+        put_Map(digExp_Unifloat, create_IntTObj(1), create_IntTObj(11));
+        /* size = (digExp + digMant) / 8; */
+        put_Map(size_Unifloat, create_IntTObj(1), create_IntTObj(8));
+        /* sizeInLongs = (sizeof_DoubleT - 4) / sizeof_LongT + 1; */
+        put_Map(sizeInLongs_Unifloat, create_IntTObj(1),
+            create_IntTObj((sizeof_DoubleT - 4) / sizeof_LongT + 1));
+        
+        if(sizeof_LongDoubleT == 8)
+        {
+            put_Map(maxExp_Unifloat, create_IntTObj(2), create_IntTObj(1024));
+            put_Map(minExp_Unifloat, create_IntTObj(2), create_IntTObj(-1021));
+            put_Map(digMant_Unifloat, create_IntTObj(2), create_IntTObj(53));
+            put_Map(digExp_Unifloat, create_IntTObj(2), create_IntTObj(11));
+            /* size = (digExp + digMant) / 8; */
+            put_Map(size_Unifloat, create_IntTObj(2), create_IntTObj(8));
+            /* sizeInLongs = (sizeof_LongDoubleT - 4) / sizeof_LongT + 1; */
+            put_Map(sizeInLongs_Unifloat, create_IntTObj(2),
+                create_IntTObj((sizeof_LongDoubleT - 4) / sizeof_LongT + 1));
+        }
+        else
+        {    
+#if ( __powerpc64__ )
+            put_Map(maxExp_Unifloat, create_IntTObj(2), create_IntTObj(1024));
+            put_Map(minExp_Unifloat, create_IntTObj(2), create_IntTObj(-1021));
+            put_Map(digMant_Unifloat, create_IntTObj(2), create_IntTObj(106));
+            put_Map(digExp_Unifloat, create_IntTObj(2), create_IntTObj(11));
+            /* size = (2 * digExp + digMant) / 8; */
+            put_Map(size_Unifloat, create_IntTObj(2), create_IntTObj(16));
+            /* sizeInLongs = (sizeof_LongDoubleT - 4) / sizeof_LongT + 1; */
+            put_Map(sizeInLongs_Unifloat, create_IntTObj(2),
+                create_IntTObj((sizeof_LongDoubleT - 4) / sizeof_LongT + 1));
+#elif ( __powerpc__ || __s390__ || __s390x__ )
+            put_Map(maxExp_Unifloat, create_IntTObj(2), create_IntTObj(16384));
+            put_Map(minExp_Unifloat, create_IntTObj(2), create_IntTObj(-16381));
+            put_Map(digMant_Unifloat, create_IntTObj(2), create_IntTObj(113));
+            put_Map(digExp_Unifloat, create_IntTObj(2), create_IntTObj(15));
+            /* size = (2 * digExp + digMant) / 8; */
+            put_Map(size_Unifloat, create_IntTObj(2), create_IntTObj(16));
+            /* sizeInLongs = (sizeof_LongDoubleT - 4) / sizeof_LongT + 1; */
+            put_Map(sizeInLongs_Unifloat, create_IntTObj(2),
+                create_IntTObj((sizeof_LongDoubleT - 4) / sizeof_LongT + 1));
+#else
+            put_Map(maxExp_Unifloat, create_IntTObj(2), create_IntTObj(16384));
+            put_Map(minExp_Unifloat, create_IntTObj(2), create_IntTObj(-16381));
+            put_Map(digMant_Unifloat, create_IntTObj(2), create_IntTObj(64));
+            put_Map(digExp_Unifloat, create_IntTObj(2), create_IntTObj(15));
+            /* size = (digExp + digMant + 1 - ((digExp + digMant + 1) % 8)) / 8; */
+            put_Map(size_Unifloat, create_IntTObj(2), create_IntTObj(10));
+            /* sizeInLongs = (sizeof_LongDoubleT - 4) / sizeof_LongT + 1; */
+            put_Map(sizeInLongs_Unifloat, create_IntTObj(2),
+                create_IntTObj((sizeof_LongDoubleT - 4) / sizeof_LongT + 1));
+#endif
+        }
+    }
+    property = get_Map(map, create_IntTObj(type));
+    return *property;
+}
+
+/************************************************************************/
+/*                    UNIFLOAT COMPLEX FUNCTIONS                        */
+/************************************************************************/
+
+//////////////////////////////////////////////////////////////////////////
+//                           create_UnifloatComplex                     //
+//////////////////////////////////////////////////////////////////////////
+UnifloatComplex* create_UnifloatComplex(Unifloat* x, Unifloat* y)
+{   
+    return create(&type_UnifloatComplex, x, y);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           compare_UnifloatComplex                    //
+//////////////////////////////////////////////////////////////////////////
+IntT compare_UnifloatComplex(UnifloatComplex* x, UnifloatComplex* y)
+{
+    return compare_Unifloat(x->Re, y->Re) || compare_Unifloat(x->Im, y->Im);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                  compareWithPrecision_UnifloatComplex                //
+//////////////////////////////////////////////////////////////////////////
+IntT compareWithPrecision_UnifloatComplex(UnifloatComplex* x, UnifloatComplex* y, IntT amount)
+{
+//    IntT res1 = compareWithPrecision_Unifloat(x->Re, y->Re, amount);
+//    IntT res2 = compareWithPrecision_Unifloat(x->Im, y->Im, amount);
+//    if ((res1 == 0) && (res2 == 0)) 
+//        return 0; 
+//    else 
+//        return 1;
+    return compareWithPrecision_Unifloat(x->Re, y->Re, amount) ||
+            compareWithPrecision_Unifloat(x->Im, y->Im, amount);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           abs_UnifloatComplex                        //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* abs_UnifloatComplex(UnifloatComplex* x)
+{
+    Unifloat* res;
+
+    if (isNan_Unifloat(x->Re) || isNan_Unifloat(x->Im))
+        return clone(nan_Unifloat(x->Re->type));
+
+    if (isInfinity_Unifloat(x->Re) || isInfinity_Unifloat(x->Im))
+        return clone(infinity_Unifloat(x->Re->type));
+
+    res = mul_Unifloat(x->Re, x->Re);
+    res = add_Unifloat(res, mul_Unifloat(x->Im, x->Im));
+    res = sqrt_Unifloat(res);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           carg_Unifloat                              //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* carg_Unifloat(UnifloatComplex* x)
+{
+    return atan2_Unifloat(x->Im, x->Re);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           add_UnifloatComplex                        //
+//////////////////////////////////////////////////////////////////////////
+UnifloatComplex* add_UnifloatComplex(UnifloatComplex* x, UnifloatComplex* y)
+{
+    UnifloatComplex* res;
+    Unifloat* newRe;
+    Unifloat* newIm;
+    newRe = add_Unifloat(x->Re, y->Re);
+    newIm = add_Unifloat(x->Im, y->Im);
+    res = create_UnifloatComplex(newRe, newIm);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           sub_UnifloatComplex                        //
+//////////////////////////////////////////////////////////////////////////
+UnifloatComplex* sub_UnifloatComplex(UnifloatComplex* x, UnifloatComplex* y)
+{
+    UnifloatComplex* res;
+    Unifloat* newRe;
+    Unifloat* newIm;
+    newRe = sub_Unifloat(x->Re, y->Re);
+    newIm = sub_Unifloat(x->Im, y->Im);
+    res = create_UnifloatComplex(newRe, newIm);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           mul_UnifloatComplex                        //
+//////////////////////////////////////////////////////////////////////////
+UnifloatComplex* mul_UnifloatComplex(UnifloatComplex* x, UnifloatComplex* y)
+{
+    UnifloatComplex* res;
+    Unifloat* newRe;
+    Unifloat* newIm;
+    newRe = sub_Unifloat(mul_Unifloat(x->Re, y->Re), mul_Unifloat(x->Im, y->Im));
+    newIm = add_Unifloat(mul_Unifloat(x->Im, y->Re), mul_Unifloat(x->Re, y->Im));
+    res = create_UnifloatComplex(newRe, newIm);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           div_UnifloatComplex                        //
+//////////////////////////////////////////////////////////////////////////
+UnifloatComplex* div_UnifloatComplex(UnifloatComplex* x, UnifloatComplex* y)
+{
+    UnifloatComplex* res;
+    Unifloat* newRe;
+    Unifloat* newIm;
+    newRe = add_Unifloat(mul_Unifloat(x->Re, y->Re), mul_Unifloat(x->Im, y->Im));
+    newRe = div_Unifloat(newRe, add_Unifloat(mul_Unifloat(y->Re, y->Re), mul_Unifloat(y->Im, y->Im)));
+    newIm = sub_Unifloat(mul_Unifloat(x->Im, y->Re), mul_Unifloat(x->Re, y->Im));
+    newIm = div_Unifloat(newIm, add_Unifloat(mul_Unifloat(y->Re, y->Re), mul_Unifloat(y->Im, y->Im)));
+    res = create_UnifloatComplex(newRe, newIm);
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                        to_string_UnifloatComplex                     //
+//////////////////////////////////////////////////////////////////////////
+static String* to_string_UnifloatComplex(struct UnifloatComplex* x)
+{
+    String* res;
+
+    res = to_string_Unifloat((struct Unifloat*)x->Re);
+    
+    res = concat_String(res, create_String(" + i *"));
+
+    res = concat_String(res, to_string_Unifloat((struct Unifloat*)x->Im));
+
+    return res;   
+}
+
+
+/************************************************************************/
+/*                  UNIFLOAT AUXILIARY FUNCTIONS                        */
+/************************************************************************/
+
+//////////////////////////////////////////////////////////////////////////
+//                         getMant_Unifloat                             //
+//////////////////////////////////////////////////////////////////////////
+
+UIntT getMant_Unifloat(Unifloat* x, UIntT index)
+{
+    UIntT localIndex = ((index - 1) % (sizeof_IntT * 8)) + 1;
+    UIntT globalIndex = (index - localIndex) / (sizeof_IntT * 8);
+    UIntT res;
+
+    res = x->mant[globalIndex];
+    res >>= (sizeof_IntT * 8 - localIndex);
+    res &= 0x1;
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                         setMant_Unifloat                             //
+//////////////////////////////////////////////////////////////////////////
+
+void setMant_Unifloat(Unifloat* x, UIntT index, UIntT bit)
+{
+    UIntT localIndex = ((index - 1) % (sizeof_IntT * 8)) + 1;
+    UIntT globalIndex = (index - localIndex) / (sizeof_IntT * 8);
+    UIntT temp = 0x1;
+
+    temp <<= (sizeof_IntT * 8 - localIndex);
+    temp = ~temp;
+    x->mant[globalIndex] &= temp;
+    
+    temp = bit;
+    temp <<= (sizeof_IntT * 8 - localIndex);
+    x->mant[globalIndex] |= temp;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                           normalize_Unifloat                         //
+//////////////////////////////////////////////////////////////////////////
+
+Unifloat* normalize_Unifloat(Unifloat* x)
+{
+    IntT i, j;
+    IntT significantSize = 
+        (PRECISION - 1 - ((PRECISION - 1) % (sizeof_IntT * 8))) / (sizeof_IntT * 8) + 1;
+
+    if(getMant_Unifloat(x, 1) == 0 && !isZero_Unifloat(x))
+    {
+        for(j = 0; x->mant[j] == 0x0; j++);
+
+        if(j)
+        {
+            x->exp -= sizeof_IntT * 8 * j;
+            for(i = 0; i < significantSize + 1; i++)
+                x->mant[i] = (i + j < MAX_SIZE_UNIFLOAT) ? x->mant[i + j] : 0x0;
+        }
+
+        for(j = 0; (x->mant[0] >> sizeof_IntT * 8 - 1 - j) == 0; j++);
+
+        if(j)
+        {
+            x->exp -= j;
+            for(i = 0; i < significantSize + 1; i++)
+            {
+                x->mant[i] <<= j;
+                x->mant[i] += x->mant[i + 1] >> (sizeof_IntT * 8 - j);
+            }
+        }
+    }
+    
+    return x;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      newPrecision_Unifloat                           //
+//////////////////////////////////////////////////////////////////////////
+UIntT newPrecision_Unifloat(UIntT oldBase, UIntT precision, UIntT newBase)
+{
+    /*
+     * nfp - precision needed to obtain most precise result
+     */
+    UIntT j, k, nfp;
+
+    if(newBase < oldBase)
+    {
+        j = 1;
+        k = newBase;
+        while(k < oldBase)
+        {
+            j++;
+            k = k*newBase;
+        }
+        nfp = precision*j;
+    }
+    else
+    {
+        j = 1;
+        k = oldBase;
+        while(k <= newBase)
+        {
+            j++;
+            k = k*oldBase;
+        }
+        j--;
+        nfp = (int)(precision/j)  +  1;
+    }
+    if(nfp > MAX_SIZE_UNIFLOAT * sizeof_IntT * 8) nfp = MAX_SIZE_UNIFLOAT * sizeof_IntT * 8;
+
+    return nfp;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              print_Unifloat                          //
+//////////////////////////////////////////////////////////////////////////
+void print_Unifloat(Unifloat* x)
+{
+    IntT i, lim;
+    
+    if(isNan_Unifloat(x))
+    {
+        verbose("NaN\n");
+        return;
+    }
+    if(isInfinity_Unifloat(x))
+    {
+        if(x->sign == -1)
+            verbose("-");
+
+        verbose("Infinity\n");
+        return;
+    }
+    if(x->sign ==  -1)
+        verbose("-");
+    if(x->exp <= 0) 
+    {
+        verbose("0.");
+        for(lim = PRECISION; lim > 0; lim--)
+            if(getMant_Unifloat(x, lim) != 0)
+                break;        
+        for(i = 1; i <= -x->exp; i++)
+            verbose("0");
+        for(i = 1; i < lim + 1; i++)
+            verbose("%i", getMant_Unifloat(x, lim));
+    }
+    else
+    {
+        for(lim = PRECISION; lim > x->exp; lim--)
+            if(getMant_Unifloat(x, lim) != 0)
+                break;
+        for(i = 1; i<lim + 1; i++)
+            {
+                verbose("%i", getMant_Unifloat(x, i));
+                if((i == x->exp) && (i != lim))
+                    verbose(".");
+            }
+    }    
+    verbose("\n");
+    return;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          printExp_Unifloat                           //
+//////////////////////////////////////////////////////////////////////////
+void printExp_Unifloat(Unifloat* x, IntT amount)
+{
+    IntT i;
+
+    if(isNan_Unifloat(x))
+    {
+        verbose("NaN\n");
+        return;
+    }
+
+    if(isInfinity_Unifloat(x))
+    {
+        if(x->sign == -1)
+            verbose("-");
+
+        verbose("Infinity\n");
+        return;
+    }
+
+    if(x->sign == -1)
+        verbose("-");
+    else
+        verbose(" ");
+
+//    x = round_Unifloat(x, amount);
+            
+    for(i = 1; i < amount + 1; i++)    
+    {
+        verbose("%d", getMant_Unifloat(x, i));
+        if((i == 1) && (i < amount))
+            verbose(".");
+    }
+    
+    verbose("e%+04d", x->exp - 1);
+    verbose(" ");
+    
+    return;
+}
+
+/************************************************************************/
+/*                     UNIFLOAT TRIG FUNCTIONS                          */
+/************************************************************************/
+
+//////////////////////////////////////////////////////////////////////////
+//                          sin_Unifloat                                //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* sin_Unifloat(Unifloat* x)
+{
+    /*
+    res - contains result
+    type - contains current type
+    pi, One, Two, Four - are constant numbers
+    arg - is the same as x, using for x don't change in calculating
+    tmp - auxiliary variable
+    eps - contains EPSILON
+    */
+    Unifloat* res;
+    UnifloatType type = x->type;
+    Unifloat* One = convertInteger_Unifloat(1, type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* Four = convertInteger_Unifloat(4, type);
+    Unifloat* arg;
+    Unifloat* tmp;
+    Unifloat* eps = convertString_Unifloat(create_CString(EPSILON), type);
+
+    arg = clone(x);
+
+      if(isNan_Unifloat(arg)) return arg;// atan(NaN)=NaN without error
+
+    if(isInfinity_Unifloat(arg))
+    {    
+        // sin(Infinity) = NaN
+        arg->kind = NaN;
+        return arg;
+    }
+
+    if (arg->sign == -1)
+    {   
+        // sin(-x) = -sin(x);
+        arg->sign = 1;
+        res = sin_Unifloat(arg);
+        res->sign = (-1)*res->sign;
+        return res;
+    }
+
+    arg = arrangeArgument_Unifloat(arg);
+
+    if (compare_Unifloat(arg, Pi[type]) == 1)
+    {   
+        // if arg>pi then res=-sin(arg-pi)
+        res = sin_Unifloat(sub_Unifloat(arg, Pi[type]));
+        res->sign = (-1)*res->sign;
+        return res;
+    }
+    
+    if(compare_Unifloat(arg, div_Unifloat(Pi[type], Two)) == 1) // if arg>pi/2 then
+    {
+        arg = sub_Unifloat(Pi[type], arg);                     // arg=pi-arg;
+        if (arg->exp <= -PRECISION) arg = createZero_Unifloat(type);
+    }
+
+    tmp = div_Unifloat(Pi[type], Four);
+
+    if(compareWithPrecision_Unifloat(arg, tmp, PRECISION-2) == 1)
+    {   
+        // if arg>pi/4 then res=cos(pi/2-arg)
+        arg = sub_Unifloat(div_Unifloat(Pi[type], Two), arg);
+        res = cos_Unifloat(arg);
+        return res;
+    }
+
+    if(isZero_Unifloat(arg)) // sin(0)=0
+        return createZero_Unifloat(type);
+
+//    if(compare_Unifloat(abs_Unifloat(arg), eps) != 1) //sin(arg)=arg, |arg|<eps
+//        return arg;
+    
+    res = tan_Unifloat(div_Unifloat(arg, Two));// res=tan(arg/2)
+
+    tmp = add_Unifloat(One, mul_Unifloat(res, res));
+    res = div_Unifloat(mul_Unifloat(Two, res), tmp);
+
+    if(compare_Unifloat(abs_Unifloat(res), One) == 1)
+        if(res->sign == 1)            // if res>1 then return 1
+            res = createOne_Unifloat(type);
+        else 
+        {                           // if res<-1 then return -1
+            res = createOne_Unifloat(type);
+            res->sign =  - 1;
+        }
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          cos_Unifloat                                //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* cos_Unifloat(Unifloat* x)
+{
+    /*
+    res - contains result
+    type - contains current type
+    pi, One, Two, Four - are constant numbers
+    arg - is the same as x, using for x don't change in calculating
+    tmp - auxiliary variable
+    eps - contains EPSILON
+    */
+    Unifloat* res;
+    UnifloatType type = x->type;
+    Unifloat* eps = convertString_Unifloat(create_CString(EPSILON), type);
+    Unifloat* One = createOne_Unifloat(type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* Four = convertInteger_Unifloat(4, type);
+    Unifloat* arg;
+    Unifloat* tmp;
+
+    arg = clone(x);
+
+    if(isNan_Unifloat(arg)) return arg;// atan(NaN)=NaN without 
+    
+    if(isInfinity_Unifloat(arg))
+    {    // cos(Infinity) = NaN
+        arg->kind = NaN;
+        return arg;
+    }
+
+    if (arg->sign == -1)
+    {
+        arg->sign = 1;
+        return cos_Unifloat(arg);
+    }
+
+    arg = arrangeArgument_Unifloat(arg);
+
+    if(compare_Unifloat(arg, Pi[type]) == 1)
+    {   // if arg>pi then res=-cos(arg-pi)
+        res = cos_Unifloat(sub_Unifloat(arg, Pi[type]));
+        res->sign = (-1)*res->sign;
+        return res;
+    }
+
+    if(compare_Unifloat(arg, div_Unifloat(Pi[type], Two)) == 1) 
+    {       // if arg>pi/2 then res=-cos(pi-arg)
+        res = cos_Unifloat(sub_Unifloat(Pi[type], arg));
+        res->sign = (-1)*res->sign;
+        return res;
+    }
+
+    tmp = div_Unifloat(Pi[type], Four);
+    if(compareWithPrecision_Unifloat(arg, tmp, PRECISION-2) == 1)
+        return sin_Unifloat(sub_Unifloat(div_Unifloat(Pi[type], Two), arg));
+
+//    if(compare_Unifloat(abs_Unifloat(arg), eps) != 1) // cos(arg)=1, |arg|<eps
+//        return createOne_Unifloat(type);
+
+    res = tan_Unifloat(div_Unifloat(arg, Two));
+    tmp = mul_Unifloat(res, res);
+    res = div_Unifloat(sub_Unifloat(One, tmp), add_Unifloat(One, tmp));
+
+    if(compare_Unifloat(abs_Unifloat(res), One) == 1)
+        if(res->sign == 1)        // if res>1 then return 1
+            res = createOne_Unifloat(type);
+        else 
+        {                       // if res<-1 then return -1
+            res = createOne_Unifloat(type);
+            res->sign =  - 1;
+        }
+        
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          tan_Unifloat                                //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* tan_Unifloat(Unifloat* x)
+{
+    /*
+    res - contains result
+    type - contains current type
+    pi, One, Two, Four - are constant numbers
+    arg - is the same as x, using for x don't change in calculating
+    tmp - auxiliary variable
+    eps - contains EPSILON
+    */
+    Unifloat* res;
+    UnifloatType type = x->type;
+    Unifloat* eps = convertString_Unifloat(create_CString(EPSILON), type);
+    Unifloat* One = createOne_Unifloat(type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* Four = convertInteger_Unifloat(4, type);
+    Unifloat* arg, * tmp;
+
+    arg = clone(x);
+    
+    if(isNan_Unifloat(arg)) return arg;// tan(NaN)=NaN without error
+
+    if(isInfinity_Unifloat(arg))
+    {    // tan(Infinity) = NaN
+        arg->kind = NaN;
+        return arg;
+    }
+
+    if (arg->sign == -1)
+    {
+        arg->sign = 1;
+        res = tan_Unifloat(arg);
+        res->sign = -res->sign;
+        return res;
+    }
+
+    arg = arrangeArgument_Unifloat(arg);
+
+    if(compare_Unifloat(arg, Pi[type]) == 1) // if arg>pi then arg:=arg-pi
+        arg = sub_Unifloat(arg, Pi[type]);
+
+/*  tan(arg)=inf, |arg-pi/2|<eps
+    tmp = abs_Unifloat(sub_Unifloat(arg, div_Unifloat(pi, Two)));
+    if(compare_Unifloat(tmp, eps) != 1)
+    {    
+        arg = createZero_Unifloat(BASE, PRECISION, type);
+        res->kind = Infinity;
+        return res;
+    }
+*/
+    if(compare_Unifloat(arg, div_Unifloat(Pi[type], Two)) == 1)
+    {        // if arg>pi/2 then res=-tan(pi-arg)
+        res = tan_Unifloat(sub_Unifloat(Pi[type], arg));
+        res->sign = (-1)*res->sign;
+        return res;
+    }
+    
+    if(compare_Unifloat(arg, div_Unifloat(Pi[type], Four)) == 1)
+    {       // if arg>pi/4 then res=1/tan(pi/2-arg)
+        res = tan_Unifloat(sub_Unifloat(div_Unifloat(Pi[type], Two), arg));
+        return div_Unifloat(One, res);
+    }
+
+    if(isZero_Unifloat(arg))  // tan(0)=0
+        return createZero_Unifloat(type);
+
+    if(compare_Unifloat(abs_Unifloat(arg), eps) != 1)// tan(arg)=arg, |arg|<eps
+        return arg;
+
+    res = calcTan_Unifloat(div_Unifloat(arg, Two), 1);
+
+    tmp = sub_Unifloat(One, mul_Unifloat(res, res));
+
+    return div_Unifloat(mul_Unifloat(Two, res), tmp);
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          sincos_Unifloat                             //
+//////////////////////////////////////////////////////////////////////////
+void sincos_Unifloat(Unifloat* x, Unifloat* s, Unifloat* c)
+{
+    s = sin_Unifloat(x);
+    c = cos_Unifloat(x);
+    return;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          asin_Unifloat                               //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* asin_Unifloat(Unifloat* x)
+{
+    /*
+    res - contains result
+    type - contains current type
+    pi, One, Two, Four - are constant numbers
+    arg - is the same as x, using for x don't change in calculating
+    tmp - auxiliary variable
+    eps - contains EPSILON
+    */
+    Unifloat* res, * tmp;
+    UnifloatType type = x->type;
+    Unifloat* eps = createOne_Unifloat(type);
+    Unifloat* One = createOne_Unifloat(type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* Four = convertInteger_Unifloat(4, type);
+    Unifloat* arg;
+    
+    eps->exp = -digMant_Unifloat(x->type);
+
+    arg = clone(x);
+
+    if(isNan_Unifloat(arg)) return arg;// asin(NaN)=NaN without error
+
+    if((compare_Unifloat(abs_Unifloat(arg), One) == 1)
+        ||(isInfinity_Unifloat(arg)))
+    {     // asin(agr<-1||arg>1||NaN||Infinity)==NaN
+        arg->kind = NaN;
+        return arg;
+    }
+
+    if(isZero_Unifloat(arg)) // asin(0)=0
+        return clone(arg);
+
+    if(compare_Unifloat(abs_Unifloat(arg), eps) != 1)//asin(arg)=arg, |arg|<eps
+        return arg;
+
+    if (arg->sign == -1)
+    {
+        arg->sign = 1;
+        res = asin_Unifloat(arg);
+        res->sign = -res->sign;
+        return res;
+    }
+
+    if(compare_Unifloat(abs_Unifloat(sub_Unifloat(arg, One)), eps) != 1)
+        return div_Unifloat(Pi[type], Two);  // asin(arg)=pi/2, |arg-1|<eps
+    
+    if(compare_Unifloat(abs_Unifloat(add_Unifloat(arg, One)), eps) != 1)
+    {                                   // asin(arg)=-pi/2, |arg+1|<eps
+        res = div_Unifloat(Pi[type], Two);
+        res->sign = (-1)*res->sign;
+        return res;
+    }
+
+    res = sqrt_Unifloat(sub_Unifloat(One, mul_Unifloat(arg, arg)));
+    res = atan_Unifloat(div_Unifloat(arg, res));
+
+    if(compare_Unifloat(res, div_Unifloat(Pi[type], Two)) == 1)
+        res = div_Unifloat(Pi[type], Two);   // if res>pi/2 then return pi/2
+
+    tmp = div_Unifloat(Pi[type], Two);
+    tmp->sign = (-1)*tmp->sign;
+    if(compare_Unifloat(tmp, res) == 1)
+    {           // if res<-pi/2 then return -pi/2
+        res = div_Unifloat(Pi[type], Two);
+        res->sign = (-1)*res->sign;
+    }
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          acos_Unifloat                               //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* acos_Unifloat(Unifloat* x)
+{
+    /*
+    res - contains result
+    type - contains current type
+    pi, One, Two, Zero - are constant numbers
+    arg - is the same as x, using for x don't change in calculating
+    eps - contains EPSILON
+    */
+    Unifloat* res;
+    UnifloatType type = x->type;
+    Unifloat* Zero = createZero_Unifloat(type);
+    Unifloat* One = createOne_Unifloat(type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* arg;
+
+    arg = clone(x);
+
+    if(isNan_Unifloat(arg)) return arg;// acos(NaN)=NaN without error
+
+    if((compare_Unifloat(abs_Unifloat(arg), One) == 1)
+        ||(isInfinity_Unifloat(arg)))
+    {   // acos(agr<-1||arg>1||Infinity)==NaN
+        arg->kind = NaN;
+        return arg;
+    }
+
+    if(compare_Unifloat(arg, One) == 0) // acos(1)==0
+        return Zero;
+
+    if(isZero_Unifloat(arg)) // acos(0)=pi/2
+        return div_Unifloat(Pi[type], Two);
+
+    res = sub_Unifloat(div_Unifloat(Pi[type], Two), asin_Unifloat(arg));
+
+    if(compare_Unifloat(res, Pi[type]) == 1) 
+        res = Pi[type];  // if res>pi then return pi
+    
+    if(compare_Unifloat(Zero, res) == 1)
+        res = Zero;// if res<0 then return 0
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          atan_Unifloat                               //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* atan_Unifloat(Unifloat* x)
+{
+    /*
+    res - contains result
+    type - contains current type
+    pi, One, Two, SqrtThree, Six - are constant numbers
+    arg - is the same as x, using for x don't change in calculating
+    tmp - auxiliary variable
+    eps - contains EPSILON
+    new_arg - auxiliary variable for calcalating
+    */
+    UnifloatType type = x->type;
+    Unifloat* eps = createOne_Unifloat(type);
+    Unifloat* One = createOne_Unifloat(type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* SqrtThree = sqrt_Unifloat(convertInteger_Unifloat(3, type));
+    Unifloat* Six = convertInteger_Unifloat(6, type);
+    Unifloat* new_arg, * res, *tmp, *arg;
+    
+    eps->exp = -digMant_Unifloat(x->type);
+
+    arg = clone(x);
+
+    if(isNan_Unifloat(arg)) return arg;// atan(NaN)=NaN without error
+
+    if(isInfinity_Unifloat(arg)) 
+    {       // atan(inf)=pi/2;
+        res=div_Unifloat(Pi[type], Two);
+        res->sign=arg->sign;
+        return res;
+    }
+
+/*  // atan(arg)=pi/2, |arg|>(1/eps)
+    if(compare_Unifloat(arg, div_Unifloat(One, eps)) == 1)
+        return div_Unifloat(pi, Two);
+  
+    if(compare_Unifloat(arg, 
+        div_Unifloat(convertInteger_Unifloat( -1, type), eps)) ==  -1)
+        return div_Unifloat(pi, convertInteger_Unifloat( -2, type));
+*/
+    if(arg->sign ==  -1)
+    {   // if arg<0 then res=-atan(-arg)
+        arg->sign=(-1)*arg->sign;
+        res = atan_Unifloat(arg);
+        res->sign = (-1)*res->sign;
+        return res;
+    }
+
+    if(compare_Unifloat(arg, One) == 1)
+    {   // if arg>1 then res=pi/2-atan(1/arg)
+        tmp = atan_Unifloat(div_Unifloat(One, arg));
+        return sub_Unifloat(div_Unifloat(Pi[type], Two), tmp);
+    }
+
+    if(isZero_Unifloat(arg))    // atan(0)==0
+        return createZero_Unifloat(type);
+
+    if(compare_Unifloat(abs_Unifloat(arg), eps) != 1)//atan(arg)=arg, |arg|<eps
+        return arg;
+
+    if(compare_Unifloat(arg, sub_Unifloat(Two, SqrtThree)) == 1)
+    {
+        tmp = sub_Unifloat(mul_Unifloat(arg, SqrtThree), One);
+        new_arg = div_Unifloat(tmp, add_Unifloat(arg, SqrtThree));
+        res = calcAtan_Unifloat(new_arg, new_arg, 1);
+        res = add_Unifloat(div_Unifloat(Pi[type], Six),res);
+    }
+    else 
+        res = calcAtan_Unifloat(arg, arg, 1);
+
+    if(compare_Unifloat(res, div_Unifloat(Pi[type], Two)) == 1)   
+        res = div_Unifloat(Pi[type], Two);   // if res>pi/2 then return pi/2
+
+    tmp = div_Unifloat(Pi[type], Two);
+    tmp->sign = (-1)*tmp->sign;
+    if(compare_Unifloat(tmp, res) == 1)
+    {           // if res<-pi/2 then return -pi/2
+        res = div_Unifloat(Pi[type], Two);
+        res->sign = (-1)*res->sign;
+    }
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          atan2_Unifloat                              //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* atan2_Unifloat(Unifloat* x, Unifloat* y)
+{
+    /*
+    res - contains current argument and may be returned as result
+    type - contains current type
+    pi,Zero, Two, Four - are constant numbers
+    arg - is the same as x, using for x don't change in calculating
+    eps - contains EPSILON
+    tmp - auxiliary variable
+    x_sign - sign of x
+    */
+    Unifloat* res, *tmp, *arg;
+    UnifloatType type = x->type;
+    Unifloat* Zero = createZero_Unifloat(type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* Four = convertInteger_Unifloat(4, type);
+    Unifloat* x_sign=convertInteger_Unifloat(x->sign, type);
+
+    res = clone(x);
+
+    if(isZero_Unifloat(x)&&(y->sign ==  - 1))
+        return mul_Unifloat(x_sign, Pi[type]);
+
+    if(isZero_Unifloat(x)&&(y->sign == 1))
+        return res;
+
+    if((x->sign ==  -1)&&isZero_Unifloat(y))
+        return div_Unifloat(Pi[type], convertInteger_Unifloat(-2, type));
+
+    if((x->sign == 1)&&isZero_Unifloat(y))
+        return div_Unifloat(Pi[type], Two);
+
+    if(isNan_Unifloat(x)||isNan_Unifloat(y))
+    {
+        res->kind = NaN;
+        return res;
+    }
+    
+    if (isZero_Unifloat(x)&&isZero_Unifloat(y)&&(y->sign==-1))
+        return mul_Unifloat(x_sign, Pi[type]);
+
+    if (isZero_Unifloat(x)&&isZero_Unifloat(y)&&(y->sign==1))
+        return mul_Unifloat(x_sign, Zero);
+
+    if((isInfinity_Unifloat(x) != 1)
+        &&(isInfinity_Unifloat(y))&&(y->sign == -1))
+        return mul_Unifloat(x_sign, Pi[type]);
+
+    if((isInfinity_Unifloat(x) != 1)&&(isInfinity_Unifloat(y))&&(y->sign == 1))
+        return mul_Unifloat(x_sign, Zero);
+
+    if(isInfinity_Unifloat(x)&&(isInfinity_Unifloat(y) != 1))
+        return div_Unifloat(Pi[type], mul_Unifloat(Two,x_sign));
+
+    if(isInfinity_Unifloat(x)&&isInfinity_Unifloat(y)&&(y->sign ==  -1))
+    {
+        tmp = convertInteger_Unifloat(3*x->sign, type);
+        return mul_Unifloat(tmp, div_Unifloat(Pi[type], Four));
+    }
+    
+    if(isInfinity_Unifloat(x)&&isInfinity_Unifloat(y)&&(y->sign == 1))
+        return div_Unifloat(Pi[type], mul_Unifloat(Four,x_sign));
+
+    res = atan_Unifloat(div_Unifloat(abs_Unifloat(x),  abs_Unifloat(y)));
+    if (y->sign == -1) res = sub_Unifloat(Pi[type], res);
+    if (x->sign == -1) res->sign = -res->sign;
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          compareWithError_Unifloat                          //
+//////////////////////////////////////////////////////////////////////////
+IntT compareWithError_Unifloat(Unifloat* x) // compare with 10^(-1)*PRECISION
+{
+    /*
+     *res - contains result of comparing
+     *type - current type
+     */
+    IntT res;
+    UnifloatType type = x->type;
+    Unifloat* error = createOne_Unifloat(type);
+
+    error->exp = -150;//( - 1)*PRECISION;
+    res = compare_Unifloat(x, error);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          arrangeArgument_Unifloat                    //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* arrangeArgument_Unifloat(Unifloat* x)
+{
+    Unifloat* int_part;
+    Unifloat* res;
+    UnifloatType type = x->type;
+    UIntT i;
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+    Unifloat* TwoPi = mul_Unifloat(Two, Pi[type]);    
+    res = clone(x);
+    if(compare_Unifloat(abs_Unifloat(x), TwoPi) == 1)
+    {   
+        // if x>2*pi
+        int_part = div_Unifloat(x, TwoPi);
+
+        // trunc(int_part)
+        for(i = (int_part->exp) + 1; i <= PRECISION; i++)
+            setMant_Unifloat(int_part, i, 0);
+        res = sub_Unifloat(res, mul_Unifloat(int_part, TwoPi));
+    }
+    
+    if(res->sign == -1) res = add_Unifloat(res, TwoPi);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                          calcAtan_Unifloat                           //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* calcAtan_Unifloat(Unifloat* x, Unifloat* y, IntT i)
+{
+    UnifloatType type = x->type;
+    Unifloat* tmp, * aux, * ind1, * ind2;
+
+    if(compareWithError_Unifloat(abs_Unifloat(y)) != 1) 
+        return createZero_Unifloat(type);
+    
+    ind1 = convertInteger_Unifloat(2 * i - 1, type);
+    ind2 = convertInteger_Unifloat(2 * i + 1, type);
+    aux = mul_Unifloat(x, x);
+    tmp = div_Unifloat(mul_Unifloat(mul_Unifloat(y, aux), ind1), ind2);
+    tmp->sign = -tmp->sign;
+    return add_Unifloat(y, calcAtan_Unifloat(x, tmp, i + 1));
+}
+//////////////////////////////////////////////////////////////////////////
+//                          calcTan_Unifloat                            //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* calcTan_Unifloat(Unifloat* x, IntT i)
+{
+    Unifloat* tmp;
+
+    if(i == ((IntT)(PRECISION/4) + 7)) 
+        return createOne_Unifloat(x->type);
+    
+    if(i == 1) 
+        return div_Unifloat(x, calcTan_Unifloat(x, i + 1));
+    else    
+        {
+            tmp = div_Unifloat(mul_Unifloat(x, x), calcTan_Unifloat(x, i + 1));
+            return sub_Unifloat(convertInteger_Unifloat(2*i - 3, x->type), tmp);
+        }
+}
+
+/************************************************************************/
+/*                    UNIFLOAT EXPONENTIAL FUNCTIONS                    */
+/************************************************************************/
+
+//////////////////////////////////////////////////////////////////////////
+//                      exp_Unifloat                                    //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* exp_Unifloat(Unifloat* x)
+{
+    Unifloat *res;
+
+    res = mul_Unifloat(x, Log2_e[x->type]);
+    res = exp2_Unifloat(res);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      exp2_Unifloat                                   //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* exp2_Unifloat(Unifloat* x)
+{
+    /*
+     * var - the same thing as x, used to not change x in calculations
+     * inaccuracy - evaluation of inaccuracy of chain fraction 
+     * curNumer, preNumer, curDenom, preDenom - current and previous numerators
+     * and denominators of chain fraction
+     * a, b_even, b_odd - factors of chain fraction
+     * temp - auxiliary variable
+     */
+    IntT i, k;
+    UIntT nfp;
+    IntT exponent = 0;
+    UnifloatType type = x->type;
+    Unifloat *res, *temp, *inaccuracy, *var;
+    Unifloat *a, *b_even, *b_odd, *preNumer, *curNumer, *preDenom, *curDenom;
+    Unifloat *one = createOne_Unifloat(type);
+   
+    if((x->kind == Infinity && x->sign == 1) || x->kind == NaN)
+        return clone(x);
+    
+    if(x->kind == Infinity && x->sign ==  -1) 
+        return createZero_Unifloat(type);
+
+    var = clone(x);
+    var->sign = 1;
+
+    /* calculation of integer part of exp2 */
+    for(i = var->exp, k = 1; i > 0; i--)
+    {
+        exponent += getMant_Unifloat(var, i) * k;
+        if(i < MAX_SIZE_UNIFLOAT * sizeof_IntT * 8)
+            setMant_Unifloat(var, i, 0);
+        k <<= 1;
+        if(k == 0x1 << (sizeof_IntT * 8 - 1))
+        {
+            if(x->sign == 1)
+                return clone(infinity_Unifloat(type));
+            else
+                return createZero_Unifloat(type);
+        }
+    }
+    normalize_Unifloat(var);
+    
+    /* calculation of fractional part of exp2 */
+    if(isZero_Unifloat(var) == false)
+    {
+        var = mul_Unifloat(var, Ln_2[type]);
+
+        /* b[] = 1, 1, 2, 3, 2, 5, 2, 7, 2, 9, ... */
+        b_odd = createOne_Unifloat(type);
+        b_even = add_Unifloat(one, one);
+
+        /* a[] = -, x, -x, x, -x, x, -x, ... */
+        a = clone(var);
+        a->sign = 1;
+
+        /* preNumer = b0 */
+        preNumer = createOne_Unifloat(type);
+        /* preDenom = 1 */
+        preDenom = createOne_Unifloat(type);
+        /* curNumer = b0*b1 + a1 */
+        curNumer = add_Unifloat(one, a);
+        /* curDenom = b1 */
+        curDenom = createOne_Unifloat(type);
+
+        k = 2;
+        a->sign = -a->sign;
+
+        inaccuracy = createOne_Unifloat(type);
+        temp = createZero_Unifloat(type);
+        
+        while((inaccuracy->exp - curDenom->exp - preDenom->exp) >= - (IntT)PRECISION && isZero_Unifloat(inaccuracy) == 0)
+        {    
+            if(k%2 == 0)
+            {
+                copy(curNumer, temp);
+                curNumer = add_Unifloat(mul_Unifloat(b_even, curNumer), mul_Unifloat(a, preNumer));
+                copy(temp, preNumer);
+
+                copy(curDenom, temp);
+                curDenom = add_Unifloat(mul_Unifloat(b_even, curDenom), mul_Unifloat(a, preDenom));
+                copy(temp, preDenom);
+
+                inaccuracy = mul_Unifloat(inaccuracy, b_even);
+                b_odd = add_Unifloat(b_odd, b_even);
+                a->sign =  -a->sign;
+            }
+            else
+            {
+                copy(curNumer, temp);
+                curNumer = add_Unifloat(mul_Unifloat(b_odd, curNumer), mul_Unifloat(a, preNumer));
+                copy(temp, preNumer);
+
+                copy(curDenom, temp);
+                curDenom = add_Unifloat(mul_Unifloat(b_odd, curDenom), mul_Unifloat(a, preDenom));
+                copy(temp, preDenom);
+
+                inaccuracy = mul_Unifloat(inaccuracy, b_odd);
+                a->sign = -a->sign;
+            }
+            k++;
+        }
+        res = div_Unifloat(curNumer, curDenom);
+    }
+    else
+        res = createOne_Unifloat(type);
+
+    res->exp += exponent;
+
+    if(x->sign == -1)
+        res = div_Unifloat(one, res);
+    
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                         expm1_Unifloat                               //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* expm1_Unifloat(Unifloat* x)
+{
+    /*
+     * var - the same thing as x, used to not change x in calculations
+     * inaccuracy - evaluation of inaccuracy of chain fraction 
+     * curNumer, preNumer, curDenom, preDenom - current and previous numerators
+     * and denominators of chain fraction
+     * a, b_even, b_odd - factors of chain fraction
+     * temp - auxiliary variable
+     */
+    IntT i, k;
+    IntT exponent = 0;
+    UnifloatType type = x->type;
+    Unifloat *res, *temp, *inaccuracy, *var;
+    Unifloat *a, *b_even, *b_odd, *preNumer, *curNumer, *preDenom, *curDenom;
+    Unifloat *one = createOne_Unifloat(type);
+   
+    if((x->kind == Infinity && x->sign == 1) || x->kind == NaN)
+        return clone(x);
+
+    if(x->kind == Infinity && x->sign ==  -1) 
+        return createZero_Unifloat(type);
+
+    var = clone(x);
+    var->sign = 1;
+
+    var = mul_Unifloat(var, Log2_e[type]);
+
+    /* calculation of integer part of exp */
+    for(i = var->exp, k = 1; i > 0; i--)
+    {
+        exponent += getMant_Unifloat(var, i) * k;
+        if(i < MAX_SIZE_UNIFLOAT * sizeof_IntT * 8)
+            setMant_Unifloat(var, i, 0);
+        k <<= 1;
+        if(k == 0x1 << (sizeof_IntT * 8 - 1))
+        {
+            if(x->sign == 1)
+                return clone(infinity_Unifloat(type));
+            else
+                return createZero_Unifloat(type);
+        }
+    }           
+    normalize_Unifloat(var);
+
+    /* calculation of exp(x)-1,|x|<1 */
+    if(isZero_Unifloat(var) == false)
+    {
+        var = mul_Unifloat(var, Ln_2[type]);
+
+        /* b[] = 1-2^(-[x]), 1, 2, 3, 2, 5, 2, 7, 2, 9, ... */
+        b_odd = createOne_Unifloat(type);
+        b_even = add_Unifloat(one, one);
+
+        /* a[] = -, x, -x, x, -x, x, -x, ... */
+        a = clone(var);
+        a->sign = 1;
+
+        /* preNumer = b0 */
+        preNumer = createOne_Unifloat(type);
+        one->exp-=exponent;
+        preNumer = sub_Unifloat(preNumer, one);
+        one->exp+=exponent;
+        /* preDenom = 1 */
+        preDenom = createOne_Unifloat(type);
+        /* curNumer = b0*b1 + a1 */
+        curNumer = add_Unifloat(preNumer, a);
+        /* curDenom = b1 */
+        curDenom = createOne_Unifloat(type);
+
+        k = 2;
+        a->sign = -a->sign;
+
+        inaccuracy = createOne_Unifloat(type);
+        temp = createZero_Unifloat(type);
+        
+        while((inaccuracy->exp - curDenom->exp - preDenom->exp) >= - (IntT)PRECISION && isZero_Unifloat(inaccuracy) == 0)
+        {    
+            if(k%2 == 0)
+            {
+                copy(curNumer, temp);
+                curNumer = add_Unifloat(mul_Unifloat(b_even, curNumer), mul_Unifloat(a, preNumer));
+                copy(temp, preNumer);
+
+                copy(curDenom, temp);
+                curDenom = add_Unifloat(mul_Unifloat(b_even, curDenom), mul_Unifloat(a, preDenom));
+                copy(temp, preDenom);
+
+                inaccuracy = mul_Unifloat(inaccuracy, b_even);
+                b_odd = add_Unifloat(b_odd, b_even);
+                a->sign =  -a->sign;
+            }
+            else
+            {
+                copy(curNumer, temp);
+                curNumer = add_Unifloat(mul_Unifloat(b_odd, curNumer), mul_Unifloat(a, preNumer));
+                copy(temp, preNumer);
+
+                copy(curDenom, temp);
+                curDenom = add_Unifloat(mul_Unifloat(b_odd, curDenom), mul_Unifloat(a, preDenom));
+                copy(temp, preDenom);
+
+                inaccuracy = mul_Unifloat(inaccuracy, b_odd);
+                a->sign = -a->sign;
+            }
+            k++;
+        }
+        res = div_Unifloat(curNumer, curDenom);
+    }
+    else
+    {
+        res = createZero_Unifloat(type);
+        res->sign = x->sign;
+    }
+
+    res->exp += exponent;
+
+    if(x->sign == -1 && isZero_Unifloat(x) == false)
+    {
+        res = div_Unifloat(res, exp_Unifloat(abs_Unifloat(x)));
+        res->sign = -1;
+    }
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      log_Unifloat                                    //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* log_Unifloat(Unifloat* x)
+{
+    /*
+     * var - the same thing as x, used to not change x in calculations
+     * inaccuracy - inaccuracy in newton method
+     * exponent - Unifloat number equals var->exp
+     * temp - auxiliary variable
+     */
+    UnifloatType type = x->type;
+    Unifloat *res, *exponent, *var;
+    Unifloat *one = createOne_Unifloat(type);
+   
+    IntT sign;
+
+    if((isInfinity_Unifloat(x) && x->sign == 1) || isNan_Unifloat(x))
+        return x;
+
+    if(isZero_Unifloat(x))
+        return changeSign_Unifloat(clone(infinity_Unifloat(type)), -1);
+
+    if(x->sign == -1)
+        return clone(nan_Unifloat(type));
+        
+    if(compare_Unifloat(x, one) == -1)
+    {
+        var = div_Unifloat(one, x);
+        sign = -1;
+    }
+    else
+    {
+        var = clone(x);
+        sign = 1;
+    }
+
+    exponent = convertInteger_Unifloat(var->exp - 1, x->type);
+    exponent = mul_Unifloat(exponent, Ln_2[type]);
+
+    var->exp = 1;
+
+    res = add_Unifloat(log1p_Unifloat(sub_Unifloat(var, one)), exponent);
+    res->sign = sign;
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                      log1p_Unifloat                                  //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* log1p_Unifloat(Unifloat* x)
+{
+    /*
+     * var - the same thing as x, used to not change x in calculations
+     * inaccuracy - evaluation of inaccuracy of chain fraction
+     *
+     * curNumer, preNumer, curDenom, preDenom - current and previous numerators
+     * and denominators of chain fraction
+     *
+     * a, b - factors of chain fraction
+     * temp - auxiliary variable
+     */
+    IntT i, k;
+    UnifloatType type = x->type;
+    Unifloat *res, *temp, *inaccuracy;
+    Unifloat *var;
+    Unifloat *one = createOne_Unifloat(type);
+    Unifloat *exponent = createZero_Unifloat(type);
+    Unifloat *inacAddition = createZero_Unifloat(type);
+    Unifloat *a, *b, *preNumer, *curNumer, *preDenom, *curDenom;
+
+    IntT sign;
+
+    if((isInfinity_Unifloat(x) && x->sign == 1) || isNan_Unifloat(x) || isZero_Unifloat(x))
+        return x;
+
+    if(compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(type), -1)) == 0)
+        return changeSign_Unifloat(clone(infinity_Unifloat(type)), -1);
+
+    if(compare_Unifloat(x, changeSign_Unifloat(createOne_Unifloat(type), -1)) == -1)
+        return clone(nan_Unifloat(type));
+
+    if(compare_Unifloat(x, createZero_Unifloat(type)) == -1)
+    {
+        var = add_Unifloat(x, one);
+
+        inacAddition = clone(x);
+
+        for(i = 1; i <= PRECISION + x->exp; i++)
+            setMant_Unifloat(inacAddition, i, 0);
+
+        inacAddition = normalize_Unifloat(inacAddition);
+        inacAddition = div_Unifloat(inacAddition, var);
+
+        var = div_Unifloat(one, var);
+        var = sub_Unifloat(var, one);
+        sign = -1;
+    }
+    else
+    {
+        var = clone(x);
+        sign = 1;
+    }
+
+    /* desire: log(1 + var), 0 <= var < 1 */
+    if(var->exp > 1)
+    {
+        var = add_Unifloat(var, one);
+    
+        exponent = convertInteger_Unifloat(var->exp - 1, type);
+        exponent = mul_Unifloat(exponent, Ln_2[type]);
+        var->exp = 1;
+
+        var = sub_Unifloat(var, one);
+    }
+    
+    /* b[] = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, ...*/    
+    b = createOne_Unifloat(type);
+
+    /* a[] = -, x, 1^2*x, 1^2*x, 2^2*x, 2^2*x, 3^2*x, 3^2*x, ...*/
+    a = clone(var);
+    
+    /* preNumer = b0 */
+    preNumer = createZero_Unifloat(type);
+    /* preDenom = 1 */
+    preDenom = createOne_Unifloat(type);
+    /* curNumer = b0*b1 + a1 */
+    curNumer = clone(a);
+    /* curDenom = b1 */
+    curDenom = createOne_Unifloat(type);
+    
+    k = 2;
+    b = add_Unifloat(b, one);
+
+    inaccuracy = createOne_Unifloat(type);
+    temp = createZero_Unifloat(type);
+    
+    while((inaccuracy->exp - curDenom->exp - preDenom->exp) >= - (IntT)PRECISION - 10 && isZero_Unifloat(inaccuracy) == 0)
+    {    
+        copy(curNumer, temp);
+        curNumer = add_Unifloat(mul_Unifloat(b, curNumer), mul_Unifloat(a, preNumer));
+        copy(temp, preNumer);
+
+        copy(curDenom, temp);
+        curDenom = add_Unifloat(mul_Unifloat(b, curDenom), mul_Unifloat(a, preDenom));
+        copy(temp, preDenom);
+
+        inaccuracy = mul_Unifloat(inaccuracy, b);
+        k++;
+
+        b = add_Unifloat(b, one);
+        a = mul_Unifloat(var, convertInteger_Unifloat((k / 2) * (k / 2), type));
+    }
+
+    res = div_Unifloat(curNumer, curDenom);
+    res = add_Unifloat(res, exponent);
+
+    res->sign = sign;
+    res = add_Unifloat(res, inacAddition);
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                              sqrt_Unifloat                           //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* sqrt_Unifloat(Unifloat* x)
+{
+    Unifloat *a, *inaccuracy, *res;
+    IntT exp;
+
+    if((isInfinity_Unifloat(x) && x->sign == 1) || isNan_Unifloat(x) || isZero_Unifloat(x))
+        return x;
+    
+    if(x->sign == -1)
+    {
+        return clone(nan_Unifloat(x->type));
+    }
+
+    a = clone(x);
+
+    if(x->exp % 2 == 1 || x->exp % 2 == -1)
+    {
+        exp = (x->exp - 1) / 2;
+        a->exp = 1;
+    }
+    else
+    {
+        exp = (x->exp - 2) / 2;
+        a->exp = 2;
+    }
+
+    /* initial approximation */
+    res = createOne_Unifloat(x->type);
+    res->exp++;
+    inaccuracy = createOne_Unifloat(x->type);
+
+    while(inaccuracy->sign == 1 && inaccuracy->exp >= res->exp - (IntT)PRECISION && isZero_Unifloat(inaccuracy) == 0)
+    {
+        copy(res, inaccuracy);
+        res = add_Unifloat(res, div_Unifloat(a, res));
+        res->exp--;
+        inaccuracy = sub_Unifloat(inaccuracy, res);
+    }
+
+    res->exp += exp;
+
+    return res;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//                         powInt_Unifloat                              //
+//////////////////////////////////////////////////////////////////////////
+Unifloat* powInt_Unifloat(Unifloat* x, UIntT n)
+{
+    if(n == 0)
+        return createOne_Unifloat(x->type);
+    else
+    if(n == 1)
+        return clone(x);
+    else
+    if(n % 2 == 0)
+        return powInt_Unifloat(mul_Unifloat(x, x), n / 2);
+    else
+        return mul_Unifloat(x, 
+            powInt_Unifloat(mul_Unifloat(x, x), (n - 1) / 2)
+            );
+}
+/********************************************************************/
+/**                    UNIFLOAT COMPLEX FUNCTIONS                  **/
+/********************************************************************/
+Unifloat* cabs_model(UnifloatComplex* x)
+{
+    Unifloat* res;
+
+    if(isNan_Unifloat(x->Re))
+        if(!isInfinity_Unifloat(x->Im))
+        {
+            res = createZero_Unifloat((x->Re)->type);
+            res->kind = NaN;
+            return res;
+        }
+        else
+        {
+            res = createZero_Unifloat((x->Re)->type);
+            res->kind = Infinity;
+            return res;
+        }
+
+    if(isNormal_Unifloat(x->Re))
+        if(isNan_Unifloat(x->Im))
+        {
+            res = createZero_Unifloat((x->Re)->type);
+            res->kind = NaN;
+            return res;
+        }
+        else if(isInfinity_Unifloat(x->Im))
+        {
+            res = createZero_Unifloat((x->Re)->type);
+            res->kind = Infinity;
+            return res;
+        }
+
+    if(isInfinity_Unifloat(x->Re))
+        {
+            res = createZero_Unifloat((x->Re)->type);
+            res->kind = Infinity;
+            return res;
+        }
+
+    return abs_UnifloatComplex(x);
+}
+
+Unifloat* carg_model(UnifloatComplex* x)
+{
+    return carg_Unifloat(x);
+}
+
+Unifloat* cimag_model(UnifloatComplex* x)
+{
+    return clone(x->Im);
+}
+
+UnifloatComplex* conj_model(UnifloatComplex* x)
+{
+    UnifloatComplex* res = clone(x);
+    res->Im->sign = (-1) * res->Im->sign;
+    return res;
+}
+
+UnifloatComplex* cproj_model(UnifloatComplex* x)
+{
+    Unifloat* newRE, * newIM, * One, * Two, *tmp;
+    if(isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        {
+            newRE = createZero_Unifloat((x->Re)->type);
+            newIM = createZero_Unifloat((x->Re)->type);
+            newRE->kind = NaN;
+            newIM->kind = NaN;
+            return create_UnifloatComplex(newRE, newIM);
+        }
+    else if(isNan_Unifloat(x->Re) || isNan_Unifloat(x->Im))
+        {
+            newRE = createZero_Unifloat((x->Re)->type);
+            newIM = createZero_Unifloat((x->Re)->type);
+            newRE->kind = Infinity;
+            return create_UnifloatComplex(newRE, newIM);
+        }
+    One = convertString_Unifloat(create_CString("1"), (x->Re)->type);
+    Two = convertString_Unifloat(create_CString("2"), (x->Re)->type);
+    tmp = add_Unifloat(mul_Unifloat(x->Re, x->Re), mul_Unifloat(x->Im, x->Im));
+    tmp = add_Unifloat(One, tmp);
+    newRE = div_Unifloat(mul_Unifloat(Two, x->Re), tmp);
+    newIM = div_Unifloat(mul_Unifloat(Two, x->Im), tmp);
+    return create_UnifloatComplex(newRE, newIM);
+}
+
+Unifloat* creal_model(UnifloatComplex* x)
+{
+    return clone(x->Re);
+}
+/********************************************************************/
+/**                     UNIFLOAT CHYPER FUNCTIONS                  **/
+/********************************************************************/
+UnifloatComplex* cacosh_model(UnifloatComplex* x)
+{
+    UnifloatComplex* aux1, * aux2, *aux;
+    UnifloatComplex* res;
+    Unifloat* real, * imag, * arg1, * arg2, * arg, * RE, * IM;
+    Unifloat* Zero = createZero_Unifloat((x->Re)->type);
+    Unifloat* One = createOne_Unifloat((x->Re)->type);
+    UnifloatType type = x->Im->type;
+    Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+    Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+    Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+    UnifloatComplex* OneC = create_UnifloatComplex(createOne_Unifloat(type), createZero_Unifloat(type));
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = cacosh_model(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }
+    
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(PiTwo));
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiTwo));
+
+    if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(Pi[type]));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(ThreePiFour));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiFour));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if ((compare_Unifloat(x->Re, One) == 0) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), createZero_Unifloat(type));
+
+    if ((compare_Unifloat(abs_Unifloat(x->Re), One) == 0) && isZero_Unifloat(x->Im))    
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(Pi[type]));
+    
+    aux1 = clone(x);
+    aux1->Re = add_Unifloat(aux1->Re, One);
+    arg1 = acos_Unifloat(div_Unifloat(aux1->Re, abs_UnifloatComplex(aux1)));
+
+    aux2 = clone(x);
+    aux2->Re = sub_Unifloat(aux2->Re, One);
+    arg2 = acos_Unifloat(div_Unifloat(aux2->Re, abs_UnifloatComplex(aux2)));
+
+    arg = add_Unifloat(arg1, arg2);
+    arg->exp--;
+
+    real = sqrt_Unifloat(abs_UnifloatComplex(aux1));
+    real = mul_Unifloat(real, sqrt_Unifloat(abs_UnifloatComplex(aux2)));
+    imag = clone(real);
+    real = mul_Unifloat(real, cos_Unifloat(arg));
+    imag = mul_Unifloat(imag, sin_Unifloat(arg));
+    real = add_Unifloat(x->Re, real);
+    imag = add_Unifloat(x->Im, imag);
+
+    RE = mul_Unifloat(real, real);
+    RE = add_Unifloat(RE, mul_Unifloat(imag, imag));
+    RE = sqrt_Unifloat(RE);
+    RE = log_Unifloat(RE);
+
+    IM = mul_Unifloat(real, real);
+    IM = add_Unifloat(IM, mul_Unifloat(imag, imag));
+    IM = sqrt_Unifloat(IM);
+    IM = div_Unifloat(real, IM);
+    IM = acos_Unifloat(IM);
+
+//    aux1 = add_UnifloatComplex(x, OneC);
+//    aux2 = sub_UnifloatComplex(OneC, x);
+//
+//    res = clog_Unifloat(div_UnifloatComplex(aux1, aux2));
+//    res->Re = div_Unifloat(res->Re, Two);
+//    res->Im = div_Unifloat(res->Im, Two);
+
+    return create_UnifloatComplex(RE, IM);
+}
+
+UnifloatComplex* casinh_model(UnifloatComplex* x)
+{
+    UnifloatComplex* aux, * OneC;
+    Unifloat* real, * imag, * temp, * RE, * IM;
+    Unifloat* Zero = createZero_Unifloat((x->Re)->type);
+    Unifloat* One = createOne_Unifloat((x->Re)->type);
+    UnifloatComplex* res;
+    UnifloatType type = x->Im->type;
+    Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+    Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+    Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+
+    if (x->Re->sign == -1)
+    {
+        x->Re->sign = 1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res = casinh_model(x);
+        x->Re->sign = -1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res->Im->sign = (-1) * res->Im->sign;
+        res->Re->sign = (-1) * res->Re->sign;
+        return res;
+    }
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = casinh_model(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }
+
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), createZero_Unifloat(type));
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiTwo));
+
+    if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiFour));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isZero_Unifloat(x->Re) && (compare_Unifloat(x->Im, One) == 0))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(PiTwo));
+
+    OneC = create_UnifloatComplex(One, Zero);
+    aux = mul_UnifloatComplex(x, x);
+    aux = add_UnifloatComplex(aux, OneC);
+    
+    real = abs_UnifloatComplex(aux);
+    temp = acos_Unifloat(div_Unifloat(aux->Re, real));
+    temp->exp--;
+    real = sqrt_Unifloat(real);
+    imag = clone(real);
+    real = mul_Unifloat(real, cos_Unifloat(temp));
+    imag = mul_Unifloat(imag, sin_Unifloat(temp));
+    real = add_Unifloat(x->Re, real);
+    imag =add_Unifloat(x->Im, imag);
+    
+    RE = mul_Unifloat(real, real);
+    RE = add_Unifloat(RE, mul_Unifloat(imag, imag));
+    RE = sqrt_Unifloat(RE);
+    RE = log_Unifloat(RE);
+
+    IM = mul_Unifloat(real, real);
+    IM = add_Unifloat(IM, mul_Unifloat(imag, imag));
+    IM = sqrt_Unifloat(IM);
+    IM = div_Unifloat(real, IM);
+    IM = acos_Unifloat(IM);
+
+    return create_UnifloatComplex(RE, IM);
+}
+
+UnifloatComplex* catanh_model(UnifloatComplex* x)
+{
+    UnifloatComplex *tempC, *OneC;
+    Unifloat* real, * imag, * tmp;
+    Unifloat* Zero = createZero_Unifloat((x->Re)->type);
+    Unifloat* One = createOne_Unifloat((x->Re)->type);
+    UnifloatComplex* res;
+    UnifloatType type = x->Im->type;
+    Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+
+    if (x->Re->sign == -1)
+    {
+        x->Re->sign = 1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res = catanh_model(x);
+        x->Re->sign = -1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res->Im->sign = (-1) * res->Im->sign;
+        res->Re->sign = (-1) * res->Re->sign;
+        return res;
+    }
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = catanh_model(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }
+
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), createZero_Unifloat(type));
+
+    if (isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(nan_Unifloat(type)));
+
+    if ((compare_Unifloat(x->Re, One) == 0) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(PiTwo));
+
+    if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(PiTwo));
+
+    if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(PiTwo));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(PiTwo));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    tempC = create_UnifloatComplex(Zero, Zero);
+    OneC = create_UnifloatComplex(One, Zero);
+    tempC = div_UnifloatComplex(add_UnifloatComplex(OneC, x), 
+                                sub_UnifloatComplex(OneC, x));
+    
+    real = log_Unifloat(abs_UnifloatComplex(tempC));
+    
+    tmp = sqrt_Unifloat(add_Unifloat(mul_Unifloat(tempC->Im, tempC->Im), 
+          mul_Unifloat(tempC->Re, tempC->Re)));
+    imag = acos_Unifloat(div_Unifloat(tempC->Re, tmp));
+    
+    real->exp--;
+    imag->exp--;
+
+    return create_UnifloatComplex(real, imag);
+}
+
+UnifloatComplex* ccosh_model(UnifloatComplex* x)
+{
+    Unifloat* real, * imag, * One, *tmp;
+    UnifloatComplex* res;
+    UnifloatType type = x->Re->type;
+    One = createOne_Unifloat((x->Re)->type);
+
+    if (x->Re->sign == -1)
+    {
+        x->Re->sign = 1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res = ccosh_model(x);
+        x->Re->sign = -1;
+        x->Im->sign = (-1) * x->Im->sign;
+        return res;
+    }
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = ccosh_model(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1)* res->Im->sign;
+        return res;
+    }
+
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(createOne_Unifloat(type), createZero_Unifloat(type));
+
+    if (isZero_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im)&& !isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(mul_Unifloat(infinity_Unifloat(type), cos_Unifloat(x->Im)),
+                                     mul_Unifloat(infinity_Unifloat(type), sin_Unifloat(x->Im)));
+
+    if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isNan_Unifloat(x->Re) && !isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    real = exp_Unifloat(x->Re);
+    real = add_Unifloat(real, div_Unifloat(One, real));
+    real = mul_Unifloat(real, cos_Unifloat(x->Im));
+    real->exp--;
+
+    imag = exp_Unifloat(x->Re);
+    imag = sub_Unifloat(imag, div_Unifloat(One, imag));
+    imag = mul_Unifloat(imag, sin_Unifloat(x->Im));
+    imag->exp--;
+    res = create_UnifloatComplex(real, imag);
+
+    return res;
+}
+
+UnifloatComplex* csinh_model(UnifloatComplex* x)
+{
+    Unifloat* real, * imag, * One, *tmp;
+    UnifloatComplex* res;
+    UnifloatType type = x->Re->type;
+    
+    One = createOne_Unifloat((x->Re)->type);
+
+    if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (x->Re->sign == -1)
+    {
+        x->Re->sign = 1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res = csinh_model(x);
+        x->Re->sign = -1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res->Im->sign = (-1) * res->Im->sign;
+        res->Re->sign = (-1) * res->Re->sign;
+        return res;
+    }
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = csinh_model(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }
+
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isZero_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(nan_Unifloat(type)));
+
+    if (isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(nan_Unifloat(type)));
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNormal_Unifloat(x->Re) && !isZero_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(mul_Unifloat(infinity_Unifloat(type), cos_Unifloat(x->Im)),
+                                      mul_Unifloat(infinity_Unifloat(type), sin_Unifloat(x->Im)));
+    
+    if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isNan_Unifloat(x->Re) && !isNan_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    real = exp_Unifloat(x->Re);
+    real = sub_Unifloat(real, div_Unifloat(One, real));
+    real = mul_Unifloat(real, cos_Unifloat(x->Im));
+    real->exp--;
+
+    imag = exp_Unifloat(x->Re);
+    imag = add_Unifloat(imag, div_Unifloat(One, imag));
+    imag = mul_Unifloat(imag, sin_Unifloat(x->Im));
+    imag->exp--;
+
+    res = create_UnifloatComplex(real, imag);
+
+    return res;
+}
+
+UnifloatComplex* ctanh_model(UnifloatComplex* x)
+{
+    Unifloat* real, * imag;
+    UnifloatComplex* res;
+    UnifloatType type = x->Re->type;
+    Unifloat* Zero = createZero_Unifloat(type);
+    Unifloat* Two = convertInteger_Unifloat(2, type);
+
+    if (x->Re->sign == -1)
+    {
+        x->Re->sign = 1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res = ctanh_model(x);
+        x->Re->sign = -1;
+        x->Im->sign = (-1) * x->Im->sign;
+        res->Im->sign = (-1) * res->Im->sign;
+        res->Re->sign = (-1) * res->Re->sign;
+        return res;
+    }
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = ctanh_model(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }    
+
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(createOne_Unifloat(type), mul_Unifloat(Zero, sin_Unifloat(mul_Unifloat(x->Im, Two))));
+
+    if (isInfinity_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(createOne_Unifloat(type), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(createOne_Unifloat(type), createZero_Unifloat(type));
+
+    if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isNan_Unifloat(x->Re) && !isNan_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    return div_UnifloatComplex(csinh_model(x), ccosh_model(x));   
+}
+
+/************************************************************************/
+/*               UNIFLOAT COMPLEX EXPONENTIAL FUNCTIONS                 */
+/************************************************************************/
+
+UnifloatComplex* cexp_Unifloat(UnifloatComplex* x)
+{
+    UnifloatComplex* tmp1;
+    Unifloat* exponent;
+    UnifloatComplex* arg = clone(x);
+    UnifloatComplex* res;
+    UnifloatType type = x->Re->type;
+    Unifloat* Zero = createZero_Unifloat(type);
+    IntT sign;
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = cexp_Unifloat(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }    
+
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(createOne_Unifloat(type), createZero_Unifloat(type));
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(mul_Unifloat(Zero, cos_Unifloat(x->Im)), mul_Unifloat(Zero, sin_Unifloat(x->Im)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(mul_Unifloat(infinity_Unifloat(type), cos_Unifloat(x->Im)), mul_Unifloat(infinity_Unifloat(type), sin_Unifloat(x->Im)));
+        
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return clone(x);
+
+    if (isNan_Unifloat(x->Re) && !isNan_Unifloat(x->Im) && !isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    exponent = exp_Unifloat(arg->Re);
+
+    tmp1 = create_UnifloatComplex(cos_Unifloat(arg->Im), sin_Unifloat(arg->Im));
+
+    res = clone(tmp1);
+    res->Re = mul_Unifloat(exponent, tmp1->Re);
+    res->Im = mul_Unifloat(exponent, tmp1->Im);
+
+    if (isUnderflow_Unifloat(res->Re))
+    {
+        sign = res->Re->sign;
+        res->Re = createZero_Unifloat(type);
+        res->Re->sign = sign;
+    }
+    if (isUnderflow_Unifloat(res->Im))
+    {
+        sign = res->Im->sign;
+        res->Im = createZero_Unifloat(type);
+        res->Im->sign = sign;
+    }
+    
+    if (isOverflow_Unifloat(res->Re))
+    {
+        sign = res->Re->sign;
+        res->Re = clone(infinity_Unifloat(type));
+        res->Re->sign = sign;
+    }
+    if (isOverflow_Unifloat(res->Im))
+    {
+        sign = res->Im->sign;
+        res->Im = clone(infinity_Unifloat(type));
+        res->Im->sign = sign;
+    }
+
+    return res;
+}
+
+UnifloatComplex* clog_Unifloat(UnifloatComplex* x)
+{
+    UnifloatComplex* res = create_UnifloatComplex(createZero_Unifloat(x->Im->type),
+                           createZero_Unifloat(x->Im->type));
+    UnifloatComplex* arg = clone(x);
+    UnifloatType type = x->Re->type;
+    Unifloat* PiFour = div_Unifloat(Pi[type], convertInteger_Unifloat(4, type));
+    Unifloat* ThreePiFour = mul_Unifloat(PiFour, convertInteger_Unifloat(3, type));
+    Unifloat* PiTwo = div_Unifloat(Pi[type], convertInteger_Unifloat(2, type));
+
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = clog_Unifloat(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }    
+
+    if (isZero_Unifloat(x->Re) && (x->Re->sign == -1) && isZero_Unifloat(x->Im))
+    {
+        res = create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(Pi[type]));
+        res->Re->sign = -1;
+        return res;
+    }
+
+    if (isZero_Unifloat(x->Re) && (x->Re->sign == 1) && isZero_Unifloat(x->Im))
+    {
+        res = create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+        res->Re->sign = -1;
+        return res;
+    }
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiTwo));
+
+    if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(Pi[type]));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(ThreePiFour));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiFour));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    res->Re = log_Unifloat(abs_UnifloatComplex(arg));
+    res->Im = carg_Unifloat(arg);
+
+    return res;
+}
+
+UnifloatComplex* clog10_Unifloat(UnifloatComplex* x)
+{
+    UnifloatComplex* res = create_UnifloatComplex(createZero_Unifloat(x->Im->type),
+                           createZero_Unifloat(x->Im->type));
+    UnifloatComplex* arg = clone(x);
+    UnifloatType type = x->Re->type;
+    Unifloat* LN10 = log_Unifloat(convertInteger_Unifloat(10, type));
+    Unifloat* PiLn10 = div_Unifloat(Pi[type], LN10);
+    Unifloat* PiLn10Four = div_Unifloat(PiLn10, convertInteger_Unifloat(4, type));
+    Unifloat* ThreePiLn10Four = mul_Unifloat(PiLn10Four, convertInteger_Unifloat(3, type));
+    Unifloat* PiLn10Two = div_Unifloat(PiLn10, convertInteger_Unifloat(2, type));
+    
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = clog10_Unifloat(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }    
+
+    if (isZero_Unifloat(x->Re) && (x->Re->sign == -1) && isZero_Unifloat(x->Im))
+    {
+        res = create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(Pi[type]));
+        res->Re->sign = -1;
+        return res;
+    }
+
+    if (isZero_Unifloat(x->Re) && (x->Re->sign == 1) && isZero_Unifloat(x->Im))
+    {
+        res = create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+        res->Re->sign = -1;
+        return res;
+    }
+
+    if (isNormal_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiLn10Two));
+
+    if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiLn10));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(ThreePiLn10Four));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(PiLn10Four));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+            return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    res->Re = log_Unifloat(abs_UnifloatComplex(arg));
+    res->Re = div_Unifloat(res->Re, LN10);
+
+    res->Im = carg_Unifloat(arg);
+    res->Im = div_Unifloat(res->Im, LN10);
+    
+    return res;
+}
+
+UnifloatComplex* cpow_Unifloat(UnifloatComplex* x, UnifloatComplex* y)
+{
+    UnifloatComplex* res = clone(x);
+    UnifloatComplex* tmp1 = clone(x), *tmp2 = clone(x);
+    UnifloatComplex* arg = clone(x);
+    UnifloatType type = x->Re->type;
+
+    if (isNan_Unifloat(x->Re) && isInfinity_Unifloat(x->Im) && 
+        isNormal_Unifloat(y->Re) && isNormal_Unifloat(y->Re))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && isNan_Unifloat(x->Im) &&
+        isNormal_Unifloat(y->Re) && isNormal_Unifloat(y->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(nan_Unifloat(type)));
+
+
+    tmp1 = clog_Unifloat(x);
+    tmp2 = mul_UnifloatComplex(y, tmp1);
+    res = cexp_Unifloat(tmp2);
+
+    return res;
+}
+
+UnifloatComplex* csqrt_Unifloat(UnifloatComplex* x)
+{
+    UnifloatComplex* res = create_UnifloatComplex(createZero_Unifloat(x->Im->type),
+                           createZero_Unifloat(x->Im->type));
+    UnifloatComplex* arg = clone(x);
+    UnifloatComplex* Half = create_UnifloatComplex(
+                                div_Unifloat(
+                                            createOne_Unifloat(x->Im->type), 
+                                            convertInteger_Unifloat(2, x->Im->type)),
+                                createZero_Unifloat(x->Im->type));
+    UnifloatType type = x->Re->type;
+
+    if (x->Im->sign == -1)
+    {
+        x->Im->sign = 1;
+        res = csqrt_Unifloat(x);
+        x->Im->sign = -1;
+        res->Im->sign = (-1) * res->Im->sign;
+        return res;
+    }    
+
+    if (isZero_Unifloat(x->Re) && isZero_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), clone(infinity_Unifloat(type)));
+
+    if (isNormal_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(createZero_Unifloat(type), clone(infinity_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(infinity_Unifloat(type)), createZero_Unifloat(type));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == -1) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(infinity_Unifloat(type)));
+
+    if (isInfinity_Unifloat(x->Re) && (x->Re->sign == 1) && isNan_Unifloat(x->Im))
+        return clone(x);
+
+    if (isNan_Unifloat(x->Re) && isNormal_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    if (isNan_Unifloat(x->Re) && isNan_Unifloat(x->Im))
+        return create_UnifloatComplex(clone(nan_Unifloat(type)), clone(nan_Unifloat(type)));
+
+    res = cpow_Unifloat(x, Half);
+
+    return res;
+}
+
+/************************************************************************/
+/*                          UNIFLOAT FORMATTERS                         */
+/************************************************************************/
+
+void initMathMedia(void)
+{
+    registerTSFormatter("unifloat", (TSFormatterFuncType)unifloat_formatter);
+}
+
+static void unifloat_formatter(TSStream* stream, Unifloat* value)
+{
+    VERIFY_TYPE(unifloat_formatter, &type_Unifloat, value);
+
+    writeUnifloat_TSStream(stream, value);
+}
+
+void writeUnifloat_TSStream(TSStream* stream, Unifloat* initValue)
+{
+    IntT i,j;
+    UIntT digExp, digMant, size;
+    IntT maxExp;
+    IntT exponent;
+    Unifloat* value = clone(initValue);
+/*
+    if(compare_Unifloat(abs_Unifloat(value), max_Unifloat[value->type]) == 1)
+    {
+        writeUnifloat_TSStream(
+            stream, 
+            changeSign_Unifloat(infinity_Unifloat[value->type], value->sign)
+            );
+        return;
+    }
+*/
+    writeTypeHeaderTSStream(stream, "unifloat");
+    
+    writeInt_TSStream(stream, value->type);
+
+    switch(value->type)
+    {
+        case UniFloatT:
+            digExp = digExp_FloatT;
+            digMant = digMant_FloatT;
+            maxExp = maxExp_FloatT;
+            size = size_FloatT;
+            break;
+        case UniDoubleT:
+            digExp = digExp_DoubleT;
+            digMant = digMant_DoubleT;
+            maxExp = maxExp_DoubleT;
+            size = size_DoubleT;
+            break;
+        case UniLongDoubleT:
+            digExp = digExp_LongDoubleT;
+            digMant = digMant_LongDoubleT;
+            maxExp = maxExp_LongDoubleT;
+            size = size_LongDoubleT;
+            break;
+    }
+
+    indexBuf = ((sizeof_LongT - (size % sizeof_LongT)) % sizeof_LongT) * 8;
+    buf = 0;
+
+    writeBit_TSStream(stream, (1 - value->sign) / 2);
+    
+    exponent = value->exp + maxExp - 2;
+
+    if(isZero_Unifloat(value))
+        exponent = 0x0;
+
+    if(isNormal_Unifloat(value) && value->exp - 1 <= maxExp)
+    {
+#if ( __powerpc64__ )
+        if(value->type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+        {
+            digMant /= 2;
+            value = round_Unifloat(value, digMant);
+        }
+#endif
+        if(exponent > 0)
+        {
+            j = maxExp;
+            for(i = 0;i < digExp;i++)
+            {
+                writeBit_TSStream(stream, (exponent & j) / j);
+                j >>= 1;
+            }
+            
+            if(value->type == UniLongDoubleT && size == 10)
+                writeBit_TSStream(stream, 1);
+
+            for(i = 0;i < digMant - 1;i++)
+                writeBit_TSStream(stream, getMant_Unifloat(value,i + 2));
+#if ( __powerpc64__ )
+            if(value->type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+            {
+                value = sub_Unifloat(initValue, value);
+                
+                exponent = value->exp + maxExp - 2;
+                
+                if(isZero_Unifloat(value))
+                {
+                      exponent = 0x0;
+                      value->sign = 1;
+                }
+                
+                writeBit_TSStream(stream, (1 - value->sign) / 2);
+                
+                if(exponent > 0)
+                {
+                    j = maxExp;
+                    for(i = 0;i < digExp;i++)
+                    {
+                        writeBit_TSStream(stream, (exponent & j) / j);
+                        j >>= 1;
+                    }
+                    
+                    if(value->type == UniLongDoubleT && size == 10)
+                        writeBit_TSStream(stream, 1);
+                    
+                    for(i = 0;i < digMant - 1;i++)
+                        writeBit_TSStream(stream, getMant_Unifloat(value,i + 2));
+                }
+                else
+                {
+                    for(i = 0;i < digExp;i++)
+                    {
+                        writeBit_TSStream(stream, 0);
+                    }
+                    
+                    if(value->type == UniLongDoubleT && size == 10)
+                    writeBit_TSStream(stream, 0);
+                    
+                    for(i = 0;i < -exponent && i < digMant - 1;i++)
+                        writeBit_TSStream(stream, 0);
+                    for(;i < digMant - 1;i++)
+                        writeBit_TSStream(stream, getMant_Unifloat(value,i + 1 + exponent));
+                }
+            }
+#endif
+        }
+        else
+        {
+            for(i = 0;i < digExp;i++)
+            {
+                writeBit_TSStream(stream, 0);
+            }
+            
+            if(value->type == UniLongDoubleT && size == 10)
+                writeBit_TSStream(stream, 0);
+
+            for(i = 0;i < -exponent && i < digMant - 1;i++)
+                writeBit_TSStream(stream, 0);
+            for(;i < digMant - 1;i++)
+                writeBit_TSStream(stream, getMant_Unifloat(value,i + 1 + exponent));
+#if ( __powerpc64__ )
+            if(value->type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+            {
+                   for(i = 0;i < 64;i++)
+                    writeBit_TSStream(stream, 0);
+            }
+#endif
+        }
+    }
+    else
+    {
+        for(i = 0;i < digExp;i++)
+            writeBit_TSStream(stream, 1);
+
+        if(value->type == UniLongDoubleT && size == 10)
+            writeBit_TSStream(stream, 1);
+
+        if(isInfinity_Unifloat(value) || value->exp - 1 > maxExp)
+            writeBit_TSStream(stream, 0);
+        else
+            writeBit_TSStream(stream, 1);
+        
+#if ( __powerpc64__ )
+        if(value->type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+        {
+            digMant = digMant + digExp;
+        }
+#endif
+        for(i = 1;i < digMant - 1;i++)
+            writeBit_TSStream(stream, 0);
+    }
+
+    writeChar_TSStream(stream, '\0');
+}
+
+Unifloat* readUnifloat_TSStream(TSStream* stream)
+{
+    Unifloat* res;
+    Unifloat* initRes;
+
+    UnifloatType type;
+    IntT i, j, k;
+    UIntT digExp, digMant, size;
+    IntT maxExp;
+    IntT exponent;
+
+    verifyType_TSStream(stream, "unifloat");
+
+    type = readInt_TSStream(stream);
+    
+    res = createZero_Unifloat(type);
+    
+    switch(type)
+    {
+        case UniFloatT:
+            digExp = digExp_FloatT;
+            digMant = digMant_FloatT;
+            maxExp = maxExp_FloatT;
+            size = size_FloatT;
+            break;
+        case UniDoubleT:
+            digExp = digExp_DoubleT;
+            digMant = digMant_DoubleT;
+            maxExp = maxExp_DoubleT;
+            size = size_DoubleT;
+            break;
+        case UniLongDoubleT:
+            digExp = digExp_LongDoubleT;
+            digMant = digMant_LongDoubleT;
+            maxExp = maxExp_LongDoubleT;
+            size = size_LongDoubleT;
+            break;
+    }
+
+    indexBuf = 0;
+    buf = 0;
+
+#if ( __powerpc64__ )
+    if(type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+    {
+        digMant /= 2;
+    }
+#endif
+
+    for(i = 0;i < digMant - 1;i++)
+        setMant_Unifloat(res, digMant - i, readBit_TSStream(stream));
+
+    if(type == UniLongDoubleT && size == 10)
+        readBit_TSStream(stream);
+
+    exponent = 0x0;
+    j = 0x1;
+    for(i = 0;i < digExp;i++)
+    {
+        exponent += (readBit_TSStream(stream) * j);
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        j = 0;
+
+        for(i = 0; i < MAX_SIZE_UNIFLOAT; i++) 
+            if(res->mant[i] != 0)
+                j = 1;
+
+        if(j == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+
+        setMant_Unifloat(res, 1, 1);
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+
+    res->sign = 1 - 2 * readBit_TSStream(stream);
+
+#if ( __powerpc64__ )
+    if(type == UniLongDoubleT && sizeof_LongDoubleT == 16)
+    {
+        initRes = clone(res);
+        res = createZero_Unifloat(type);
+
+    for(i = 0;i < digMant - 1;i++)
+        setMant_Unifloat(res, digMant - i, readBit_TSStream(stream));
+
+    if(type == UniLongDoubleT && size == 10)
+        readBit_TSStream(stream);
+
+    exponent = 0x0;
+    j = 0x1;
+    for(i = 0;i < digExp;i++)
+    {
+        exponent += (readBit_TSStream(stream) * j);
+        j <<= 1;
+    }
+
+    if(exponent == maxExp * 2 - 1)   /* exponent == 0x111...11 */
+    {
+        j = 0;
+
+        for(i = 0; i < MAX_SIZE_UNIFLOAT; i++) 
+            if(res->mant[i] != 0)
+                j = 1;
+
+        if(j == 1)
+            res->kind = NaN;
+        else
+            res->kind = Infinity;
+
+        setMant_Unifloat(res, 1, 1);
+    }
+    else
+    {
+        res->kind = Normal;
+        res->exp = exponent - maxExp + 2;
+
+        if(exponent == 0x0)
+        {
+            setMant_Unifloat(res, 1, 0);
+            res->exp++;
+            res = normalize_Unifloat(res);
+            res = round_Unifloat(res, PRECISION);
+        }
+        else
+            setMant_Unifloat(res, 1, 1);
+    }
+
+    res->sign = 1 - 2 * readBit_TSStream(stream);
+    
+        if(isZero_Unifloat(initRes) == false)
+        {
+            res = add_Unifloat(res, initRes);
+        }
+    }
+#endif
+
+    shift_TSInputStream(stream,strlen(pointer_TSStream(stream))+1);
+    
+    return res;
+}
+
+void writeBit_TSStream(TSStream* stream, UIntT bit)
+{
+    buf <<= 1;
+    buf |= (ULongT)bit;
+    indexBuf = (indexBuf + 1) % (sizeof_LongT * 8);
+    
+    if(indexBuf == 0)
+    {
+        writeLongReal_TSStream(stream, buf);
+        buf = 0;
+    }
+}
+
+UIntT readBit_TSStream(TSStream* stream)
+{
+    ULongT bit;
+    
+    if(indexBuf == 0)
+        buf = readLongReal_TSStream(stream);
+
+    bit = buf & 0x1;
+    buf >>= 1;
+    indexBuf = (indexBuf + 1) % (sizeof_LongT * 8);
+
+    return (UIntT)bit;
+}
+
+/************************************************************************/
+/*                          GLOBAL INIT FUNCTION                        */
+/************************************************************************/
+
+void initMath(void)
+{
+    IntT i, type;
+
+    max_Unifloat = create_Map(&type_IntTObj, &type_Unifloat);
+    min_Unifloat = create_Map(&type_IntTObj, &type_Unifloat);
+    infinity_Unifloat = create_Map(&type_IntTObj, &type_Unifloat);
+    nan_Unifloat = create_Map(&type_IntTObj, &type_Unifloat);
+
+    maxExp_Unifloat = create_Map(&type_IntTObj, &type_IntTObj);
+    minExp_Unifloat = create_Map(&type_IntTObj, &type_IntTObj);
+    digMant_Unifloat = create_Map(&type_IntTObj, &type_IntTObj);
+    digExp_Unifloat = create_Map(&type_IntTObj, &type_IntTObj);
+    size_Unifloat = create_Map(&type_IntTObj, &type_IntTObj);
+    sizeInLongs_Unifloat = create_Map(&type_IntTObj, &type_IntTObj);
+    
+    /* calculation of maximum and minimum values */
+    maxLongLongT = createZero_Unifloat(UniLongDoubleT);
+    maxLongLongT->exp = sizeof_LLongT * 8;
+    for (i = 1; i <= sizeof_LLongT * 8; i++)
+        setMant_Unifloat(maxLongLongT, i, 1);
+
+    maxLongT = createZero_Unifloat(UniLongDoubleT);
+    maxLongT->exp = sizeof_LongT * 8;
+    for (i = 1; i <= sizeof_LongT * 8; i++)
+        setMant_Unifloat(maxLongT, i, 1);
+
+    for(type = 0; type < 3; type++)
+    {
+        Pi[type] = convertBinaryString_Unifloat(create_CString(PI), type);
+        Ln_2[type] = convertBinaryString_Unifloat(create_CString(LN_2), type);
+        Log2_e[type] = convertBinaryString_Unifloat(create_CString(LOG2_E), type);
+        Log10_e[type] = convertBinaryString_Unifloat(create_CString(LOG10_E), type);
+        Log2_10[type] = convertBinaryString_Unifloat(create_CString(LOG2_10), type);
+    }
+    
+    #if defined(SINGLE_PLATFORM_CONFIGURATION)
+    #endif /* SINGLE_PLATFORM_CONFIGURATION */
+
+    initMathMedia();
+}
+
+/************************************************************************/
+/*                          END UNIFLOAT FUNCTIONS                      */
+/************************************************************************/
+
+
+/************************************************************************/
+/* Commands copied from fenv_media.sec, may need update...              */
+/************************************************************************/
+
+/*FEnvExceptions readFEnvExceptions_TSStream(TSStream* stream)
+{
+    FEnvExceptions res;
+
+    res.divbyzero = readChar_TSStream(stream) != '\x00';
+    res.inexact   = readChar_TSStream(stream) != '\x00';
+    res.invalid   = readChar_TSStream(stream) != '\x00';
+    res.overflow  = readChar_TSStream(stream) != '\x00';
+    res.underflow = readChar_TSStream(stream) != '\x00';
+    
+    return res;
+}*/
+
+/** feclearexcept_command **/
+IntT feclearexcept_command(CallContext context, FEnvExceptions excepts)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "feclearexcept:$(fexcepts)", 
+        create_FEnvExceptionsObj(excepts));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** fegetenv_command **/
+IntT fegetenv_command(CallContext context, VoidTPtr envp)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "fegetenv:$(ptr)", 
+        create_VoidTPtrObj(envp));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** fegetexceptflag_command **/
+IntT fegetexceptflag_command(CallContext context, VoidTPtr flagp, FEnvExceptions excepts)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "fegetexceptflag:$(ptr)$(fexcepts)", 
+        create_VoidTPtrObj(flagp), 
+        create_FEnvExceptionsObj(excepts));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** fegetround_command **/
+IntT fegetround_command(CallContext context)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "fegetround");
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** feholdexcept_command **/
+IntT feholdexcept_command(CallContext context, VoidTPtr envp)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "feholdexcept:$(ptr)", 
+        create_VoidTPtrObj(envp));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** feraiseexcept_command **/
+IntT feraiseexcept_command(CallContext context, FEnvExceptions excepts)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "feraiseexcept:$(fexcepts)", 
+        create_FEnvExceptionsObj(excepts));
+
+    executeCommandInContext(context, &command);
+    
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** fesetenv_command **/
+IntT fesetenv_command(CallContext context, FEnvTPtr envp)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "fesetenv:$(ptr)", 
+        create_VoidTPtrObj(envp));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** fesetexceptflag_command **/
+IntT fesetexceptflag_command(CallContext context, FExceptTPtr flagp, FEnvExceptions excepts)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "fesetexceptflag:$(ptr)$(fexcepts)", 
+        create_VoidTPtrObj(flagp), 
+        create_FEnvExceptionsObj(excepts));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** fesetround_command **/
+IntT fesetround_command(CallContext context, IntT round)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "fesetround:$(int)", 
+        create_IntTObj(round));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** fetestexcept_command **/
+FEnvExceptions fetestexcept_command(CallContext context, FEnvExceptions excepts)
+{
+    FEnvExceptions res = create_NoneFEnvExceptions();
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "fetestexcept:$(fexcepts)", 
+        create_FEnvExceptionsObj(excepts));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readFEnvExceptions_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+
+/** feupdateenv_command **/
+IntT feupdateenv_command(CallContext context, FEnvTPtr envp)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "feupdateenv:$(ptr)", 
+        create_VoidTPtrObj(envp));
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}
+/************************************************************************/
+/*                   End of copied commands                             */
+/************************************************************************/
+IntT get_math_errhandling_command(CallContext context)
+{
+    IntT res = -1;
+    TSCommand command = create_TSCommand();
+
+    format_TSCommand(&command, "get_math_errhandling:");
+
+    executeCommandInContext(context, &command);
+
+    if(!isBadVerdict())
+    {
+        res = readInt_TSStream(&command.response);
+    }
+    
+    destroy_TSCommand(&command);
+    
+    return res;
+}

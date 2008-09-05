@@ -1,0 +1,144 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "ncurses/input/char_media.seh"
+#include "common/common_media.seh"
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initNcursesInputCharSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_getch_spec(getch_media);
+    set_mediator_ungetch_spec(ungetch_media);
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** getch_spec **/
+//This mediator refers to: mvwgetch, wgetch, mvgetch, getch
+mediator getch_media for specification
+IntT getch_spec( CallContext context, WindowTPtr* win, NCursesPosition* pos)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        if(win == NULL)
+        {
+            if(pos == NULL)
+            {
+                format_TSCommand( &command, "getch" );
+            }
+            else
+            {
+                format_TSCommand( &command, "mvgetch:$(int)$(int)",
+                        create_IntTObj(pos->y), create_IntTObj(pos->x));
+            }
+        }
+        else
+        {
+            if(pos == NULL)
+            {
+                format_TSCommand( &command, "wgetch:$(ptr)",
+                    create_VoidTPtrObj(*win));
+            }
+            else
+            {
+                format_TSCommand( &command, "mvwgetch:$(ptr)$(int)$(int)",
+                        create_VoidTPtrObj(*win), create_IntTObj(pos->y),
+                        create_IntTObj(pos->x));
+            }
+        }
+        
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            NCursesTerminal* term = getNCursesStdTerminal(context);
+            NCursesWindow* wnd =getWindowMayNULL(context, win);
+
+            timestamp = command.meta.timestamp;
+
+            res = readInt_TSStream(&command.response);
+
+            if(term->halfdelay && wnd->delay)
+            {
+                //May need improvement:)
+                if(!size_List(term->inserted_character_buffer))
+                {
+                    traceFormattedUserInfo("halfdelay timeout: %d msec", (int)(delta(timestamp)/1000000));
+
+                
+                    /*
+                     * The halfdelay() function sets the input mode for the
+                     * current window to Half-Delay Mode and specifies 'tenths'
+                     * tenths of seconds as the half-delay interval.
+                     */
+                    REQ_MEDIA("", "getch function should return ERR in this case", res == -1);
+
+                    
+                    REQ_MEDIA("", "getch function failed before halfdelay timeout expired",
+                        (delta(timestamp)/100000000 + 1) >= term->halfdelay);
+
+                }
+            }
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onGetch(context, win, pos, getch_spec);
+    }
+}
+
+/** ungetch_spec **/
+mediator ungetch_media for specification
+IntT ungetch_spec( CallContext context, IntT ch)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res;
+    
+        format_TSCommand( &command, "ungetch:$(int)", create_IntTObj(ch));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;
+    }
+    state
+    {
+        onUngetch(context, ch, ungetch_spec);
+    }
+}
+
+

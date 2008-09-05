@@ -1,0 +1,374 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "process/scheduler/scheduler_media.seh"
+#include "process/meta/user_media.seh"
+#include "common/common_media.seh"
+
+/********************************************************************/
+/**                    Formatters                                  **/
+/********************************************************************/
+
+void schedparam_formatter(TSStream *stream, ShedParam* param)
+{
+    VERIFY_TYPE(schedparam_formatter, &type_ShedParam, param);
+    
+    writeTypeHeaderTSStream(stream, "schpar");
+    
+    writeInt_TSStream(stream, param->sched_priority);
+    writeInt_TSStream(stream, param->sched_ss_low_priority);
+    writeLong_TSStream(stream, param->sched_ss_repl_period->sec);  
+    writeLong_TSStream(stream, param->sched_ss_repl_period->nsec);  
+    writeLong_TSStream(stream, param->sched_ss_init_budget->sec);  
+    writeLong_TSStream(stream, param->sched_ss_init_budget->nsec);  
+    writeInt_TSStream(stream, param->sched_ss_max_repl);
+}
+
+
+ShedParam* readShedParam_TSStream(TSStream* stream)
+{
+    IntT             sched_priority;
+    IntT             sched_ss_low_priority; 
+    TimeSpecTObj*        sched_ss_repl_period;  
+    TimeSpecTObj*        sched_ss_init_budget;  
+    IntT             sched_ss_max_repl;     
+    TimeSpecT tmpTime;
+
+
+
+    sched_priority = readInt_TSStream(stream);
+    sched_ss_low_priority = readInt_TSStream(stream); 
+
+    tmpTime.sec = readLong_TSStream(stream);
+    tmpTime.nsec = readLong_TSStream(stream);
+
+    sched_ss_repl_period = create_TimeSpecTObj(
+                                               tmpTime
+                                               );  
+
+    tmpTime.sec = readLong_TSStream(stream);
+    tmpTime.nsec = readLong_TSStream(stream);
+    sched_ss_init_budget = create_TimeSpecTObj(
+                                               tmpTime
+                                               );  
+    sched_ss_max_repl = readInt_TSStream(stream);     
+
+    return create_ShedParam( sched_priority, 
+                             sched_ss_low_priority, sched_ss_repl_period, 
+                             sched_ss_init_budget, sched_ss_max_repl);
+}
+
+
+/********************************************************************/
+/**                    Initialization Function                     **/
+/********************************************************************/
+void initProcessSchedulerSubsystem(void)
+{
+  // Set up mediators
+    set_mediator_sched_get_priority_min_max_spec(sched_get_priority_min_max_media);
+    set_mediator_sched_getparam_spec(sched_getparam_media);
+    set_mediator_sched_getscheduler_spec(sched_getscheduler_media);
+    set_mediator_sched_rr_get_interval_spec(sched_rr_get_interval_media);
+    set_mediator_sched_setparam_spec(sched_setparam_media);
+    set_mediator_sched_setscheduler_spec(sched_setscheduler_media);
+    set_mediator_sched_yield_spec(sched_yield_media);
+  // Set up auxiliary mediators
+    set_mediator_setuid_spec(setuid_media);
+    set_mediator_setgid_spec(setgid_media);
+    set_mediator_getuid_spec(getuid_media);
+    set_mediator_getgid_spec(getgid_media);
+
+    // Set up formatters
+    registerTSFormatter("schpar",(TSFormatterFuncType)schedparam_formatter);
+
+}
+
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/** sched_get_priority_max_spec **/
+//This mediator refers to: sched_get_priority_min, sched_get_priority_max
+mediator sched_get_priority_min_max_media for specification
+IntT sched_get_priority_min_max_spec( CallContext context, IntT policy, ErrorCode* errno, bool min)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        if (min)
+        {
+            format_TSCommand( &command, "sched_get_priority_min:$(int)", create_IntTObj(policy) );
+        }
+        else
+        {
+            format_TSCommand( &command, "sched_get_priority_max:$(int)", create_IntTObj(policy) );
+        }
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+
+        return res;   
+    }
+    state
+        {
+            if(sched_get_priority_min_max_spec != -1)
+            {
+                ProcessState* process_state = getProcessState_CallContext(context);
+                if(min)
+                {
+                    put_Map(process_state->priority_min,
+                            create_Integer(policy),
+                            create_Integer(sched_get_priority_min_max_spec));
+                }
+                else
+                {
+                    put_Map(process_state->priority_max,
+                            create_Integer(policy),
+                            create_Integer(sched_get_priority_min_max_spec));
+                }
+            }
+        }
+}
+
+/** sched_getparam_spec **/
+mediator sched_getparam_media for specification
+SchedGetParamReturnType* sched_getparam_spec( CallContext context, PidT pid, ErrorCode* errno)
+{
+    call
+    {
+        IntT       funcRes;
+        ShedParam* shParam;
+        TSCommand  command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "sched_getparam:$(int)", create_IntTObj(pid) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            funcRes = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+
+            shParam = readShedParam_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_SchedGetParamReturnType(funcRes, shParam);   
+  }
+}
+
+
+/** sched_getscheduler_spec **/
+mediator sched_getscheduler_media for specification
+IntT sched_getscheduler_spec(CallContext context, PidT pid, ErrorCode* errno)
+{
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "sched_getscheduler:$(int)", 
+                          create_IntTObj(pid));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+  }
+}
+
+
+/** sched_rr_get_interval_spec **/
+mediator sched_rr_get_interval_media for specification
+RRGetIntervalReturnType* sched_rr_get_interval_spec( CallContext context, PidT pid, ErrorCode* errno)
+{
+    call
+    {
+        IntT          funcRes;
+        TimeSpecTObj* interval;
+        TSCommand command = create_TSCommand();
+        TimeSpecT tmpTime;
+
+         
+        format_TSCommand( &command, "sched_rr_get_interval:$(int)", create_IntTObj(pid) );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+             
+
+            funcRes = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+            
+            tmpTime.sec = readLong_TSStream(&command.response);
+            tmpTime.nsec = readLong_TSStream(&command.response);
+
+            interval = create_TimeSpecTObj(tmpTime);  
+
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return create_RRGetIntervalReturnType(funcRes, interval);   
+  }
+}
+
+
+/** sched_setparam_spec **/
+mediator sched_setparam_media for specification
+IntT sched_setparam_spec( CallContext context, PidT pid, ShedParam* param, ErrorCode* errno)
+{
+    ProcessState* process_state;
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+    
+         
+        format_TSCommand( &command, "sched_setparam:$(int)$(schpar)", create_IntTObj(pid), param );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+             
+            res    = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;  
+    }
+    state
+    {
+        if((param != NULL) && (sched_setparam_spec != -1))
+        {
+            if(pid == 0)
+            {
+                process_state = getProcessState_CallContext(context);
+            }
+            else
+            {
+                process_state = findProcessState_PidT(pid);
+            }
+            process_state->param = clone(param);
+        }
+    }
+}
+
+
+/** sched_setscheduler_spec **/
+mediator sched_setscheduler_media for specification
+IntT sched_setscheduler_spec( CallContext context, PidT pid, IntT policy, IntT* former_policy, ShedParam* param, ErrorCode* errno)
+{
+    ProcessState* process_state;
+    call
+    {
+        IntT res;
+        TSCommand command = create_TSCommand();
+        
+         
+        format_TSCommand( &command, "sched_setscheduler:$(int)$(int)$(schpar)", 
+                          create_IntTObj(pid), create_IntTObj(policy), param );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            
+             
+            res    = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res;   
+    }
+    state
+    {
+        if((param != NULL) && (sched_setscheduler_spec != -1))
+        {
+            if(pid == 0)
+            {
+                process_state = getProcessState_CallContext(context);
+            }
+            else
+            {
+                process_state = findProcessState_PidT(pid);
+            }
+            process_state->param = clone(param);
+            *former_policy = process_state->policy;
+            process_state->policy = policy;
+        }
+    }
+}
+
+
+/** sched_yield_spec **/
+mediator sched_yield_media for specification
+IntT sched_yield_spec( CallContext context, ErrorCode * errno )
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+        IntT res=0;
+    
+        format_TSCommand( &command, "sched_yield" );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            res = readInt_TSStream(&command.response);
+            *errno = readInt_TSStream(&command.response);
+        }
+        
+        destroy_TSCommand(&command);
+        
+        return res; 
+  }
+}
+
+
+
+

@@ -1,0 +1,349 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/ncurses/ncurses_config.h"
+#include "ncurses/ncurses/ncurses_data.seh"
+#include "data/ncurses_model.seh"
+#include "ncurses/string/insert_model.seh"
+#include "config/interpretation.seh"
+
+
+#pragma SEC subsystem string "ncurses.string"
+
+
+
+/*
+   The group of functions 'ncurses.string.insert' consists of:
+       insnstr [1]
+       insstr [1]
+       mvinsnstr [1]
+       mvinsstr [1]
+       mvwinsnstr [1]
+       mvwinsstr [1]
+       winsnstr [1]
+       winsstr [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+-------------------------------------------------------------------------------
+
+NAME
+
+    insnstr, insstr, mvinsnstr, mvinsstr, mvwinsnstr, mvwinsstr, winsnstr,
+        winsstr - insert a multi-byte character string into a window
+
+SYNOPSIS
+
+    #include <curses.h>
+    int insnstr(const char *str, int n);
+    int insstr(const char *str);
+    int mvinsnstr(int y, int x, const char *str, int n);
+    int mvinsstr(int y, int x, const char *str);
+    int mvwinsnstr(WINDOW *win, int y, int x, const char *str, int n);
+    int mvwinsstr(WINDOW *win, int y, int x, const char *str);
+    int winsnstr(WINDOW *win, const char *str, int n);
+    int winsstr(WINDOW *win, const char *str);
+
+DESCRIPTION
+
+    These functions insert a character string (as many characters as will fit
+    on the line) before the current or specified position in the current or
+    specified window.
+
+    These functions do not advance the cursor position. These functions perform
+    special-character processing. The insnstr() and winsnstr() functions
+    perform wrapping. The insstr() and winsstr() functions do not perform
+    wrapping.
+
+    The insnstr(), mvinsnstr(), mvwinsnstr() and winsnstr() functions insert at
+    most n bytes. If n is less than 1, the entire string is inserted.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK.Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: mvwinsnstr, winsnstr, mvwinsstr, winsstr,
+//mvinsnstr, insnstr, mvinsstr, insstr
+specification
+IntT insstr_spec( CallContext context, WindowTPtr* win, NCursesPosition* pos,  CString* str, IntT* n)
+{
+    NCursesWindow*   curWnd=clone(getWindowMayNULL(context, win));
+    NCursesPosition* curPos=getWindowPositionMayNULL(curWnd, pos);
+    NCursesWindow*   modifiedWindow;
+
+    if (win!=NULL)
+    {
+        if (n!=NULL){
+            if (pos!=NULL){ FILTER("mvwinsnstr"); }
+            else{ FILTER("winsnstr"); }
+        }
+        else
+        {
+            if (pos!=NULL){ FILTER("mvwinsstr"); }
+            else{ FILTER("winsstr"); }
+        }
+    }
+    else
+    {
+        if (n!=NULL){
+            if (pos!=NULL){ FILTER("mvinsnstr"); }
+            else{ FILTER("insnstr"); }
+        }
+        else
+        {
+            if (pos!=NULL){ FILTER("mvinsstr"); }
+            else{ FILTER("insstr"); }
+        }
+    }
+
+    pre
+    {
+        modifiedWindow = insstr_model(context, win, pos,  str, n);
+
+        return true;
+    }
+    post
+    {
+        if (insstr_spec!=SUT_EOK)
+        {
+            /*
+            * Otherwise, they return ERR.
+            */
+            REQ("insnstr.07.02;insstr.07.02;mvinsnstr.07.02;mvinsstr.07.02;mvwinsnstr.07.02;mvwinsstr.07.02;winsnstr.07.02;winsstr.07.02",
+                "Function shall return ERR", insstr_spec == SUT_ERR);
+        }
+        else
+        {
+             NCursesWindow* curWnd=getWindowMayNULL(context, win);
+
+            /*
+            * Upon successful completion, these functions return OK.
+            */
+            REQ("insnstr.07.01;insstr.07.01;mvinsnstr.07.01;mvinsstr.07.01;mvwinsnstr.07.01;mvwinsstr.07.01;winsnstr.07.01;winsstr.07.01",
+                "Function shall return OK", insstr_spec == SUT_EOK);
+
+
+            /*
+            * These functions do not advance the cursor position.
+            */
+            REQ("insnstr.02;insstr.02;mvinsnstr.02;mvinsstr.02;mvwinsnstr.02;mvwinsstr.02;winsnstr.02;winsstr.02",
+                "Cursor position shall be unchanged", equals(curWnd->cursorPos, curPos));
+
+            /*
+            * [Compare model window with the real window]
+            */
+            REQ("", "Data in the window shall be valid", check_NCursesWindows(curWnd, modifiedWindow, CH_ALL, 10));
+
+        }
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+IntT shiftWindowOnePos(NCursesWindow* curWnd, IntT insPos)
+{
+    IntT i;
+    if (insPos >= curWnd->ncols*curWnd->nlines)
+    {
+        if (!curWnd->scroll)
+        {
+            return -1;
+        }
+        else
+        {
+            scrollLineNcursesWindow(curWnd);
+            insPos=curWnd->wnd_image->size-curWnd->ncols;
+
+            return insPos;
+        }
+
+    }
+
+    for (i=curWnd->ncols*curWnd->nlines - 1; i > insPos; i--)
+    {
+        setElement_NCursesWindow_Offset(curWnd, i,
+            getElement_NCursesWindow_Offset(curWnd, i-1));
+    }
+
+    return insPos;
+}
+
+
+NCursesWindow* insstr_model( CallContext context, WindowTPtr* win, NCursesPosition* pos,  CString* str, IntT* n)
+{
+    NCursesWindow*   curWnd=createNCursesWindow_Local(getWindowMayNULL(context, win));
+    NCursesPosition* curPos=clone(getWindowPositionMayNULL(curWnd, pos));
+    IntT numChars, insPos, i;
+
+    curWnd->cursorPos->x = curPos->x;
+    curWnd->cursorPos->y = curPos->y;
+
+    numChars=length_CString(str);
+
+    if (n!=NULL)
+    {
+        if (*n < 1)
+        {
+            /*
+            * If n is less than 1, the entire string is inserted.
+            */
+            IMPLEMENT_REQ("insnstr.06;mvinsnstr.06;mvwinsnstr.06;winsnstr.06");
+
+            numChars=length_CString(str);
+        }
+        else
+        {
+            /*
+            * The insnstr(), mvinsnstr(), mvwinsnstr() and winsnstr() functions insert at
+            * most n bytes.
+            */
+            IMPLEMENT_REQ("insnstr.05;mvinsnstr.05;mvwinsnstr.05;winsnstr.05");
+
+            numChars = min(*n, length_CString(str));
+        }
+    }
+
+    if (n==NULL || NCURSES_INSSTR_ALWAYS_NO_WRAP)
+    {
+        /*
+        * The insstr() and winsstr() functions do not perform wrapping.
+        */
+        IMPLEMENT_REQ("insstr.04;winsstr.04");
+
+        for (i=0;i<numChars;i++)
+        {
+            ChTypeT ch = create_ChTypeTWithAttr(curWnd->attrs, curWnd->bkgd, charAt_CString(str, i));
+
+            /*
+            * These functions perform special-character processing.
+            */
+            IMPLEMENT_REQ("insstr.03;mvinsstr.03;mvwinsstr.03;winsstr.03");
+
+            if(!addSpecChar(curWnd, curWnd->cursorPos, ch, false, true))
+            {
+                /*
+                * These functions insert a character string (as many characters as will fit on
+                * the line) before the current or specified position in the current or specified
+                * window.
+                */
+                IMPLEMENT_REQ("insstr.01;mvinsstr.01;mvwinsstr.01;winsstr.01");
+
+                shiftWindow(curWnd, curWnd->cursorPos->x+curWnd->ncols*curWnd->cursorPos->y, 1, false);
+
+                setElement_NCursesWindow(curWnd, curWnd->cursorPos, ch);
+                (curWnd->cursorPos->x)++;
+                if (curWnd->cursorPos->x >= curWnd->ncols)
+                {
+                    break;
+                }
+            }
+        }
+
+    }
+    else
+    {
+        /*
+        * The insnstr() and winsnstr() functions perform wrapping.
+        */
+        IMPLEMENT_REQ("insstr.04;winsstr.04");
+
+        for (i=0;i<numChars;i++)
+        {
+            ChTypeT ch = create_ChTypeTWithAttr(curWnd->attrs, curWnd->bkgd, charAt_CString(str, i));
+
+            /*
+            * These functions perform special-character processing.
+            */
+            IMPLEMENT_REQ("insnstr.03;mvinsnstr.03;mvwinsnstr.03;winsnstr.03");
+
+            if(!addSpecChar(curWnd, curWnd->cursorPos, ch, true, true))
+            {
+
+                shiftWindow(curWnd, curWnd->cursorPos->y*curWnd->ncols + curWnd->cursorPos->x, 1, true);
+
+                /*
+                * These functions insert a character string (as many characters as will fit on
+                * the line) before the current or specified position in the current or specified
+                * window.
+                */
+                IMPLEMENT_REQ("insnstr.01;mvinsnstr.01;mvwinsnstr.01;winsnstr.01");
+
+                setElement_NCursesWindow(curWnd, curWnd->cursorPos, ch);
+
+                changeCursorPos(curWnd, curWnd->cursorPos, 1);
+
+                if(curWnd->cursorPos->y == curWnd->nlines && curWnd->scroll)
+                {
+                    scrollLineNcursesWindow(curWnd);
+                }
+
+            }
+        }
+
+    }
+
+    curWnd->cursorPos->x = curPos->x;
+    curWnd->cursorPos->y = curPos->y;
+
+    pushNCursesWindow(curWnd);
+
+    return curWnd;
+}
+
+
+
+void onInsstr( CallContext context, WindowTPtr* win, NCursesPosition* pos,  CString* str, IntT* n, IntT insstr_spec)
+{
+    if (insstr_spec==SUT_EOK)
+    {
+        updateNCursesWindowMayNULL(context, win);
+        refresh_WindowTPtr(context, win, 0);
+    }
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/

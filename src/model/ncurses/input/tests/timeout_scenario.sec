@@ -1,0 +1,178 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#define NEWREQ
+
+#include "ncurses/input/tests/timeout_scenario.seh"
+#include "ncurses/input/tests/input_main.seh"
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+
+#include "ncurses/terminal/terminal_model.seh"
+#include "ncurses/window/window_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+
+#include "ncurses/input/timeout_model.seh"
+
+static CallContext context;
+static NewWinReturnType* retMyWnd[2];
+
+IntT TimeoutVals[] = { 0, 13, 43, -2, 15, 999, -1, 666, -234 };
+IntT szTimeoutVals = sizeof(TimeoutVals)/sizeof(TimeoutVals[0]);
+
+WindowTPtr* WndVals[] = { NULL, NULL, NULL };
+IntT szWndVals = sizeof(WndVals)/sizeof(WndVals[0]);
+
+static CByteArray *termInfo;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_timeout_scenario(int argc, char** argv)
+{
+    NCursesWindow *stdWnd, *Wnd1;
+    context = createDefaultProcessForNCurses();
+    termInfo = ncursesReadTerminfo(context);
+    traceFormattedUserInfo("terminfo:$(obj)", termInfo);
+
+    initscr_spec(context);
+    stdWnd = getNCursesStdWindow(context);
+
+    initReqFilters();
+
+    registerStdTerminal(context);  
+
+    setVariables_StdTerminal(context);
+
+    retMyWnd[0] = newwin_spec(context, 30, 30, 5, 5);
+    if(!(WndVals[1] = &retMyWnd[0]->win)) return false;
+
+    retMyWnd[1] = newwin_spec(context, 30, 30, 5, 5);
+    if(!(WndVals[2] = &retMyWnd[1]->win)) return false;
+
+    Wnd1 = getWindow(&retMyWnd[0]->win);
+
+    /*
+     * The initial state is FALSE.
+     */
+    REQ("notimeout.03", "initial state is FALSE",
+        stdWnd->notimeout == false && Wnd1->notimeout == false);
+
+    return true;
+}
+
+static void finish_timeout_scenario(void)
+{
+    endwin_spec(context);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool timeout_scen()
+{
+    iterate(int i = 0; i < szTimeoutVals; i++;)
+    {
+        iterate(int i2 = 0; i2 < szWndVals; i2++;)
+        {
+            timeout_spec(context, WndVals[i2], TimeoutVals[i]);
+        }
+    }
+    
+    return true;
+}
+
+scenario
+bool notimeout_scen()
+{
+    iterate(int i = 0; i < szWndVals; i++;)
+    {
+        notimeout_spec(context, WndVals[i], true);
+        notimeout_spec(context, WndVals[i], false);
+    }
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm timeout_scenario =
+{
+    .init = init_timeout_scenario,
+    .finish = finish_timeout_scenario,
+    .actions = {
+        timeout_scen,
+        notimeout_scen,
+        NULL
+    }
+};
+
+bool main_ncurses_input_timeout(int argc, char** argv)
+{
+    return timeout_scenario(argc, argv);
+}
+
+#ifdef NCURSES_INPUT_TIMEOUT_LOCAL_MAIN
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initNcurses();
+}
+
+int main(int argc, char** argv)
+{
+    initTestSystem();
+    loadSUT();
+
+    // Set up tracer
+    // setTraceEncoding("windows-1251");
+
+    addTraceToFile("trace.xml");
+    // Run test scenario
+    main_ncurses_input_timeout(argc, argv);
+
+    // unloadSUT();
+
+    return 0;
+}
+
+#endif

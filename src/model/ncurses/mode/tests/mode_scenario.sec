@@ -1,0 +1,193 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "ncurses/mode/tests/mode_scenario.seh"
+#include "ncurses/mode/tests/mode_main.seh"
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+
+#include "ncurses/terminal/terminal_model.seh"
+#include "ncurses/window/window_model.seh"
+#include "process/process/process_model.seh"
+#include "system/system/system_model.seh"
+    
+#include "ncurses/mode/mode_model.seh"
+#include "ncurses/border/border_media.seh"
+#include "ncurses/window/refresh_model.seh"
+
+static CallContext context;
+static CByteArray *termInfo;
+static ChTypeT NULL_ChTypeT = {0,0,0,0,0,0,0,0,0,0,0};
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+
+static bool init_mode_scenario(int argc, char** argv)
+{
+    //context = createProcessForNCurses(30, 10);
+    context = createDefaultProcessForNCurses();
+    termInfo = ncursesReadTerminfo(context);
+    traceFormattedUserInfo("terminfo:$(obj)", termInfo);
+    
+    initscr_spec(context);
+
+    onAcsMapUpdate(context);
+    
+    registerStdTerminal(context);  
+
+    setVariables_StdTerminal(context);
+
+    return true;
+}
+
+static void finish_mode_scenario(void)
+{
+    endwin_spec(context);
+}
+
+/********************************************************************/
+/**                          Utilities                             **/
+/********************************************************************/
+
+static void DumpScr(void)
+{
+    ChTypeTArray* scrDump;
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+    IntT i;
+    
+    refresh_spec(context, NULL);
+
+    scrDump = create_ChTypeTArray_ScreenDump(ncursesScreenDump(context), stdWnd->ncols, stdWnd->nlines);
+    traceFormattedUserInfo("screen dump:$(obj)", scrDump);
+
+    DUMP("\n---\n");
+    for(i = 0; i < scrDump->size; i++) DUMP("%c", chtypeAt_ChTypeTArray(scrDump, i).letter);
+    DUMP("\n---\n");
+}
+
+static ChTypeT _ct(CharT ch)
+{
+    ChTypeT c = create_emptyChTypeT();
+    c.letter = ch;
+    return c;
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool set_modes_scen()
+{
+    def_shell_mode_spec(context);
+    
+    // modify terminal modes...
+    
+    def_prog_mode_spec(context);
+
+    box_spec(context, NULL, _ct(0), _ct(0));
+
+    DumpScr();
+
+    reset_shell_mode_spec(context);
+
+    DumpScr();
+
+    reset_prog_mode_spec(context);
+
+    DumpScr();
+
+    return true;
+}
+
+scenario
+bool ttyfunc_scen()
+{
+    savetty_spec(context);
+
+    def_shell_mode_spec(context);
+
+    box_spec(context, NULL, _ct(0), _ct(0));
+
+    DumpScr();
+
+    resetty_spec(context);
+
+    DumpScr();
+
+    reset_shell_mode_spec(context);
+
+    DumpScr();
+
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+
+scenario dfsm mode_scenario =
+{
+    .init = init_mode_scenario,
+    .finish = finish_mode_scenario,
+    .actions = {
+        set_modes_scen,
+        ttyfunc_scen,
+        NULL
+    }
+};
+
+#ifdef NCURSES_MODE_LOCAL_MAIN
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemConfiguration();
+    initPathSystemConfiguration();
+
+    initSystemModel();
+    initProcessModel();
+    initPThreadModel();
+
+    initNcurses();
+}
+
+int main(int argc, char** argv)
+{    
+    initTestSystem();
+    loadSUT();
+
+    addTraceToFile("trace.xml");
+    main_mode_scenario(argc, argv);
+
+    return 0;
+}
+
+#endif

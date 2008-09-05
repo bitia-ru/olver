@@ -1,0 +1,547 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+#include "ncurses/window/tests/window_scenario.seh"
+#include "common/init.seh"
+
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/control_center.seh"
+
+#include "ncurses/terminal/terminal_media.seh"
+
+#include "ncurses/char/add_media.seh"
+#include "ncurses/char/input_media.seh"
+
+#include "ncurses/window/window_media.seh"
+#include "ncurses/window/pad_media.seh"
+#include "ncurses/window/refresh_media.seh"
+
+#include "ncurses/input/input_media.seh"
+
+#include "ncurses/ncurses/ncurses_data.seh"
+
+static CallContext context;
+
+static VoidTPtr ptr;
+static CByteArray* scrDump;
+static ChTypeTArray* arr;
+static NCursesWindow *stdWnd;
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static CByteArray *termInfo;
+static bool init_window_scenario(int argc,char** argv)
+{
+    context = createProcessForNCurses(40, 40);
+    termInfo = ncursesReadTerminfo(context);
+    traceFormattedUserInfo("terminfo:$(obj)", termInfo);
+
+    initscr_spec(context);
+    stdWnd = getNCursesStdWindow(context);
+
+    initReqFilters();
+
+    registerStdTerminal(context);  
+    setVariables_StdTerminal(context); 
+
+    return true;   
+}
+
+
+static void finish_window_scenario(void)
+{
+    endwin_spec(context); 
+    TEST_SCENARIO_VERDICT_VERBOSE(window_scenario);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool ncurses_window_copywin_scen()
+{
+    ChTypeT ch = create_emptyChTypeT();
+    NCursesPosition* pos=create_NCursesPosition(10, 10);
+    NewWinReturnType* winRet, *winRet2;
+    NCursesWindow* win;
+
+    winRet = newwin_spec( context, 15, 15, 0, 0);
+
+    winRet2 = newwin_spec( context, 15, 15, 5, 5);
+
+    ch.bold=true;
+    ch.letter='a';
+
+    win = getWindow(&winRet->win);
+    addch_spec(context, ch, &(winRet->win), pos, false);
+    addch_spec(context, ch, &(winRet2->win), create_NCursesPosition(3, 3), false);
+    addch_spec(context, ch, &(winRet2->win), NULL, false);
+
+    refresh_spec(context, &(winRet->win));
+    refresh_spec(context, &(winRet2->win));
+
+    copywin_spec(context,&(winRet->win), &(winRet2->win), 0, 0, 0, 0, 10, 10, 0);
+    refresh_spec(context, &(winRet2->win));
+
+    copywin_spec(context,&(winRet2->win), &(winRet->win), 0, 0, 0, 0, 4, 4, 1);
+    refresh_spec(context, &(winRet->win));
+
+    return true;
+}
+
+scenario
+bool ncurses_window_overlay_overwrite_scen()
+{
+    ChTypeT ch = create_emptyChTypeT();
+    NCursesPosition* pos=create_NCursesPosition(1, 5);
+    NewWinReturnType* winRet, *winRet2, *winRet3;
+    IntT res;
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+
+    winRet = newwin_spec( context, 10, 4, 0, 4);
+
+    winRet2 = newwin_spec( context, 4, 10, 4, 0);
+
+    winRet3 = newwin_spec( context, 10, 10, 10, 10);
+
+    ch.bold=true;
+    ch.letter='a';
+
+    //Case with intersection:
+    addch_spec(context, ch, &(winRet->win), pos, false);
+    addch_spec(context, ch, &(winRet2->win), NULL, false);
+    addch_spec(context, ch, &(winRet2->win), NULL, false);
+
+    res = overlay_spec(context, &(winRet->win), &(winRet2->win));
+
+    refresh_spec(context, &winRet->win);
+    refresh_spec(context, &winRet2->win);
+
+    ch.letter = 'Q';
+
+    pos = create_NCursesPosition(5, 1);
+
+    addch_spec(context, ch, &(winRet2->win), pos, false);
+    addch_spec(context, ch, &(winRet2->win), NULL, false);
+
+    res = overwrite_spec(context, &(winRet2->win), &(winRet->win));
+
+    refresh_spec(context, &winRet->win);
+
+    //No intersect case:
+    pos = create_NCursesPosition(1, 5);
+
+    addch_spec(context, ch, &(winRet->win), pos, false);
+    addch_spec(context, ch, &(winRet3->win), NULL, false);
+    addch_spec(context, ch, &(winRet3->win), NULL, false);
+
+    res = overlay_spec(context, &(winRet->win), &(winRet2->win));
+
+    refresh_spec(context, &winRet->win);
+    refresh_spec(context, &winRet3->win);
+
+    ch.letter = 'Q';
+
+    pos = create_NCursesPosition(5, 1);
+
+    addch_spec(context, ch, &(winRet3->win), pos, false);
+    addch_spec(context, ch, &(winRet3->win), NULL, false);
+
+    res = overwrite_spec(context, &(winRet3->win), &(winRet->win));
+
+    refresh_spec(context, &winRet->win);
+
+
+    return true;
+}
+
+scenario
+bool ncurses_window_curs_set_scen()
+{
+    IntT ret;
+    
+    iterate(int i=0;i<4;i++;)
+    {
+        ret = curs_set_spec(context, i);
+
+        iterate(int j=0;j<1;j++;)
+            curs_set_spec(context, j);
+    }
+
+    return true;
+}
+
+scenario
+bool ncurses_window_delwin_scen()
+{
+    ChTypeT ch = create_emptyChTypeT();
+    NCursesPosition* pos=create_NCursesPosition(10, 10);
+    NewWinReturnType* winRet, *winRet2;
+
+    winRet = newwin_spec( context, 30, 30, 5, 5);
+
+    ch.bold=true;
+    ch.letter='a';
+
+    addch_spec(context, ch, &(winRet->win), pos, false);
+
+    delwin_spec(context, &(winRet->win));
+    delwin_spec(context, &(winRet->win));
+
+    return true;
+}
+
+scenario
+bool ncurses_window_derwin_subwin_scen()
+{
+    ChTypeT ch = create_emptyChTypeT();
+    NCursesPosition* pos=create_NCursesPosition(10, 10);
+    NewWinReturnType* winRet, *winRet2;
+    WindowTPtr ret1, ret2, ret11, ret12, ret21, ret22;
+    NCursesWindow* tmp;
+
+    winRet = newwin_spec( context, 30, 30, 5, 5);
+
+    ch.bold=true;
+    ch.letter='a';
+
+    addch_spec(context, ch, &(winRet->win), create_NCursesPosition(3, 3), false);
+    refresh_spec(context, &winRet->win);
+
+    ret1 = derwin_spec(context, &(winRet->win), 10, 10, 10, 10);
+    
+    tmp = getWindow(&ret1);
+
+    addch_spec(context, ch, &ret1, NULL, false);
+    addch_spec(context, ch, &ret1, NULL, false);
+    addch_spec(context, ch, &ret1, NULL, false);
+
+    refresh_spec(context, &winRet->win);
+
+    ret2 = subwin_spec(context, &(winRet->win), 10, 10, 10, 10);
+
+    addch_spec(context, ch, &ret2, NULL, false);
+    addch_spec(context, ch, &ret2, NULL, false);
+    addch_spec(context, ch, &ret2, NULL, false);
+    
+    refresh_spec(context, &ret2);
+
+    ret11 = derwin_spec(context, &ret1, 5, 5, 5, 5);
+
+    ret12 = subwin_spec(context, &ret1, 5, 5, 15, 15);
+
+    ret21 = derwin_spec(context, &ret2, 5, 5, 0, 5);
+
+    ret22 = subwin_spec(context, &ret2, 5, 5, 5, 5);
+
+    delwin_spec(context, &ret22);
+    delwin_spec(context, &ret21);
+    delwin_spec(context, &ret12);
+    delwin_spec(context, &ret11);
+    delwin_spec(context, &ret2);
+    delwin_spec(context, &ret1);
+    delwin_spec(context, &(winRet->win));
+
+    return true;
+}
+
+scenario
+bool ncurses_window_dupwin_mvwin_scen()
+{
+    NewWinReturnType* winRet;
+    WindowTPtr ret;
+    IntT rs;
+    ChTypeT ch = create_emptyChTypeT();
+    NCursesWindow* tmp, *stdWnd = getNCursesStdWindow(context);
+    WindowState* ws;
+
+    winRet = newwin_spec( context, 30, 30, 5, 5);
+    refresh_spec(context, &winRet->win);
+    
+    ret = dupwin_spec(context, &(winRet->win));
+    
+    ch.letter = 'Q';
+
+    addch_spec(context, ch, &winRet->win, NULL, false);
+
+    refresh_spec(context, &winRet->win);
+
+    refresh_spec(context, &ret);
+
+    rs = mvwin_spec(context, &winRet->win, 0, 0);
+
+    rs = addch_spec(context, ch, &winRet->win, create_NCursesPosition(1, 1),
+                        false);
+
+    rs = refresh_spec(context, &winRet->win);
+
+    rs = mvwin_spec(context, &ret, 3, 3);
+
+    rs = addch_spec(context, ch, &ret, create_NCursesPosition(4, 4),
+                        false);
+
+    rs = refresh_spec(context, &ret);
+
+    return true;
+}
+
+scenario
+bool ncurses_window_intrflush_scen()
+{
+    IntT ret;
+    VoidTPtr null = NULL_VoidTPtr;
+
+    ret = intrflush_spec(context, &null, 0);
+    ret = intrflush_spec(context, &null, 1);
+
+    return true;
+}
+
+scenario
+bool ncurses_window_keypad_scen()
+{
+    IntT ret;
+    NewWinReturnType* winRet;
+
+    winRet = newwin_spec( context, 0, 0, 0, 0);
+
+    ret = keypad_spec(context, &(winRet->win), 0);
+    ret = keypad_spec(context, &(winRet->win), 1);
+
+    return true;
+}
+scenario
+bool ncurses_window_meta_scen()
+{
+    IntT ret;
+    VoidTPtr null = NULL_VoidTPtr;
+
+    ret = meta_spec(context, &null, 0);
+    ret = meta_spec(context, &null, 1);
+
+    return true;
+}
+scenario
+bool ncurses_window_nodelay_scen()
+{
+    IntT ret0, ret1;
+    NewWinReturnType* winRet;
+    NCursesWindow* stdWnd = getNCursesStdWindow(context);
+    NCursesTerminal* term = getNCursesStdTerminal(context);
+
+    winRet = newwin_spec( context, 30, 30, 5, 5);
+
+    /*Interesting:)
+    ret = nodelay_spec(context, &null, 0);
+    ret = nodelay_spec(context, &null, 1);
+    */
+    ret0 = nodelay_spec(context, &winRet->win, 0);
+
+/*
+    DUMP("ret == %d\n", ret0);
+    DUMP_ws(window_state(context, winRet->win));
+    DUMP_ws(window_state(context, stdWnd->address));
+    DUMP("\n");
+*/
+    
+    ret1 = nodelay_spec(context, &winRet->win, 1);
+    
+    ret1 = nodelay_spec(context, &winRet->win, ret0);
+    
+    return true;
+}
+scenario
+bool ncurses_window_putwin_getwin_scen()
+{
+    NewWinReturnType* winRet;
+    WindowTPtr ret;
+    IntT res;
+    CString* filep = create_CString("file.win");
+
+    winRet = newwin_spec( context, 30, 30, 5, 5);
+
+    res = putwin_spec(context, &(winRet->win), filep);
+
+    if(res == SUT_EOK)
+    {
+        ret = getwin_spec(context, filep);
+    }
+
+    return true;
+}
+scenario
+bool ncurses_window_mvderwin_scen()
+{
+    ChTypeT ch = create_emptyChTypeT();
+    NCursesPosition* pos=create_NCursesPosition(1, 1);
+    NewWinReturnType* winRet;
+    WindowTPtr ret1;
+    IntT res;
+    WindowState* ws;
+
+    winRet = newwin_spec( context, 30, 30, 5, 5);
+    ret1 = derwin_spec(context, &(winRet->win), 10, 10, 0, 0);
+
+    ch.bold=true;
+    ch.letter='0';
+
+    addch_spec(context, ch, &(winRet->win), create_NCursesPosition(0, 0), false);
+    ch.letter = '1';
+    addch_spec(context, ch, &(winRet->win), create_NCursesPosition(1, 1), false);
+    ch.letter = 'f';
+    addch_spec(context, ch, &(winRet->win), create_NCursesPosition(15, 15), false);
+
+    refresh_spec(context, &ret1);
+    refresh_spec(context, &winRet->win);
+
+    res = mvderwin_spec(context, &ret1, create_NCursesPosition(15, 15));
+    ch.letter = 'g';
+    addch_spec(context, ch, &winRet->win, create_NCursesPosition(21, 21), false);
+    touchwin_spec(context, getWindow(&ret1));
+    refresh_spec(context, &ret1);
+
+    ch.letter = 'h';
+    addch_spec(context, ch, &ret1, create_NCursesPosition(5, 5), false);
+    touchwin_spec(context, getWindow(&winRet->win));
+    refresh_spec(context, &winRet->win);
+
+    return true;
+}
+scenario
+bool ncurses_window_window_pad_scen()
+{
+    WindowTPtr pad0, ret;
+    NCursesWindow* pad0_wnd, *duppad0_wnd;
+    ChTypeT ch = create_emptyChTypeT();
+    IntT res;
+    CString* filep = create_CString("file.pad");
+    
+    refresh_spec(context, NULL);    
+  
+    pad0 = newpad_spec(context, 20, 20);
+
+    pad0_wnd = getWindow(&pad0);
+
+    ch.blink = true;
+    ch.letter = 'P';
+    
+    prefresh_spec(context, pad0_wnd, 0, 0, 4, 4, 5, 5);
+    pechochar_spec(context, pad0_wnd, ch);   
+
+    res = putwin_spec(context, &pad0, filep);
+
+    if(res == SUT_EOK)
+    {
+        ret = getwin_spec(context, filep);
+    }
+
+    ret = dupwin_spec(context, &pad0);
+
+    duppad0_wnd = getWindow(&pad0);
+
+    ch.blink = false;
+    ch.bold = true;
+    ch.letter = 'Q';
+    
+    prefresh_spec(context, duppad0_wnd, 0, 0, 4, 4, 5, 5);
+    pechochar_spec(context, duppad0_wnd, ch);   
+
+    prefresh_spec(context, duppad0_wnd, 3, 3, 4, 4, 5, 5);
+    pechochar_spec(context, duppad0_wnd, ch);   
+
+    return true;
+}
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm window_window_scenario =
+{
+    .init = init_window_scenario,
+    .finish = finish_window_scenario,
+    .actions = {
+        ncurses_window_copywin_scen,
+        ncurses_window_curs_set_scen,
+        ncurses_window_delwin_scen,
+        ncurses_window_derwin_subwin_scen,
+        ncurses_window_dupwin_mvwin_scen,
+        ncurses_window_intrflush_scen,
+        ncurses_window_keypad_scen,
+        ncurses_window_meta_scen,
+        ncurses_window_mvderwin_scen,
+        ncurses_window_nodelay_scen,
+        ncurses_window_overlay_overwrite_scen,
+        ncurses_window_putwin_getwin_scen,
+        ncurses_window_window_pad_scen,
+        NULL
+    }
+};
+
+
+bool main_ncurses_window_window( int argc, char** argv )
+{
+    window_window_scenario(argc, argv);
+    return true;
+}
+
+#ifdef NCURSES_WINDOW_WINDOW_LOCAL_MAIN
+
+/********************************************************************/
+/**                     Test System Initialization                 **/
+/********************************************************************/
+void reinitTestSystem(void)
+{
+    reinitControlCenter();
+    initCommonModel();
+    initCommonMedia();
+    initCommonScenarioState();
+
+    initSystemModel();
+
+    initNcurses();
+}
+
+
+//static AssertionExit system_assertion_handler;
+
+//void myAssertionExit(const char * format, va_list arg_list)
+//{
+//    system_assertion_handler( format, arg_list );  // Put breakpoint here
+//}
+
+int main(int argc, char** argv)
+{
+    //
+    initTestSystem();
+    loadSUT();
+    //    system_assertion_handler = atAssertion( myAssertionExit );
+    
+    // Set up tracer
+    //setTraceEncoding("windows-1251");
+    addTraceToFile("trace.xml");
+    // Run test scenario
+    main_ncurses_window_window(argc,argv);
+    
+    //  unloadSUT();
+    return 0;
+}
+#endif
+
+
+

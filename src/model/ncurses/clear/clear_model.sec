@@ -1,0 +1,1054 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+/*
+ * Portions of this text are reprinted and reproduced in electronic form
+ * from the Single UNIX Specification Version 2, Copyright (C) 1997 by The Open
+ * Group. In the event of any discrepancy between this version and the original
+ * document from the Open Group, the Open Group document is the referee document.
+ * The original document can be obtained online at http://www.unix.org/version2/online.html.
+ */
+
+#include "ncurses/clear/clear_model.seh"
+
+
+#pragma SEC subsystem clear "ncurses.clear"
+
+
+
+/*
+   The group of functions 'ncurses.clear' consists of:
+       clear [1]
+       clrtobot [1]
+       clrtoeol [1]
+       delch [1]
+       deleteln [1]
+       erase [1]
+       erasechar [1]
+       killchar [1]
+       mvdelch [1]
+       mvwdelch [1]
+       wclear [1]
+       wclrtobot [1]
+       wclrtoeol [1]
+       wdelch [1]
+       wdeleteln [1]
+       werase [1]
+ */
+
+/********************************************************************/
+/**                      Interface Functions                       **/
+/********************************************************************/
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    clear, erase, wclear, werase - clear a window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int clear(void);
+
+    int erase(void);
+
+    int wclear(WINDOW *win);
+
+    int werase(WINDOW *win);
+
+DESCRIPTION
+
+    The clear(), erase(), wclear() and werase() functions clear every
+    position in the current or specified window.
+
+    The clear() and wclear() functions also achieve the same effect as calling
+    clearok(), so that the window is cleared completely on the next call to
+    wrefresh() for the window and is redrawn in its entirety.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK. Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: werase, wclear, erase, clear
+specification
+IntT clear_spec( CallContext context, WindowTPtr* win, bool erase)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+
+    clear_model(local);
+
+    if(win)
+    {
+        if(erase)
+        {
+            FILTER("werase");
+        }
+        else
+        {
+            FILTER("wclear");
+        }
+    }
+    else
+    {
+        if(erase)
+        {
+            FILTER("erase");
+        }
+        else
+        {
+            FILTER("clear");
+        }
+    }
+
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { ClearWindow, "Clear a window" };
+    }
+    post
+    {
+        IntT i, j, eq = 1;
+
+        if(clear_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("clear.03.02;erase.03.02;wclear.03.02;werase.03.02", "", TODO_REQ());
+        }
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("clear.03.01;erase.03.01;wclear.03.01;werase.03.01",
+            "Upon successful completion, these functions return OK",
+            clear_spec == SUT_OK);
+
+        for(i = 0; i < curWnd->ncols; i++)
+            for(j=0;j < curWnd->nlines;j++)
+            {
+                eq &= equals_ChTypeT(curWnd->bkgd,
+                        getElement_NCursesWindow(curWnd,
+                            create_NCursesPosition(i, j))) ? 1 : 0;
+            }
+        /*
+         * The clear(), erase(), wclear() and werase() functions clear every
+         * position in the current or specified window.
+         */
+        REQ("clear.01;erase.01;wclear.01;werase.01",
+            "clear every position in the current or specified window",
+            eq);
+
+        /*
+         * The clear() and wclear() functions also achieve the same effect
+         * as calling clearok(), so that the window is cleared completely
+         * on the next call to wrefresh() for the window and is redrawn in
+         * its entirety.
+         */
+        REQ("clear.02;wclear.02", "", TODO_REQ());
+
+        REQ("", "Check All", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+void clear_model(NCursesWindow* local)
+{
+    IntT i, j;
+    NCursesPosition* pos = create_NCursesPosition(0, 0);
+
+    local->cursorPos = create_NCursesPosition(0, 0);
+
+    for(i = 0; i<local->ncols; i++)
+    {
+        for(j = 0; j< local->nlines; j++)
+        {
+            setElement_NCursesWindow(local, pos, local->bkgd);
+            pos->y++;
+        }
+        pos->y = 0;
+        pos->x++;
+    }
+    pushNCursesWindow(local);
+}
+
+void onClear(CallContext context, WindowTPtr* win, bool erase, IntT clear_spec)
+{
+    NCursesWindow* curWnd;
+    IntT i, j;
+
+    if (clear_spec==SUT_EOK)
+    {
+        if (win!=NULL)
+        {
+            curWnd=getWindow(win);
+        }
+        else
+        {
+            curWnd=getNCursesStdWindow(context);
+        }
+
+        curWnd->cursorPos = create_NCursesPosition(0, 0);
+
+        for(i = 0; i<curWnd->ncols; i++)
+            for(j = 0; j< curWnd->nlines; j++)
+                setElement_NCursesWindow( curWnd, create_NCursesPosition(i, j),
+                                          curWnd->bkgd);
+    }
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    clrtobot, wclrtobot - clear from cursor to end of window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int clrtobot(void);
+
+    int wclrtobot(WINDOW *win);
+
+DESCRIPTION
+
+    The clrtobot() and wclrtobot() functions erase all lines following the
+    cursor in the current or specified window, and erase the current line from
+    the cursor to the end of the line, inclusive.These functions do not update
+    the cursor.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK.Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: wclrtobot, clrtobot
+specification
+IntT clrtobot_spec( CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+    NCursesPosition* cursorPre = clone(curWnd->cursorPos);
+
+    clrtobot_model(local);
+
+    if(win)
+    {
+        FILTER("wclrtobot");
+    }
+    else
+    {
+        FILTER("clrtobot");
+    }
+
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { ClearFromCursorToEndOfWindow, "Clear from cursor to end of window" };
+    }
+    post
+    {
+        IntT i, j, eq = 1;
+
+        if(clrtobot_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("clrtobot.03.02;wclrtobot.03.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("clrtobot.03.01;wclrtobot.03.01",
+            "Upon successful completion, these functions return OK",
+            clrtobot_spec == SUT_OK);
+
+        /*
+         * These functions do not update the cursor.
+         */
+        REQ("clrtobot.02;wclrtobot.02",
+            "These functions do not update the cursor",
+            equals(curWnd->cursorPos, cursorPre));
+
+        for(i = 0; i < curWnd->ncols; i++)
+            for(j=curWnd->cursorPos->y+1;j < curWnd->nlines;j++)
+            {
+                eq &= equals_ChTypeT(curWnd->bkgd,
+                        getElement_NCursesWindow(curWnd,
+                            create_NCursesPosition(i, j))) ? 1 : 0;
+            }
+        /*
+         * The clrtobot() and wclrtobot() functions erase all lines
+         * following the cursor in the current or specified window,
+         */
+        REQ("clrtobot.01.01;wclrtobot.01.01",
+            "erase all lines following the cursor in the current or "
+            "specified window",
+            eq);
+
+        eq = 1;
+
+        for(i = curWnd->cursorPos->x; i < curWnd->ncols; i++)
+        {
+            eq &= equals_ChTypeT(curWnd->bkgd,
+                    getElement_NCursesWindow(curWnd,
+                        create_NCursesPosition(i, curWnd->cursorPos->y)))
+                  ? 1 : 0;
+        }
+        /*
+         * and erase the current line from the cursor to the end of the
+         * line, inclusive.
+         */
+        REQ("clrtobot.01.02;wclrtobot.01.02",
+            "shall erase the current line from the cursor to the end "
+            "of the line, inclusive",
+            eq);
+
+
+        REQ("", "Check All", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+void clrtobot_model(NCursesWindow* local)
+{
+    IntT i, j;
+    NCursesPosition* pos = create_NCursesPosition(local->cursorPos->x,
+                                local->cursorPos->y);
+
+    for(i = local->cursorPos->x; i < local->ncols; i++)
+    {
+        setElement_NCursesWindow(local, pos, local->bkgd);
+        pos->x++;
+    }
+
+    for(j = local->cursorPos->y+1; j< local->nlines; j++)
+    {
+        for(i = 0; i<local->ncols; i++)
+        {
+            setElement_NCursesWindow(local, pos, local->bkgd);
+            pos->x++;
+        }
+        pos->x = 0;
+        pos->y++;
+    }
+
+    pushNCursesWindow(local);
+}
+
+void onClrtobot( CallContext context, WindowTPtr* win, IntT clrtobot_spec)
+{
+    NCursesWindow* curWnd;
+    IntT i, j;
+
+    if (clrtobot_spec==SUT_EOK)
+    {
+        if (win!=NULL)
+        {
+            curWnd=getWindow(win);
+        }
+        else
+        {
+            curWnd=getNCursesStdWindow(context);
+        }
+
+        for(i = curWnd->cursorPos->x; i < curWnd->ncols; i++)
+            setElement_NCursesWindow(curWnd,
+                create_NCursesPosition(i, curWnd->cursorPos->y), curWnd->bkgd);
+
+        for(i = 0; i < curWnd->ncols; i++)
+            for(j=curWnd->cursorPos->y+1;j < curWnd->nlines;j++)
+                setElement_NCursesWindow(curWnd,
+                    create_NCursesPosition(i, j), curWnd->bkgd);
+    }
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    clrtoeol, wclrtoeol - clear from cursor to end of line
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int clrtoeol(void);
+
+    int wclrtoeol(WINDOW *win);
+
+DESCRIPTION
+
+    The clrtoeol() and wclrtoeol() functions erase the current line from the
+    cursor to the end of the line, inclusive, in the current or specified
+    window. These functions do not update the cursor.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK.Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: wclrtoeol, clrtoeol
+specification
+IntT clrtoeol_spec( CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+    NCursesPosition* cursorPre = clone(curWnd->cursorPos);
+
+    clrtoeol_model(local);
+
+    if(win)
+    {
+        FILTER("wclrtoeol");
+    }
+    else
+    {
+        FILTER("clrtoeol");
+    }
+
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { ClearFromCursorToEndOfLine, "Clear from cursor to end of line" };
+    }
+    post
+    {
+        IntT i, eq = 1;
+
+        if(clrtoeol_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("clrtoeol.03.02;wclrtoeol.03.02", "", TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("clrtoeol.03.01;wclrtoeol.03.01",
+            "Upon successful completion, these functions return OK",
+            clrtoeol_spec == SUT_OK);
+
+        /*
+         * These functions do not update the cursor.
+         */
+        REQ("clrtoeol.02;wclrtoeol.02",
+            "These functions do not update the cursor",
+            equals(curWnd->cursorPos, cursorPre));
+
+        for(i = curWnd->cursorPos->x; i < curWnd->ncols; i++)
+        {
+            eq &= equals_ChTypeT(curWnd->bkgd,
+                    getElement_NCursesWindow(curWnd,
+                        create_NCursesPosition(i, curWnd->cursorPos->y)))
+                  ? 1 : 0;
+        }
+
+        /*
+         * The clrtoeol() and wclrtoeol() functions erase the current line
+         * from the cursor to the end of the line, inclusive, in the current
+         * or specified window.
+         */
+        REQ("clrtoeol.01;wclrtoeol.01",
+            "Shall erase the current line from the cursor to the end of the "
+            "line, inclusive, in the current or specified window",
+            eq);
+
+        REQ("", "Check All", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+    FILTER_CLEAN;
+}
+
+void clrtoeol_model(NCursesWindow* local)
+{
+    IntT i;
+    NCursesPosition* pos = create_NCursesPosition(local->cursorPos->x,
+                                local->cursorPos->y);
+
+    for(i = local->cursorPos->x; i < local->ncols; i++)
+    {
+        setElement_NCursesWindow(local, pos, local->bkgd);
+        pos->x++;
+    }
+
+    pushNCursesWindow(local);
+}
+
+
+void onClrtoeol( CallContext context, WindowTPtr* win, IntT clrtoeol_spec)
+{
+    NCursesWindow* curWnd;
+    IntT i;
+
+    if (clrtoeol_spec==SUT_EOK)
+    {
+        if (win!=NULL)
+        {
+            curWnd=getWindow(win);
+        }
+        else
+        {
+            curWnd=getNCursesStdWindow(context);
+        }
+
+        for(i = curWnd->cursorPos->x; i < curWnd->ncols; i++)
+            setElement_NCursesWindow(curWnd,
+                create_NCursesPosition(i, curWnd->cursorPos->y), curWnd->bkgd);
+    }
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    delch, mvdelch, mvwdelch, wdelch - delete a character from a window.
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int delch(void);
+
+    int mvdelch(int y, int x);
+
+    int mvwdelch(WINDOW *win, int y, int x);
+
+    int wdelch(WINDOW *win);
+
+DESCRIPTION
+
+    These functions delete the character at the current or specified position
+    in the current or specified window. This function does not change the
+    cursor position.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK.Otherwise, they
+    return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: mvwdelch, wdelch, mvdelch, delch
+specification
+IntT delch_spec( CallContext context, WindowTPtr* win,
+                NCursesPosition* position)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+    NCursesPosition* cursorPre = position == NULL ?
+                                clone(curWnd->cursorPos) : clone(position);
+
+    delch_model(local, position);
+
+    if(win)
+    {
+        if(position)
+        {
+            FILTER("mvwdelch");
+        }
+        else
+        {
+            FILTER("wdelch");
+        }
+    }
+    else
+    {
+        if(position)
+        {
+            FILTER("mvdelch");
+        }
+        else
+        {
+            FILTER("delch");
+        }
+    }
+
+    pre
+    {
+        return true;
+    }
+    post
+    {
+        IntT eq = 1;
+
+        if(delch_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("delch.03.02;mvdelch.03.02;wdelch.03.02;mvwdelch.03.02", "",
+                    TODO_REQ());
+
+            return true;
+        }
+
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("delch.03.01;mvdelch.03.01;wdelch.03.01;mvwdelch.03.01",
+            "Upon successful completion, these functions return OK",
+            delch_spec == SUT_OK);
+
+        /*
+         * This function does not change the cursor position.
+         */
+        REQ("delch.02;mvdelch.02;wdelch.02;mvwdelch.02",
+            "This function does not change the cursor position",
+            equals(curWnd->cursorPos, cursorPre));
+
+        /*
+         * These functions delete the character at the current or specified
+         * position in the current or specified window.
+         */
+        REQ("delch.01;mvdelch.01;wdelch.01;mvwdelch.01",
+            "These functions delete the character at the current or specified "
+            "position in the current or specified window",
+            equals_ChTypeT(curWnd->bkgd,
+                           getElement_NCursesWindow(curWnd, cursorPre)));
+
+        REQ("", "Check All", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+void delch_model(NCursesWindow* local, NCursesPosition* pos)
+{
+    if(pos != NULL)
+        local->cursorPos = clone(pos);
+
+    setElement_NCursesWindow(local,
+        create_NCursesPosition(local->cursorPos->x, local->cursorPos->y),
+        local->bkgd);
+
+    pushNCursesWindow(local);
+}
+
+void onDelch( CallContext context, WindowTPtr* win, NCursesPosition* position,
+             IntT delch_spec)
+{
+    NCursesWindow* curWnd;
+    NCursesPosition* curPosition;
+
+    if (delch_spec==SUT_EOK)
+    {
+        if (win!=NULL)
+        {
+            curWnd=getWindow(win);
+        }
+        else
+        {
+            curWnd=getNCursesStdWindow(context);
+        }
+
+        if(position != NULL)
+        {
+            curWnd->cursorPos = clone(position);
+        }
+
+        setElement_NCursesWindow(curWnd, curWnd->cursorPos, curWnd->bkgd);
+    }
+}
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    deleteln, wdeleteln - delete lines in a window
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    int deleteln(void);
+
+    int wdeleteln(WINDOW *win);
+
+DESCRIPTION
+
+    The deleteln() and wdeleteln() functions delete the line containing the
+    cursor in the current or specified window and move all lines following the
+    current line one line toward the cursor. The last line of the window is
+    cleared. The cursor position does not change.
+
+RETURN VALUE
+
+    Upon successful completion, these functions return OK.Otherwise, they return
+    ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: wdeleteln, deleteln
+specification
+IntT deleteln_spec( CallContext context, WindowTPtr* win)
+{
+    NCursesWindow* curWnd = getWindowMayNULL(context, win);
+    NCursesWindow* local = createNCursesWindow_Local(curWnd);
+    NCursesWindow* local2 = clone(local);
+    NCursesPosition* cursorPre = clone(curWnd->cursorPos);
+
+    deleteln_model(local);
+
+    if(win)
+    {
+        FILTER("wdeleteln");
+    }
+    else
+    {
+        FILTER("deleteln");
+    }
+
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { DeleteLine, "Delete the line" };
+    }
+    post
+    {
+        IntT eq;
+
+        if(deleteln_spec == SUT_ERR)
+        {
+            /*
+             * Otherwise, they return ERR.
+             */
+            REQ("deleteln.04.02;wdeleteln.04.02", "", TODO_REQ());
+
+            return true;
+        }
+        /*
+         * Upon successful completion, these functions return OK.
+         */
+        REQ("deleteln.04.01;wdeleteln.04.01",
+            "Upon successful completion, these functions return OK",
+            deleteln_spec == SUT_OK);
+
+        /*
+         * The cursor position does not change.
+         */
+        REQ("deleteln.03;wdeleteln.03",
+            "The cursor position does not change",
+            equals(curWnd->cursorPos, cursorPre));
+
+        eq = check_deleteln(local2, curWnd) ? 1 : 0;
+        /*
+         * The deleteln() and wdeleteln() functions delete the line containing
+         * the cursor in the current or specified window and move all lines
+         * following the current line one line toward the cursor.
+         */
+        REQ("deleteln.01;wdeleteln.01",
+            "Shall delete the line containing the cursor in the current or "
+            "specified window and move all lines following the current line "
+            "one line toward the cursor",
+            eq);
+
+        /*
+         * The last line of the window is cleared.
+         */
+        REQ("deleteln.02;wdeleteln.02",
+            "The last line of the window is cleared",
+            eq);
+
+        REQ("", "Check All", check_NCursesWindows(curWnd, local, CH_ALL, -1));
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+
+void deleteln_model(NCursesWindow* local)
+{
+    IntT i, j;
+    NCursesPosition* pos = create_NCursesPosition(0, local->cursorPos->y);
+
+    //shifting screen
+    for(j = local->cursorPos->y; j <local->nlines - 1; j++)
+    {
+        for(i = 0; i < local->ncols; i++)
+        {
+            setElement_NCursesWindow(local, pos,
+                getElement_NCursesWindow_YX(local, j+1, i));
+
+            pos->x++;
+        }
+        pos->y++;
+        pos->x = 0;
+    }
+
+    //erasing last line
+    pos->y = local->nlines - 1;
+    pos->x = 0;
+
+    for(i = 0; i < local->ncols; i++)
+    {
+        setElement_NCursesWindow(local, pos, local->bkgd);
+        pos->x++;
+    }
+
+    pushNCursesWindow(local);
+}
+
+
+void onDeleteln( CallContext context, WindowTPtr* win, IntT deleteln_spec)
+{
+    NCursesWindow* curWnd;
+    IntT i, j;
+
+    if (deleteln_spec==SUT_EOK)
+    {
+        if (win!=NULL)
+        {
+            curWnd=getWindow(win);
+        }
+        else
+        {
+            curWnd=getNCursesStdWindow(context);
+        }
+
+        //shifting screen
+        for(i = 0; i < curWnd->ncols; i++)
+            for(j = curWnd->cursorPos->y; j <curWnd->nlines - 1; j++)
+                setElement_NCursesWindow(curWnd, create_NCursesPosition(i, j),
+                        getElement_NCursesWindow(curWnd,
+                            create_NCursesPosition(i, j+1)));
+
+        //erasing last line
+        for(i = 0; i < curWnd->ncols; i++)
+            setElement_NCursesWindow(curWnd,
+                create_NCursesPosition(i, curWnd->nlines - 1),
+                curWnd->bkgd);
+    }
+}
+
+
+/*
+Linux Standard Base Core Specification 3.1
+Copyright (c) 2004, 2005 Free Standards Group
+
+    refers
+
+The Single UNIX ® Specification, Version 2
+Copyright (c) 1997 The Open Group
+
+NAME
+
+    erasechar, erasewchar, killchar, killwchar - terminal environment query
+    functions
+
+SYNOPSIS
+
+    #include <curses.h>
+
+    char erasechar(void);
+
+    int erasewchar(wchar_t *ch);
+
+    char killchar(void);
+
+    int killwchar(wchar_t *ch);
+
+DESCRIPTION
+
+    The erasechar() function returns the current erase character.   The
+    erasewchar() function stores the current erase character in the object
+    pointed to by ch. If no erase character has been defined, the function
+    will fail and the object pointed to by ch will not be changed.
+
+    The killchar() function returns the current line kill character.  The
+    killwchar() function stores the current line kill character in the object
+    pointed to by ch. If no line kill character has been defined, the function
+    will fail and the object pointed to by ch will not be changed.
+
+RETURN VALUE
+
+    The erasechar() function returns the erase character and killchar() returns
+    the line kill character. The return value is unspecified when these
+    characters are multi-byte characters.
+
+    Upon successful completion, erasewchar() and killwchar() return OK.
+    Otherwise, they return ERR.
+
+ERRORS
+
+    No errors are defined.
+*/
+
+//This specification refers to: killchar, erasechar
+specification
+IntT erasechar_spec( CallContext context, bool kill)
+{
+    if(kill)
+    {
+        FILTER("killchar");
+    }
+    else
+    {
+        FILTER("erasechar");
+    }
+
+    pre
+    {
+        return true;
+    }
+    coverage C
+    {
+        return { TerminalEnvironmentQueryFunction, "Terminal environment query function" };
+    }
+    post
+    {
+        /*
+         * The erasechar() function returns the current erase character.
+         */
+        REQ("erasechar.01;killchar.01", "", TODO_REQ());
+
+        /*
+         * The erasechar() function returns the erase character and
+         * killchar() returns the line kill character.
+         */
+        REQ("erasechar.02;killchar.02", "", TODO_REQ());
+
+        /*
+         * The return value is unspecified when these characters are multi-byte
+         * characters.
+         */
+        REQ("erasechar.03;killchar.03", "", TODO_REQ());
+
+        return true;
+    }
+
+    FILTER_CLEAN;
+}
+//We may save this value in model and i'll improve create_emptyChTypeT
+void onErasechar( CallContext context, bool kill, IntT erase_spec)
+{
+
+}
+
+/********************************************************************/
+/**                       Helper Functions                         **/
+/********************************************************************/
+bool check_deleteln(NCursesWindow* win_pre, NCursesWindow* win_post)
+{
+    IntT i, j;
+
+
+    for(i=0;i<win_pre->ncols;i++)
+        for(j=win_pre->cursorPos->y;j<win_pre->nlines-1;j++)
+        {
+            if(!equals_ChTypeT(getElement_NCursesWindow_YX(win_pre, j+1, i),
+                                getElement_NCursesWindow_YX(win_post, j, i)))
+                return false;
+        }
+
+    for(i=0;i<win_pre->ncols;i++)
+    {
+        if(!equals_ChTypeT( win_post->bkgd,
+            getElement_NCursesWindow_YX(win_pre, win_pre->nlines-1, i)))
+                return false;
+    }
+
+    return true;
+}

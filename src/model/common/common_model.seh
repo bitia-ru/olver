@@ -1,0 +1,630 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef COMMON_MODEL_SEH
+#define COMMON_MODEL_SEH
+
+#include <ctype.h>
+#include "atl/map.h"
+#include "atl/set.h"
+#include "atl/long.h"
+#include "config/model_config.seh"
+#include "data/embed_model.seh"
+#include "common/pointer.seh"
+#include "common/tsstream.seh"
+#include "common/verbose.h"
+#include "data/errno_model.seh"
+
+typedef enum Bool3
+{
+    False_Bool3,
+    True_Bool3,
+    Unknown_Bool3
+} Bool3;
+
+#define NewCTesK
+
+// Temporary here
+#include "core/core.seh"
+
+/********************************************************************/
+/**                  Common Model Initialization                   **/
+/********************************************************************/
+void initCommonModel(void);
+
+
+/********************************************************************/
+/**                      Traceability Functions                    **/
+/********************************************************************/
+#define T( x ) tterm( (x), #x )
+#define F( x ) fterm( (x), #x )
+bool tterm( bool value, const char* str );
+bool fterm( bool value, const char* str );
+#define REQUIREMENTS_FAILED(x) traceUserInfo( "Requirements failed: " x );
+
+void traceRequirements(char* id);
+void traceFailedRequirements(char* id);
+String* filterAllowedRequirements(char * id);
+
+void traceExtraProperty(const char* key, Object* value);
+void traceExtraFormattedProperty(const char* key, const char* format, ...);
+
+#define TRACE_OBJECT( obj ) \
+{\
+String* __tmp;\
+char* __buff;\
+\
+    __tmp = toString( obj );\
+    __buff = (char*)malloc( length_String( __tmp )+strlen( #obj )+32 );\
+    sprintf( __buff, "%s = %s", #obj, toCharArray_String(__tmp) );\
+    traceUserInfo( __buff );\
+    free( __buff );\
+}
+
+String* to_string_ErrorCode(sut_int* error_code); // need in ERROR_MAY_SHALL
+
+
+/********************************************************************/
+/**                       REQ FILTER &MACROS                       **/
+/********************************************************************/
+
+extern bool trace_all_requirements;
+
+bool initReqFilters(void);
+void req_filter(char * s);
+void filter_clean();
+void reverse_filter();
+
+bool AlwaysTrue(const char* strReqs);
+extern bool req_scen_verdict;
+
+#define FILTER(s)  req_filter(s)
+#define FILTER_CLEAN  filter_clean()
+#define REVERSE_FILTER  reverse_filter()
+
+
+#ifdef DUMPREQ
+#define REQTRACE dump_req
+#else
+#define REQTRACE traceFormattedUserInfo
+#endif
+
+
+// temporary suppress TODO_REQ()
+#define REQCSS(id, msg, value, valstr)\
+    { \
+        String *smsg = msg; \
+        String *csid = id; \
+        char *idStr = (char*)toCharArray_String(csid); \
+        if( !strstr(valstr,"TODO_REQ") && (strcmp(idStr,"implicit")!=0) && (strcmp(idStr,"no_id(bug)")!=0) && ( trace_all_requirements || (!strstr(valstr,"GENERAL_REQ") && !strstr(valstr,"STRUCT_REQ")) )) \
+        { \
+            traceRequirements(idStr);\
+        } \
+        if (!(value))\
+        {\
+            String *reqStr = concat_String(create_String("Requirement failed: {"), filterAllowedRequirements(idStr) ); \
+            reqStr = concat_String(reqStr, create_String("} ")); \
+            reqStr = concat_String(reqStr, smsg); \
+            traceExceptionInfo( toCharArray_String(reqStr) ); \
+            REQTRACE( toCharArray_String(reqStr) ); \
+            traceFailedRequirements(idStr); \
+            return false;\
+        } \
+    }
+
+// REQCSS taking CString as id and msg
+#define REQCS(id, msg, value)\
+    REQCSS(id, msg, value, #value)
+
+#define REQ(id, msg, value)\
+    REQCSS(create_String(id), create_String(msg), value, #value)
+    
+// temporary suppress TODO_REQ()
+#define REQCSS3(id, msg, value, valstr) \
+{ \
+       Bool3 lvalue = (value); \
+       String *smsg = msg; \
+       String *csid = id; \
+       char *idStr = (char*)toCharArray_String(csid); \
+       if( \
+           (lvalue != Unknown_Bool3) && \
+           !strstr(valstr, "TODO_REQ") && \
+           (strcmp(idStr, "implicit") != 0) && \
+           (strcmp(idStr, "no_id(bug)") != 0) && \
+           ( trace_all_requirements || (!strstr(valstr, "GENERAL_REQ") && !strstr(valstr, "STRUCT_REQ") )) \
+          ) \
+       { \
+           traceRequirements(idStr);\
+       } \
+       if (lvalue == False_Bool3)\
+       {\
+           String *reqStr = concat_String(create_String("Requirement failed: {"), filterAllowedRequirements(idStr) ); \
+           reqStr = concat_String(reqStr, create_String("} ")); \
+           reqStr = concat_String(reqStr, smsg); \
+           traceExceptionInfo( toCharArray_String(reqStr) ); \
+           REQTRACE( toCharArray_String(reqStr) ); \
+           traceFailedRequirements(idStr); \
+           return false;\
+       } \
+   }
+
+// REQCSS3 taking CString as id and msg
+#define REQCS3(id, msg, value) \
+    REQCSS3(id, msg, value, #value)
+
+// REQ3 taking 'value' as Bool3
+#define REQ3(id, msg, value) \
+    REQCSS3(create_String(id), create_String(msg), value, #value)
+
+#define INIT_REQ_SCEN\
+    { \
+        req_scen_verdict = true; \
+    } \
+
+#define REQ_SCEN(id, msg, value)\
+    { \
+        String *smsg = create_String(msg); \
+        if( !strstr(#value,"TODO_REQ") && ( trace_all_requirements || (!strstr(#value,"GENERAL_REQ") && !strstr(#value,"STRUCT_REQ")) )) \
+        { \
+            traceRequirements(id);\
+        } \
+        if (!(value))\
+        {\
+            String *csid = create_String(id); \
+            char *idStr = (char*)toCharArray_String(csid); \
+            String *reqStr = concat_String(create_String("Requirement failed: {"), filterAllowedRequirements(idStr) ); \
+            reqStr = concat_String(reqStr, create_String("} ")); \
+            reqStr = concat_String(reqStr, smsg); \
+            traceExceptionInfo( toCharArray_String(reqStr) ); \
+                REQTRACE( toCharArray_String(reqStr) ); \
+            traceFailedRequirements(idStr); \
+            req_scen_verdict = false; \
+        } \
+    }
+
+#define VERDICT_REQ_SCEN\
+    { \
+        return req_scen_verdict; \
+    } \
+
+#define REQ_MEDIA(id, msg, value)\
+                        { \
+                            traceRequirements(id);\
+                            if (!(value))\
+                            {\
+                             const char *_msg = "Requirements failed: {" id "}" msg;\
+                             REQTRACE( _msg );\
+                             setBadVerdict(_msg);\
+                             traceFailedRequirements(id);\
+                            }\
+                        }
+
+#define IMPLEMENT_REQ(id)   traceRequirements(id);
+
+
+#define REQ_UNCHECKABLE(ID, response) {traceRequirements(ID);}
+
+#define TODO_REQ()        (true)
+#define STRUCT_REQ()      (true)
+#define GENERAL_REQ(depend)      (AlwaysTrue(depend))
+
+
+/********************************************************************/
+/**                         Error Checking                         **/
+/********************************************************************/
+#define HAS_EXTRA_ERROR_CODES(n) (n##_HAS_EXTRA_ERROR_CODES > 0)
+
+#define MAY_SHALL_FAIL(n, e)     (n##_FAILS_WITH_##e > 0)
+#define MAY_SHALL_FAIL_EXT(n, p, e)     (n##_FAILS_WITH_##e##_ON_##p > 0)
+#define HAS_EXTRA_CONDITION_ON(n, e) (n##_HAS_EXTRA_CONDITION_ON_##e>0)
+
+#define ERROR_BEGIN(ERR_FUNC, reqid, has_error, error_val) \
+{ \
+    bool hasError = has_error; \
+    sut_int  errNo = error_val; \
+    bool extraCodes = HAS_EXTRA_ERROR_CODES(ERR_FUNC); \
+    char * err_reqid = reqid; \
+    String *hasErrorStr = create_String(#has_error); \
+    String *failedId = create_String( (char*)reqid ); \
+    String *errMsg  = NULL; \
+    int shallFail = -1; \
+    bool errFound = false; \
+    bool retOnSuccess = true; \
+    if (has_error && (error_val == SUT_EOK)) \
+    {   \
+        String *reqStr = concat_String(create_String("Requirement failed: {"), filterAllowedRequirements(reqid)); \
+        reqStr = concat_String(reqStr, create_String("} ")); \
+        reqStr = concat_String(reqStr, create_String(#has_error)); \
+        reqStr = concat_String(reqStr, create_String(" means error while error code (" )); \
+        reqStr = concat_String(reqStr, create_String(#error_val) ); \
+        reqStr = concat_String(reqStr, create_String(") is not set") ); \
+        traceExceptionInfo( toCharArray_String(reqStr) ); \
+        REQTRACE( toCharArray_String(reqStr) ); \
+        traceFailedRequirements(reqid); \
+        return false; \
+    } else { \
+        traceRequirements(reqid); \
+    }
+
+
+#define ERROR_MAY_SHALL(ERR_FUNC, errname, reqid, error_predicate, shall, error_predicate_str, predicate_unknown) \
+    { \
+        bool mayShall =  shall; \
+        bool extraCond = HAS_EXTRA_CONDITION_ON(ERR_FUNC, errname) > 0; \
+        bool pred = error_predicate; \
+        \
+        if (hasError && (errNo == SUT_ ##errname)) \
+        { \
+        	if( !strstr(error_predicate_str,"TODO_ERR") && !(predicate_unknown)) \
+            	traceRequirements(reqid); \
+            errFound = true; \
+            if(extraCond || pred ) \
+            { \
+                shallFail = 0; \
+                return true; \
+            } \
+            else \
+            { \
+                String *strUnmatched = create_String("{"); \
+                String *strDelim = create_String(" ; "); \
+                strUnmatched = concat_String(strUnmatched, create_String(reqid)); \
+                strUnmatched = concat_String(strUnmatched, create_String("} error not met because its predicate ("#error_predicate") is false while error code " #errname " is set")); \
+                errMsg = concat_String(strUnmatched, strDelim); \
+                if(shallFail==-1) \
+                    shallFail = 1; \
+            } \
+        } \
+        if (mayShall && pred && (!hasError || (errNo != SUT_ ##errname) )  ) \
+        { \
+            failedId = create_String( reqid ); \
+            errMsg = create_String("{"); \
+            errMsg = concat_String(errMsg, create_String( reqid )); \
+            errMsg = concat_String(errMsg, create_String("} ")); \
+            if(hasError) \
+            {\
+                errMsg = concat_String(errMsg, create_String("Function returned ")); \
+                errMsg = concat_String(errMsg, to_string_ErrorCode(&errNo)); \
+                errMsg = concat_String(errMsg, create_String(" while " #errname " was expected by condition " #error_predicate)); \
+            } else { \
+                errMsg = concat_String(errMsg, create_String("Function returned EOK error code, while `")); \
+                errMsg = concat_String(errMsg, create_String( #error_predicate ) ); \
+                errMsg = concat_String(errMsg, create_String(" == true` means that ")); \
+                errMsg = concat_String(errMsg, create_String( #errname " SHALL be set")); \
+            } \
+            if(shallFail==-1) \
+                shallFail = 1; \
+        } \
+    }
+
+
+
+#define ERROR_NEVER(ERR_FUNC, errname, reqid) \
+    if( errNo == SUT_ ##errname ) \
+    { \
+        if (hasError) \
+        {\
+            traceExceptionInfo("Requirement failed: {" reqid "} This function shall not return an error code of " #errname); \
+            REQTRACE("Requirement failed: {" reqid "} This function shall not return an error code of " #errname); \
+            traceFailedRequirements(reqid); \
+            return false; \
+        } \
+    }
+
+
+#define ERROR_UNCHECKABLE(ERR_FUNC, errname, reqid, reason) \
+    { \
+        if (hasError && (errNo == SUT_ ##errname)) \
+        { \
+            traceRequirements(reqid); \
+            errFound = true; \
+        } \
+    }
+
+
+#define ERROR_MAY( ERR_FUNC, errname, reqid, error_predicate ) \
+    ERROR_MAY_SHALL( ERR_FUNC, errname, reqid, error_predicate, MAY_SHALL_FAIL(ERR_FUNC, errname), #error_predicate, false )
+
+#define ERROR_MAY_EXT( ERR_FUNC, ERR_POSTFIX, errname, reqid, error_predicate ) \
+    ERROR_MAY_SHALL( ERR_FUNC, errname, reqid, error_predicate, MAY_SHALL_FAIL_EXT(ERR_FUNC, ERR_POSTFIX, errname), #error_predicate, false )
+
+#define ERROR_MAY3( ERR_FUNC, errname, reqid, error_predicate ) \
+    ERROR_MAY_SHALL( ERR_FUNC, errname, reqid, (error_predicate)!=False_Bool3, (MAY_SHALL_FAIL(ERR_FUNC, errname) && (error_predicate)==True_Bool3), #error_predicate, (error_predicate)==Unknown_Bool3 )
+
+#define ERROR_SHALL( ERR_FUNC, errname, reqid, error_predicate ) \
+    ERROR_MAY_SHALL( ERR_FUNC, errname, reqid, error_predicate, true, #error_predicate, false )
+
+#define ERROR_SHALL3( ERR_FUNC, errname, reqid, error_predicate ) \
+    ERROR_MAY_SHALL( ERR_FUNC, errname, reqid, (error_predicate)!=False_Bool3, (error_predicate)==True_Bool3, #error_predicate, (error_predicate)==Unknown_Bool3 )
+
+#define ERROR_END() \
+    if (hasError || (shallFail!=-1) ) \
+    { \
+        char *failedIdStr = (char*)toCharArray_String(failedId); \
+        String * errCodeStr = to_string_ErrorCode(&errNo);\
+        if ( !errFound && extraCodes) \
+        { \
+            traceRequirements(err_reqid); \
+            if(retOnSuccess) \
+                return true; \
+        } \
+        if ( shallFail==1 ) \
+        { \
+            errMsg = concat_String(create_String("Requirement failed: "), errMsg); \
+            traceExceptionInfo(toCharArray_String(errMsg)); \
+            REQTRACE(toCharArray_String(errMsg)); \
+            traceFailedRequirements (failedIdStr) ;\
+            return false; \
+        } \
+        if( errFound || extraCodes) \
+        { \
+            traceRequirements(err_reqid); \
+            if(retOnSuccess) \
+                return true; \
+        } \
+        errMsg = format_String("Requirement failed: Unexpected error code returned: [%s] code 0x%X", toCharArray_String(errCodeStr), errNo); \
+        traceExceptionInfo(toCharArray_String(errMsg)); \
+        REQTRACE(toCharArray_String(errMsg)); \
+        traceFailedRequirements (failedIdStr) ;\
+        return false; \
+    } \
+}
+
+#define TODO_ERR(errname) (errNo == SUT_ ##errname && hasError)
+
+/********************************************************************/
+/**                        Type Verification                       **/
+/********************************************************************/
+#define VERIFY_TYPE( f, t, ref )                                \
+    assertion(    (ref) == 0                                    \
+               || isBasicType((t), TYPE( (void*)ref ))          \
+             , FORMAT( #f ": '%s' type required, '%s' found" )  \
+             , (t) ? (t)->name : "<null>"                       \
+             , ((ref) == 0) || TYPE( (void*)ref )->name         \
+             )
+
+
+/********************************************************************/
+/**                  Deferred Reactions Mode Control               **/
+/********************************************************************/
+#define DISABLE_DEFERRED_REACTIONS    { bool drmode = setDeferredReactionsMode(false);
+#define ENABLE_DEFERRED_REACTIONS     setDeferredReactionsMode(drmode); }
+
+
+/********************************************************************/
+/**                    Three Valued Boolean Type                   **/
+/********************************************************************/
+Bool3 not_Bool3(Bool3 x);
+Bool3 and_Bool3(Bool3 x, Bool3 y);
+Bool3 or_Bool3(Bool3 x, Bool3 y);
+Bool3 equals_Bool3(Bool3 x, Bool3 y);
+
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+specification typedef TimeUnit TimeUnitObj;
+
+TimeUnitObj * create_TimeUnitObj(TimeUnit timeUnit);
+
+/********************************************************************/
+/**                      Conversion Functions                      **/
+/********************************************************************/
+
+/* 2CharT */
+CharT SChar2Char( CallContext context, SCharT value );
+CharT UChar2Char( CallContext context, UCharT value );
+CharT Short2Char( CallContext context, ShortT value );
+CharT UShort2Char( CallContext context, UShortT value );
+CharT Int2Char( CallContext context, IntT value );
+CharT UInt2Char( CallContext context, UIntT value );
+CharT Long2Char( CallContext context, LongT value );
+CharT ULong2Char( CallContext context, ULongT value );
+CharT LLong2Char( CallContext context, LLongT value );
+CharT ULLong2Char( CallContext context, ULLongT value );
+
+
+/********************************************************************/
+/**                          Memory Block                          **/
+/********************************************************************/
+specification typedef
+struct MemoryBlock
+{
+    VoidTPtr   address;
+    SizeT      size;
+    List*      subblocks;
+    Object*    data;
+} MemoryBlock;
+
+MemoryBlock* create_MemoryBlock( VoidTPtr address, SizeT size );
+MemoryBlock* registerMemoryBlock( VoidTPtr address, SizeT size );
+void unregisterMemoryBlock( VoidTPtr address );
+void printMemoryBlocksInfo( CallContext context );
+
+
+/********************************************************************/
+/**                      Memory Blocks Storage                     **/
+/********************************************************************/
+MemoryBlock* getMemoryBlock( VoidTPtr ptr );
+MemoryBlock* findMemoryBlock( List* memory_blocks, VoidTPtr ptr );
+
+MemoryBlock* getTopMemoryBlock( VoidTPtr ptr );
+MemoryBlock* findTopMemoryBlock( List* memory_blocks, VoidTPtr ptr );
+
+bool isDisjointMemoryBlock( List* memory_blocks, VoidTPtr ptr, SizeT size );
+bool isDisjointMemoryBlockExceptFor( List* memory_blocks, VoidTPtr except_block, VoidTPtr ptr, SizeT size );
+bool isHeapBlockPointer( VoidTPtr ptr );
+int getNumberOfHeapBlocks( CallContext context );
+MemoryBlock* getLastMemoryBlock( CallContext context );
+
+CByteArray* readCByteArray_MemoryBlock( MemoryBlock* mb );
+WCharArray* readWCharArray_MemoryBlock( MemoryBlock* mb );
+CByteArray* readCByteArray_MemoryBlockExceptFor( MemoryBlock* mb, VoidTPtr ptr, SizeT size );
+
+
+/********************************************************************/
+/**                        Objects In Memory                       **/
+/********************************************************************/
+void registerObjectInMemory( VoidTPtr ptr, SizeT size, Object* data );
+void unregisterObjectInMemory( VoidTPtr ptr );
+
+Object* getObjectInMemory( VoidTPtr ptr );
+Object* findObjectInMemoryBlocks( List* memory_blocks, VoidTPtr ptr );
+
+// for forkProcess in control_center.sec
+bool removeMemoryBlock( List* memory_blocks, VoidTPtr address );
+
+
+Object* getTypedObjectInMemory( VoidTPtr ptr, const Type* type_desc );
+Object* findTypedObjectInMemoryBlocks( List* memory_blocks, VoidTPtr ptr, const Type* type_desc );
+
+typedef Map ObjectsInMemory;
+
+ObjectsInMemory* getTypedObjectsInMemory( CallContext context, const Type* type_desc );
+ObjectsInMemory* findTypedObjectsInMemoryBlocks( List* memory_blocks, const Type* type_desc );
+
+ObjectsInMemory* getAllTypedObjectsInMemory( const Type* type_desc );
+Object* findObjectInMemory( ObjectsInMemory* objects, VoidTPtr ptr );
+
+int getNumberOfTypedObjectsInMemory( CallContext context, const Type* type_desc );
+
+Object* getAnyObjectInMemoryOfType( CallContext context, const Type* type_desc );
+Object* findAnyObjectInMemoryBlocksOfType( List* memory_blocks, const Type* type_desc );
+
+typedef bool (*SelectorFuncType)( Object* object );
+Object* selectObjectInMemory( CallContext context, SelectorFuncType selector );
+//Object* selectObjectInMemory( CallContext context, SelectorFuncType selector );
+
+
+/********************************************************************/
+/**                     Common Memory Functions                    **/
+/********************************************************************/
+bool isValidPointer( CallContext context, VoidTPtr ptr );
+
+//SizeT sizeMemoryAvailable( VoidTPtr ptr, AccessT requiredAccess );
+SizeT sizeRWMemoryAvailable( VoidTPtr ptr );
+SizeT sizeRMemoryAvailable( VoidTPtr ptr );
+SizeT sizeWMemoryAvailable( VoidTPtr ptr );
+bool areObjectsOverlapped( VoidTPtr ptr1, SizeT size1, VoidTPtr ptr2, SizeT size2 );
+bool isPointerAligned( VoidTPtr ptr, SizeT allignment );
+bool isZeroArray(VoidTPtr s, SizeT n);
+
+
+/********************************************************************/
+/**                           Error Code                           **/
+/********************************************************************/
+specification typedef IntT ErrorCode;
+ErrorCode* create_ErrorCode( IntT errno );
+
+
+/********************************************************************/
+/**                        Common Coverages                        **/
+/********************************************************************/
+#define ALIGNMENT_COVERAGE(ptr) \
+    coverage C_##ptr \
+    { \
+        if (isPointerAligned(ptr, sizeof_Type(context,"int"))) \
+        { \
+            return { C_##ptr_Aligned,      "Pointer " #ptr " is aligned on sizeof(int)"     }; \
+        } else { \
+            return { C_##ptr_NotAligned,   "Pointer " #ptr " is not aligned on sizeof(int)" }; \
+        } \
+    }
+
+#define UNSIGNED_CHAR_COVERAGE(c) \
+    coverage C_##c \
+    { \
+        if((SCharT)c==(UCharT)c) \
+                return { UnsNot, "Unsigned char is not important" }; \
+            else /* if((CharT)c!=(UCharT)c) */ \
+                return { UnsImp, "Unsigned char is important" }; \
+    }
+
+#define CANCELPOINT_COVERAGE(context) \
+    coverage Cancelpoint \
+    { \
+        if (isCancellationRequest(context)) \
+        { \
+            if (getThreadCancelState(context) == SUT_PTHREAD_CANCEL_ENABLE) \
+            { \
+                return { RequestEnabled,  "Cancellation request is present, cancellation enabled"  }; \
+            } else { \
+                return { RequestDisabled, "Cancellation request is present, cancellation disabled" }; \
+            } \
+        } else { \
+            return { RequestAbsent, "Cancellation request is absent" }; \
+        } \
+    }
+
+// Temporary define
+#define  CANCELLATION_POINT_MAY_OCCUR_REQ(context, status) \
+    if ( CANCELLED(status) ) \
+    { \
+        /* \
+         * A cancellation point may also occur when a thread is executing the function. \
+         * \
+         * Whenever a thread has cancelability enabled and  \
+         * a cancellation request has been made with that thread as the target, \
+         * and the thread then calls any function that is a cancellation point, \
+         * the cancellation request shall be acted upon before the function returns. \
+         */ \
+        REQ( "", "Cancellation request shall be made", @isCancellationRequest(context) ); \
+        REQ( "", "Cancelability state shall be enabled", \
+             @getThreadCancelState(context) == SUT_PTHREAD_CANCEL_ENABLE \
+           ); \
+        return true; \
+    }
+
+#define  CANCELLATION_POINT_SHALL_OCCUR_REQ(context, status) \
+    if ( (@getThreadCancelState(context) == SUT_PTHREAD_CANCEL_ENABLE) && \
+         @isCancellationRequest(context) \
+       ) \
+    { \
+        /* \
+         * Cancellation points shall occur when a thread is executing the function. \
+         * \
+         * Whenever a thread has cancelability enabled and  \
+         * a cancellation request has been made with that thread as the target, \
+         * and the thread then calls any function that is a cancellation point, \
+         * the cancellation request shall be acted upon before the function returns. \
+         */ \
+        REQ( "", "Cancellation request shall be acted upon before the function returns", status); \
+    }
+
+// If you use this macro you have to include "pthread/pthread/pthread_model.seh"
+#define  ON_CANCELLATION_POINT(context, status) \
+    if ( CANCELLED(status) ) \
+    { \
+        ThreadState *thState = getThreadState_CallContext(context); \
+        if(thState == NULL) \
+        { \
+            setBadVerdict("ON_CANCELLATION_POINT: thread should be alive"); \
+            return; \
+        } \
+        thState->terminating = PTHREAD_TERMINATING; \
+        checkThreadDelete(thState); \
+        return; \
+    }
+
+
+/********************************************************************/
+/**                            Other                               **/
+/********************************************************************/
+
+#define _NO(a) create_IntTObj(a)
+
+#endif

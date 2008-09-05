@@ -1,0 +1,232 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved. 
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at 
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "memory/mman/tests/mman_scenario.seh"
+#include "memory/mman/mman_model.seh"
+#include "memory/mman/mman_media.seh"
+#include "memory/mman/tests/mman_main.seh"
+#include "common/common_scenario.seh"
+#include "fs/meta/meta_model.seh"
+#include "fs/fs/fs_model.seh"
+
+static CallContext context_pr1;
+static CallContext context_pr2;
+
+static VoidTPtr addr1;
+static SizeT size1 = (SizeT) 10;
+static OffT off = (OffT) 0;
+
+static VoidTPtr mapAddr;
+static VoidTPtr map64Addr;
+
+static CString* filename;
+static CString* shared_object_name;
+static FileDescId file_desc_id; 
+
+static FilePermission* full_control1;
+static FilePermission* full_control2;
+static FilePermission* full_control3;
+
+static bool init_memory_mman_scenario(int argc, char** argv)
+{
+    ProcessId pid;
+    LongT pagesize;
+    ProcessState* prSt;
+    
+    initReqFilters();
+    setFinishMode(UNTIL_END); 
+    
+    context_pr1 = getContext();
+    pid = getProcessId_CallContext(context_pr1);
+
+    addr1.address = (sut_ptr_t) 100;
+    addr1.process = pid.process;
+    addr1.system = pid.system;
+
+    filename = create_CString("filename");
+    shared_object_name = create_CString("objectname");
+
+    full_control1 = create_FilePermission(true, true, true);
+    full_control2 = create_FilePermission(true, true, true);
+    full_control3 = create_FilePermission(true, true, true);
+
+    prSt = getProcessState_CallContext(context_pr1);
+    put_Map(prSt->sysconf, create_IntTObj(SUT_SC_XOPEN_UNIX), create_LongTObj(1));
+
+    pagesize = sysconf_spec( context_pr1, SUT_SC_PAGE_SIZE, requestErrorCode() );
+    if ( pagesize == -1) 
+    {
+        return false;
+    }
+    else 
+    {
+        setSystemConfigurationValue( context_pr1, SUT_SC_PAGE_SIZE, pagesize);
+    }
+
+    return true;
+}
+
+static void finish_memory_mman_scenario(void)
+{
+    TEST_SCENARIO_VERDICT_VERBOSE(memory_mman_scenario);
+}
+
+scenario bool mlock_scen()
+{
+    mlock_spec(context_pr1, mapAddr, size1, requestErrorCode());
+    return true;
+}
+
+scenario bool mlockall_scen()
+{
+    MLockallFlags flags;
+    flags.MCL_CURRENT_Flag = true;
+    flags.MCL_FUTURE_Flag = true;
+    mlockall_spec(context_pr1, flags, requestErrorCode());
+    return true;
+}
+
+scenario bool mmap_scen()
+{
+    MmanProtFlags prot;
+    MmapFlags flags;
+
+    prot.PROT_EXEC_Flag = false;
+    prot.PROT_NONE_Flag = false;
+    prot.PROT_READ_Flag = true;
+    prot.PROT_WRITE_Flag = true;
+
+    flags.MAP_FIXED_Flag = false;
+    flags.MAP_PRIVATE_Flag = false;
+    flags.MAP_SHARED_Flag = true;
+
+    mapAddr = mmap_spec(context_pr1, addr1, size1, prot, flags, file_desc_id, 
+              off, false, requestErrorCode());
+
+    
+//    map64Addr = mmap_spec(context_pr1, addr1, size1, prot, flags, file_desc_id, 
+//              off, true, requestErrorCode());
+
+    if (isInvalid_VoidTPtr(mapAddr))
+    {
+        traceUserInfo("Can't create basic map to shared memory object");
+        return false;
+    }
+
+//    if (isInvalid_VoidTPtr(map64Addr))
+//    {
+//        traceUserInfo("Can't create basic map to shared memory object");
+//        return false;
+//    }
+
+    return true;
+}
+
+
+scenario bool mprotect_scen()
+{
+    MmanProtFlags prot;
+
+    prot.PROT_EXEC_Flag = false;
+    prot.PROT_NONE_Flag = false;
+    prot.PROT_READ_Flag = true;
+    prot.PROT_WRITE_Flag = true;
+
+    mprotect_spec(context_pr1, mapAddr, size1, prot, requestErrorCode());
+    return true;
+}
+
+scenario bool msync_scen()
+{
+    MsyncFlags flags;
+    flags.MS_ASYNC_Flag = false;
+    flags.MS_INVALIDATE_Flag = false;
+    flags.MS_SYNC_Flag = true;
+
+    msync_spec(context_pr1, mapAddr, size1, flags, requestErrorCode());
+    return true;
+}
+
+scenario bool munlock_scen()
+{
+    munlock_spec(context_pr1, mapAddr, size1, requestErrorCode());
+    return true;
+}
+
+scenario bool munlockall_scen()
+{
+    munlockall_spec(context_pr1);
+    return true;
+}
+
+scenario bool munmap_scen()
+{
+    munmap_spec(context_pr1, mapAddr, size1, requestErrorCode());
+    return true;
+}
+
+scenario bool shm_open_scen()
+{
+    Shm_openOflags oflag;
+    FilePermissions* mode;
+
+    oflag.O_CREAT_Flag = true;
+    oflag.O_EXCL_Flag = false;
+    oflag.O_RDONLY_Flag = false;
+    oflag.O_RDWR_Flag = true;
+    oflag.O_TRUNC_Flag = false;
+
+    mode = create_FilePermissions(full_control1, full_control2, full_control3,
+                                  False_Bool3, False_Bool3, False_Bool3);
+
+    file_desc_id = shm_open_spec(context_pr1, filename, oflag, mode, requestErrorCode());
+
+    if (file_desc_id.filedesc == -1)
+    {
+        traceUserInfo("Can't create basic shared memory object");
+        return false;
+    }
+
+    return true;
+}
+
+scenario bool shm_unlink_scen()
+{
+    shm_unlink_spec(context_pr1, filename, requestErrorCode());
+    return true;
+}
+
+scenario dfsm memory_mman_scenario =
+{
+    .init = init_memory_mman_scenario,
+    .finish = finish_memory_mman_scenario,
+    .actions = {
+        shm_open_scen,
+        mmap_scen,
+        mlock_scen,
+        munlock_scen,
+        mlockall_scen,
+        munlockall_scen,
+        mprotect_scen,
+        msync_scen,
+        munmap_scen,
+        shm_unlink_scen,
+        NULL
+    }
+};
+
