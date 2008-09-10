@@ -3,26 +3,52 @@
 # This script runs the tests
 #
 
-TESTER=`cat ${0%/*}/../etc/olver.conf | grep USER_NAME_TESTER | awk '{print $3}'`
+TESTER=`cat ${0%/*}/../etc/olver.conf | grep USER_NAME_TESTER | sed 's/.*=\s*//'`
 id $TESTER > /dev/null 2>&1
 if [ $? -ne 0 ]; then
 	echo "Error: there is no such a user '$TESTER'"
 	exit 1
 fi
 
+if [ -z $RESTART ]; then
 #
-# Prepare reports dir
+# Parameters
 #
+export TTIMEMARK=${TTIMEMARK:-`date +%Y-%m-%d_%H-%M-%S`}
 export OLVER_REPORT_DIR=${OLVER_REPORT_DIR:-/var/opt/lsb/test/olver-core}
-mkdir -p $OLVER_REPORT_DIR
+export AGENT_LOG=${AGENT_LOG:-/tmp/olver-log/agent.log} # Hardcoded in agent.c
+export REPORT_DIR=$OLVER_REPORT_DIR/$TTIMEMARK
+export RUN_LOG=${RUN_LOG:-$OLVER_REPORT_DIR/$TTIMEMARK/run.log}
+export TIMES_LOG=${TIMES_LOG:-$OLVER_REPORT_DIR/$TTIMEMARK/times.log}
+
+#
+# Prepare dirs for reports and logs
+#
+mkdir -p -m 755 $OLVER_REPORT_DIR
 chown $TESTER:"`id $TESTER -gn`" $OLVER_REPORT_DIR > /dev/null 2>&1
-chmod 755 $OLVER_REPORT_DIR > /dev/null 2>&1
+
+mkdir -p -m 755 $REPORT_DIR
+chown $TESTER:"`id $TESTER -gn`" $REPORT_DIR > /dev/null 2>&1
+
+rm -rf /tmp/olver > /dev/null 2>&1
+mkdir -p -m 755 /tmp/olver
+chown $TESTER:"`id $TESTER -gn`" /tmp/olver > /dev/null 2>&1
+
+AGENT_DIR=${AGENT_LOG%/*}
+rm -rf $AGENT_DIR > /dev/null 2>&1
+mkdir -p -m 755 $AGENT_DIR
+echo > $AGENT_LOG
+chmod 755 $AGENT_LOG > /dev/null 2>&1
+chown -R $TESTER:"`id $TESTER -gn`" $AGENT_DIR > /dev/null 2>&1
+
+fi
 
 #
 # Change current user
 #
 if [ "`id -un`" != "$TESTER" ]; then
-    su $TESTER -c "${0%/*}/olver_run_tests $1"
+    export RESTART="yes"
+    su $TESTER -c "${0%/*}/olver_run_tests $1 $2"
     exit $?
 fi
 
@@ -42,9 +68,6 @@ fi
 #
 # Execution Parameters
 #
-export TTIMEMARK=${TTIMEMARK:-`date +%Y-%m-%d_%H-%M-%S`}
-export AGENT_LOG=${AGENT_LOG:-/tmp/olver-log/agent.log}
-export RUN_LOG=${RUN_LOG:-run.log}
 TEST_TIMEOUT=1800
 TEST_PLAN=testplan
 
@@ -59,22 +82,6 @@ fi
 if [ $# -gt 1 ]; then
     TEST_TIMEOUT=$2
 fi
-
-#
-# Prepare dirs for logs
-#
-rm -rf /tmp/olver > /dev/null 2>&1
-rm -rf ${AGENT_LOG%/*} > /dev/null 2>&1
-rm -f *.log > /dev/null 2>&1
-rm -f $RUN_LOG > /dev/null 2>&1
-
-mkdir -p /tmp/olver
-chmod 755 /tmp/olver > /dev/null 2>&1
-
-mkdir -p ${AGENT_LOG%/*}
-chmod 755 ${AGENT_LOG%/*} > /dev/null 2>&1
-echo > $AGENT_LOG
-chmod 755 $AGENT_LOG > /dev/null 2>&1
 
 #
 # Count Scenarios
@@ -102,13 +109,12 @@ count_unknown=0
 run() {
 ((count_scen++))
 echo "Running scenario $1 ($count_scen of $SCENARIO_CNT)"  | tee -a $RUN_LOG
-./olver -l -c "../etc/olver.conf"  -t $TEST_TIMEOUT $1
+./olver -l -c "../etc/olver.conf" -r $REPORT_DIR -t $TEST_TIMEOUT $1
 code=$?
 
 echo " "
 
-zip -q -j $1.utz $1.utt
-rm -f $1.utt > /dev/null 2>&1
+zip -q -j -T -m $REPORT_DIR/$1.utz $REPORT_DIR/$1.utt > /dev/null 2>&1
 
 echo -n Scenario $1 status: | tee -a $RUN_LOG
 if [ $code = 0 ]; then
@@ -153,7 +159,8 @@ do
     fi
 done
 
-cp times.log times.ref >/dev/null 2>&1
+cp -f $TIMES_LOG ../etc/times.ref >/dev/null 2>&1
+cp -f $AGENT_LOG $REPORT_DIR/ >/dev/null 2>&1
 
 #
 # Execution Status

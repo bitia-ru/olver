@@ -21,6 +21,7 @@ OLVERPWD=../../..
 #
 mkdir package
 cp -f $OLVERPWD/package/build-olver-core-rpm.sh package/build-olver-core-rpm.sh
+cp -f $OLVERPWD/package/HOWTO package/HOWTO
 
 #
 # Build section
@@ -44,9 +45,10 @@ cp -f $OLVERPWD/bin/ask_root.sh bin/ask_root.sh
 # Configuration section
 #
 mkdir etc
-cp -f $OLVERPWD/etc/*.conf etc/ > /dev/null 2>&1
-sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/olver\/testdata/' -i etc/*.conf > /dev/null 2>&1
-sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i etc/*.conf > /dev/null 2>&1
+cp -f $OLVERPWD/etc/olver.conf etc/ > /dev/null 2>&1
+cp -f $OLVERPWD/etc/times.ref etc/ > /dev/null 2>&1
+sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i etc/olver.conf > /dev/null 2>&1
+sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i etc/olver.conf > /dev/null 2>&1
 
 #
 # Source section

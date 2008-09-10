@@ -95,7 +95,8 @@ int StringBuffer_append_l(StringBuffer* sbuf, long l) {
 }
 
 int StringBuffer_append_s(StringBuffer* sbuf, const char* s) {
-  return StringBuffer_append(sbuf,s,strlen(s));
+  if (s == NULL)	return 2;
+  return StringBuffer_append(sbuf, s, strlen(s));
 }
 
 int StringBuffer_append(StringBuffer* sbuf, const char* s, int l)
@@ -111,13 +112,13 @@ int rest;
 
   rest = sbuf->tail->size - sbuf->tail->len;
   if (rest >= l) {
-    memcpy(&(sbuf->tail->data[sbuf->tail->len]),s,l);
+    memcpy(&(sbuf->tail->data[sbuf->tail->len]), s, l);
     sbuf->tail->len += l;
     sbuf->len += l;
     return 0;
   }
   if (rest > 0) {
-    memcpy(&(sbuf->tail->data[sbuf->tail->len]),s,rest);
+    memcpy(&(sbuf->tail->data[sbuf->tail->len]), s, rest);
     sbuf->tail->len = sbuf->tail->size;
     sbuf->len += rest;
     l -= rest;
@@ -128,17 +129,18 @@ int rest;
     if(NULL == sbuf->tail->next) return 3;
     sbuf->tail = sbuf->tail->next;
     if (sbuf->tail->size >= l) {
-      memcpy(sbuf->tail->data,&(s[rest]),l);
+      memcpy(sbuf->tail->data, s + rest, l);
       sbuf->tail->len = l;
       sbuf->len += l;
       return 0;
     }
-    memcpy(sbuf->tail->data,&(s[rest]),sbuf->allocateStorBy);
+    memcpy(sbuf->tail->data, s + rest, sbuf->allocateStorBy);
     sbuf->tail->len = sbuf->allocateStorBy;
     sbuf->len += sbuf->allocateStorBy;
     l -= sbuf->allocateStorBy;
     rest += sbuf->allocateStorBy;
-  } 
+  }
+  return 0;
 }
 
   

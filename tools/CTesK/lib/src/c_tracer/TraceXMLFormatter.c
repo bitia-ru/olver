@@ -33,7 +33,7 @@ StringBuffer * buff;
   if(buff == NULL) return NULL;
 
   last = 0;
-  for(i=0;i<len;i++)
+  for(i=0; i<len; i++)
    {switch (value[i])
      {case '<':
         StringBuffer_append(buff, value+last, i-last);
@@ -66,7 +66,7 @@ static char * encodeCdataValue(const char *value)
 unsigned i, last, len;
 char *ptr;
 StringBuffer * buff;
-char buff2[8];
+char buff2[10];
 
   len = strlen(value);
   buff = StringBuffer_create(2 * len);
@@ -74,14 +74,14 @@ char buff2[8];
   if(buff == NULL) return NULL;
 
   last = 0;
-  for(i=0;i<len;i++) {
-/*	if (value[i] == '>') {
-      StringBuffer_append(buff, value+last, i-last);
-      StringBuffer_append_s(buff, "&#x3E;");
-      last = i+1;
-	} else
-*/
-	if (value[i] == ']') {
+  for(i=0; i<len; i++) {
+//	if (value[i] == '>') {
+//      StringBuffer_append(buff, value+last, i-last);
+//      StringBuffer_append_s(buff, "&#x3E;");
+//      last = i+1;
+//	} else
+
+	if (value[i] == ']' && value[i+1] == ']' && value[i+2] == '>') {
       StringBuffer_append(buff, value+last, i-last);
       StringBuffer_append_s(buff, "&#x5D;");
       last = i+1;
@@ -89,7 +89,9 @@ char buff2[8];
       StringBuffer_append(buff, value+last, i-last);
       StringBuffer_append_s(buff, "&#x26;");
       last = i+1;
-	} else if (value[i] != '\n' && (signed char)value[i] < 32) {
+	} else if ((signed char)value[i] < 32
+		&& value[i] != '\n' && value[i] != '\t' && value[i] != '\r')
+	{
       StringBuffer_append(buff, value+last, i-last);
 	  sprintf(buff2, "&#x%02X;", value[i]);
       StringBuffer_append_s(buff, buff2);
@@ -100,6 +102,8 @@ char buff2[8];
   ptr = StringBuffer_toString(buff);
   StringBuffer_delete(buff);
   return ptr;
+
+//	return strdup(value);
 }
 
 /*
@@ -117,7 +121,7 @@ static char * encodeBoolValue(TraceBool value)
 char * Indent_print(Indent ind) {
   char *buf = (char *)malloc(ind.cur_indent + 1);
   if(buf != NULL) {
-    memset(buf,ind.indent_char,ind.cur_indent);
+    memset(buf, ind.indent_char, ind.cur_indent);
     buf[ind.cur_indent] = '\0';
   }
   return buf;
@@ -435,7 +439,9 @@ char * TraceXMLFormatter_traceScenarioValue(void *state, int traceId, const char
   StringBuffer_append_s(ss, ptr);
   if(ptr) free(ptr);
   StringBuffer_append_s(ss, "\"><![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(value));
+  ptr = encodeCdataValue(value);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></scenario_value>\n");
 
   ptr = StringBuffer_toString(ss);
@@ -601,7 +607,9 @@ const char * TraceXMLFormatter_traceModelOperationArgument(void *state, int trac
   StringBuffer_append_s(ss, ptr);
   if(ptr) free(ptr);
   StringBuffer_append_s(ss, "\"><![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(value));
+  ptr = encodeCdataValue(value);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></model_value>\n");
 
   ptr = StringBuffer_toString(ss);
@@ -615,7 +623,7 @@ const char * TraceXMLFormatter_traceModelOperationResult(void *state, int traceI
 {
   TraceXMLFormatter_state * st = (TraceXMLFormatter_state *)state;
   char *ptr;
-  StringBuffer * ss = StringBuffer_create(-1);
+  StringBuffer *ss = StringBuffer_create(-1);
   if((st == NULL) || (ss == NULL)) return NULL;
 
 //  ss << indent << "<model_value" << " trace=\"" << traceId << "\"" << " kind=\"result\""
@@ -631,7 +639,9 @@ const char * TraceXMLFormatter_traceModelOperationResult(void *state, int traceI
   StringBuffer_append_s(ss, ptr);
   if(ptr) free(ptr);
   StringBuffer_append_s(ss, "\"><![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(value));
+  ptr = encodeCdataValue(value);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></model_value>\n");
 
   ptr = StringBuffer_toString(ss);
@@ -656,7 +666,9 @@ const char * TraceXMLFormatter_traceModelOperationChannel(void *state, int trace
   StringBuffer_append_s(ss, "<model_value trace=\"");
   StringBuffer_append_l(ss, traceId);
   StringBuffer_append_s(ss, "\" kind=\"channel\" type=\"ChannelID\"><![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(channel));
+  ptr = encodeCdataValue(channel);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></model_value>\n");
 
   ptr = StringBuffer_toString(ss);
@@ -681,7 +693,9 @@ const char * TraceXMLFormatter_traceModelOperationTimestamp(void *state, int tra
   StringBuffer_append_s(ss, "<model_value trace=\"");
   StringBuffer_append_l(ss, traceId);
   StringBuffer_append_s(ss, "\" kind=\"timestamp\" type=\"TimeInterval\"><![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(timestamp));
+  ptr = encodeCdataValue(timestamp);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></model_value>\n");
 
   ptr = StringBuffer_toString(ss);
@@ -1010,7 +1024,9 @@ const char * TraceXMLFormatter_traceFormula(void *state, int id, const char *tex
   StringBuffer_append_s(ss, "<formula id=\"");
   StringBuffer_append_l(ss, id);
   StringBuffer_append_s(ss, "\"><![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(text));
+  ptr = encodeCdataValue(text);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></formula>\n");
 
   ptr = StringBuffer_toString(ss);
@@ -1280,7 +1296,9 @@ const char * TraceXMLFormatter_traceInternalError(void *state, int traceId, cons
   StringBuffer_append_s(ss, ptr);
   if(ptr) free(ptr);
   StringBuffer_append_s(ss, "<info><![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(info));
+  ptr = encodeCdataValue(info);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></info>\n");
 
 //  ss << --indent << "</exception>" << endl;
@@ -1309,7 +1327,9 @@ char * TraceXMLFormatter_traceSystemInfo(void *state, int traceId, const char *i
   StringBuffer_append_s(ss, "<info trace=\"");
   StringBuffer_append_l(ss, traceId);
   StringBuffer_append_s(ss, "\"> <![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(info));
+  ptr = encodeCdataValue(info);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]></info>\n");
 
   ptr = StringBuffer_toString(ss);
@@ -1338,7 +1358,9 @@ const char * TraceXMLFormatter_traceUserInfo(void *state, int traceId, const cha
   StringBuffer_append_s(ss, ptr);
   if(ptr) free(ptr);
   StringBuffer_append_s(ss, "<![CDATA[");
-  StringBuffer_append_s(ss, encodeCdataValue(info));
+  ptr = encodeCdataValue(info);
+  StringBuffer_append_s(ss, ptr);
+  if(ptr) free(ptr);
   StringBuffer_append_s(ss, "]]>\n");
 
 // ss << --indent << "</user_info>" << endl;
