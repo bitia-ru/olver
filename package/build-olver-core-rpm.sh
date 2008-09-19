@@ -10,7 +10,7 @@ DEST=`pwd`
 pushd ${0%/*} > /dev/null 2>&1
 
 # Building sources
-../build_conf_tests.sh
+../build_conf_tests.sh -r
 
 # Configure
 ARCH=`uname -m`
@@ -36,6 +36,7 @@ sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester
 
 # Building rpm
 ../tools/buildrpm/buildrpm.sh $1 $2
-cp -f ../tools/buildrpm/lsb-test-olver-core-*.rpm $DEST
+mv -f ../tools/buildrpm/lsb-test-olver-core-*.rpm $DEST
 
 popd > /dev/null 2>&1
+exit 0

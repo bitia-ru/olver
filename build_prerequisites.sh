@@ -77,19 +77,13 @@ if [ $? -eq 0 ]; then
 fi
 
 # Java Runtime Environment
-JAVA_SUN=`java -version 2>&1 | grep "HotSpot(TM)"`
-JAVA_IBM=`java -version 2>&1 | grep "IBM"`
-JAVA_OpenJDK=`java -version 2>&1 | grep "OpenJDK"`
 JAVA_VERSION=`java -version 2>&1 | grep 'java version \"1\.[56789]'`
 JAVA_VERSION_2=`java -version 2>&1 | grep 'java version \"[23456789]\.[0123456789]'`
 
-if [[ "_$JAVA_SUN" != "_" || "_$JAVA_IBM" != "_" || "_$JAVA_OpenJDK" != "_" ]]; then
-	if [[ "_$JAVA_VERSION" != "_"  || "_$JAVA_VERSION_2" != "_" ]]
-	then
-		check_jre=1
-	fi
+if [[ "_$JAVA_VERSION" != "_"  || "_$JAVA_VERSION_2" != "_" ]]
+then
+	check_jre=1
 fi
-
 
 # Check for autoconf
 autoconf --version &> /dev/null
@@ -157,7 +151,7 @@ else
 fi
 
 if [ $check_jre = 0 ] ; then
-	echo "$issue_count) Please, make sure you have OpenJDK, Sun or IBM JRE 5 or later installed"
+	echo "$issue_count) Please, make sure you have JRE 1.5 or later installed"
 	echo "   and 'java' command is on your path. JRE is needed to build SEC files."
 	echo
 	((issue_count++))

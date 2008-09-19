@@ -21,6 +21,7 @@ OLVERPWD=../../..
 #
 mkdir package
 cp -f $OLVERPWD/package/build-olver-core-rpm.sh package/build-olver-core-rpm.sh
+cp -f $OLVERPWD/package/Makefile package/Makefile
 cp -f $OLVERPWD/package/HOWTO package/HOWTO
 
 #
@@ -39,7 +40,6 @@ cp -f $OLVERPWD/bin/olver_run_tests bin/olver_run_tests
 cp -f $OLVERPWD/bin/olver_pre bin/olver_pre
 cp -f $OLVERPWD/bin/olver_report bin/olver_report
 cp -f $OLVERPWD/bin/testplan bin/testplan
-cp -f $OLVERPWD/bin/ask_root.sh bin/ask_root.sh
 
 #
 # Configuration section

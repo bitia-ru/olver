@@ -4,6 +4,25 @@
 #
 
 #
+# Parse options
+#
+while getopts ":r" Option
+do
+    case $Option in
+    'r'   ) RPMMODE=1
+            ;;
+    *     ) echo "-$OPTARG: unknown option"
+            echo
+            echo "Usage: build_conf_tests.sh [-r]"
+            echo "Options:"
+            echo "  -r: rpm build mode, don't set permissions for agent"
+            exit 1
+            ;;
+    esac
+done
+shift $(($OPTIND - 1))
+
+#
 # Adjust Directory
 #
 pushd ${0%/*} > /dev/null 2>&1
@@ -112,19 +131,40 @@ cd ../..
 #
 # Step 8: Copy binaries and set agent permissions
 #
-echo "Setting permissions for the test agent..."
-./bin/ask_root.sh
-SU_CMD=`cat olver_su_cmd.txt`
-rm -f ./olver_su_cmd.txt
-
-cd bin
-$SU_CMD ../agent_perm.sh
-
-agent_permission_status=$?
-if [ $agent_permission_status = 0 ]; then
-	echo "Agent attributes changed"
+if [ -z $RPMMODE ]; then
+    if [ `id -u` -ne 0 ]; then 
+    	echo "Need root privileges"
+    	OLVER_SU_CMD="su root -- -c"
+    	which sudo 2>&1 > /dev/null
+    	if [ $? -eq 0 ]; then
+    		echo -n "You have sudo available.  Should I use it? "
+    		read answer
+    		answer=`echo ${answer} | cut -c1`
+    		if [ "${answer}" = "y" -o "${answer}" = "Y" ]; then
+    		    OLVER_SU_CMD="sudo /bin/sh -c"
+    		fi
+    		echo
+    	fi
+        
+    	echo "Using the command "${OLVER_SU_CMD}" to gain root access.  Please type the"
+    	echo "appropriate password if prompted."
+    	echo " "
+    else
+        echo "Already have root privileges"
+        OLVER_SU_CMD="/bin/sh -c"
+    fi
+    
+    echo "Setting permissions for the test agent..."
+    $OLVER_SU_CMD ./agent_perm.sh
+    agent_permission_status=$?
+    if [ $agent_permission_status = 0 ]; then
+    	echo "Agent attributes changed"
+    else
+        echo "Failed. Try to do it manually using agent_perm.sh"
+    fi
+else
+    agent_permission_status=0
 fi
-cd ..
 
 if [ -e bin/olverterm ]; then
 	olverterm_build_status=0
@@ -173,12 +213,14 @@ if [ $model_build_status = 0 ]; then
 	echo "Build status for model ................. PASSED"
 else
 	echo "Build status for model ................. FAILED"
-fi	
-if [ $agent_permission_status = 0 ]; then
-	echo "Setting agent permissions .............. PASSED"
-else
-	echo "Setting agent permissions .............. FAILED"
-fi	
+fi
+if [ -z $RPMMODE ]; then
+    if [ $agent_permission_status = 0 ]; then
+    	echo "Setting agent permissions .............. PASSED"
+    else
+    	echo "Setting agent permissions .............. FAILED"
+    fi
+fi
 
 if [[ $handbook_build_status = 0 && $config_generation_status = 0 && $testdata_build_status = 0 && $olverterm_build_status = 0 && $agent_build_status = 0 && $launch_build_status = 0 && $ctesk_lib_build_status = 0 && $model_build_status = 0 && $agent_permission_status = 0 ]]; then
 	echo ""
