@@ -1,4 +1,3 @@
-#pragma warning ( disable : 4786 )
 /* ANTLRParser.h
  *
  * Define the generic ANTLRParser superclass, which is subclassed to

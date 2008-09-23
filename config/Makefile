@@ -1,8 +1,9 @@
 CC=g++
 LL=g++
 
-ANTLR = antlr
-DLG = dlg
+PCCTS_DIR=./external/PCCTS
+ANTLR = $(PCCTS_DIR)/bin/antlr
+DLG = $(PCCTS_DIR)/bin/dlg
 
 BIN_DIR = ./bin
 
@@ -12,7 +13,6 @@ CFLAGS = -g -c -O0 -Wno-deprecated -fPIC
 
 INCDIRS = ./external/PCCTS/h ./src
 
-PCCTS_DIR = ./external/PCCTS/h
 DEPTREE_DIR = ./src/deptree
 HANDBOOK_DIR = ./src/handbook
 CONFIGURATION_DIR = ./src/configuration
@@ -21,13 +21,13 @@ CONFIGPROCESSOR_DIR = ./src/configprocessor
 TESTPLANPROCESSOR_DIR = ./src/testplanprocessor
 
 PCCTS_SRC = \
-		$(PCCTS_DIR)/AParser.cpp\
-        $(PCCTS_DIR)/ASTBase.cpp\
-        $(PCCTS_DIR)/ATokenBuffer.cpp\
-        $(PCCTS_DIR)/BufFileInput.cpp\
-        $(PCCTS_DIR)/DLexerBase.cpp\
-        $(PCCTS_DIR)/PCCTSAST.cpp\
-		$(PCCTS_DIR)/slist.cpp
+		$(PCCTS_DIR)/h/AParser.cpp\
+        $(PCCTS_DIR)/h/ASTBase.cpp\
+        $(PCCTS_DIR)/h/ATokenBuffer.cpp\
+        $(PCCTS_DIR)/h/BufFileInput.cpp\
+        $(PCCTS_DIR)/h/DLexerBase.cpp\
+        $(PCCTS_DIR)/h/PCCTSAST.cpp\
+		$(PCCTS_DIR)/h/slist.cpp
 
 DEPTREE_GRAMMAR = ./src/deptree/deptreegrammar.g
 DEPTREE_GRAMMAR_SRC = \
@@ -77,16 +77,21 @@ all: $(HANDBOOK_APP) $(CONFIGPROCESSOR_APP) $(TESTPLANPROCESSOR_APP)
 
 include $(DEPENDS)
 
-$(DEPENDS):%.d: $(DEPTREE_GRAMMAR_SRC)
-	set -e; $(CC) -MM $(INCLUDES) $(CFLAGS) $*.cpp > $@
-	echo "$*.d $(*D)/`cat $@`" > $@
+$(DEPENDS):%.d:$(DEPTREE_GRAMMAR_SRC)
+	@set -e; $(CC) -MM $(INCLUDES) $(CFLAGS) $*.cpp > $@
+	@echo "$*.d $(*D)/`cat $@`" > $@
 
 $(OBJECTS):%.o:
 	$(CC) $(INCLUDES) $(CFLAGS) $*.cpp -o $*.o
 
-$(DEPTREE_GRAMMAR_SRC) $(DEPTREE_GRAMMAR_INC): $(DEPTREE_GRAMMAR)
+$(DEPTREE_GRAMMAR_SRC) $(DEPTREE_GRAMMAR_INC): $(DEPTREE_GRAMMAR) $(ANTLR) $(DLG)
 	$(ANTLR) -CC $(DEPTREE_GRAMMAR) -o ./src/deptree -ft dtokens.h  -nopurify
 	$(DLG) -CC -C1 -i -ci ./src/deptree/parser.dlg -o ./src/deptree -cl DDlgLexer
+
+$(ANTLR) $(DLG):
+	@if [ ! -d $(PCCTS_DIR)/bin ] ; then mkdir $(PCCTS_DIR)/bin ; fi
+	@cd $(PCCTS_DIR)/antlr; $(MAKE)
+	@cd $(PCCTS_DIR)/dlg; $(MAKE)
 
 $(PCCTS_LIB): $(PCCTS_OBJECTS)
 	$(LL) -shared -o $(PCCTS_LIB) $(PCCTS_OBJECTS)
@@ -111,6 +116,10 @@ $(TESTPLANPROCESSOR_APP): $(TESTPLAN_LIB) $(TESTPLANPROCESSOR_OBJECTS)
 
 
 clean:
+	-cd $(PCCTS_DIR)/antlr; $(MAKE) -s clean
+	-cd $(PCCTS_DIR)/dlg; $(MAKE) -s clean
+	-rm -f $(ANTLR)
+	-rm -f $(DLG)
 	-rm -rf $(DEPENDS)
 	-rm -rf $(OBJECTS)
 	-rm -rf $(BIN_DIR)/*.so

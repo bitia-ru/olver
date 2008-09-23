@@ -4,7 +4,7 @@
 #ifdef PCCTS_USE_NAMESPACE_STD
 #include <istream>
 #else
-#include <istream>
+#include <istream.h>
 #endif
 
 #endif

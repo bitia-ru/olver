@@ -23,8 +23,8 @@ CFG=pcctslib - Win32 Debug
 
 # Begin Project
 # PROP AllowPerConfigDependencies 0
-# PROP Scc_ProjName "IDE/External/Pccts/h/pcctslib60"
-# PROP Scc_LocalPath "."
+# PROP Scc_ProjName "pcctslib60"
+# PROP Scc_LocalPath ".."
 CPP=cl.exe
 RSC=rc.exe
 
@@ -41,8 +41,8 @@ RSC=rc.exe
 # PROP Intermediate_Dir "Release"
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /W3 /GX /O2 /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /YX /FD /c
-# ADD CPP /nologo /MD /W4 /GX /Zi /O2 /Ob2 /I "..\sorcerer\h" /I "." /D "NDEBUG" /D "WIN32" /D "_WINDOWS" /FD /c
-# SUBTRACT CPP /WX /YX
+# ADD CPP /nologo /MD /W4 /WX /GX /O2 /I "$(PCCTS)\sorcerer\h" /D "NDEBUG" /D "WIN32" /D "_WINDOWS" /FD /c
+# SUBTRACT CPP /YX
 # ADD BASE RSC /l 0x409
 # ADD RSC /l 0x409
 BSC32=bscmake.exe
@@ -54,7 +54,7 @@ LIB32=link.exe -lib
 # Begin Special Build Tool
 SOURCE="$(InputPath)"
 PostBuild_Desc=Copy to ..\lib
-PostBuild_Cmds=xcopy /f /y pccts_release.lib ..\lib\*
+PostBuild_Cmds=mkdir ..\lib	copy pccts_release.lib ..\lib\pccts_release.lib
 # End Special Build Tool
 
 !ELSEIF  "$(CFG)" == "pcctslib - Win32 Debug"
@@ -70,7 +70,7 @@ PostBuild_Cmds=xcopy /f /y pccts_release.lib ..\lib\*
 # PROP Intermediate_Dir "Debug"
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /W3 /GX /Z7 /Od /D "WIN32" /D "_DEBUG" /D "_WINDOWS" /YX /FD /c
-# ADD CPP /nologo /MDd /W4 /WX /GX /ZI /Od /I "..\sorcerer\h" /I "." /D "_DEBUG" /D "WIN32" /D "_WINDOWS" /FR /FD /c
+# ADD CPP /nologo /MDd /W4 /WX /GX /ZI /Od /I "$(PCCTS)\sorcerer\h" /D "_DEBUG" /D "WIN32" /D "_WINDOWS" /FR /FD /c
 # SUBTRACT CPP /YX
 # ADD BASE RSC /l 0x409
 # ADD RSC /l 0x409
@@ -83,7 +83,7 @@ LIB32=link.exe -lib
 # Begin Special Build Tool
 SOURCE="$(InputPath)"
 PostBuild_Desc=Copy to ..\lib
-PostBuild_Cmds=xcopy /f /y pccts_debug.lib ..\lib\*
+PostBuild_Cmds=mkdir ..\lib	copy pccts_debug.lib ..\lib\pccts_debug.lib
 # End Special Build Tool
 
 !ENDIF 
@@ -118,15 +118,6 @@ SOURCE=.\DLexerBase.cpp
 # Begin Source File
 
 SOURCE=.\PCCTSAST.cpp
-
-!IF  "$(CFG)" == "pcctslib - Win32 Release"
-
-# ADD CPP /Ob1
-
-!ELSEIF  "$(CFG)" == "pcctslib - Win32 Debug"
-
-!ENDIF 
-
 # End Source File
 # Begin Source File
 
@@ -135,6 +126,7 @@ SOURCE=.\SList.cpp
 # Begin Source File
 
 SOURCE=..\sorcerer\lib\STreeParser.cpp
+# ADD CPP /I "$(PCCTS)\h"
 # End Source File
 # End Group
 # Begin Group "Header Files"
@@ -163,10 +155,6 @@ SOURCE=.\ATokenStream.h
 # Begin Source File
 
 SOURCE=.\ATokPtr.h
-# End Source File
-# Begin Source File
-
-SOURCE=.\ATokPtrImpl.h
 # End Source File
 # Begin Source File
 

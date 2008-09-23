@@ -6,16 +6,16 @@
 #
 # Parse options
 #
-while getopts ":r" Option
+while getopts ":p" Option
 do
     case $Option in
-    'r'   ) RPMMODE=1
+    'p'   ) PACKAGE_MODE=1
             ;;
     *     ) echo "-$OPTARG: unknown option"
             echo
-            echo "Usage: build_conf_tests.sh [-r]"
+            echo "Usage: build_conf_tests.sh [-p]"
             echo "Options:"
-            echo "  -r: rpm build mode, don't set permissions for agent"
+            echo "  -p: package build mode, don't set permissions for agent"
             exit 1
             ;;
     esac
@@ -131,7 +131,7 @@ cd ../..
 #
 # Step 8: Copy binaries and set agent permissions
 #
-if [ -z $RPMMODE ]; then
+if [ -z $PACKAGE_MODE ]; then
     if [ `id -u` -ne 0 ]; then 
     	echo "Need root privileges"
     	OLVER_SU_CMD="su root -- -c"
@@ -214,7 +214,7 @@ if [ $model_build_status = 0 ]; then
 else
 	echo "Build status for model ................. FAILED"
 fi
-if [ -z $RPMMODE ]; then
+if [ -z $PACKAGE_MODE ]; then
     if [ $agent_permission_status = 0 ]; then
     	echo "Setting agent permissions .............. PASSED"
     else

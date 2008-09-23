@@ -6,7 +6,6 @@ check_gcc=0
 check_gpp=0
 check_ncurses=0
 
-check_antlr=0
 check_lsbcc=0
 check_lsb_so=0
 check_jre=0
@@ -38,17 +37,6 @@ fi
 NCURSES_STR=`gcc -lncurses -v 2>&1 | grep "cannot find -lncurses"`
 if test "_$NCURSES_STR" = "_" ;then
 	check_ncurses=1
-fi
-
-# Check antlr if needed
-if [ -f "./src/model/pthread/attr/attr_config.c" ]
-then
-	check_antlr=1
-else
-	ANTLR_STR=`antlr 2>&1 | grep "Version 1.33"`
-	if ! test "_$ANTLR_STR" = "_" ; then
-		check_antlr=1
-	fi
 fi
 
 # Check for lsbcc
@@ -106,7 +94,7 @@ fi
 #
 # Report Errors
 #
-if [[ $check_antlr = 0 || $check_lsbcc = 0 || $check_lsb_so = 0 || $check_jre = 0 || $check_autoconf = 0 || $check_automake = 0 || $check_libtool = 0 || $check_gcc = 0 || $check_gpp = 0 || $check_ncurses = 0 ]]; then
+if [[ $check_lsbcc = 0 || $check_lsb_so = 0 || $check_jre = 0 || $check_autoconf = 0 || $check_automake = 0 || $check_libtool = 0 || $check_gcc = 0 || $check_gpp = 0 || $check_ncurses = 0 ]]; then
 	echo
 	echo "Several checks failed. Please, see details below."
 	echo
@@ -126,13 +114,6 @@ fi
 
 if [ $check_ncurses = 0 ] ; then
 	echo "$issue_count) The ncurses development library should be installed."
-	echo
-	((issue_count++))
-fi
-
-if [ $check_antlr = 0 ]; then
-	echo "$issue_count) Antlr version 1.33 is required to be installed"
-	echo "   to build grammar files."
 	echo
 	((issue_count++))
 fi

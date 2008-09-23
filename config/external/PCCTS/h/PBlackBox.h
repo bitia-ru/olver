@@ -101,7 +101,7 @@ public:
     , file(0)
     , openByBlackBox(0)
   {
-    FILE *f = fopen(fname, "rb");
+    FILE *f = fopen(fname, "r");
     if ( f==NULL ) {
       openByBlackBox = 0;
       cerr << "cannot open " << fname << "\n"; return;

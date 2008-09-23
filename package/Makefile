@@ -5,24 +5,72 @@ RELEASE=1
 # Derive date string for daily snapshots
 ISO_DATE=$(shell date +"%Y%m%d")
 
-# BZRTREES?=http://bzr.linux-foundation.org/lsb/devel
-# BZR_MODULE=olver-core-tests
+PACKAGE_NAME=$(PACKAGE)-$(VERSION)-$(RELEASE)
+TARBALL=$(PACKAGE_NAME).src.tgz
+SRC_DIR=olver-core
+
+# Handle different version generation for snapshots than for official builds
+# OFFICIAL_RELEASE should be set to the tag to extract from BZR
+ifdef OFFICIAL_RELEASE
+	VERSION_SUFFIX=
+	# EXPORT_TAG should be set to the bzr tag to use
+	EXPORT_TAG=--revision=otag:$(OFFICIAL_RELEASE)
+else
+	VERSION_SUFFIX=.$(ISO_DATE)
+	EXPORT_TAG=
+endif
+
+# Override this on the command line to use a different repository
+BZRTREES?=http://bzr.linux-foundation.org/lsb/devel
+BZR_MODULE=olver-core-tests
 
 # Default target
+ifndef BUILD_NO_DEB
+all: rpm_package deb_package
+else
 all: rpm_package
+endif
 
 clean:
 	@rm -f *.rpm *.deb *.tgz
 
-tarball: $(PACKAGE)-$(VERSION)-$(RELEASE).src.tgz
+tarball: $(TARBALL)
 
-rpm_package: $(PACKAGE)-$(VERSION)-$(RELEASE).*.rpm
+deb_package: $(PACKAGE_NAME).*.deb
 
-$(PACKAGE)-$(VERSION)-$(RELEASE).*.rpm:
-	@sh build-olver-core-rpm.sh $(VERSION) $(RELEASE)
+$(PACKAGE_NAME).*.deb: rpm_package
+	@if [ ! `which fakeroot` ]; then \
+		echo "Error: fakeroot not found. Can't build DEB."; \
+	elif [ ! `which alien` ]; then \
+		echo "Error: alien not found. Can't build DEB."; \
+	else \
+		fakeroot alien -cdk $(PACKAGE_NAME).*.rpm; \
+	fi
 
-$(PACKAGE)-$(VERSION)-$(RELEASE).src.tgz:
-	@sh ../tools/buildrpm/buildsrc.sh $(VERSION) $(RELEASE)
-	@mv -f ../tools/buildrpm/$(PACKAGE)-$(VERSION)-$(RELEASE).tar.gz ./$(PACKAGE)-$(VERSION)-$(RELEASE).src.tgz
+rpm_package: $(PACKAGE_NAME).*.rpm
+
+list_uploadable:
+	@ls *.rpm
+ifndef BUILD_NO_DEB
+	@ls *.deb
+endif
+
+$(PACKAGE_NAME).*.rpm: $(SRC_DIR)
+	@sh -c "$(SRC_DIR)/build_conf_tests.sh -p"
+	@if [ ! `which makelsbpkg` ]; then \
+		echo "Error: makelsbpkg not found. Can't build package."; \
+	else \
+		sh -c "$(SRC_DIR)/tools/buildrpm/buildrpm.sh $(SRC_DIR) $(VERSION) $(RELEASE)"; \
+	fi
+	@rm -rf $(SRC_DIR)
+
+$(TARBALL): $(SRC_DIR)
+	@tar -c $(SRC_DIR) | gzip -f9 > $(TARBALL)
+	@rm -rf $(SRC_DIR)
+
+$(SRC_DIR):
+	@rm -rf $(SRC_DIR)
+	@mkdir -p $(SRC_DIR)
+	bzr export $(EXPORT_TAG) $(SRC_DIR) $(BZRTREES)/$(BZR_MODULE)
 
 .PHONY: rpm_package

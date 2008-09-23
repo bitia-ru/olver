@@ -1,5 +1,3 @@
-#pragma warning ( disable : 4711 )
- 
 #ifndef PCCTS_CONFIG_H
 #define PCCTS_CONFIG_H
 /*

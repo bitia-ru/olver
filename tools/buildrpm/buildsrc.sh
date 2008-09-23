@@ -1,54 +1,59 @@
 #!/bin/bash
 
-if [[ -z $1 || -z $2 ]]; then
-    echo "Using: sh buildsrc.sh version release"
+if [[ -z $1 || -z $2 || -z $3 ]]; then
+    echo "Using: sh buildsrc.sh olver_dir version release"
+    exit 1
+elif [ ! -d $1 ]; then
+    echo "Error: no such directory: $1"
+    exit 1
+elif [ ! -f $1/build_conf_tests.sh ]; then
+    echo "Error: not an olver root directory: $1"
     exit 1
 fi
 
 #
 # Adjust Directory
 #
-pushd ${0%/*} > /dev/null 2>&1
+DEST=`pwd`
+SOURCE=`cd $1 && pwd`
+SRC_DIR=olver-core
 
-rm -rf olver-core
-mkdir -p olver-core
-cd olver-core
-
-OLVERPWD=../../..
+rm -rf $SRC_DIR
+mkdir -p $SRC_DIR
+pushd $SRC_DIR &> /dev/null
 
 #
 # Package section
 #
 mkdir package
-cp -f $OLVERPWD/package/build-olver-core-rpm.sh package/build-olver-core-rpm.sh
-cp -f $OLVERPWD/package/Makefile package/Makefile
-cp -f $OLVERPWD/package/HOWTO package/HOWTO
+cp -f $SOURCE/package/Makefile package/Makefile
+cp -f $SOURCE/package/HOWTO package/HOWTO
 
 #
 # Build section
 #
-cp -f $OLVERPWD/build_conf_tests.sh ./build_conf_tests.sh
-cp -f $OLVERPWD/build_prerequisites.sh ./build_prerequisites.sh
-cp -f $OLVERPWD/agent_perm.sh ./agent_perm.sh
+cp -f $SOURCE/build_conf_tests.sh ./build_conf_tests.sh
+cp -f $SOURCE/build_prerequisites.sh ./build_prerequisites.sh
+cp -f $SOURCE/agent_perm.sh ./agent_perm.sh
 
 #
 # Binary section
 #
 mkdir bin
 
-cp -f $OLVERPWD/bin/olver_run_tests bin/olver_run_tests
-cp -f $OLVERPWD/bin/olver_pre bin/olver_pre
-cp -f $OLVERPWD/bin/olver_report bin/olver_report
-cp -f $OLVERPWD/bin/testplan bin/testplan
+cp -f $SOURCE/bin/olver_run_tests bin/olver_run_tests
+cp -f $SOURCE/bin/olver_pre bin/olver_pre
+cp -f $SOURCE/bin/olver_report bin/olver_report
+cp -f $SOURCE/bin/testplan bin/testplan
 
 #
 # Configuration section
 #
 mkdir etc
-cp -f $OLVERPWD/etc/olver.conf etc/ > /dev/null 2>&1
-cp -f $OLVERPWD/etc/times.ref etc/ > /dev/null 2>&1
-sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i etc/olver.conf > /dev/null 2>&1
-sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i etc/olver.conf > /dev/null 2>&1
+cp -f $SOURCE/etc/olver.conf etc/
+cp -f $SOURCE/etc/times.ref etc/
+sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i etc/olver.conf &> /dev/null
+sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i etc/olver.conf &> /dev/null
 
 #
 # Source section
@@ -56,8 +61,8 @@ sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester
 mkdir -p src
 mkdir -p config
 
-cp -rf $OLVERPWD/src/* src/
-cp -rf $OLVERPWD/config/* config/
+cp -rf $SOURCE/src/* src/
+cp -rf $SOURCE/config/* config/
 
 #
 # Tools section
@@ -69,24 +74,39 @@ mkdir tools/reportgen
 mkdir tools/share
 mkdir tools/CTesK
 mkdir tools/buildrpm
-cp -rf $OLVERPWD/tools/BugDB/* tools/BugDB/
-cp -rf $OLVERPWD/tools/TraceTools/* tools/TraceTools/
-cp -rf $OLVERPWD/tools/reportgen/* tools/reportgen/
-cp -rf $OLVERPWD/tools/share/* tools/share/
-cp -rf $OLVERPWD/tools/CTesK/* tools/CTesK/
-cp -f $OLVERPWD/tools/buildrpm/* ./tools/buildrpm/
+cp -rf $SOURCE/tools/BugDB/* tools/BugDB/
+cp -rf $SOURCE/tools/TraceTools/* tools/TraceTools/
+cp -rf $SOURCE/tools/reportgen/* tools/reportgen/
+cp -rf $SOURCE/tools/share/* tools/share/
+cp -rf $SOURCE/tools/CTesK/* tools/CTesK/
+cp -f $SOURCE/tools/buildrpm/* ./tools/buildrpm/ &> /dev/null
 
 #
 # Documentation section
 #
 mkdir doc
-cp -rf $OLVERPWD/doc/* doc/
+cp -rf $SOURCE/doc/* doc/
 
 #
 # CVS clean
 #
 find . -name "CVS" -type d -exec rm -rf '{}' \; > /dev/null 2>&1
+find . -name ".cvsignore" -type f -exec rm -f '{}' \; &> /dev/null
 
-cd ..
-tar cz --remove-files -f lsb-test-olver-core-$1-$2.tar.gz ./olver-core
-popd > /dev/null 2>&1
+#
+# Permissions
+#
+find . -type d -exec chmod 775 '{}' \; &> /dev/null
+find . -type f -exec chmod 664 '{}' \; &> /dev/null
+find . -name '*.sh' -exec chmod 775 '{}' \; &> /dev/null
+find . -name '*.pl' -exec chmod 775 '{}' \; &> /dev/null
+find . -name '*.exe' -exec chmod 775 '{}' \; &> /dev/null
+find . -name '*.bat' -exec chmod 775 '{}' \; &> /dev/null
+find . -type f -path './bin/*' -name 'olver*' ! -name 'testplan' -exec chmod 775 '{}' \; &> /dev/null
+find . -name 'tjreport' -exec chmod 775 '{}' \; &> /dev/null
+find . -name 'install-sh' -exec chmod 775 '{}' \; &> /dev/null
+
+popd &> /dev/null
+
+tar cz --remove-files -f lsb-test-olver-core-$2-$3.tar.gz ./olver-core
+exit 0
