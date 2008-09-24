@@ -57,7 +57,7 @@ endif
 
 $(PACKAGE_NAME).*.rpm: $(SRC_DIR)
 	@sh -c "$(SRC_DIR)/build_conf_tests.sh -p"
-	@if [ ! `which makelsbpkg` ]; then \
+	@if [ ! -x /opt/lsb/bin/makelsbpkg ]; then \
 		echo "Error: makelsbpkg not found. Can't build package."; \
 	else \
 		sh -c "$(SRC_DIR)/tools/buildrpm/buildrpm.sh $(SRC_DIR) $(VERSION) $(RELEASE)"; \
@@ -70,7 +70,6 @@ $(TARBALL): $(SRC_DIR)
 
 $(SRC_DIR):
 	@rm -rf $(SRC_DIR)
-	@mkdir -p $(SRC_DIR)
 	bzr export $(EXPORT_TAG) $(SRC_DIR) $(BZRTREES)/$(BZR_MODULE)
 
 .PHONY: rpm_package

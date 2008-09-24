@@ -131,7 +131,7 @@ RES=0
 
 echo
 echo 'Building the package...'
-makelsbpkg --verbose --tagfile=./olver-$2.xml lsb-test-olver-core $PACKAGE_DIR
+/opt/lsb/bin/makelsbpkg --verbose --tagfile=./olver-$2.xml lsb-test-olver-core $PACKAGE_DIR
 
 if [ ! $? = 0 ]; then
     RES=$?
