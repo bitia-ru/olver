@@ -59,6 +59,8 @@ $(PACKAGE_NAME).*.rpm: $(SRC_DIR)
 	@sh -c "$(SRC_DIR)/build_conf_tests.sh -p"
 	@if [ ! -x /opt/lsb/bin/makelsbpkg ]; then \
 		echo "Error: makelsbpkg not found. Can't build package."; \
+		rm -rf $(SRC_DIR); \
+		exit 1; \
 	else \
 		sh -c "$(SRC_DIR)/tools/buildrpm/buildrpm.sh $(SRC_DIR) $(VERSION) $(RELEASE)"; \
 	fi
@@ -69,7 +71,6 @@ $(TARBALL): $(SRC_DIR)
 	@rm -rf $(SRC_DIR)
 
 $(SRC_DIR):
-	@rm -rf $(SRC_DIR)
 	bzr export $(EXPORT_TAG) $(SRC_DIR) $(BZRTREES)/$(BZR_MODULE)
 
 .PHONY: rpm_package
