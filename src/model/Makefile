@@ -85,7 +85,7 @@ $(C_OBJECTS) $(SEC_C_OBJECTS):%.o: %.c
 	@$(CC) $(CFLAGS) "-I$(@D)" -c $*.c -o $*.o
 
 $(SEC_C_SOURCES):%.c: $(SEI_DEPENDS)
-	@if test -f sec2c.cmd; then $(SEC) @sec2c.cmd generate; rm -f sec2c.cmd >/dev/null 2>&1; fi
+	@if test -f sec2c.cmd; then $(SEC) -J-Dsec.encoding=ISO-8859-1 @sec2c.cmd generate; rm -f sec2c.cmd >/dev/null 2>&1; fi
 
 $(SEI_DEPENDS):%.sd: %.sei
 	@if test $*.sei -nt $*.c; then echo $*.sei >> sec2c.cmd; fi
