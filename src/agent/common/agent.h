@@ -268,3 +268,7 @@ void clear_timemark(struct timespec* timemark);
 
 #endif
 
+/********************************************************************/
+/**                        Test Agent Sandbox                      **/
+/********************************************************************/
+const char* ta_get_test_file_path(const char* path);

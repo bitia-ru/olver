@@ -1385,3 +1385,23 @@ void dr_cancelpoint_detector(void* par)
     sendResponse(thread);
     ta_debug_printf("in CP DR DONE (%u)....\n", (unsigned long)pthread_self());
 }
+
+/********************************************************************/
+/**                        Test Agent Sandbox                      **/
+/********************************************************************/
+const char* ta_test_directory = "/tmp/olver/agent";
+
+const char* ta_get_test_file_path(const char* path)
+{
+    char* full_path;
+    if(path != NULL && strlen(path) != 0)
+    {
+        full_path = ta_alloc_memory(strlen(ta_test_directory) + strlen(path) + 2);
+        if(full_path != NULL)
+        {
+            sprintf(full_path, "%s/%s", ta_test_directory, path);
+        }
+    }
+    
+    return full_path;
+}

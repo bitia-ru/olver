@@ -59,7 +59,7 @@ static TACommandVerdict __assert_fail_cmd(TAThread thread,TAInputStream stream)
     //sendResponse( thread );
 
     // Execute
-    stubfile = fopen("stderr_stub.txt","wt");
+    stubfile = fopen(ta_get_test_file_path("stderr_stub.txt"),"wt");
 
     old_std = stderr;
     stderr = stubfile;
@@ -84,7 +84,7 @@ static TACommandVerdict get_stderr_cmd(TAThread thread,TAInputStream stream)
     char* buffer;
     size_t readBytes;
 
-    f = fopen("stderr_stub.txt", "rb");
+    f = fopen(ta_get_test_file_path("stderr_stub.txt"), "rb");
     if (!f)
     {
         ta_debug_printf("assert_agent.c:Error:1\n");

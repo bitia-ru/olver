@@ -59,8 +59,8 @@ static TACommandVerdict fmtmsg_cmd(TAThread thread,TAInputStream stream)
     nbyte = readSize(&stream);
     buf = ta_alloc_memory(nbyte);
 
-    remove("xxx.txt");
-    fd = open("xxx.txt", O_RDWR  | O_CREAT | O_TRUNC, 0);
+    remove(ta_get_test_file_path("xxx.txt"));
+    fd = open(ta_get_test_file_path("xxx.txt"), O_RDWR  | O_CREAT | O_TRUNC, 0);
     dup2 ( fd, 2);
     close( fd );
 

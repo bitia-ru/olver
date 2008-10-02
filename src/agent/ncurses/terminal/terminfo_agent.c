@@ -2,7 +2,7 @@
  * File: ncurses/terminal/terminfo_agent.c
  *
  * Author:
- * Version:  $Id: terminfo_agent.c,v 1.42 2007/10/11 15:11:42 lex Exp $
+ * Version:  $Id: terminfo_agent.c,v 1.43 2008/10/02 16:13:35 phoenix Exp $
  *
  * Copyright (c) 2005 ISP RAS.
  * 25, B.Communisticheskaya, Moscow, Russia.
@@ -16,7 +16,7 @@
 #include <stdlib.h>
 	
 #define NCURSES_STACK_BUFFSIZE 1024*256
-#define NCURSES_TERMDUMP "agent.termdump"
+#define NCURSES_TERMDUMP ta_get_test_file_path("agent.termdump")
 #define NCURSES_TERMINAL "olverct"
 #define OLVERCT_TERMINFO_PATH   "./terminfo/olverct.terminfo"
 
@@ -24,10 +24,15 @@
 TACommandVerdict create_ncurses_process_cmd(TAThread thread, TAInputStream stream)
 {
     int code = 0;
-    char *termname = readString(&stream);
+    char* termname = readString(&stream);
     int sx = readInt(&stream);
     int sy = readInt(&stream);
-    char buf[30];
+    char* sockname[256];
+    char* termdump[256];
+    char* termexp[256];
+    char* termdiff[256];
+    char* dumpfile[256];
+    char* termsize[30];
     char size[30];
 
   // Init test system descriptor
@@ -52,19 +57,25 @@ TACommandVerdict create_ncurses_process_cmd(TAThread thread, TAInputStream strea
          * execlp(), and execvp()), the environment for the new process image
          * shall be taken from the external variable environ in the calling process.
          */
-        putenv("CT_SOCKNAME=olversock");
-        putenv("TEST_NAME=agent");
-        putenv("TERM_DUMP=" NCURSES_TERMDUMP);
-        putenv("TERM_EXP=agent.termexp");
-        putenv("TERM_DIFF=agent.termdiff");
-        putenv("CT_DUMPFILE=agent.progdump");
-        putenv("TERMINFO=./terminfo");
-        sprintf(buf, "TERM_SIZE=%dx%d", sx, sy);
-        putenv(buf);
-        //putenv("TERM_SIZE=20x40");
+        sprintf(sockname, "CT_SOCKNAME=%s", ta_get_test_file_path("olversock"));
+        sprintf(termdump, "TERM_DUMP=%s", NCURSES_TERMDUMP);
+        sprintf(termexp, "TERM_EXP=%s", ta_get_test_file_path("agent.termexp"));
+        sprintf(termdiff, "TERM_DIFF=%s", ta_get_test_file_path("agent.termdiff"));
+        sprintf(dumpfile, "CT_DUMPFILE=%s", ta_get_test_file_path("agent.progdump"));
+        sprintf(termsize, "TERM_SIZE=%dx%d", sx, sy);
         sprintf(size, "%dx%d", sx, sy);
-
-        code = execl("./olverterm", "./olverterm", "-g", size, "-t", termname, "-e", "./agent -silent", "-o", "agent.termdump", NULL);
+        
+        putenv(sockname);
+        putenv("TEST_NAME=agent");
+        putenv(termdump);
+        putenv(termexp);
+        putenv(termdiff);
+        putenv(dumpfile);
+        putenv("TERMINFO=./terminfo");
+        putenv(termsize);
+        //putenv("TERM_SIZE=20x40");
+        
+        code = execl("./olverterm", "./olverterm", "-g", size, "-t", termname, "-e", "./agent -silent", "-o", NCURSES_TERMDUMP, NULL);
         perror("create_ncurses_process");
         assertion( 0, "create_ncurses_process failed" );
     }

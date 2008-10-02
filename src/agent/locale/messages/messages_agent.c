@@ -37,7 +37,7 @@ static TACommandVerdict perror_cmd(TAThread thread, TAInputStream stream)
     char* s = readString(&stream);
     errno = readInt(&stream);
 
-    stderr = fopen("stderr.dat", "wb");
+    stderr = fopen(ta_get_test_file_path("stderr.dat"), "wb");
 
     START_TARGET_OPERATION(thread);
 
@@ -49,7 +49,7 @@ static TACommandVerdict perror_cmd(TAThread thread, TAInputStream stream)
     fclose(stderr);
     stderr = temp_stderr;
 
-    temp_stderr = fopen("stderr.dat", "rb");
+    temp_stderr = fopen(ta_get_test_file_path("stderr.dat"), "rb");
 
     buf_size = fread(buf, 1, 4096, temp_stderr);
 
