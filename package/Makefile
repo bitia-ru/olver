@@ -44,7 +44,7 @@ $(PACKAGE_NAME).*.deb: rpm_package
 	elif [ ! `which alien` ]; then \
 		echo "Error: alien not found. Can't build DEB."; \
 	else \
-		fakeroot alien -cdk $(PACKAGE_NAME).*.rpm; \
+		/opt/lsb/bin/fakeroot alien -cdk $(PACKAGE_NAME).*.rpm; \
 	fi
 
 rpm_package: $(PACKAGE_NAME).*.rpm

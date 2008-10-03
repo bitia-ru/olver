@@ -20,7 +20,7 @@ SRC_DIR=olver-core
 
 rm -rf $SRC_DIR
 mkdir -p $SRC_DIR
-pushd $SRC_DIR &> /dev/null
+pushd $SRC_DIR >/dev/null 2>/dev/null
 
 #
 # Package section
@@ -52,8 +52,8 @@ cp -f $SOURCE/bin/testplan bin/testplan
 mkdir etc
 cp -f $SOURCE/etc/olver.conf etc/
 cp -f $SOURCE/etc/times.ref etc/
-sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i etc/olver.conf &> /dev/null
-sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i etc/olver.conf &> /dev/null
+sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i etc/olver.conf >/dev/null 2>/dev/null
+sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i etc/olver.conf >/dev/null 2>/dev/null
 
 #
 # Source section
@@ -79,7 +79,7 @@ cp -rf $SOURCE/tools/TraceTools/* tools/TraceTools/
 cp -rf $SOURCE/tools/reportgen/* tools/reportgen/
 cp -rf $SOURCE/tools/share/* tools/share/
 cp -rf $SOURCE/tools/CTesK/* tools/CTesK/
-cp -f $SOURCE/tools/buildrpm/* ./tools/buildrpm/ &> /dev/null
+cp -f $SOURCE/tools/buildrpm/* ./tools/buildrpm/ >/dev/null 2>/dev/null
 
 #
 # Documentation section
@@ -90,23 +90,23 @@ cp -rf $SOURCE/doc/* doc/
 #
 # CVS clean
 #
-find . -name "CVS" -type d -exec rm -rf '{}' \; > /dev/null 2>&1
-find . -name ".cvsignore" -type f -exec rm -f '{}' \; &> /dev/null
+find . -name "CVS" -type d -exec rm -rf '{}' \; >/dev/null 2>/dev/null
+find . -name ".cvsignore" -type f -exec rm -f '{}' \; >/dev/null 2>/dev/null
 
 #
 # Permissions
 #
-find . -type d -exec chmod 775 '{}' \; &> /dev/null
-find . -type f -exec chmod 664 '{}' \; &> /dev/null
-find . -name '*.sh' -exec chmod 775 '{}' \; &> /dev/null
-find . -name '*.pl' -exec chmod 775 '{}' \; &> /dev/null
-find . -name '*.exe' -exec chmod 775 '{}' \; &> /dev/null
-find . -name '*.bat' -exec chmod 775 '{}' \; &> /dev/null
-find . -type f -path './bin/*' -name 'olver*' ! -name 'testplan' -exec chmod 775 '{}' \; &> /dev/null
-find . -name 'tjreport' -exec chmod 775 '{}' \; &> /dev/null
-find . -name 'install-sh' -exec chmod 775 '{}' \; &> /dev/null
+find . -type d -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
+find . -type f -exec chmod 664 '{}' \; >/dev/null 2>/dev/null
+find . -name '*.sh' -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
+find . -name '*.pl' -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
+find . -name '*.exe' -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
+find . -name '*.bat' -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
+find ./bin -maxdepth 1 -type f ! -name 'testplan' -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
+find . -name 'tjreport' -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
+find . -name 'install-sh' -exec chmod 775 '{}' \; >/dev/null 2>/dev/null
 
-popd &> /dev/null
+popd >/dev/null 2>/dev/null
 
 tar cz --remove-files -f lsb-test-olver-core-$2-$3.tar.gz ./olver-core
 exit 0

@@ -17,7 +17,7 @@ PACKAGE_DIR=olver-core-package
 
 rm -rf $PACKAGE_DIR
 mkdir -p $PACKAGE_DIR/opt/lsb/test/olver-core
-pushd $PACKAGE_DIR/opt/lsb/test/olver-core &> /dev/null
+pushd $PACKAGE_DIR/opt/lsb/test/olver-core >/dev/null 2>/dev/null
 
 #
 # Binary section
@@ -60,9 +60,9 @@ fi
 if [ ${ARCH} = PPC ]; then
     ARCH=PPC32
 fi
-sed "s/^\s*global\.TARGET_DATA_TYPES_ARCH\s.*$/global\.TARGET_DATA_TYPES_ARCH = LSB_ARCH_${ARCH}/" -i ./etc/olver.conf &> /dev/null
-sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i ./etc/olver.conf &> /dev/null
-sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i ./etc/olver.conf &> /dev/null
+sed "s/^\s*global\.TARGET_DATA_TYPES_ARCH\s.*$/global\.TARGET_DATA_TYPES_ARCH = LSB_ARCH_${ARCH}/" -i ./etc/olver.conf >/dev/null 2>/dev/null
+sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i ./etc/olver.conf >/dev/null 2>/dev/null
+sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i ./etc/olver.conf >/dev/null 2>/dev/null
 
 #
 # Tools section
@@ -98,7 +98,7 @@ mkdir -p testdata/locale.textdomain/Path2/en_US/LC_MESSAGES
 cp -f $SOURCE/src/testdata/locale.textdomain/Path2/en_US/LC_MESSAGES/anotherdomain.po testdata/locale.textdomain/Path2/en_US/LC_MESSAGES
 
 mkdir testdata/locale.nlcat
-find $SOURCE/src/testdata/locale.nlcat -name '*.msg' -exec cp -f '{}' testdata/locale.nlcat/ \;>/dev/null 2>&1
+find $SOURCE/src/testdata/locale.nlcat -name '*.msg' -exec cp -f '{}' testdata/locale.nlcat/ \; >/dev/null 2>/dev/null
 
 #
 # Document section
@@ -109,33 +109,33 @@ cp -rf $SOURCE/doc/* doc/
 #
 # CVS clean
 #
-find . -name "CVS" -type d -exec rm -rf '{}' \; &> /dev/null
-find . -name ".cvsignore" -type f -exec rm -f '{}' \; &> /dev/null
+find . -name "CVS" -type d -exec rm -rf '{}' \; >/dev/null 2>/dev/null
+find . -name ".cvsignore" -type f -exec rm -f '{}' \; >/dev/null 2>/dev/null
 
-popd &> /dev/null
+popd >/dev/null 2>/dev/null
 
 #
 # RPM building
 #
 echo
 echo 'Building the specification file...'
-pushd ${0%/*} &> /dev/null
+pushd ${0%/*} >/dev/null 2>/dev/null
 ./maketags.sh $2 $3
 if [ ! $? = 0 ]; then
     exit 1
 fi
 mv -f olver-$2.xml $DEST/
-popd &> /dev/null
+popd >/dev/null 2>/dev/null
 
-RES=0
-
+RES=1
 echo
 echo 'Building the package...'
+/opt/lsb/bin/fakeroot /bin/bash <<FAKEROOT
+chown -R root:root $PACKAGE_DIR
 /opt/lsb/bin/makelsbpkg --verbose --tagfile=./olver-$2.xml lsb-test-olver-core $PACKAGE_DIR
-
-if [ ! $? = 0 ]; then
-    RES=$?
-fi
+exit $?
+FAKEROOT
+RES=$?
 
 rm -rf $PACKAGE_DIR
 rm -f olver-$2.xml
