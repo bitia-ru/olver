@@ -84,6 +84,7 @@ cp -rf $SOURCE/tools/share/* tools/share/
 mkdir -p testdata
 
 cp -f $SOURCE/src/testdata/install_testdata.sh testdata/
+cp -f $SOURCE/src/testdata/uninstall_testdata.sh testdata/
 cp -rf $SOURCE/src/testdata/math.exp testdata/
 cp -rf $SOURCE/src/testdata/math.trig testdata/
 cp -rf $SOURCE/src/testdata/math.bessel testdata/

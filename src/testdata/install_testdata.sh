@@ -3,9 +3,9 @@ cd $DIR
 
 echo -n "Installing test data for locale.nlcat ...      "
 pushd locale.nlcat>/dev/null 2>&1
-gencat catfirst.cat catfirst.msg
-gencat catsecond.cat catsecond.msg
-gencat catthird.cat catthird.msg
+gencat -o catfirst.cat catfirst.msg
+gencat -o catsecond.cat catsecond.msg
+gencat -o catthird.cat catthird.msg
 popd>/dev/null 2>&1
 echo 'Done'
 
