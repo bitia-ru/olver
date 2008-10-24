@@ -133,6 +133,16 @@ echo
 echo 'Building the package...'
 /opt/lsb/bin/fakeroot /bin/bash <<FAKEROOT
 chown -R root:root $PACKAGE_DIR
+find $PACKAGE_DIR/opt/lsb/test/olver-core -type d -exec chmod 775 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core -type f -exec chmod 664 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core/bin -maxdepth 1 -type f ! -name 'testplan' -exec chmod 775 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core -name 'tjreport' -exec chmod 775 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core -name 'stargen' -exec chmod 775 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core -name '*.sh' -exec chmod 775 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core -name '*.pl' -exec chmod 775 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core -name '*.exe' -exec chmod 775 '{}' \; >/dev/null
+find $PACKAGE_DIR/opt/lsb/test/olver-core -name '*.bat' -exec chmod 775 '{}' \; >/dev/null
+chmod 775 $PACKAGE_DIR/usr/share/terminfo/o/olverct >/dev/null
 /opt/lsb/bin/makelsbpkg --verbose --tagfile=./olver-$2.xml lsb-test-olver-core $PACKAGE_DIR
 exit $?
 FAKEROOT
