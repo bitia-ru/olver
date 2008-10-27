@@ -1,6 +1,6 @@
 PACKAGE=lsb-test-olver-core
 VERSION=1.5
-RELEASE=1
+RELEASE=2
 
 # Derive date string for daily snapshots
 ISO_DATE=$(shell date +"%Y%m%d")
