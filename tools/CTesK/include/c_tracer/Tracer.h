@@ -16,8 +16,8 @@
 #include "TraceMultiWriter.h"
 #include "TraceFormatter.h"
 #include "TraceConstrainer.h"
-#include "TracerStringBuffer.h"
 #include "TraceBool.h"
+#include <atl/stringbuffer.h>
 
 #define ENCODING_STR_LEN 1024
 

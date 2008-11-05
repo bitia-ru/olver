@@ -10,7 +10,8 @@
  */
 
 
-#include <malloc.h>
+#include <stdlib.h>
+
 #include "TraceWriteController.h"
 
 void TraceWriteController_delete(TraceWriteController *tc)

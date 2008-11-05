@@ -10,7 +10,8 @@
  */
 
 #include <stdio.h>
-#include <malloc.h>
+#include <stdlib.h>
+
 #include "TraceConstrainer.h"
 
 extern int tracer_debug_level;

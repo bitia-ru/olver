@@ -5,7 +5,7 @@ SECPP = "$(CTESK_HOME)/bin/sec-pp.sh"
 INCLUDE = $(XINCLUDE)
 LIBTYPE = gcc
 CTESK_LIBPATH = $(CTESK_HOME)/lib/$(LIBTYPE)
-LIB = $(XLIB) "-L$(CTESK_LIBPATH)" -lctesk -lstdc++ -lpthread
+LIB = $(XLIB) "-L$(CTESK_LIBPATH)" -lctesk -lpthread
 CFLAGS = $(XCFLAGS) -g -std=c99 $(INCLUDE)
 LDFLAGS = $(XLDFLAGS) -g -std=c99 $(LIB)
 

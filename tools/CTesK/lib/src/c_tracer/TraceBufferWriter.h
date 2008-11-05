@@ -13,12 +13,12 @@
 #define __TRACE_BUFFER_WRITER_H__
 
 #include "TraceWriter.h"
-#include "TracerStringBuffer.h"
+#include <atl/stringbuffer.h>
 
 
 TraceWriter * TraceBufferWriter_create(StringBuffer *sb);
 void TraceBufferWriter_delete_state(void *sb);
-void TraceBufferWriter_puts(void *sb, const char *str);
+void TraceBufferWriter_puts(void *sb, String *str);
 void TraceBufferWriter_flush(void *sb);
 
 

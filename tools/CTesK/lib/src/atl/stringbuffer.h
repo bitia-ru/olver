@@ -50,6 +50,11 @@ StringBuffer* create_StringBuffer(void);
 StringBuffer* createCustomized_StringBuffer( int allocateBy );
 
 /*
+ * Empty StringBuffer
+ */
+void clear_StringBuffer( StringBuffer* self );
+
+/*
  * Returns the current size of the string buffer.
  */
 int size_StringBuffer( StringBuffer* self );

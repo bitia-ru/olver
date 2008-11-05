@@ -10,7 +10,8 @@
  */
 
 
-#include <malloc.h>
+#include <stdlib.h>
+
 #include "TraceFormatter.h"
 
 void TraceFormatter_delete(TraceFormatter *tf)

@@ -17,7 +17,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <malloc.h>
+
 #include "TraceBufferWriter.h"
 #include "TraceConsoleWriter.h"
 #include "TraceXMLFormatter.h"
@@ -69,21 +69,15 @@ static TraceBool tracer_valid( class_Tracer* tracer )
   {
     if( tracer_debug_level >= TRACER_DEBUG_LEVEL_FULL )
     {
-      if(    ( tr_true == (   NULL != tracer->constrainer->valid
-                            ? (*tracer->constrainer->valid)( tracer->constrainer )
-                            : tr_true
-                          )
+      if(    (    NULL == tracer->constrainer->valid
+               || (*tracer->constrainer->valid)( tracer->constrainer ) == tr_true
              )
-          && ( tr_true == (   NULL != tracer->writer->valid
-                            ? (*tracer->writer->valid)( tracer->writer )
-                            : tr_true
-                          )
+          && (    NULL == tracer->writer->valid
+               || (*tracer->writer->valid)( tracer->writer ) == tr_true
              )
-          && ( tr_true == (   NULL != tracer->formatter->valid
-                            ? (*tracer->formatter->valid)( tracer->formatter )
-                            : tr_true
-                          )
-              )
+          && (    NULL == tracer->formatter->valid
+               || (*tracer->formatter->valid)( tracer->formatter ) == tr_true
+             )
         )
         return tr_true;
     }
@@ -96,14 +90,12 @@ static TraceBool tracer_valid( class_Tracer* tracer )
 
 ///////////////////////////////
 
-void deletelist_tracer_environment( TraceList* list )
+static void deletelist_tracer_environment( TraceList* list )
 {
   TraceListitem *item, *tmp;
 
-  for(item = list->head;(item != NULL); )
-  {
-    if(item->data)
-    {
+  for(item = list->head; item != NULL; ) {
+    if(item->data) {
       TracePair_free((TracePair *)item->data);
     }
     tmp = item->next;
@@ -112,17 +104,21 @@ void deletelist_tracer_environment( TraceList* list )
   }
   TraceList_clear(list);
 }
+
 ///////////////////////////////
-void deletelist_tracer_transitions (TraceList* list)
+
+static void deletelist_tracer_transitions (TraceList* list)
 {
   TraceList_clear(list);
 }
+
 ///////////////////////////////
-void deletelist_tracer_model_operations (TraceList* list)
+
+static void deletelist_tracer_model_operations (TraceList* list)
 {
   TraceListitem *item, *tmp;
 
-  for(item = list->head;(item != NULL); ) {
+  for(item = list->head; item != NULL; ) {
     if(item->data) free(item->data);
     tmp = item->next;
     TraceList_remove(list, item);
@@ -130,12 +126,14 @@ void deletelist_tracer_model_operations (TraceList* list)
   }
   TraceList_clear(list);
 }
+
 ///////////////////////////////
-void deletelist_tracer_exception_values (TraceList* list)
+
+static void deletelist_tracer_exception_values (TraceList* list)
 {
   TraceListitem *item, *tmp;
 
-  for(item = list->head;(item != NULL); )
+  for(item = list->head; item != NULL; )
   {
     TracePair_free((TracePair *)item->data);
     tmp = item->next;
@@ -144,12 +142,14 @@ void deletelist_tracer_exception_values (TraceList* list)
   }
   TraceList_clear(list);
 }
+
 ///////////////////////////////
-void deletelist_tracer_exception_infos (TraceList* list)
+
+static void deletelist_tracer_exception_infos (TraceList* list)
 {
   TraceListitem *item, *tmp;
 
-  for(item = list->head;(item != NULL); )
+  for(item = list->head; item != NULL; )
   {
     if(item->data) free(item->data);
     tmp = item->next;
@@ -158,6 +158,16 @@ void deletelist_tracer_exception_infos (TraceList* list)
   }
   TraceList_clear(list);
 }
+
+///////////////////////////////
+
+/* Write string to writer */
+static void write_string(TraceWriteController* writer, String *str)
+{
+	(*writer->puts)( writer->state, str );
+}
+
+///////////////////////////////
 
 
 
@@ -168,8 +178,10 @@ void TracerExitTrigger(void);
 
 void tracer_setDefaultTracer(class_Tracer* tracer)
 {
-  if(NULL != c_Tracer_default_tracer) tracer_deleteTracer(c_Tracer_default_tracer);
-  if(NULL != tracer) atexit(TracerExitTrigger);
+  if(NULL != c_Tracer_default_tracer)
+	  tracer_deleteTracer(c_Tracer_default_tracer);
+  if(NULL != tracer)
+	  atexit(TracerExitTrigger);
   c_Tracer_default_tracer = tracer;
 }
 
@@ -237,12 +249,12 @@ TracePair *tmppair;
     // Set system environment
     tsEnv = TSEnvironment_createTSEnvironment();
     tmppair = TracePair_create( tracer_cloneString(newtracer->ENV_HOST)
-                              , (*tsEnv->getHostInfo)()
+                              , (*tsEnv->getHostInfo)()	// will not be free()'d
                               );
     TraceList_add_back(&(newtracer->environment), tmppair);
 
     tmppair = TracePair_create( tracer_cloneString(newtracer->ENV_OS)
-                              , (*tsEnv->getOSInfo)()
+                              , (*tsEnv->getOSInfo)()	// will not be free()'d
                               );
     TraceList_add_back(&(newtracer->environment), tmppair);
 
@@ -262,14 +274,14 @@ TracePair *tmppair;
 
     TraceList_add_back( &(newtracer->environment), tmppair );
 
-    newtracer->transitionBuffer = StringBuffer_create(-1);
+    newtracer->transitionBuffer = create_StringBuffer();
     newtracer->transitionBuffer_wr
             = TraceBufferWriter_create( newtracer->transitionBuffer );
 
     if( newtracer->transitionBuffer_wr )
       newtracer->transitionBuffer_wr->refCnt = 1;
 
-    newtracer->keepBuffer = StringBuffer_create( -1 );
+    newtracer->keepBuffer = create_StringBuffer();
     newtracer->keepBuffer_wr = TraceBufferWriter_create( newtracer->keepBuffer );
     if( newtracer->keepBuffer_wr )
       newtracer->keepBuffer_wr->refCnt = 1;
@@ -434,7 +446,7 @@ void tracer_setEncoding(class_Tracer* tracer, const char* encoding )
 /*
  * Methods for setting current servers
  */
-TraceBool tracer_addWriter(class_Tracer* tracer, const char* name,TraceWriter* writer)
+TraceBool tracer_addWriter(class_Tracer* tracer, const char* name, TraceWriter* writer)
 {
   if( !(tracer_valid( tracer ))) return tr_false;
 
@@ -446,12 +458,11 @@ TraceBool tracer_addWriter(class_Tracer* tracer, const char* name,TraceWriter* w
 
   if( (*tracer->constrainer->isInTrace)( tracer->constrainer ) )
   {
-    if( (writer != NULL) && (writer->puts != NULL) )
+    if( writer != NULL && writer->puts != NULL )
     {
-      (*writer->puts)
+	  (*writer->puts)
           ( writer->state
-          , (*tracer->formatter->startTrace)
-                ( tracer->formatter->state, tracer->encoding )
+          , (*tracer->formatter->startTrace)( tracer->formatter->state, tracer->encoding )
           );
     }
   }
@@ -465,8 +476,8 @@ TraceBool tracer_addWriter(class_Tracer* tracer, const char* name,TraceWriter* w
 
 TraceBool tracer_removeWriter( class_Tracer * tracer, const char* name )
 {
-  if(    (!tracer_valid( tracer ))
-      || ((*tracer->constrainer->isInScenario)( tracer->constrainer ))
+  if(    !tracer_valid( tracer )
+      || (*tracer->constrainer->isInScenario)( tracer->constrainer )
     )
     return tr_false;
 
@@ -475,15 +486,12 @@ TraceBool tracer_removeWriter( class_Tracer * tracer, const char* name )
     return (*tracer->writer->removeWriter)
                ( tracer->writer->state
                , name
-               , (*tracer->formatter->endTrace)
-                     ( tracer->formatter->state
-                     , 0
-                     )
+               , (*tracer->formatter->endTrace)( tracer->formatter->state, 0)
                );
   }
   else
   {
-    return (*tracer->writer->removeWriter)( tracer->writer->state, name, "" );
+    return (*tracer->writer->removeWriter)( tracer->writer->state, name, create_String("") );
   }
 }
 
@@ -540,8 +548,8 @@ TraceConstrainer* tracer_setConstrainer( class_Tracer* tracer
  */
 int tracer_getTraceId(class_Tracer* tracer)
 {
-  if(    (!tracer_valid( tracer ))
-      || (!((*tracer->constrainer->isInTrace)( tracer->constrainer )))
+  if(    !tracer_valid( tracer )
+      || !(*tracer->constrainer->isInTrace)( tracer->constrainer )
     )
   {
     return -1;
@@ -586,13 +594,12 @@ void tracer_startTrace(class_Tracer* tracer)
       tracer->needTrace = tr_true;
       tracer->needTraceState = tr_true;
       // Write message
-      (*tracer->writer->puts)
-          ( tracer->writer->state
-          , (*tracer->formatter->startTrace)
-                ( tracer->formatter->state
-                , tracer->encoding
-                )
-          );
+	  write_string( tracer->writer
+			 , (*tracer->formatter->startTrace)
+				   (  tracer->formatter->state
+					, tracer->encoding
+				   )
+             );
     }
   }
 }
@@ -601,12 +608,10 @@ void tracer_startTrace(class_Tracer* tracer)
 void tracer_endTrace( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->endTrace)( tracer->constrainer ))
+      && (*tracer->constrainer->endTrace)( tracer->constrainer )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->endTrace)
-              ( tracer->formatter->state, 1 )
+    write_string( tracer->writer
+			, (*tracer->formatter->endTrace)( tracer->formatter->state, 1 )
         );
 }
 
@@ -617,34 +622,35 @@ void tracer_endTrace( class_Tracer* tracer )
  */
 void tracer_traceScenarioStart( class_Tracer* tracer, const char* name )
 {
+char *host, *os;
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceScenarioStart)
-              ( tracer->constrainer, name ))
+      && (*tracer->constrainer->traceScenarioStart)( tracer->constrainer, name )
     )
   {
     TSEnvironment* tsEnv = TSEnvironment_createTSEnvironment();
     time_t now = time(NULL);
 
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceEnvironmentProperties)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , &(tracer->environment)
-              )
-        );
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceEnvironmentProperties)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , &(tracer->environment)
+				  )
+	);
 
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceScenarioStart)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , name
-              , now
-              , (*tsEnv->getHostInfo)()
-              , (*tsEnv->getOSInfo)()
-              )
-        );
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceScenarioStart)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , name
+				  , now
+				  , host = (*tsEnv->getHostInfo)()
+				  , os = (*tsEnv->getOSInfo)()
+				  )
+	);
+
+	free(host);
+	free(os);
   }
 }
 
@@ -656,18 +662,16 @@ void tracer_traceScenarioParameters( class_Tracer* tracer
                                    )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceScenarioParameters)
-              ( tracer->constrainer, argc, argv ))
+      && (*tracer->constrainer->traceScenarioParameters)( tracer->constrainer, argc, argv )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceScenarioParameters)
-            ( tracer->formatter->state
-            , tracer->traceId
-            , argc
-            , argv
-            )
-        );
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceScenarioParameters)
+				( tracer->formatter->state
+				, tracer->traceId
+				, argc
+				, argv
+				)
+		   );
 }
 
 ///////////////////////////////
@@ -678,18 +682,16 @@ void tracer_traceTestEngineProperty( class_Tracer* tracer
                                    )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceTestEngineProperty)
-              ( tracer->constrainer, name, value ))
+      && (*tracer->constrainer->traceTestEngineProperty)( tracer->constrainer, name, value )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceTestEngineProperty)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , name
-              , value
-              )
-        );
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceTestEngineProperty)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , name
+				  , value
+				  )
+           );
 }
 
 ///////////////////////////////
@@ -697,18 +699,17 @@ void tracer_traceTestEngineProperty( class_Tracer* tracer
 void tracer_traceScenarioEnd( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceScenarioEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->traceScenarioEnd)( tracer->constrainer )
     )
   {
     time_t now = time( NULL );
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceScenarioEnd)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , now
-              )
-        );
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceScenarioEnd)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , now
+				  )
+		   );
   }
 }
 
@@ -725,14 +726,13 @@ void tracer_traceScenarioValue( class_Tracer* tracer
                               )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceScenarioValue)
+      && (*tracer->constrainer->traceScenarioValue)
               ( tracer->constrainer
               , kind
               , type
               , name
               , value
               )
-         )
     )
   {
     if(    (*tracer->constrainer->isInTransition)( tracer->constrainer )
@@ -741,17 +741,16 @@ void tracer_traceScenarioValue( class_Tracer* tracer
       )
     {
       // skip state message if transition wasn't traced
-      (*tracer->writer->puts)
-          ( tracer->writer->state
-          , (*tracer->formatter->traceScenarioValue)
-                ( tracer->formatter->state
-                , tracer->traceId
-                , kind
-                , type
-                , name
-                , value
-                )
-          );
+	  write_string(  tracer->writer
+			  , (*tracer->formatter->traceScenarioValue)
+					( tracer->formatter->state
+					, tracer->traceId
+					, kind
+					, type
+					, name
+					, value
+					)
+			  );
     }
   }
 }
@@ -761,23 +760,22 @@ void tracer_traceScenarioValue( class_Tracer* tracer
 void tracer_traceState( class_Tracer* tracer, const char* id )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceState)( tracer->constrainer, id ))
+      && (*tracer->constrainer->traceState)( tracer->constrainer, id )
     )
   {
-    if(    (*tracer->constrainer->isInTransition)(tracer->constrainer )
+    if(    (*tracer->constrainer->isInTransition)( tracer->constrainer )
         || tracer->traceAccidentalTransitions
         || tracer->needTraceState
       )
     {
       // skip state message if transition wasn't traced
-      (*tracer->writer->puts)
-          ( tracer->writer->state
-          , (*tracer->formatter->traceState)
-                ( tracer->formatter->state
-                , tracer->traceId
-                , id
-                )
-          );
+	  write_string(  tracer->writer
+			  , (*tracer->formatter->traceState)
+					( tracer->formatter->state
+					, tracer->traceId
+					, id
+					)
+			  );
     }
   }
 }
@@ -787,12 +785,12 @@ void tracer_traceState( class_Tracer* tracer, const char* id )
 void tracer_traceTransitionStart( class_Tracer* tracer, const char* id )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceTransitionStart)( tracer->constrainer, id ))
+      && (*tracer->constrainer->traceTransitionStart)( tracer->constrainer, id )
     )
   {
     if( !tracer->traceAccidentalTransitions )
     {
-      StringBuffer_clear( tracer->transitionBuffer );
+      clear_StringBuffer( r(tracer->transitionBuffer) );
 
       (*tracer->writer->pushWriters)( tracer->writer->state );
 
@@ -803,11 +801,10 @@ void tracer_traceTransitionStart( class_Tracer* tracer, const char* id )
       tracer->needTraceState = tr_false;
     }
 
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceTransitionStart)
-              ( tracer->formatter->state , tracer->traceId ,id )
-        );
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceTransitionStart)
+				  ( tracer->formatter->state , tracer->traceId ,id )
+		   );
 
     // Initialize transition local variables
     tracer->modelOperationIdSeq = 1;
@@ -815,7 +812,7 @@ void tracer_traceTransitionStart( class_Tracer* tracer, const char* id )
 
     tracer->wasSeries = tr_false;
 
-    StringBuffer_clear( tracer->keepBuffer );
+    clear_StringBuffer( r(tracer->keepBuffer) );
   }
 }
 
@@ -824,48 +821,42 @@ void tracer_traceTransitionStart( class_Tracer* tracer, const char* id )
 void tracer_traceTransitionEnd( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceTransitionEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->traceTransitionEnd)( tracer->constrainer )
     )
   {
     // Write keeping trace
     if(    !tracer->wasSeries
-        && ( tracer->keepBuffer->len > 0 )
+        && size_StringBuffer(r(tracer->keepBuffer)) > 0
       )
     {
-      (*tracer->writer->puts)
-          ( tracer->writer->state
-          , (*tracer->formatter->traceSeriesStart)
-                ( tracer->formatter->state , tracer->traceId )
+	  write_string(  tracer->writer
+			  , (*tracer->formatter->traceSeriesStart)
+					( tracer->formatter->state , tracer->traceId )
           );
 
-      (*tracer->writer->puts)
-          ( tracer->writer->state, StringBuffer_toString( tracer->keepBuffer ) );
+	  write_string( tracer->writer, toString(r(tracer->keepBuffer)) );
 
-      (*tracer->writer->puts)
-          ( tracer->writer->state
-          , (*tracer->formatter->traceSeriesEnd)
-                ( tracer->formatter->state, tracer->traceId )
-          );
+	  write_string(  tracer->writer
+			  , (*tracer->formatter->traceSeriesEnd)
+					( tracer->formatter->state, tracer->traceId )
+			  );
 
-      StringBuffer_clear( tracer->keepBuffer );
+      clear_StringBuffer( r(tracer->keepBuffer) );
     }
 
     // Write 'TransitionEnd' message
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceTransitionEnd)
-              ( tracer->formatter->state, tracer->traceId )
-        );
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceTransitionEnd)
+				  ( tracer->formatter->state, tracer->traceId )
+			);
 
     // Process accidental transitions filter
     if( !tracer->traceAccidentalTransitions )
     {
       (*tracer->writer->popWriters)( tracer->writer->state );
 
-      if( tracer->needTrace )
-      {
-        (*tracer->writer->puts)
-            ( tracer->writer->state, StringBuffer_toString( tracer->transitionBuffer ) );
+      if( tracer->needTrace ) {
+		write_string( tracer->writer, toString(r(tracer->transitionBuffer)) );
       }
 
       tracer->needTraceState = tracer->needTrace;
@@ -885,20 +876,19 @@ void tracer_traceModelOperationStart( class_Tracer* tracer
                                     )
 {
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceModelOperationStart)
-              ( tracer->constrainer, kind, subsystem, signature ))
+      && (*tracer->constrainer->traceModelOperationStart)
+              ( tracer->constrainer, kind, subsystem, signature )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceModelOperationStart)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , kind
-              , subsystem
-              , signature
-              , tracer->modelOperationIdSeq++
-              )
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceModelOperationStart)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , kind
+				  , subsystem
+				  , signature
+				  , tracer->modelOperationIdSeq++
+				  )
         );
 
     tracer->needTrace = tr_true;
@@ -914,18 +904,17 @@ void tracer_traceModelOperationArgument( class_Tracer* tracer
                                        )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceModelOperationArgument)
-              ( tracer->constrainer, type, name, value ))
+      && (*tracer->constrainer->traceModelOperationArgument)
+              ( tracer->constrainer, type, name, value )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceModelOperationArgument)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , type
-              , name
-              , value
-              )
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceModelOperationArgument)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , type
+				  , name
+				  , value
+				  )
         );
 }
 
@@ -937,17 +926,16 @@ void tracer_traceModelOperationResult( class_Tracer* tracer
                                      )
 {
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceModelOperationResult)
-            ( tracer->constrainer, type, value ))
+      && (*tracer->constrainer->traceModelOperationResult)
+            ( tracer->constrainer, type, value )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceModelOperationResult)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , type
-              , value
-              )
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceModelOperationResult)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , type
+				  , value
+				  )
         );
 }
 
@@ -963,8 +951,8 @@ void tracer_traceModelOperationIdentifier( class_Tracer* tracer, long id )
   } *pair;
 
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceModelOperationIdentifier)
-              ( tracer->constrainer, id ))
+      && (*tracer->constrainer->traceModelOperationIdentifier)
+              ( tracer->constrainer, id )
     )
   {
     for( item = tracer->model_operations.head
@@ -998,8 +986,8 @@ void tracer_traceModelOperationIdentifier( class_Tracer* tracer, long id )
 void tracer_traceModelOperationChannel( class_Tracer* tracer, long chid )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceModelOperationChannel)
-              ( tracer->constrainer, chid ))
+      && (*tracer->constrainer->traceModelOperationChannel)
+              ( tracer->constrainer, chid )
     )
   {
     char ss[ 10 ];
@@ -1009,13 +997,12 @@ void tracer_traceModelOperationChannel( class_Tracer* tracer, long chid )
     else
       sprintf( ss, "%ld\0", chid );
 
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceModelOperationChannel)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , ss
-              )
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceModelOperationChannel)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , ss
+				  )
         );
   }
 }
@@ -1025,16 +1012,15 @@ void tracer_traceModelOperationChannel( class_Tracer* tracer, long chid )
 void tracer_traceModelOperationTimestamp( class_Tracer* tracer, const char* timestamp )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceModelOperationTimestamp)
-              ( tracer->constrainer, timestamp ))
+      && (*tracer->constrainer->traceModelOperationTimestamp)
+              ( tracer->constrainer, timestamp )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceModelOperationTimestamp)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , timestamp
-              )
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceModelOperationTimestamp)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , timestamp
+				  )
         );
 }
 
@@ -1056,17 +1042,14 @@ void tracer_traceOracleStart( class_Tracer* tracer
          )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceOracleStart)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , subsystem
-              , signature
-              , tracer_getModelOperationReference( tracer->model_operations
-                                                 , refId
-                                                 )
-              )
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceOracleStart)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , subsystem
+				  , signature
+				  , tracer_getModelOperationReference( tracer->model_operations, refId )
+				  )
         );
   }
   else
@@ -1084,17 +1067,14 @@ void tracer_traceOracleStart( class_Tracer* tracer
                                 , tracer->keepBuffer_wr
                                 );
 
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceOracleStart)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , subsystem
-              , signature
-              , tracer_getModelOperationReference( tracer->model_operations
-                                                 , refId
-                                                 )
-              )
+    write_string(  tracer->writer
+			, (*tracer->formatter->traceOracleStart)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , subsystem
+				  , signature
+				  , tracer_getModelOperationReference( tracer->model_operations, refId )
+				  )
         );
   }
 }
@@ -1104,12 +1084,11 @@ void tracer_traceOracleStart( class_Tracer* tracer
 void tracer_tracePreconditionEnd( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->tracePreconditionEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->tracePreconditionEnd)( tracer->constrainer )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->tracePreconditionEnd)
-              ( tracer->formatter->state, tracer->traceId )
+    write_string(  tracer->writer
+			, (*tracer->formatter->tracePreconditionEnd)
+				  ( tracer->formatter->state, tracer->traceId )
         );
 }
 
@@ -1121,22 +1100,19 @@ void tracer_traceOracleEnd( class_Tracer* tracer )
   {
     if( (*tracer->constrainer->traceOracleEnd)( tracer->constrainer ) )
     {
-      (*tracer->writer->puts)
-          ( tracer->writer->state
-          , (*tracer->formatter->traceOracleEnd)
-                ( tracer->formatter->state, tracer->traceId )
-          );
+	  write_string(  tracer->writer
+			  , (*tracer->formatter->traceOracleEnd)
+					( tracer->formatter->state, tracer->traceId )
+             );
 
       clear_exception_values( tracer );
 
-  } else
-  if( (*tracer->constrainer->keepOracleEnd)( tracer->constrainer ) )
+  } else if( (*tracer->constrainer->keepOracleEnd)( tracer->constrainer ) )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceOracleEnd)
-              ( tracer->formatter->state , tracer->traceId )
-        );
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceOracleEnd)
+				  ( tracer->formatter->state , tracer->traceId )
+           );
 
     (*tracer->writer->popWriters)( tracer->writer->state );
 
@@ -1148,13 +1124,12 @@ void tracer_traceOracleEnd( class_Tracer* tracer )
 void tracer_traceModelOperationEnd( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceModelOperationEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->traceModelOperationEnd)( tracer->constrainer )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceModelOperationEnd)
-              ( tracer->formatter->state, tracer->traceId )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceModelOperationEnd)
+				  ( tracer->formatter->state, tracer->traceId )
         );
 
     clear_exception_values( tracer );
@@ -1164,22 +1139,18 @@ void tracer_traceModelOperationEnd( class_Tracer* tracer )
 void tracer_traceSeriesStart(class_Tracer* tracer)
 {
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceSeriesStart)( tracer->constrainer ))
+      && (*tracer->constrainer->traceSeriesStart)( tracer->constrainer )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceSeriesStart)( tracer->formatter->state
-                                                , tracer->traceId
-                                                )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceSeriesStart)( tracer->formatter->state
+													, tracer->traceId
+													)
         );
 
-    if( tracer->keepBuffer->len > 0 )
+    if( size_StringBuffer(r(tracer->keepBuffer))> 0 )
     {
-      (*tracer->writer->puts)
-          ( tracer->writer->state
-          , StringBuffer_toString( tracer->keepBuffer )
-          );
+	  write_string( tracer->writer, toString(r(tracer->keepBuffer)) );
       tracer->wasSeries = tr_true;
     }
   }
@@ -1190,14 +1161,12 @@ void tracer_traceSeriesStart(class_Tracer* tracer)
 void tracer_traceSeriesEnd(class_Tracer* tracer)
 {
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceSeriesEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->traceSeriesEnd)( tracer->constrainer )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceSeriesEnd)( tracer->formatter->state
-                                              , tracer->traceId
-                                              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceSeriesEnd)
+				( tracer->formatter->state, tracer->traceId )
         );
   }
 }
@@ -1210,18 +1179,16 @@ void tracer_traceSeriesEnd(class_Tracer* tracer)
 void tracer_tracePrimeFormula( class_Tracer* tracer, int id, TraceBool value )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->tracePrimeFormula)
+      && (*tracer->constrainer->tracePrimeFormula)
             (tracer->constrainer, id, value )
-         )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->tracePrimeFormula)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , id
-              , value
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->tracePrimeFormula)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , id
+				  , value
+				  )
         );
 }
 
@@ -1234,23 +1201,21 @@ void tracer_traceCoverageElement( class_Tracer* tracer
                                 )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceCoverageElement)
+      && (*tracer->constrainer->traceCoverageElement)
             ( tracer->constrainer
             , structureId
             , coverageId
             , branchId
             )
-         )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceCoverageElement)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , structureId
-              , coverageId
-              , branchId
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceCoverageElement)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , structureId
+				  , coverageId
+				  , branchId
+				  )
         );
 }
 
@@ -1259,12 +1224,11 @@ void tracer_traceCoverageElement( class_Tracer* tracer
 void tracer_traceMark( class_Tracer* tracer, const char* mark )
 {
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceMark)( tracer->constrainer, mark ))
+      && (*tracer->constrainer->traceMark)( tracer->constrainer, mark )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceMark)
-              ( tracer->formatter->state, tracer->traceId ,mark )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceMark)
+				  ( tracer->formatter->state, tracer->traceId ,mark )
         );
 
 }
@@ -1274,15 +1238,13 @@ void tracer_traceMark( class_Tracer* tracer, const char* mark )
 void tracer_traceCoverageStructureStart( class_Tracer* tracer, const char* name )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceCoverageStructureStart)
+      && (*tracer->constrainer->traceCoverageStructureStart)
               ( tracer->constrainer, name )
-         )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceCoverageStructureStart)
-              ( tracer->formatter->state, tracer->traceId, name )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceCoverageStructureStart)
+				  ( tracer->formatter->state, tracer->traceId, name )
         );
   }
 }
@@ -1292,12 +1254,11 @@ void tracer_traceCoverageStructureStart( class_Tracer* tracer, const char* name 
 void tracer_traceFormulaeStart( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceFormulaeStart)( tracer->constrainer ))
+      && (*tracer->constrainer->traceFormulaeStart)( tracer->constrainer )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceFormulaeStart)( tracer->formatter->state )
-        );
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceFormulaeStart)( tracer->formatter->state )
+           );
 }
 
 ///////////////////////////////
@@ -1305,15 +1266,14 @@ void tracer_traceFormulaeStart( class_Tracer* tracer )
 void tracer_traceFormula( class_Tracer* tracer, int id, const char* text )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceFormula)( tracer->constrainer, id, text ))
+      && (*tracer->constrainer->traceFormula)( tracer->constrainer, id, text )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceFormula)
-              ( tracer->formatter->state
-              , id
-              , text
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceFormula)
+				  ( tracer->formatter->state
+				  , id
+				  , text
+				  )
         );
 }
 
@@ -1322,12 +1282,13 @@ void tracer_traceFormula( class_Tracer* tracer, int id, const char* text )
 void tracer_traceFormulaeEnd( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceFormulaeEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->traceFormulaeEnd)( tracer->constrainer )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceFormulaeEnd)( tracer->formatter->state )
+  {
+	write_string(  tracer->writer
+	        , (*tracer->formatter->traceFormulaeEnd)( tracer->formatter->state )
         );
+  }
 }
 
 ///////////////////////////////
@@ -1335,15 +1296,11 @@ void tracer_traceFormulaeEnd( class_Tracer* tracer )
 void tracer_traceCoverageStart( class_Tracer* tracer, const char* id )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceCoverageStart)( tracer->constrainer, id))
+      && (*tracer->constrainer->traceCoverageStart)( tracer->constrainer, id)
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceCoverageStart)
-              ( tracer->formatter->state
-              , id
-              )
-        );
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceCoverageStart)( tracer->formatter->state, id )
+           );
 }
 
 ///////////////////////////////
@@ -1351,16 +1308,14 @@ void tracer_traceCoverageStart( class_Tracer* tracer, const char* id )
 void tracer_traceElement( class_Tracer* tracer, int id, const char* name )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceElement)
-              ( tracer->constrainer, id, name ))
+      && (*tracer->constrainer->traceElement)( tracer->constrainer, id, name )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceElement)
-              ( tracer->formatter->state
-              , id
-              , name
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceElement)
+				  ( tracer->formatter->state
+				  , id
+				  , name
+				  )
         );
 }
 
@@ -1369,12 +1324,11 @@ void tracer_traceElement( class_Tracer* tracer, int id, const char* name )
 void tracer_traceCoverageEnd( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceCoverageEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->traceCoverageEnd)( tracer->constrainer )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceCoverageEnd)( tracer->formatter->state )
-        );
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceCoverageEnd)( tracer->formatter->state )
+           );
 }
 
 ///////////////////////////////
@@ -1382,12 +1336,11 @@ void tracer_traceCoverageEnd( class_Tracer* tracer )
 void tracer_traceCoverageStructureEnd( class_Tracer* tracer )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceCoverageStructureEnd)( tracer->constrainer ))
+      && (*tracer->constrainer->traceCoverageStructureEnd)( tracer->constrainer )
     )
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceCoverageStructureEnd)( tracer->formatter->state )
-        );
+	write_string(  tracer->writer
+	        , (*tracer->formatter->traceCoverageStructureEnd)( tracer->formatter->state )
+           );
 }
 
 
@@ -1397,18 +1350,17 @@ void tracer_traceCoverageStructureEnd( class_Tracer* tracer )
 void tracer_traceException( class_Tracer* tracer, const char* kind )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceException)( tracer->constrainer, kind ))
+      && (*tracer->constrainer->traceException)( tracer->constrainer, kind )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceException)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , kind
-              , &(tracer->exception_values)
-              , &(tracer->exception_infos)
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceException)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , kind
+				  , &(tracer->exception_values)
+				  , &(tracer->exception_infos)
+				  )
         );
 
     if( !(tracer->traceAccidentalTransitions) )
@@ -1422,18 +1374,17 @@ void tracer_traceException( class_Tracer* tracer, const char* kind )
 void tracer_traceInterimException( class_Tracer* tracer , const char* kind )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceInterimException)( tracer->constrainer, kind ))
+      && (*tracer->constrainer->traceInterimException)( tracer->constrainer, kind )
     )
   {
-    (*tracer->writer->puts)
-        (tracer->writer->state
-        , (*tracer->formatter->traceInterimException)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , kind
-              , &(tracer->exception_values)
-              , &(tracer->exception_infos)
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceInterimException)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , kind
+				  , &(tracer->exception_values)
+				  , &(tracer->exception_infos)
+				  )
         );
 
     if( !(tracer->traceAccidentalTransitions) )
@@ -1453,8 +1404,8 @@ void tracer_traceExceptionValue( class_Tracer* tracer
   TracePair *pair;
 
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceExceptionValue)
-              (tracer->constrainer, name, value ))
+      && (*tracer->constrainer->traceExceptionValue)
+              (tracer->constrainer, name, value )
     )
   {
     pair = TracePair_create_clone( name, value );
@@ -1470,8 +1421,7 @@ void tracer_traceExceptionInfo( class_Tracer* tracer, const char* info )
   char* str;
 
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceExceptionInfo)
-              ( tracer->constrainer, info ))
+      && (*tracer->constrainer->traceExceptionInfo)( tracer->constrainer, info )
     )
   {
     str = tracer_cloneString( info );
@@ -1485,16 +1435,13 @@ void tracer_traceExceptionInfo( class_Tracer* tracer, const char* info )
 void tracer_traceInternalError( class_Tracer* tracer, const char* info )
 {
   if(    tracer_valid( tracer )
-      && ((*tracer->constrainer->traceInternalError)( tracer->constrainer, info ))
+      && (*tracer->constrainer->traceInternalError)( tracer->constrainer, info )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceInternalError)
-              ( tracer->formatter->state
-              , tracer->traceId,info
-              )
-        );
+	write_string(  tracer->writer
+		, (*tracer->formatter->traceInternalError)
+			( tracer->formatter->state, tracer->traceId,info )
+		);
 
     if( !(tracer->traceAccidentalTransitions) )
       tracer->needTrace = tr_true;
@@ -1506,15 +1453,12 @@ void tracer_traceInternalError( class_Tracer* tracer, const char* info )
 void tracer_traceSystemInfo( class_Tracer* tracer, const char* info )
 {
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceSystemInfo)( tracer->constrainer, info ))
+      && (*tracer->constrainer->traceSystemInfo)( tracer->constrainer, info )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceSystemInfo)
-              ( tracer->formatter->state
-              , tracer->traceId,info
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceSystemInfo)
+				  ( tracer->formatter->state, tracer->traceId,info )
         );
 
     if ( !(tracer->traceAccidentalTransitions) )
@@ -1527,16 +1471,15 @@ void tracer_traceSystemInfo( class_Tracer* tracer, const char* info )
 void tracer_traceUserInfo( class_Tracer* tracer, const char* info )
 {
   if(    tracer_valid(tracer)
-      && ((*tracer->constrainer->traceUserInfo)( tracer->constrainer, info ))
+      && (*tracer->constrainer->traceUserInfo)( tracer->constrainer, info )
     )
   {
-    (*tracer->writer->puts)
-        ( tracer->writer->state
-        , (*tracer->formatter->traceUserInfo)
-              ( tracer->formatter->state
-              , tracer->traceId
-              , info
-              )
+	write_string(  tracer->writer
+			, (*tracer->formatter->traceUserInfo)
+				  ( tracer->formatter->state
+				  , tracer->traceId
+				  , info
+				  )
         );
 
     if( !(tracer->traceAccidentalTransitions) )

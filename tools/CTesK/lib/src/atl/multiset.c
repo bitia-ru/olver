@@ -25,6 +25,7 @@
 //#include <common/array.h>
 #include <atl/list.h>
 #include <atl/string.h>
+#include <atl/stringbuffer.h>
 #include <utils/assertion.h>
 #include <utils/boolean.h>
 
@@ -126,37 +127,38 @@ int size = header_MultiSet( left )->size;
 
 static String* to_string_MultiSet( MultiSet* set )
 {
-    String *res = create_String( "< " );
-    int size = header_MultiSet( set )->size;
-    int i;
-    String *delim = create_String( ", " );
+StringBuffer *res = create_StringBuffer();
+int size = header_MultiSet( set )->size;
+int i;
+
+	append_StringBuffer(r(res), "< ");
 
     for( i = 0; i < size; i++ )
     {
-        if( i > 0 ) res = concat_String( res, r( delim ) );
-        res = concat_String( res, toString( get_MultiSet( r( set ), i ) ) );
+		if (i > 0)	append_StringBuffer( r(res), ", " );
+        appendString_StringBuffer( r(res), toString( get_MultiSet(r(set), i) ) );
     }
 
-    res = concat_String( res, create_String( (size > 0) ? " >" : ">" ) );
+    append_StringBuffer( r(res), size>0 ? " >" : ">" );
 
-    destroy( delim );
-
-    return res;
+    return toString(res);
 }
 
 static String* to_XML_MultiSet( MultiSet* set )
 {
+StringBuffer *res = create_StringBuffer();
 int size = header_MultiSet( set )->size;
-String *res = format_String("<object kind=\"spec\" type=\"MultiSet\" text=\"MultiSet [%d]\">\n", size);
 int i;
 
+	appendString_StringBuffer(r(res), format_String("<object kind=\"spec\" type=\"MultiSet\" text=\"MultiSet [%d]\">\n", size) );
+
     for( i = 0; i < size; i++ ) {
-        res = concat_String( res, toXML( get_MultiSet( r(set), i ) ) );
+        appendString_StringBuffer( r(res), toXML( get_MultiSet(r(set), i) ) );
     }
 
-    res = concat_String(res, create_String("</object>"));
+	append_StringBuffer( r(res), "</object>" );
 
-    return res;
+    return toString(res);
 }
 
 static bool check_invariant_MultiSet(MultiSet* set)

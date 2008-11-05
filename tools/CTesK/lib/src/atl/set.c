@@ -16,6 +16,7 @@
 #include <atl/array.h>
 #include <atl/list.h>
 #include <atl/string.h>
+#include <atl/stringbuffer.h>
 #include <utils/assertion.h>
 #include <utils/boolean.h>
 
@@ -97,37 +98,36 @@ static int compare_Set( Set *left, Set *right )
 
 static String* to_string_Set( Set* set )
 {
-    String *res = create_String( "{ " );
-    int size = header_Set( set )->size;
-    int i;
-    String *delim = create_String( ", " );
+StringBuffer *res = create_StringBuffer();
+int size = header_Set( set )->size;
+int i;
 
+	append_StringBuffer(r(res), "{ ");
     for( i = 0; i < size; i++ )
     {
-        if( i > 0 ) res = concat_String( res, r( delim ) );
-        res = concat_String( res, toString( get_Set( r( set ), i ) ) );
+		if (i > 0)	append_StringBuffer( r(res), ", " );
+        appendString_StringBuffer( r(res), toString( get_Set(r(set), i) ) );
     }
 
-    res = concat_String( res, create_String( (size > 0) ? " }" : "}" ) );
+    append_StringBuffer( r(res), size>0 ? " }" : "}" );
 
-    destroy( delim );
-
-    return res;
+    return toString(res);
 }
 
 static String* to_XML_Set( Set* set )
 {
+StringBuffer *res = create_StringBuffer();
 int size = header_Set( set )->size;
-String *res = format_String("<object kind=\"spec\" type=\"Set\" text=\"Set [%d]\">\n", size);
 int i;
 
+	appendString_StringBuffer( r(res), format_String("<object kind=\"spec\" type=\"Set\" text=\"Set [%d]\">\n", size) );
     for( i = 0; i < size; i++ ) {
-        res = concat_String( res, toXML( get_Set( r(set), i ) ) );
+        appendString_StringBuffer( r(res), toXML( get_Set(r(set), i) ) );
     }
 
-    res = concat_String(res, create_String("</object>"));
+	append_StringBuffer( r(res), "</object>" );
 
-    return res;
+    return toString(res);
 }
 
 static bool check_invariant_Set(Set* set)

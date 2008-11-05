@@ -15,6 +15,7 @@
 
 #include <atl/array.h>
 #include <atl/string.h>
+#include <atl/stringbuffer.h>
 #include <utils/assertion.h>
 #include <utils/boolean.h>
 
@@ -103,38 +104,38 @@ int size = header_List( left )->size;
 
 static String *to_string_List( List *lst )
 {
-String *res = create_String( "< " );
+StringBuffer *res = create_StringBuffer();
 int size = header_List( lst )->size;
 int i;
-String *delim = create_String( ", " );
+
+  append_StringBuffer(r(res), "< ");
 
   for( i = 0; i < size; i++ )
-   {
-    if ( i > 0 )
-      res = concat_String( res, r( delim ) );
-    res = concat_String( res, toString( get_List( r( lst ), i ) ) );
-   }
+  {
+    if (i > 0)	append_StringBuffer( r(res), ", " );
+    appendString_StringBuffer( r(res), toString( get_List(r(lst), i) ) );
+  }
 
-  res = concat_String( res, create_String( (size > 0) ? " >" : ">" ) );
+  append_StringBuffer( r(res), size>0 ? " >" : ">" );
 
-  destroy( delim );
-
-  return res;
+  return toString(res);
 }
 
 static String *to_XML_List( List *lst )
 {
+StringBuffer *res = create_StringBuffer();
 int size = header_List( lst )->size;
-String *res = format_String( "<object kind=\"spec\" type=\"List\" text=\"List [%d]\">\n", size);
 int i;
 
+	appendString_StringBuffer( r(res), format_String( "<object kind=\"spec\" type=\"List\" text=\"List [%d]\">\n", size) );
+
 	for( i = 0; i < size; i++ ) {
-		res = concat_String( res, toXML( get_List( r(lst), i ) ) );
+		appendString_StringBuffer( r(res), toXML( get_List(r(lst), i) ) );
 	}
 
-	res = concat_String( res, create_String("</object>") );
+	append_StringBuffer( r(res), "</object>" );
 
-	return res;
+	return toString(res);
 }
 
 static bool check_invariant_List( List *lst )

@@ -74,6 +74,7 @@ foreach my $pkg (sort keys %{$xmlreport->{PackageDesc}}){
             my $spec_name = $1;
             my $num = 1;
             my $tp_num;
+            my $known_bug;
             
             # Test information
             print "70||\"total reqs in $pkg.$spec_name $req_count\"\n";
@@ -87,6 +88,12 @@ foreach my $pkg (sort keys %{$xmlreport->{PackageDesc}}){
                 if(defined($xmlreport->{FailureDesc}{"$fid"}{bug})){
                     $xmlreport->{FailureDesc}{"$fid"}{bug}{id} =~ /bug(\d+)_?(\d)?/;
                     $tp_num = "$1$2";
+                    if(defined($known_bug->{$tp_num})){
+                        next;
+                    }
+                    else{
+                        $known_bug->{$tp_num} = 1;
+                    }
                 }
                 else{
                     $tp_num = $num;

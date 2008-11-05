@@ -17,7 +17,7 @@
 
 TraceWriter * TraceConsoleWriter_create();
 void TraceConsoleWriter_delete_state(void *);
-void TraceConsoleWriter_puts(void *, const char *str);
+void TraceConsoleWriter_puts(void *, String *str);
 void TraceConsoleWriter_flush(void *);
 
 

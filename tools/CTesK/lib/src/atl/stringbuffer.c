@@ -11,6 +11,7 @@
  *
  */
 
+#include <atl/array.h>
 #include <atl/object.h>
 #include <utils/assertion.h>
 #include <utils/boolean.h>
@@ -19,70 +20,106 @@
 #include <ctype.h>
 #include <string.h>
 
-#define DEFAULT_ALLOCATE_SIZE   256
+#include <atl/object_int.h>
+
+
+#define DEFAULT_ALLOCATE_SIZE   128
+
+#define CONTENTS(buf)	( (char*) (buf->header + 1) )
+#define LENGTH(buf)		(buf->header->length)
+
+
+/* Copied from string.c */
+typedef struct StringHeader
+{	// Fields from ArrayHeader
+    int ref_cnt;
+    int capacity;
+	// Own fields
+	int length;
+	// The following is a char array. For String, it will be null-terminated.
+}
+StringHeader;
+
+struct String
+{
+    StringHeader *header;
+};
+
+#define MAGIC_LENGTH	~((~0U) >> 1)	// == (bin)1000...000
+/* End copy */
+
 
 struct StringBuffer
 {
-  int   size;
-  int   capacity;
+  StringHeader *header;
   int   allocateBy;
-  char* buffer;
 };
 
 static void init_StringBuffer( StringBuffer* strbuf, va_list *arg_list )
 {
-  strbuf->size = 0;
-  strbuf->allocateBy = va_arg( *arg_list, int );
-  strbuf->capacity = strbuf->allocateBy;
+int allocateBy = va_arg( *arg_list, int );
 
-  assertion( strbuf->allocateBy > 0,
+  assertion( allocateBy > 0,
              FORMAT( "init_StringBuffer: allocateBy should be greater zero" )
            );
 
-  strbuf->buffer = malloc( strbuf->allocateBy );
-
-  assertion( strbuf->buffer != NULL, FORMAT( "init_StringBuffer: Not enough memory" ) );
+  strbuf->header = create_Array( sizeof(StringHeader), 1, allocateBy );
+  strbuf->header->length = 0;
+  strbuf->allocateBy = allocateBy;
 }
 
 static void copy_StringBuffer( StringBuffer* src, StringBuffer* dst )
 {
-  dst->size = src->size;
-  dst->capacity = src->capacity;
   dst->allocateBy = src->allocateBy;
-  dst->buffer = malloc( dst->capacity );
 
-  assertion( dst->buffer != NULL, FORMAT( "copy_StringBuffer: Not enough memory" ) );
-
-  memcpy( dst->buffer, src->buffer, dst->size );
+  // clone_Array() is not suitable
+  dst->header = create_Array( sizeof(StringHeader), 1, src->header->capacity );
+  dst->header->length = src->header->length;
+  memcpy( CONTENTS(dst), CONTENTS(src), LENGTH(src) );
 }
 
 static int compare_StringBuffer( StringBuffer* left, StringBuffer* right )
 {
-  if (left->size != right->size)
-    return left->size - right->size;
-  return memcmp( left->buffer, right->buffer, left->size );
+  if (LENGTH(left) != LENGTH(right))
+    return LENGTH(left) - LENGTH(right);
+  return memcmp( CONTENTS(left), CONTENTS(right), LENGTH(left) );
 }
 
-static String* to_string_StringBuffer( StringBuffer* strbuf )
+static String* to_string_StringBuffer( StringBuffer* self )
 {
 char* cstr;
 String* res;
+int ref_cnt = header( self )->hard_ref_cnt + header( self )->weak_ref_cnt;
 
-  res = create( &type_String, NULL, strbuf->size  );
+  if (ref_cnt == 1 && self->header->capacity > LENGTH(self))
+  {	// Simplified copy
+	res = create(&type_String, NULL, MAGIC_LENGTH);
+    assertion( res != 0, FORMAT( "to_string_StringBuffer: No memory" ) );
+
+	res->header = self->header;
+	CONTENTS(self) [ LENGTH(self) ] = 0;
+
+	self->header = NULL;	// Preserve contents during further destruction
+	return res;
+  }
+
+  // Copy data
+  res = create( &type_String, NULL, LENGTH(self) );	// Will allocate length+1 bytes
   cstr = (char*)toCharArray_String( r(res) );
-  memcpy( cstr, strbuf->buffer, strbuf->size );
-  cstr[strbuf->size] = '\0';
+  memcpy( cstr, CONTENTS(self), LENGTH(self) );
+  cstr[LENGTH(self)] = '\0';
   return res;
 }
 
-static String* to_XML_StringBuffer( StringBuffer* strbuf )
+static String* to_XML_StringBuffer( StringBuffer* self )
 {
-	return to_XML_spec("StringBuffer", to_string_StringBuffer(strbuf));
+	return to_XML_spec("StringBuffer", to_string_StringBuffer(self));
 }
 
-static void destroy_StringBuffer( StringBuffer* strbuf )
+static void destroy_StringBuffer( StringBuffer* self )
 {
-  free( strbuf->buffer );
+  if (self->header != NULL)	// Was set to NULL by toString()
+	destroy_Array( self->header );
 }
 
 const Type type_StringBuffer
@@ -111,10 +148,10 @@ int extra;
   else
     extra = ((min / self->allocateBy) + 1) * self->allocateBy;
 
-  self->buffer = realloc( self->buffer, self->capacity + extra );
-  assertion( self->buffer != NULL, FORMAT( "expand_StringBuffer: Not enough memory" ) );
+  self->header->capacity += extra;
 
-  self->capacity = self->capacity + extra;
+  self->header = realloc( self->header, sizeof(StringHeader) + self->header->capacity);
+  assertion( self->header != NULL, FORMAT( "expand_StringBuffer: No memory" ) );
 
   destroy( self );
 }
@@ -137,6 +174,16 @@ StringBuffer* createCustomized_StringBuffer( int allocateBy )
 }
 
 /*
+ * Empty StringBuffer
+ */
+void clear_StringBuffer( StringBuffer* self )
+{
+  LENGTH(self) = 0;
+  destroy(self);
+}
+
+
+/*
  * Returns the current size of the string buffer.
  */
 int size_StringBuffer( StringBuffer* self )
@@ -145,7 +192,7 @@ int res;
 
   CHECK_TYPE_COMPATIBLE( size_StringBuffer, &type_StringBuffer, self );
 
-  res = self->size;
+  res = LENGTH(self);
 
   destroy( self );
 
@@ -161,13 +208,13 @@ char res;
 
   CHECK_TYPE_COMPATIBLE( charAt_StringBuffer, &type_StringBuffer, self );
 
-  assertion( 0 <= index && index < self->size
+  assertion( 0 <= index && index < LENGTH(self)
            , FORMAT( "charAt_StringBuffer: char index %d is out of bounds [0, %d[" )
            , index
-           , self->size
+           , LENGTH(self)
            );
 
-  res = self->buffer[index];
+  res = CONTENTS(self) [index];
 
   destroy( self );
 
@@ -181,13 +228,12 @@ void appendChar_StringBuffer( StringBuffer* self, char ch )
 {
   CHECK_TYPE_COMPATIBLE( appendChar_StringBuffer, &type_StringBuffer, self );
 
-  if (self->size == self->capacity)
-   {
+  if (LENGTH(self) == self->header->capacity) {
     expand_StringBuffer( r(self), 1 );
-   }
+  }
 
-  self->buffer[self->size] = ch;
-  self->size++;
+  CONTENTS(self) [LENGTH(self)] = ch;
+  LENGTH(self)++;
 
   destroy( self );
 }
@@ -204,13 +250,13 @@ int length;
 
   length = strlen( str );
 
-  if (self->size + length > self->capacity)
+  if (LENGTH(self) + length > self->header->capacity)
    {
-    expand_StringBuffer( r(self), self->size + length - self->capacity );
+    expand_StringBuffer( r(self), LENGTH(self) + length - self->header->capacity );
    }
 
-  memcpy( &(self->buffer[self->size]), str, length );
-  self->size = self->size + length;
+  memcpy( CONTENTS(self) + LENGTH(self), str, length );
+  LENGTH(self) += length;
 
   destroy( self );
 }
@@ -222,13 +268,12 @@ void appendCharArray_StringBuffer( StringBuffer* self, const char* arr, int size
 {
   CHECK_TYPE_COMPATIBLE( appendCharArray_StringBuffer, &type_StringBuffer, self );
 
-  if (self->size + size > self->capacity)
-   {
-    expand_StringBuffer( r(self), self->size + size - self->capacity );
-   }
+  if (LENGTH(self) + size > self->header->capacity) {
+    expand_StringBuffer( r(self), LENGTH(self) + size - self->header->capacity );
+  }
 
-  memcpy( &(self->buffer[self->size]), arr, size );
-  self->size = self->size + size;
+  memcpy( CONTENTS(self) + LENGTH(self), arr, size );
+  LENGTH(self) += size;
 
   destroy( self );
 }
@@ -245,13 +290,12 @@ int length;
 
   length = length_String( r(str) );
 
-  if (self->size + length > self->capacity)
-   {
-    expand_StringBuffer( r(self), self->size + length - self->capacity );
-   }
+  if (LENGTH(self) + length > self->header->capacity) {
+    expand_StringBuffer( r(self), LENGTH(self) + length - self->header->capacity );
+  }
 
-  memcpy( &(self->buffer[self->size]), toCharArray_String( r(str) ), length );
-  self->size = self->size + length;
+  memcpy( CONTENTS(self) + LENGTH(self), toCharArray_String( r(str) ), length );
+  LENGTH(self) += length;
 
   destroy( self );
   destroy( str );
@@ -265,13 +309,12 @@ void appendStringBuffer_StringBuffer( StringBuffer* self, StringBuffer* strbuf )
   CHECK_TYPE_COMPATIBLE( appendStringBuffer_StringBuffer, &type_StringBuffer, self );
   CHECK_TYPE_COMPATIBLE( appendStringBuffer_StringBuffer, &type_StringBuffer, strbuf );
 
-  if (self->size + strbuf->size > self->capacity)
-   {
-    expand_StringBuffer( r(self), self->size + strbuf->size - self->capacity );
-   }
+  if (LENGTH(self) + LENGTH(strbuf) > self->header->capacity) {
+    expand_StringBuffer( r(self), LENGTH(self) + LENGTH(strbuf) - self->header->capacity );
+  }
 
-  memcpy( &(self->buffer[self->size]), strbuf->buffer, strbuf->size );
-  self->size = self->size + strbuf->size;
+  memcpy( CONTENTS(self) + LENGTH(self), CONTENTS(strbuf), LENGTH(strbuf) );
+  LENGTH(self) += LENGTH(strbuf);
 
   destroy( self );
   destroy( strbuf );
@@ -306,13 +349,17 @@ int res_vsnprintf;
   CHECK_TYPE_COMPATIBLE( appendFormat_StringBuffer, &type_StringBuffer, self );
 
   for( i = 1; ; i++ )
-   {
-    res_vsnprintf = _vsnprintf( self->buffer + self->size, self->capacity - self->size, format, args );
+  {
+    res_vsnprintf = _vsnprintf( CONTENTS(self) + LENGTH(self)
+							  , self->header->capacity - LENGTH(self)
+							  , format
+							  , args );
+    if ( res_vsnprintf >= 0 )
+		break;
 
-    if ( res_vsnprintf >= 0 ) { break; }
-    expand_StringBuffer( r(self), i*self->allocateBy );
-   }
-  self->size = self->size + res_vsnprintf;
+    expand_StringBuffer( r(self), i * self->allocateBy );
+  }
+  LENGTH(self) += res_vsnprintf;
 
   destroy( self );
 }
@@ -332,15 +379,21 @@ va_list args_copy;
 
   va_copy( args_copy, args );
 
-  added_len = vsnprintf( self->buffer + self->size, self->capacity - self->size, format, args );
+  added_len = vsnprintf( CONTENTS(self) + LENGTH(self)
+					   , self->header->capacity - LENGTH(self)
+					   , format
+					   , args );
   va_end(args);
 
-  if ( self->size + added_len + 1 > self->capacity )
-   {
-    expand_StringBuffer( r(self), self->size + added_len + 1 - self->capacity );
-    added_len = vsnprintf( self->buffer + self->size, self->capacity - self->size, format, args );
-   }
-  self->size = self->size + added_len;
+  if ( LENGTH(self) + added_len + 1 > self->header->capacity )
+  {
+    expand_StringBuffer( r(self), LENGTH(self) + added_len + 1 - self->header->capacity );
+    added_len = vsnprintf( CONTENTS(self) + LENGTH(self)
+						 , self->header->capacity - LENGTH(self)
+						 , format
+						 , args );
+  }
+  LENGTH(self) += added_len;
 
   va_end( args_copy );
   destroy( self );
@@ -363,16 +416,13 @@ bool res;
   suffix_cstr = toCharArray_String( r( suffix ) );
   suffix_len  = length_String( r( suffix ) );
 
-  if( self->size >= suffix_len )
-   {
-    res = memcmp( self->buffer + self->size - suffix_len, suffix_cstr, suffix_len )
-              ?   false
-                : true;
-   }
-  else
-   {
+  if( LENGTH(self) >= suffix_len )
+  {
+    res = memcmp( CONTENTS(self) + LENGTH(self) - suffix_len, suffix_cstr, suffix_len )
+			? false : true;
+  } else {
     res = false;
-   }
+  }
 
   destroy( self );
   destroy( suffix );
@@ -401,15 +451,13 @@ int res = - 1;
 
   if ( fromIndex < 0 ) fromIndex = 0;
 
-  if ( ch != 0 && fromIndex < self->size )
-   {
-    const char* pos = memchr( self->buffer + fromIndex, ch, self->size - fromIndex );
-
-    if (pos != NULL)
-     {
-      res = pos - self->buffer;
-     }
-   }
+  if ( ch != 0 && fromIndex < LENGTH(self) )
+  {
+    const char* pos = memchr( CONTENTS(self) + fromIndex, ch, LENGTH(self) - fromIndex );
+    if (pos != NULL) {
+      res = pos - CONTENTS(self);
+    }
+  }
 
   destroy( self );
 
@@ -441,19 +489,19 @@ int res = -1;
 
   str_length = length_String( r(str) );
 
-  if ( fromIndex <= self->size - str_length )
-   {
-    const char* str_cstr = toCharArray_String( r( str  ) );
+  if ( fromIndex <= LENGTH(self) - str_length )
+  {
+    const char* str_cstr = toCharArray_String( r(str) );
 
-    for( i = fromIndex; i <= self->size - str_length; i++ )
-     {
-      if (memcmp( self->buffer + i, str_cstr, str_length ) == 0)
-       {
+    for( i = fromIndex; i <= LENGTH(self) - str_length; i++ )
+    {
+      if (memcmp( CONTENTS(self) + i, str_cstr, str_length ) == 0)
+      {
         res = i;
         break;
-       }
-     }
-   }
+      }
+    }
+  }
 
   destroy( self );
   destroy( str );
@@ -469,7 +517,7 @@ int lastIndexOfChar_StringBuffer( StringBuffer* self, int ch )
 {
   CHECK_TYPE_COMPATIBLE( lastIndexOfChar_StringBuffer, &type_StringBuffer, self );
 
-  return lastIndexOfCharFrom_StringBuffer( self, ch, self->size );
+  return lastIndexOfCharFrom_StringBuffer( self, ch, LENGTH(self) );
 }
 
 /*
@@ -484,20 +532,21 @@ int res = - 1;
   CHECK_TYPE_COMPATIBLE( lastIndexOfCharFrom_StringBuffer, &type_StringBuffer, self );
 
   if ( ch != 0 && 0 <= fromIndex )
-   {
+  {
     int i;
 
-    if ( fromIndex >= self->size ) fromIndex = self->size - 1;
+    if (fromIndex >= LENGTH(self))
+		fromIndex = LENGTH(self) - 1;
 
     for( i = fromIndex; 0 <= i; i-- )
-     {
-      if (self->buffer[i] == ch)
-       {
+    {
+      if (CONTENTS(self) [i] == ch)
+      {
         res = i;
         break;
-       }
-     }
-   }
+      }
+    }
+  }
 
   destroy( self );
 
@@ -512,7 +561,7 @@ int lastIndexOfString_StringBuffer( StringBuffer* self, String* str )
 {
   CHECK_TYPE_COMPATIBLE( lastIndexOfString_StringBuffer, &type_StringBuffer, self );
 
-  return lastIndexOfStringFrom_StringBuffer( self, str, self->size );
+  return lastIndexOfStringFrom_StringBuffer( self, str, LENGTH(self) );
 }
 
 /*
@@ -523,20 +572,24 @@ int lastIndexOfStringFrom_StringBuffer( StringBuffer* self, String* str, int fro
 {
 int res = -1;
 int i;
+int str_len;
 
   CHECK_TYPE_COMPATIBLE( lastIndexOfStringFrom_StringBuffer, &type_StringBuffer, self );
   CHECK_TYPE_COMPATIBLE( lastIndexOfStringFrom_StringBuffer, &type_String, str  );
 
-  if ( fromIndex > self->size ) fromIndex = self->size - length_String( r(str) );
+  str_len = length_String( r(str) );
 
-  for( i = fromIndex; 0 <= i; i-- )
-   {
-    if ( startsWithOffset_StringBuffer( r(self), r(str), i ) )
-     {
-      res = i;
-      break;
-     }
-   }
+  if (str_len <= LENGTH(self)) {
+    if ( fromIndex > LENGTH(self) - str_len )
+	    fromIndex = LENGTH(self) - str_len;
+
+    for( i = fromIndex; 0 <= i; i-- ) {
+      if ( startsWithOffset_StringBuffer( r(self), r(str), i ) ) {
+        res = i;
+        break;
+	  }
+    }
+  }
 
   destroy( self );
   destroy( str );
@@ -550,14 +603,16 @@ int i;
 void replace_StringBuffer( StringBuffer* self, char oldChar, char newChar )
 {
 int i;
+char *p;
 
   CHECK_TYPE_COMPATIBLE( replace_StringBuffer, &type_StringBuffer, self );
 
-  for( i = 0; i < self->size; i++ )
-   {
-    if (self->buffer[i] == oldChar)
-      self->buffer[i] = newChar;
-   }
+  p = CONTENTS(self);
+  for( i = 0; i < LENGTH(self); i++ )
+  {
+    if (p[i] == oldChar)
+      p[i] = newChar;
+  }
 
   destroy( self );
 }
@@ -584,17 +639,14 @@ bool res = false;
 
   length = length_String( r( prefix ) );
 
-  if ( 0 <= toffset && toffset <= self->size - length )
-   {
-    const char* prefix_cstr = toCharArray_String( r( prefix ) );
-
-    res = memcmp( self->buffer + toffset
-                 , prefix_cstr
+  if ( 0 <= toffset && toffset <= LENGTH(self) - length )
+  {
+    res = memcmp(  CONTENTS(self) + toffset
+                 , toCharArray_String( r( prefix ) )
                  , length
-                 )
-          ?   false
-            : true;
-   }
+                )
+          ? false : true;
+  }
 
   destroy( self );
   destroy( prefix );
@@ -612,16 +664,16 @@ char* cstr;
 
   CHECK_TYPE_COMPATIBLE( substringFrom_StringBuffer, &type_StringBuffer, self );
 
-  assertion( 0 <= beginIndex && beginIndex <= self->size
+  assertion( 0 <= beginIndex && beginIndex <= LENGTH(self)
              , FORMAT( "substringFrom_StringBuffer: beginIndex %d is out of bounds [0,%d]" )
              , beginIndex
-             , self->size
+             , LENGTH(self)
              );
 
-  res = create( &type_String, NULL, self->size - beginIndex );
+  res = create( &type_String, NULL, LENGTH(self) - beginIndex );
   cstr = (char*)toCharArray_String( r(res) );
-  memcpy( cstr, self->buffer + beginIndex, self->size - beginIndex );
-  cstr[self->size - beginIndex] = '\0';
+  memcpy( cstr, CONTENTS(self) + beginIndex, LENGTH(self) - beginIndex );
+  cstr[LENGTH(self) - beginIndex] = '\0';
 
   destroy( self );
 
@@ -640,18 +692,18 @@ char* cstr;
 
   assertion(    0 <= beginIndex
              && beginIndex <= endIndex
-             && endIndex <= self->size
+             && endIndex <= LENGTH(self)
            , FORMAT( "substring_String: beginIndex %d or endIndex %d are out of bounds [0,%d]"
                      " or endIndex < beginIndex"
                    )
            , beginIndex
            , endIndex
-           , self->size
+           , LENGTH(self)
            );
 
   res = create( &type_String, NULL, endIndex - beginIndex );
   cstr = (char*)toCharArray_String( r(res) );
-  memcpy( cstr, self->buffer + beginIndex, endIndex - beginIndex );
+  memcpy( cstr, CONTENTS(self) + beginIndex, endIndex - beginIndex );
   cstr[endIndex - beginIndex] = '\0';
 
   destroy( self );

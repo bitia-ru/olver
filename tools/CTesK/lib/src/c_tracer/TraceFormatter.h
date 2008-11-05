@@ -21,6 +21,7 @@
 /* CTesK Source End */
 
 #include <time.h>
+#include <atl/string.h>
 #include "TraceBool.h"
 #include "TraceList.h"
 
@@ -34,65 +35,65 @@ struct _TraceFormatter
   /*
    * Trace level methods
    */
-  const char * (*startTrace)(void *state, const char *encoding);
-  const char * (*endTrace)(void *state, TraceBool original);
+  String * (*startTrace)(void *state, const char *encoding);
+  String * (*endTrace)(void *state, TraceBool original);
 
   /*
    * Scenario level methods
    */
-  const char * (*traceScenarioStart)(void *state, int traceId, const char *name, time_t now, const char *host, const char *os);
-  const char * (*traceEnvironmentProperties)(void *state, int traceId, TraceList *properties);
-  const char * (*traceScenarioParameters)(void *state, int traceId, int argc, const char** argv);
-  const char * (*traceTestEngineProperty)(void *state, int traceId, const char *name, const char *value);
-  const char * (*traceScenarioEnd)(void *state, int traceId, time_t now);
+  String * (*traceScenarioStart)(void *state, int traceId, const char *name, time_t now, const char *host, const char *os);
+  String * (*traceEnvironmentProperties)(void *state, int traceId, TraceList *properties);
+  String * (*traceScenarioParameters)(void *state, int traceId, int argc, const char** argv);
+  String * (*traceTestEngineProperty)(void *state, int traceId, const char *name, const char *value);
+  String * (*traceScenarioEnd)(void *state, int traceId, time_t now);
 
   /*
    * Transition level methods
    */
-  char * (*traceScenarioValue)(void *state, int traceId, const char *kind, const char *type, const char *name, const char *value);
-  const char * (*traceState)(void *state, int traceId, const char *id);
-  const char * (*traceTransitionStart)(void *state, int traceId, const char *id);
-  const char * (*traceTransitionEnd)(void *state, int traceId);
+  String * (*traceScenarioValue)(void *state, int traceId, const char *kind, const char *type, const char *name, const char *value);
+  String * (*traceState)(void *state, int traceId, const char *id);
+  String * (*traceTransitionStart)(void *state, int traceId, const char *id);
+  String * (*traceTransitionEnd)(void *state, int traceId);
 
   /*
    * Oracle level methods
    */
-  const char * (*traceModelOperationStart)(void *state, int traceId, const char *kind, const char *subsystem, const char *signature, unsigned refid);
-  const char * (*traceModelOperationArgument)(void *state, int traceId, const char *type, const char *name, const char *value);
-  const char * (*traceModelOperationResult)(void *state, int traceId, const char *type, const char *value);
-  const char * (*traceModelOperationChannel)(void *state, int traceId, const char *channel);
-  const char * (*traceModelOperationTimestamp)(void *state, int traceId, const char *timestamp);
-  const char * (*traceOracleStart)(void *state, int traceId, const char *subsystem, const char *signature, unsigned ref);
-  const char * (*tracePreconditionEnd)(void *state, int traceId);
-  const char * (*traceOracleEnd)(void *state, int traceId);
-  const char * (*traceModelOperationEnd)(void *state, int traceId);
-  const char * (*traceSeriesStart)(void *state, int traceId);
-  const char * (*traceSeriesEnd)(void *state, int traceId);
+  String * (*traceModelOperationStart)(void *state, int traceId, const char *kind, const char *subsystem, const char *signature, unsigned refid);
+  String * (*traceModelOperationArgument)(void *state, int traceId, const char *type, const char *name, const char *value);
+  String * (*traceModelOperationResult)(void *state, int traceId, const char *type, const char *value);
+  String * (*traceModelOperationChannel)(void *state, int traceId, const char *channel);
+  String * (*traceModelOperationTimestamp)(void *state, int traceId, const char *timestamp);
+  String * (*traceOracleStart)(void *state, int traceId, const char *subsystem, const char *signature, unsigned ref);
+  String * (*tracePreconditionEnd)(void *state, int traceId);
+  String * (*traceOracleEnd)(void *state, int traceId);
+  String * (*traceModelOperationEnd)(void *state, int traceId);
+  String * (*traceSeriesStart)(void *state, int traceId);
+  String * (*traceSeriesEnd)(void *state, int traceId);
 
   /*
    * Coverage level methods
    */
-  const char * (*tracePrimeFormula)(void *state, int traceId, int id, TraceBool value);
-  const char * (*traceCoverageElement)(void *state, int traceId, const char *structureId, const char *coverageId, int branchId);
-  const char * (*traceMark)(void *state, int traceId, const char *mark);
+  String * (*tracePrimeFormula)(void *state, int traceId, int id, TraceBool value);
+  String * (*traceCoverageElement)(void *state, int traceId, const char *structureId, const char *coverageId, int branchId);
+  String * (*traceMark)(void *state, int traceId, const char *mark);
 
-  const char * (*traceCoverageStructureStart)(void *state, int traceId, const char* name);
-  const char * (*traceFormulaeStart)(void *state);
-  const char * (*traceFormula)(void *state, int id, const char *text);
-  const char * (*traceFormulaeEnd)(void *state);
-  const char * (*traceCoverageStart)(void *state, const char *id);
-  const char * (*traceElement)(void *state, int id, const char *name);
-  const char * (*traceCoverageEnd)(void *state);
-  const char * (*traceCoverageStructureEnd)(void *state);
+  String * (*traceCoverageStructureStart)(void *state, int traceId, const char* name);
+  String * (*traceFormulaeStart)(void *state);
+  String * (*traceFormula)(void *state, int id, const char *text);
+  String * (*traceFormulaeEnd)(void *state);
+  String * (*traceCoverageStart)(void *state, const char *id);
+  String * (*traceElement)(void *state, int id, const char *name);
+  String * (*traceCoverageEnd)(void *state);
+  String * (*traceCoverageStructureEnd)(void *state);
 
   /*
    * Other messages
    */
-  const char * (*traceException)(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos);
-  const char * (*traceInterimException)(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos);
-  const char * (*traceInternalError)(void *state, int traceId, const char *info);
-  char * (*traceSystemInfo)(void *state, int traceId, const char *info);
-  const char * (*traceUserInfo)(void *state, int traceId, const char *info);
+  String * (*traceException)(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos);
+  String * (*traceInterimException)(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos);
+  String * (*traceInternalError)(void *state, int traceId, const char *info);
+  String * (*traceSystemInfo)(void *state, int traceId, const char *info);
+  String * (*traceUserInfo)(void *state, int traceId, const char *info);
 
   TraceBool (*valid)(TraceFormatter *tf);
 };

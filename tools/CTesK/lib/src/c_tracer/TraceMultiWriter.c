@@ -13,7 +13,7 @@ extern int tracer_debug_level;
 
 #include <string.h>
 #include <stdlib.h>
-#include <malloc.h>
+
 #include "TraceMultiWriter.h"
 #include "TraceList.h"
 
@@ -90,12 +90,12 @@ static TraceBool find_func(TraceList *list, TraceListitem *item, const void *arg
 static TraceBool out_func(TraceList *list, TraceListitem *item, const void *arg1, void *arg2)
 {
   WriterCell* cell;
-  const char *str = (const char *)arg1;
+  String *str = (String *)arg1;
 
   if((item != NULL) && (item->data != NULL)) {
     cell = (WriterCell* )(item->data);
-    if((cell->writer)&&(cell->writer->puts)&&(str))
-      (*cell->writer->puts)(cell->writer->state, str);
+    if( cell->writer && cell->writer->puts && str )
+      (*cell->writer->puts)(cell->writer->state, r(str));
   }
   return tr_false;
 }
@@ -106,7 +106,7 @@ static TraceBool flush_func(TraceList *list, TraceListitem *item, const void *ar
 
   if((item != NULL) && (item->data != NULL)) {
     cell = (WriterCell* )(item->data);
-    if((cell->writer)&&(cell->writer->flush))
+    if( cell->writer && cell->writer->flush )
       (*cell->writer->flush)(cell->writer->state);
   }
   return tr_false;
@@ -197,11 +197,13 @@ TraceListitem* res = NULL;
   return res;
 }
 
-void TraceMultiWriter_puts(void* mr, const char* str) 
+void TraceMultiWriter_puts(void* mr, String * str) 
 {
   if( (tracer_debug_level >= TRACE_MULTIWRITER_DEBUG_LEVEL) && !TraceMultiWriter_state_valid((TraceMultiWriter_state *)mr) ) return;
-  if(str != NULL) 
-      TraceList_itr(((TraceMultiWriter_state *)mr)->writers, out_func, str, NULL);
+  if(str != NULL) {
+    TraceList_itr(((TraceMultiWriter_state *)mr)->writers, out_func, str, NULL);
+	destroy(str);	// out_func does not change refcount
+  }
 }
 
 void TraceMultiWriter_flush(void* mr)
@@ -241,7 +243,7 @@ TraceBool TraceMultiWriter_hasWriter(void* mr, const char* name)
   return ( (TraceMultiWriter_findWriter((TraceMultiWriter_state *)mr, name) != NULL) ? tr_true : tr_false );
 }
 
-TraceBool TraceMultiWriter_removeWriter(void* mr, const char* name, const char* finalizer) 
+TraceBool TraceMultiWriter_removeWriter(void* mr, const char* name, String * finalizer) 
 {
 TraceListitem* item;
 WriterCell* cell;
@@ -253,7 +255,7 @@ WriterCell* cell;
     cell = (WriterCell *)(item->data);
     cell->refCnt--;
     if (cell->refCnt <= 0) {
-	  if((cell->writer)&&(cell->writer->puts)&&(finalizer)) {
+	  if(cell->writer && cell->writer->puts && finalizer) {
         (*cell->writer->puts)(cell->writer->state, finalizer);
 		cell->writer->refCnt -= 1;
 	  }

@@ -15,18 +15,19 @@
 
 #include "TraceWriter.h"
 #include "TraceBool.h"
+#include <atl/string.h>
 
 typedef struct _TraceWriteController TraceWriteController;
 struct _TraceWriteController
 {
   void * state;
   void (*delete_state)(void *state);
-  void (*puts)(void *state, const char* str);
+  void (*puts)(void *state, String *str);
   void (*flush)(void *state);
 
   TraceBool (*addWriter)(void *state, const char* name, TraceWriter* writer);
   TraceBool (*hasWriter)(void *state, const char* name);
-  TraceBool (*removeWriter)(void *state, const char* name, const char *finalizer);
+  TraceBool (*removeWriter)(void *state, const char* name, String *finalizer);
   TraceBool (*isTraceEnabled)(void *state);
 
   void (*pushWriters)(void *state);

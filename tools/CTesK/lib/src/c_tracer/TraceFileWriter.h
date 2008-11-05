@@ -16,7 +16,7 @@
 
 TraceWriter * TraceFileWriter_create(FILE *file);
 void TraceFileWriter_delete_state(void *);
-void TraceFileWriter_puts(void *file, const char *str);
+void TraceFileWriter_puts(void *file, String *str);
 void TraceFileWriter_flush(void *file);
 
 

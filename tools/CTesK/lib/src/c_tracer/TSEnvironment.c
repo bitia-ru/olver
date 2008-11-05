@@ -9,14 +9,26 @@
  *
  */
 
-#include <malloc.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "TSEnvironment.h"
 #include "TraceList.h"
-#include "s_StringBuffer.h"
 
+#include <atl/stringbuffer.h>
 
 
 /* CTesK Source Start */
+
+/* Duplicate contents of StringBuffer into newly-allocated char array and destroy that StringBuffer */
+static char *stringbuffer_to_memory(StringBuffer *ss)
+{
+  String *result = toString(ss);
+  char *tmpptr = tracer_cloneString( toCharArray_String(r(result)) );
+  destroy(result);
+  return tmpptr;
+}
+
 
 /********************************************************************/
 /**                        Win TS Environment                      **/
@@ -26,128 +38,104 @@
 #include <windows.h>
 #include <tchar.h>
 
-
-static char* trim( TCHAR* str )
+static String* trim( TCHAR* str )
 {
-    int start, end, len;
-    struct s_StringBuffer ss;
+int start, end;
+StringBuffer *ss = create_StringBuffer();
 
-    if( str == NULL || *str == 0 ) return NULL;
-    if( s_StringBuffer_init(&ss) ) return NULL;
+    if( str == NULL || *str == 0 || ss == NULL )	return create_String("");
 
-    for( start = 0; str[start] != 0; start++ )
-    {
+    for( start = 0; str[start] != 0; start++ ) {
         if( str[start] != (_TCHAR)(' ') ) break;
     }
-
-    for( end = strlen(str)-1; end >= 0; end-- )
-    {
+    for( end = strlen(str)-1; end >= 0; end-- ) {
         if( str[end] != (_TCHAR)(' ') ) break;
     }
+    if( start > end  ) return create_String("");
 
-    if( start > end  ) return NULL;
+	appendCharArray_StringBuffer( r(ss), str + start, end - start + 1 );
 
-    len = end - start + 1;
-
-    s_StringBuffer_addstr( &ss, str+start, len );
-
-    return ss.data;
+    return toString(ss);
 }
 
-char * WinTSEnvironment_getOSInfo()
+/** @return newly-allocated char array */
+static char* WinTSEnvironment_getOSInfo()
 {
 OSVERSIONINFO osInfo;
-struct s_StringBuffer ss;
-char *tmpptr;
-
+StringBuffer *ss;
 
   osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
   if (!GetVersionEx(&osInfo)) return NULL;
 
-  if (s_StringBuffer_init(&ss)) return NULL;
+  ss = create_StringBuffer();
+  if (ss == NULL)	return NULL;
 
   // OS Name
+
   switch (osInfo.dwPlatformId) {
     case VER_PLATFORM_WIN32s:
 //    ss << "Windows " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
-      if( !s_StringBuffer_addstr(&ss,"Windows ",-1) ) {
-        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
-          if( !s_StringBuffer_addstr(&ss,".",-1) )
-            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
-      }
+	  appendFormat_StringBuffer( r(ss), "Windows %li.%li", (long)osInfo.dwMajorVersion, (long)osInfo.dwMinorVersion);
       break;
     case VER_PLATFORM_WIN32_WINDOWS:
       if (osInfo.dwMajorVersion == 4) {
-        if (osInfo.dwMinorVersion == 0)
+		if (osInfo.dwMinorVersion == 0)
 //        ss << "Windows 95";
-          s_StringBuffer_addstr(&ss,"Windows 95",-1);
-	else if (osInfo.dwMinorVersion < 90)
-//	  ss << "Windows 98";
-          s_StringBuffer_addstr(&ss,"Windows 98",-1);
-	else
-//	  ss << "Windows ME";
-          s_StringBuffer_addstr(&ss,"Windows ME",-1);
-	break;
+	      append_StringBuffer( r(ss), "Windows 95" );
+	    else if (osInfo.dwMinorVersion < 90)
+//	      ss << "Windows 98";
+	      append_StringBuffer( r(ss), "Windows 98" );
+		else
+//	      ss << "Windows ME";
+	      append_StringBuffer( r(ss), "Windows ME" );
+	    break;
       }
 //    ss << "Windows " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
-      if( !s_StringBuffer_addstr(&ss,"Windows ",-1) ) {
-        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
-          if( !s_StringBuffer_addstr(&ss,".",-1) )
-            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
-      }
+	  appendFormat_StringBuffer( r(ss), "Windows %li.%li", (long)osInfo.dwMajorVersion, (long)osInfo.dwMinorVersion);
       break;
     case VER_PLATFORM_WIN32_NT:
       if (osInfo.dwMajorVersion == 5) {
         if (osInfo.dwMinorVersion == 0)
 //        ss << "Windows 2000";
-          s_StringBuffer_addstr(&ss,"Windows 2000",-1);
-	else if (osInfo.dwMinorVersion == 1)
+          append_StringBuffer( r(ss), "Windows 2000" );
+	    else if (osInfo.dwMinorVersion == 1)
 //	  ss << "Windows XP";
-          s_StringBuffer_addstr(&ss,"Windows XP",-1);
-	else
+          append_StringBuffer( r(ss), "Windows XP" );
+	    else
 //	  ss << "Windows NT";
-          s_StringBuffer_addstr(&ss,"Windows NT",-1);
-	break;
+          append_StringBuffer( r(ss), "Windows NT" );
+	    break;
       }
 //    ss << "Windows NT " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
-      if( !s_StringBuffer_addstr(&ss,"Windows NT ",-1) ) {
-        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
-          if( !s_StringBuffer_addstr(&ss,".",-1) )
-            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
-      }
+	  appendFormat_StringBuffer( r(ss), "Windows NT %li.%li", (long)osInfo.dwMajorVersion, (long)osInfo.dwMinorVersion);
       break;
     default:
 //    ss << "Unknown Windows " << osInfo.dwMajorVersion << "." << osInfo.dwMinorVersion;
-      if( !s_StringBuffer_addstr(&ss,"Unknown Windows ",-1) ) {
-        if( !s_StringBuffer_addint(&ss,osInfo.dwMajorVersion) )
-          if( !s_StringBuffer_addstr(&ss,".",-1) )
-            s_StringBuffer_addint(&ss,osInfo.dwMinorVersion);
-      }
+	  appendFormat_StringBuffer( r(ss), "Unknown Windows %li.%li", (long)osInfo.dwMajorVersion, (long)osInfo.dwMinorVersion);
       break;
   }
+
   // OS Build
+
   // if (osInfo.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS)
   //   ss << "(build " << LOWORD(osInfo.dwPlatformId) << ")";
   // else
   //   ss << "(build " << osInfo.dwPlatformId << ")";
   // OS Service Pack
-  if (strlen(osInfo.szCSDVersion) > 0)
+  if (strlen(osInfo.szCSDVersion) > 0) {
 //  ss << " " << trim( osInfo.szCSDVersion );
-    if ( !s_StringBuffer_addstr(&ss," ",-1) )
-      if ( NULL != (tmpptr = trim(osInfo.szCSDVersion)) ) {
-        s_StringBuffer_addstr(&ss,tmpptr,-1);
-        free(tmpptr);
-      }
+	append_StringBuffer( r(ss), " " );
+	appendString_StringBuffer( r(ss), trim(osInfo.szCSDVersion) );
+  }
 
-  return ss.data;
+  return stringbuffer_to_memory(ss);
 }
 
-char * WinTSEnvironment_getHostInfo()
+/** @return newly-allocated char array */
+static char * WinTSEnvironment_getHostInfo()
 {
 DWORD size = MAX_COMPUTERNAME_LENGTH + 1;
-char *buff = NULL;
-
-  buff = (char *) malloc(MAX_COMPUTERNAME_LENGTH + 1);
+char *buff = (char *) malloc(MAX_COMPUTERNAME_LENGTH + 1);
   if(NULL != buff)
     if (!GetComputerName(buff,&size)) { free(buff); return NULL; }
 
@@ -155,7 +143,6 @@ char *buff = NULL;
 }
 
 #endif /* WIN32 */
-/* CTesK Source End */
 
 
 /********************************************************************/
@@ -167,60 +154,48 @@ char *buff = NULL;
 #include <fcntl.h>
 #include <sys/param.h>
 
+/** @return newly-allocated char array */
 static char * read_file(const char* filename)
 {
 int fd;
 char buffer[256];
 size_t len;
-struct s_StringBuffer res;
+StringBuffer *res = create_StringBuffer();
 
-  if (s_StringBuffer_init(&res)) return NULL;
+  if (res == NULL)	return NULL;
 
   if (filename != NULL) {
     fd = open( filename, O_RDONLY );
     if (fd != -1) {
-       for(;;)
-       {
-        len = read( fd, buffer, 256 );
-        if ( len <= 0 )
-           break;
-        if(s_StringBuffer_addstr(&res,buffer,len))
-           break;
-       }
-       close(fd);
+      for(;;) {
+        len = read( fd, buffer, sizeof(buffer) );
+        if (len <= 0)	break;
+		appendCharArray_StringBuffer( r(res), buffer, len );
+      }
+      close(fd);
     }
   }
-  return res.data;
+  return stringbuffer_to_memory(res);
 }
 
-static char* trim( char* str )
+static String* trim( char* str )
 {
-    size_t start, end, len;
-    char* buf = NULL;
+size_t start, end, len;
+StringBuffer *ss = create_StringBuffer();
+	
+    if( str == NULL || *str == 0 || ss == NULL )	return create_String("");
 
-    if( str == NULL || *str == 0 ) return NULL;
-
-	for( start = 0; str[start] != 0; start++ )
-	{
+	for( start = 0; str[start] != 0; start++ ) {
 	    if( !isspace(str[start]) && !iscntrl(str[start]) ) break;
 	}
-
-	for( end = strlen(str)-1; end > 0; end-- )
-	{
+	for( end = strlen(str)-1; end > 0; end-- ) {
 	    if( !isspace(str[end]) && !iscntrl(str[end]) ) break;
 	}
+	if( start > end ) return create_String("");
+	
+	appendCharArray_StringBuffer( r(ss), str + start, end - start + 1 );
 
-	if( start > end ) return NULL;
-
-    len = end-start+1;
-    buf = (char*)malloc(len+1);
-    if( NULL != buf )
-    {
-        memcpy( buf, str+start, len );
-        buf[len] = 0;
-    }
-
-    return buf;                 // str.substr(i,j+1);
+    return toString(ss);
 }
 
 
@@ -228,32 +203,38 @@ static char* trim( char* str )
 #define KERNEL_OSTYPE      "/proc/sys/kernel/ostype"
 #define KERNEL_OSRELEASE   "/proc/sys/kernel/osrelease"
 
+/** @return newly-allocated char array */
 char * LinuxTSEnvironment_getOSInfo()
 {
-struct s_StringBuffer ss;
-char *ptr1, *ptr2;
+StringBuffer *ss = create_StringBuffer();
+char *ptr1;
 
-  if (s_StringBuffer_init(&ss)) return NULL;
+  if (ss == NULL)	return NULL;
 
 //  ss << trim( read_file( KERNEL_OSTYPE ) ) << " " << trim( read_file( KERNEL_OSRELEASE ) );
   ptr1 = read_file( KERNEL_OSTYPE );
-  if(NULL != ptr1) { ptr2 = trim(ptr1); free(ptr1); }
-  if(NULL != ptr2) { s_StringBuffer_addstr(&ss,ptr2,-1); free(ptr2); }
+  if(NULL != ptr1) {
+	appendString_StringBuffer( r(ss), trim(ptr1) );
+    free(ptr1);
+  }
 
-  s_StringBuffer_addstr(&ss," ",-1);
+  append_StringBuffer( r(ss), " " );
 
   ptr1 = read_file( KERNEL_OSRELEASE );
-  if(NULL != ptr1) { ptr2 = trim(ptr1); free(ptr1); }
-  if(NULL != ptr2) { s_StringBuffer_addstr(&ss,ptr2,-1); free(ptr2); }
+  if(NULL != ptr1) {
+	appendString_StringBuffer( r(ss), trim(ptr1) );
+    free(ptr1);
+  }
 
-
-  return ss.data;
+  return stringbuffer_to_memory(ss);
 }
 
 // Linux has problems with dynamic determination of MAXHOSTNAMELEN (HOST_NAME_MAX).
 // So we use our own maximum value.
 #define LINUX_HOST_NAME_MAX 1024
 
+
+/** @return newly-allocated char array */
 char * LinuxTSEnvironment_getHostInfo()
 {
 char *hostname = NULL;
@@ -269,13 +250,14 @@ char *hostname = NULL;
 }
 
 #endif /* linux */
+/* CTesK Source End */
 
 
 /********************************************************************/
 /**                     Default TS Environment                     **/
 /********************************************************************/
 
-char* DefaultTSEnvironment_getOSInfo()
+static char* DefaultTSEnvironment_getOSInfo()
 {
   char* res;
 
@@ -285,7 +267,7 @@ char* DefaultTSEnvironment_getOSInfo()
   return tracer_cloneString(res);
 }
 
-char* DefaultTSEnvironment_getHostInfo()
+static char* DefaultTSEnvironment_getHostInfo()
 {
   char* res;
 

@@ -1,5 +1,5 @@
-TRACER_FILE_LIST = TracerStringBuffer.c  TraceConsoleWriter.c     TraceFormatter.c \
-      s_StringBuffer.c      TraceWriteController.c   TraceXMLFormatter.c \
+TRACER_FILE_LIST = TraceConsoleWriter.c     TraceFormatter.c \
+      TraceWriteController.c   TraceXMLFormatter.c \
       TraceList.c           TraceWriter.c            TSEnvironment.c \
       TraceBufferWriter.c   TraceMultiWriter.c       Tracer.c \
       TraceFileWriter.c     TraceConstrainer.c       c_tracer.c

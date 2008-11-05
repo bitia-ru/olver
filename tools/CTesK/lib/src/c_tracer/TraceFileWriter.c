@@ -10,7 +10,8 @@
  */
 
 #include <stdio.h>
-#include <malloc.h>
+#include <stdlib.h>
+
 #include "TraceFileWriter.h"
 
 
@@ -35,9 +36,12 @@ void TraceFileWriter_delete_state(void *file)
   }
 }
 
-void TraceFileWriter_puts(void *file, const char *str)
+void TraceFileWriter_puts(void *file, String *str)
 {
-  if((file != NULL) && (str != NULL)) fputs(str,(FILE *)file);
+	if(file != NULL && str != NULL) {
+		fputs(toCharArray_String(r(str)), (FILE *)file);
+		destroy(str);
+	}
 }
 
 void TraceFileWriter_flush(void *file)

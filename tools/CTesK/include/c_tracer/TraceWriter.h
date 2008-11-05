@@ -12,13 +12,13 @@
 #ifndef __TRACE_WRITER_H__
 #define __TRACE_WRITER_H__
 
-#include <string.h>
+#include <atl/string.h>
 
 struct _TraceWriter 
 {
   void * state;
   void (*delete_state)(void *state);
-  void (*puts)(void *state, const char* str);
+  void (*puts)(void *state, String* str);
   void (*flush)(void *state);
   int refCnt;
 };

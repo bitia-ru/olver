@@ -396,53 +396,40 @@ void traceUserInfo(const char *info)
 }
 
 
-#define FORMATTED_USER_INFO_LEN  2048
-
 void traceFormattedUserInfo(const char *format,...)
 {
-char* res;
-StringBuffer * buffer = StringBuffer_create(0);
-int i,j,len;
+StringBuffer * buffer = create_StringBuffer();
+int i, j, len;
 va_list arg_list;
-
+String *str, *res;
 
   class_Tracer *tracer = tracer_getDefaultTracer();
   va_start(arg_list, format);
 
   len = strlen(format);
   j = 0;
-  for(i=0;i<len;i++)
-   {if (format[i] == '$')
-     {if ((i < len - 5) && (memcmp(format+i,"$(obj)",6) == 0))
-       {
-        void* obj = va_arg( arg_list, void*);
-        String* str = toString(obj);
+  for(i=0; i<len; i++) {
+    if (format[i] == '$') {
+      if (i < len - 5 && memcmp(format+i,"$(obj)",6) == 0) {
+        void* obj = va_arg( arg_list, void* );
 
-        StringBuffer_append(buffer, format+j, i-j );
-        StringBuffer_append_s(buffer, toCharArray_String((struct String*)r(str)) );
+        appendCharArray_StringBuffer( r(buffer), format+j, i-j );
+        appendString_StringBuffer( r(buffer), toString(obj) );
 
-        destroy(str);
         i = i + 5;
         j = i + 1;
-       }
-     }
-   }
-  StringBuffer_append(buffer, format+j, i-j );
+      }
+    }
+  }
+  appendCharArray_StringBuffer( r(buffer), format+j, i-j );
 
-  len = buffer->len + FORMATTED_USER_INFO_LEN;
-  res = (char*)malloc( len );
-  if (res == NULL)
-   {
-    tracer_traceUserInfo(tracer, StringBuffer_toString(buffer));
-    assertion(res != NULL,"traceFormattedUserInfo: Failed to allocate %d bytes", len );
-   }
+  str = toString( buffer );		// destroy buffer
+  res = vformat_String( toCharArray_String( r(str) ), arg_list );
 
-  vsprintf( res, StringBuffer_toString(buffer), arg_list );
+  tracer_traceUserInfo(tracer, toCharArray_String( r(res) ));
 
-  tracer_traceUserInfo(tracer,res);
-
-  free(res);
-  StringBuffer_delete( buffer );
+  destroy(str);
+  destroy(res);
   va_end(arg_list);
 }
 

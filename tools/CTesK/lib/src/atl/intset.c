@@ -15,6 +15,7 @@
 
 #include <atl/array.h>
 #include <atl/integer.h>
+#include <atl/stringbuffer.h>
 #include <utils/assertion.h>
 
 #include <stdio.h>
@@ -108,21 +109,22 @@ static int compare_IntSet( IntSet *left, IntSet *right )
 
 static String *to_string_IntSet( IntSet *set )
 {
-    String *res = create_String( "{ " );
+    StringBuffer *res = create_StringBuffer();
     unsigned int upper = header_IntSet( set )->upper;
     unsigned int i, j, bit;
-    String *delim = create_String( ", " );
     unsigned long *buf = ARRAY( set );
     bool first = true;
-    char num[11];
+    char num[12];
+	
+	append_StringBuffer(r(res), "{ ");
 
     for( i = 0; i < CHUNK(upper); i++ )
         for ( j = 0, bit = 1; j < CHUNK_BIT_SIZE; j++, bit <<= 1 )
             if ( buf[i] & bit )
             {
                 sprintf( num, "%d", NUMBER( i , j ) );
-                if( ! first ) res = concat_String( res, r( delim ) );
-                res = concat_String( res, create_String( num ) );
+                if( ! first )	append_StringBuffer( r(res), ", " );
+                appendString_StringBuffer( r(res), create_String(num) );
                 first = false;
             }
 
@@ -130,41 +132,41 @@ static String *to_string_IntSet( IntSet *set )
         if ( buf[i] & bit )
         {
             sprintf( num, "%d", NUMBER( i , j ) );
-            if( ! first ) res = concat_String( res, r( delim ) );
-            res = concat_String( res, create_String( num ) );
+            if( ! first )	append_StringBuffer( r(res), ", " );
+            appendString_StringBuffer( r(res), create_String(num) );
             first = false;
         }
 
-    res = concat_String( res, create_String( " }" ) );
+	append_StringBuffer( r(res), first ? "}" : " }" );
 
-    destroy( delim );
-
-    return res;
+    return toString( res );
 }
 
 static String *to_XML_IntSet( IntSet *set )
 {
-    String *res = create_String("<object kind=\"spec\" type=\"IntSet\" text=\"IntSet\">");
+    StringBuffer *res = create_StringBuffer();
     unsigned int upper = header_IntSet( set )->upper;
     unsigned int i, j, bit;
     unsigned long *buf = ARRAY( set );
+
+	append_StringBuffer(r(res), "<object kind=\"spec\" type=\"IntSet\" text=\"IntSet\">");
 
     for( i = 0; i < CHUNK(upper); i++ )
         for ( j = 0, bit = 1; j < CHUNK_BIT_SIZE; j++, bit <<= 1 )
             if ( buf[i] & bit )
             {
-                res = concat_String( res, format_String("<object kind=\"spec\" type=\"IntSet.element\" text=\"%d\"/>", NUMBER( i , j )));
+                appendString_StringBuffer( r(res), format_String("<object kind=\"spec\" type=\"IntSet.element\" text=\"%d\"/>", NUMBER( i , j )));
             }
 
     for ( j = 0, bit = 1; j <= BIT( upper ); j++, bit <<= 1 )
         if ( buf[i] & bit )
         {
-            res = concat_String( res, format_String("<object kind=\"spec\" type=\"IntSet.element\" text=\"%d\"/>", NUMBER( i , j )));
+            appendString_StringBuffer( r(res), format_String("<object kind=\"spec\" type=\"IntSet.element\" text=\"%d\"/>", NUMBER( i , j )));
         }
 
-    res = concat_String(res, create_String("</object>"));
+	append_StringBuffer(r(res), "</object>");
 
-    return res;
+    return toString( res );
 }
 
 static void destroy_IntSet( IntSet *set )

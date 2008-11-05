@@ -28,6 +28,8 @@ static String* to_string_sectype(SECTypeDesc* desc,void* ptr);
 
 
 #define ALLOW_SIMPLIFIED_XML
+#define STRING_THRESHOLD	15
+#define STRING_ABBR		10
 
 
 /********************************************************************/
@@ -623,8 +625,11 @@ static String* to_XML_simple_sectype(SimpleTypeDesc* desc,void* ptr)
       switch (conv)
       {
         case 'c':
-          if (len == ' ')
+          if (len == ' ') {
+			if (*(char *)ptr == 0)	// Special case
+				return create_String("<object kind=\"simple\" type=\"char\" text=\"&#x00;\"/>");
 			return create_single_XML_entry("simple", "char", format_String("%c", *(char *)ptr));
+		  }
           break;
         case 'u':
           switch (len)
@@ -832,17 +837,19 @@ String* create_single_XML_entry(const char *kind, const char *type, String *valu
 
 static String *format_shortened_string(String *s)
 {
-	String *res = create_String("<value><string_value>");
-	res = concat_String(res, r(s));
-	res = concat_String(res, create_String("</string_value><xml_value>"));
-	res = concat_String(res, create_String("<object kind=\"spec\" type=\"String\" text=\""));
-	res = concat_String(res, substring_String(r(s), 0, 5));
-	res = concat_String(res, create_String("&#133;\">"));	// #133 is '...'
-	res = concat_String(res, to_XML_spec("String", r(s)));
-	res = concat_String(res, create_String("</object></xml_value></value>"));
+	StringBuffer *res = create_StringBuffer();
+	append_StringBuffer(      r(res), "<value><string_value>");
+	appendString_StringBuffer(r(res), XML_encode_String(r(s)) );
+	append_StringBuffer(      r(res), "</string_value><xml_value>");
+	append_StringBuffer(      r(res), "<object kind=\"spec\" type=\"String\" text=\"");
+	appendString_StringBuffer(r(res), XML_encode_String( substring_String(r(s), 0, STRING_ABBR) ));
+//	append_StringBuffer(      r(res), "&#133;\">");	// #133 is '...'
+	append_StringBuffer(      r(res), "...\">");
+	appendString_StringBuffer(r(res), to_XML_spec("String", r(s)));
+	append_StringBuffer(      r(res), "</object></xml_value></value>");
 
 	destroy(s);
-	return res;
+	return toString(res);
 }
 
 static HashSet primitive_specs;
@@ -886,7 +893,7 @@ String* ts_to_XML_sectype(SECTypeDesc* desc, void* ptr)
 				&& ((SpecTypeDesc*)desc)->type == &type_String )
 	  { // Special cases: skip formatting for short Strings, special format for long ones
 		  void *str = POINTER(ptr);
-		  if (str != NULL && length_String( r(str) ) > 10)
+		  if (str != NULL && length_String( r(str) ) > STRING_THRESHOLD)
 		    res = format_shortened_string( r(str) );
 		  else res = /*XML_encode_String(*/ ts_to_string_sectype(desc, ptr) ;
 	  } else if (  desc->kind == specType
@@ -896,11 +903,13 @@ String* ts_to_XML_sectype(SECTypeDesc* desc, void* ptr)
 	  } else
 #endif
 	  {
-        res = create_String("<value><string_value>");
-        res = concat_String(res, XML_encode_String(ts_to_string_sectype(desc, ptr)));
-        res = concat_String(res, create_String("</string_value>\n<xml_value>"));
-        res = concat_String(res, to_XML_sectype(desc, ptr));
-        res = concat_String(res, create_String("</xml_value></value>"));
+		StringBuffer *r2 = create_StringBuffer();
+        append_StringBuffer(      r(r2), "<value><string_value>");
+        appendString_StringBuffer(r(r2), XML_encode_String(ts_to_string_sectype(desc, ptr)));
+        append_StringBuffer(      r(r2), "</string_value>\n<xml_value>");
+        appendString_StringBuffer(r(r2), to_XML_sectype(desc, ptr));
+        append_StringBuffer(      r(r2), "</xml_value></value>");
+		res = toString(r2);
 //        res = replace_String(res, '\n', ' ');
 	  }
       ts_finish_to_XML();

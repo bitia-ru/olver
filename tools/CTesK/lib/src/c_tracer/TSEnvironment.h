@@ -13,16 +13,11 @@
 #define __TRACER_TS_ENVIRONMENT_H__
 
 
-#include <string.h>
-
-
-
 /********************************************************************/
 /**                     CTesK Version Info                         **/
 /********************************************************************/
 extern char* ts_get_ctesk_version(void);
 extern char* ts_get_ctesk_build(void);
-
 
 
 /********************************************************************/
@@ -34,7 +29,6 @@ struct _TSEnvironment
   char * (*getHostInfo)();
 };
 typedef struct _TSEnvironment TSEnvironment;
-
 
 
 /********************************************************************/

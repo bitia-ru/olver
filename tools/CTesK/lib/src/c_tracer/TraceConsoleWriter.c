@@ -10,7 +10,8 @@
  */
 
 #include <stdio.h>
-#include <malloc.h>
+#include <stdlib.h>
+
 #include "TraceConsoleWriter.h"
 
 
@@ -29,9 +30,12 @@ TraceWriter * TraceConsoleWriter_create()
 
 void TraceConsoleWriter_delete_state(void *arg) {}
 
-void TraceConsoleWriter_puts(void *arg, const char *str)
+void TraceConsoleWriter_puts(void *arg, String *str)
 {
-  if(str != NULL) fputs(str,stdout);
+  if(str != NULL) {
+	fputs(toCharArray_String(r(str)), stdout);
+	destroy(str);
+  }
 }
 
 void TraceConsoleWriter_flush(void *arg)

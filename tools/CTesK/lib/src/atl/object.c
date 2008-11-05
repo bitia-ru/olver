@@ -12,6 +12,7 @@
 
 #include <atl/object_int.h>
 #include <atl/string.h>
+#include <atl/stringbuffer.h>
 #include <atl/hash.h>
 #include <ts/convex.h>
 #include <utils/boolean.h>
@@ -602,15 +603,19 @@ bool xml_started_here = ts_start_to_XML();
   }
 
   if (xml_started_here) {
-	res = create_String("<value><string_value>");
+	StringBuffer *res2 = create_StringBuffer();
+
+	append_StringBuffer( r(res2), "<value><string_value>" );
 	if (string_value==NULL) {
-	  res = concat_String(res, XML_encode_String(TYPE(ref)->to_string(ref)));
+	  appendString_StringBuffer( r(res2), XML_encode_String( TYPE(ref)->to_string(ref) ) );
 	} else {
-	  res = concat_String(res, XML_encode_String(create_String(string_value)));
+	  appendString_StringBuffer( r(res2), XML_encode_String(create_String(string_value)) );
 	}
-	res = concat_String(res, create_String("</string_value>\n<xml_value>"));
-	res = concat_String(res, xml_value);
-	res = concat_String(res, create_String("</xml_value></value>"));
+	append_StringBuffer( r(res2), "</string_value>\n<xml_value>" );
+	appendString_StringBuffer( r(res2), xml_value); // xml_value destroyed here
+	append_StringBuffer( r(res2), "</xml_value></value>" );
+
+	res = toString(res2);
 /*    res = replace_String(res, '\n', ' '); */
 
 	ts_finish_to_XML();

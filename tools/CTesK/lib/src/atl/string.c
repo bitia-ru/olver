@@ -23,9 +23,12 @@
 #include <atl/object_int.h>
 
 typedef struct StringHeader
-{
+{	// Fields from ArrayHeader
     int ref_cnt;
     int capacity;
+	// Own fields
+	int length;
+	// The following is a null-terminated char array
 }
 StringHeader;
 
@@ -34,11 +37,15 @@ struct String
     StringHeader *header;
 };
 
+#define MAGIC_LENGTH	~((~0U) >> 1)	// == (bin)1000...000
+
 #define header_String( str ) (str->header)
+
 
 static void init_array_String( String *str, int len )
 {
-    header_String( str ) = create_Array( sizeof(StringHeader), 1, len + 1 );
+    header_String(str) = create_Array( sizeof(StringHeader), 1, len + 1 );
+	header_String(str)->length = len;
 }
 
 static void init_String( String *str, va_list *arg_list )
@@ -48,6 +55,10 @@ const char* cstr = va_arg( *arg_list, const char *);
     if ( cstr == NULL )
      {
         int len = va_arg( *arg_list, int );
+
+		// This length value is flag used by to_string_StringBuffer()
+		if (len == MAGIC_LENGTH)
+			return;
 
         assertion( len >= 0, FORMAT( "init_String: C-string is NULL and length is less than zero" ) );
 
@@ -65,7 +76,7 @@ const char* cstr = va_arg( *arg_list, const char *);
 
 static void copy_String( String *src, String *dst )
 {
-    clone_Array( *(void**)dst = header_String( src ) );
+    clone_Array( dst->header = src->header );
 }
 
 static int compare_String( String *left, String *right )
@@ -338,7 +349,7 @@ int length_String( String *self )
 
     CHECK_TYPE_COMPATIBLE( length_String, &type_String, self );
 
-    res = header_String( self )->capacity - 1;
+    res = header_String( self )->length;
 
     destroy( self );
 
@@ -632,19 +643,18 @@ String *format_String(const char * format, ...) {
 String *vformat_String( const char * format, va_list args )
 {
   void * p;
-  static char * format_cstring = NULL;
-  static size_t format_cstring_len = FORMAT_CSTRING_LEN;
+  char * format_cstring = NULL;
+  size_t format_cstring_len = FORMAT_CSTRING_LEN;
   int num_written = 0;
- 
+  String * res = NULL;
+
   format_cstring=malloc( format_cstring_len );
   assertion(format_cstring!=NULL,
             FORMAT("format_String: Failed to allocate %d bytes"),
             format_cstring_len);
-  
   while( 1 )
   {
       num_written = _vsnprintf(format_cstring, format_cstring_len, format, args);
-  
       if( num_written >= 0 )
           break;
 
@@ -656,16 +666,20 @@ String *vformat_String( const char * format, va_list args )
       format_cstring = (char *)p;
   }
 
-  return create_String(format_cstring);
+  res = create_String( format_cstring );
+  free( format_cstring );
+  return res;
 }
 
 #else
 
 String *vformat_String(const char * format, va_list args) {
   void * p;
-  static char * format_cstring = NULL;
-  static int size = FORMAT_CSTRING_LEN;
+  char * format_cstring = NULL;
+  int size = FORMAT_CSTRING_LEN;
   int total_size = 0;
+  String * res = NULL;
+
   va_list args_copy;
   va_copy( args_copy, args );
 
@@ -690,7 +704,6 @@ String *vformat_String(const char * format, va_list args) {
              , FORMAT( "format_String: Failed to allocate %d bytes" )
              , size
              );
-    
     format_cstring = (char *)p;
 
     total_size = vsnprintf( format_cstring, size, format, args_copy );
@@ -699,7 +712,9 @@ String *vformat_String(const char * format, va_list args) {
   }
   va_end( args_copy );
 
-  return create_String( format_cstring );
+  res = create_String( format_cstring );
+  free( format_cstring );
+  return res;
 }
 
 #endif
@@ -820,31 +835,32 @@ String *XML_encode_String(String *self)
 {
 StringBuffer *buff = create_StringBuffer();
 int i;
-int length = length_String(r(self));
+const char *array = toCharArray_String( r(self) );
+int length = length_String( r(self) );
 char buf2[16];
 	for(i = 0; i < length; i++)
 	{
-		unsigned char c = charAt_String(r(self), i);
+		unsigned char c = array[i];
 		switch (c)
 		{
 		case '<':
-			appendCharArray_StringBuffer(r(buff), "&lt;", 4);
+			append_StringBuffer(r(buff), "&lt;");
 			break;
 		case '>':
-			appendCharArray_StringBuffer(r(buff), "&gt;", 4);
+			append_StringBuffer(r(buff), "&gt;");
 			break;
 		case '&':
-			appendCharArray_StringBuffer(r(buff), "&amp;", 5);
+			append_StringBuffer(r(buff), "&amp;");
 			break;
 		case '"':
-			appendCharArray_StringBuffer(r(buff), "&quot;", 6);
+			append_StringBuffer(r(buff), "&quot;");
 			break;
 		case '\n':
-			appendCharArray_StringBuffer(r(buff), "\\n", 2);
+			append_StringBuffer(r(buff), "\\n");
 			break;
 		default:
 			if (c < 32 || c > 127) {
-				sprintf(buf2, "&#%i;", (int)c);
+				sprintf(buf2, "&#x%02X;", (int)c);
 				append_StringBuffer(r(buff), buf2);
 			} else
 				appendChar_StringBuffer(r(buff), c);

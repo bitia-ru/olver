@@ -180,7 +180,7 @@ void*   ts_destroy_spec_ref(Object* ref);
 /********************************************************************/
 /**                       Auxiliary Functions                      **/
 /********************************************************************/
-void do_nothing(void* p);
+void _dummy(void* p);
 Object* singletonState(void);
 
 

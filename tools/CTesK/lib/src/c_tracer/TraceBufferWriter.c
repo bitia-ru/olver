@@ -9,7 +9,8 @@
  *
  */
 
-#include <malloc.h>
+#include <stdlib.h>
+
 #include "TraceBufferWriter.h"
 
 
@@ -28,18 +29,14 @@ TraceWriter * TraceBufferWriter_create(StringBuffer *sb)
 
 void TraceBufferWriter_delete_state(void *sb)
 {
-  StringBuffer_delete((StringBuffer *)sb);
+  destroy((StringBuffer*)sb);
 }
 
-void TraceBufferWriter_puts(void *sb, const char *str)
+void TraceBufferWriter_puts(void *sb, String *str)
 {
-  if((sb != NULL) && (str != NULL)) 
-    StringBuffer_append_s((StringBuffer *)sb, str);
+  if(sb != NULL && str != NULL)
+	appendString_StringBuffer( r((StringBuffer *)sb), str);
 }
 
 void TraceBufferWriter_flush(void *sb) {}
-
-
-
-
 
