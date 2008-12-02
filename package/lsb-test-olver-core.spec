@@ -138,7 +138,7 @@ popd >/dev/null 2>/dev/null
 /usr/share/terminfo/o/olverct
 
 %pre
-if [ "$1" = "1" ] ; then # first install
+if [ "$1" = "1" -o "$1" = "install" ] ; then # install
 PATH=/usr/sbin:$PATH
 
 echo "Preparing tester account..."
@@ -177,20 +177,17 @@ fi
 fi
 
 %post
-if [ "$1" = "1" ] ; then  # first install
-/opt/lsb/test/olver-core/testdata/install_testdata.sh
-else # upgrade
-/opt/lsb/test/olver-core/testdata/uninstall_testdata.sh
+if [ "$1" = "1" -o \( "$1" = "configure" -a -z "$2" \) ] ; then  # install
 /opt/lsb/test/olver-core/testdata/install_testdata.sh
 fi
 
 %preun
-if [ "$1" = "0" ] ; then # last uninstall
+if [ "$1" = "0" -o "$1" = "remove" ] ; then # remove
 /opt/lsb/test/olver-core/testdata/uninstall_testdata.sh
 fi
 
 %postun
-if [ "$1" = "0" ] ; then # last uninstall
+if [ "$1" = "0" -o "$1" = "remove" ] ; then # remove
 PATH=/usr/sbin:$PATH
 
 echo "Deleting tester account..."
