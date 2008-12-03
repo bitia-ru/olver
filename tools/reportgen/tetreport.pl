@@ -165,14 +165,16 @@ foreach my $pkg (sort keys %{$xmlreport->{PackageDesc}}){
             
             # Eliminate warnings
             if(! scalar keys %{$xmlreport->{PackageDesc}{"$pkg"}{SpecificationDesc}{SpecificationMethodDesc}{"$spec"}{CoveredStandaloneMark}}){
+                $tp_num = $num;
                 # Invocable Component Start: 400|activity ICnumber TPcount time|text
-                print "400|$activity 1 1 ".&mtime."|IC start\n";  
+                print "400|$activity $tp_num 1 ".&mtime."|IC start\n";  
                 # Test Purpose Start: 200|activity TPnumber time|text
-                print "200|$activity 1 ".&mtime."|TP Start no reqs\n";
+                print "200|$activity $tp_num ".&mtime."|TP Start no reqs\n";
                 # Test Purpose Result: 220|activity TPnumber result time|result-name
-                print "220|$activity 1 0 ".&mtime."|PASS\n";
+                print "220|$activity $tp_num 0 ".&mtime."|PASS\n";
                 # Invocable Component End: 410|activity ICnumber TPcount time|text
-                print "410|$activity 1 1 ".&mtime."|IC end\n";                
+                print "410|$activity $tp_num 1 ".&mtime."|IC end\n";
+                $num++;                
             }
             # Print the rest requirements
             foreach my $req (keys %{$xmlreport->{PackageDesc}{"$pkg"}{SpecificationDesc}{SpecificationMethodDesc}{"$spec"}{CoveredStandaloneMark}}){
