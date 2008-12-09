@@ -19,9 +19,3 @@ rm -f genmo
 cd ..
 echo 'Done'
 
-echo -n "Installing Olver-locale for locale.locale ... "
-cd locale.locale
-./install_locale.sh
-cd ..
-echo 'Done'
-
