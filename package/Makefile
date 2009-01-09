@@ -83,9 +83,9 @@ $(RPM_BINARY_NAME): $(PACKAGE).spec $(TARBALL)
 	@mkdir -p $(RPM_TMP_BUILD_DIR)/BUILD
 	@mkdir -p $(RPM_TMP_BUILD_DIR)/RPMS
 ifdef SIGN_PACKAGES
-	@expect -c 'set timeout -1' -c "spawn $(RPM_BUILD_CMD) --sign --rcfile $(RCFILELIST) --define=_sourcedir\ $(PWD) --define=_topdir\ $(RPM_TMP_BUILD_DIR) --define=_target_cpu\ $(RPM_BUILD_ARCH) --define=name\ $(PACKAGE) --define=ver\ $(VERSION) --define=rel\ $(RELEASE) -bb $(PACKAGE).spec" -c 'expect -ex "Enter pass phrase:"' -c 'send "\n"' -c 'expect "Executing(%clean)"' -c 'expect "exit 0"' -c 'send "\n"'
+	@expect -c 'set timeout -1' -c "spawn $(RPM_BUILD_CMD) --sign --rcfile $(RCFILELIST) --define=_sourcedir\ $(PWD) --define=_topdir\ $(RPM_TMP_BUILD_DIR) --define=_target_cpu\ $(RPM_BUILD_ARCH) --define=name\ $(PACKAGE) --define=ver\ $(VERSION) --define=rel\ $(RELEASE) -ba $(PACKAGE).spec" -c 'expect -ex "Enter pass phrase:"' -c 'send "\n"' -c 'expect "Executing(%clean)"' -c 'expect "exit 0"' -c 'send "\n"'
 else
-	@$(RPM_BUILD_CMD) --rcfile $(RCFILELIST) --define="_sourcedir $(PWD)" --define="_topdir $(RPM_TMP_BUILD_DIR)" --define="_target_cpu $(RPM_BUILD_ARCH)" --define="name $(PACKAGE)" --define="ver $(VERSION)" --define="rel $(RELEASE)" -bb $(PACKAGE).spec
+	@$(RPM_BUILD_CMD) --rcfile $(RCFILELIST) --define="_sourcedir $(PWD)" --define="_topdir $(RPM_TMP_BUILD_DIR)" --define="_target_cpu $(RPM_BUILD_ARCH)" --define="name $(PACKAGE)" --define="ver $(VERSION)" --define="rel $(RELEASE)" -ba $(PACKAGE).spec
 endif
 	@mv $(RPM_BINARY_DIR)/$(RPM_BINARY_NAME) .
 	@mv $(RPM_SRPM_DIR)/$(RPM_SOURCE_NAME) .
