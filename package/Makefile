@@ -36,11 +36,13 @@ RCFILELIST="/usr/lib/rpm/rpmrc:./rpmrc"
 RPM_TMP_BUILD_DIR=$(HOME)/tmp/rpm-build
 RPM_BUILD_ARCH=$(shell rpm --rcfile ${RCFILELIST} --eval=%{_target_cpu})
 RPM_BINARY_DIR=$(RPM_TMP_BUILD_DIR)/RPMS/$(RPM_BUILD_ARCH)
+RPM_SRPM_DIR=$(RPM_TMP_BUILD_DIR)/SRPMS
 
 RPM_BINARY_NAME=$(PACKAGE_NAME).$(RPM_BUILD_ARCH).rpm
+RPM_SOURCE_NAME=$(PACKAGE_NAME).src.rpm
 
 # Override this on the command line to use a different repository
-BZRTREES?=http://bzr.linux-foundation.org/lsb/devel
+BZRTREES?=http://bzr.linuxfoundation.org/lsb/devel
 BZR_MODULE=olver-core-tests
 
 # Default target
@@ -73,6 +75,9 @@ list_uploadable:
 ifndef BUILD_NO_DEB
 	@ls *.deb
 endif
+ifdef LIST_SOURCE_FILES
+	@echo $(RPM_SOURCE_NAME) $(TARBALL)
+endif
 
 $(RPM_BINARY_NAME): $(PACKAGE).spec $(TARBALL)
 	@mkdir -p $(RPM_TMP_BUILD_DIR)/BUILD
@@ -83,6 +88,7 @@ else
 	@$(RPM_BUILD_CMD) --rcfile $(RCFILELIST) --define="_sourcedir $(PWD)" --define="_topdir $(RPM_TMP_BUILD_DIR)" --define="_target_cpu $(RPM_BUILD_ARCH)" --define="name $(PACKAGE)" --define="ver $(VERSION)" --define="rel $(RELEASE)" -bb $(PACKAGE).spec
 endif
 	@mv $(RPM_BINARY_DIR)/$(RPM_BINARY_NAME) .
+	@mv $(RPM_SRPM_DIR)/$(RPM_SOURCE_NAME) .
 	@rm -rf $(RPM_TMP_BUILD_DIR)
 
 $(TARBALL):
