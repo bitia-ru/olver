@@ -71,7 +71,7 @@ $(PACKAGE_NAME).*.deb: rpm_package
 rpm_package: $(RPM_BINARY_NAME)
 
 list_uploadable:
-	@ls *.rpm
+	@echo $(RPM_BINARY_NAME)
 ifndef BUILD_NO_DEB
 	@ls *.deb
 endif
