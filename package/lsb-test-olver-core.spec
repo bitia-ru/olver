@@ -55,23 +55,28 @@ mkdir etc
 cp -f $SOURCE/etc/olver.conf etc/
 cp -f $SOURCE/etc/times.ref etc/
 
-ARCH=`uname -m`
-if [ ${ARCH#i?} = 86 ]; then
-    ARCH=i486
-fi
+ARCH=`uname -m | tr '[:upper:]' '[:lower:]'`
+case $ARCH in
+    i?86)
+        ARCH_NUM=1; ARCH=i486 ;;
+    ia64)
+        ARCH_NUM=2 ;;
+    ppc|powerpc)
+        ARCH_NUM=3; ARCH=ppc ;;
+    ppc64|powerpc64)
+        ARCH_NUM=4; ARCH=ppc64 ;;
+    s390)
+        ARCH_NUM=5 ;;
+    s390x)
+        ARCH_NUM=6 ;;
+    x86_64|x86-64)
+        ARCH_NUM=7; ARCH=x86_64 ;;
+    *)
+        echo "Error: Couldn't determine architecture from 'uname' output '$ARCH'"; ARCH_NUM=1; ARCH=i486 ;;
+esac
 echo "OLVER was configured for $ARCH architecture"
 
-ARCH=`uname -m | tr '[:lower:]' '[:upper:]'`
-if [ ${ARCH#I?} = 86 ]; then
-    ARCH=IA32
-fi
-if [ ${ARCH} = X86_64 ]; then
-    ARCH=AMD64
-fi
-if [ ${ARCH} = PPC ]; then
-    ARCH=PPC32
-fi
-sed "s/^\s*global\.TARGET_DATA_TYPES_ARCH\s.*$/global\.TARGET_DATA_TYPES_ARCH = LSB_ARCH_${ARCH}/" -i ./etc/olver.conf >/dev/null 2>/dev/null
+sed "s/^\s*global\.TARGET_DATA_TYPES_ARCH\s.*$/global\.TARGET_DATA_TYPES_ARCH = ${ARCH_NUM}/" -i ./etc/olver.conf >/dev/null 2>/dev/null
 sed 's/^\s*global\.TEST_DATA_PATH\s.*$/global\.TEST_DATA_PATH = \/opt\/lsb\/test\/olver-core\/testdata/' -i ./etc/olver.conf >/dev/null 2>/dev/null
 sed 's/^\s*global\.USER_NAME_TESTER\s.*$/global\.USER_NAME_TESTER = olver_tester/' -i ./etc/olver.conf >/dev/null 2>/dev/null
 
