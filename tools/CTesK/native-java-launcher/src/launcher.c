@@ -168,7 +168,7 @@ static char* get_program_path( char* argv0 )
 }
 
 /* Get line without newline character.  */
-static char* getline( FILE * file )
+static char* get_line( FILE * file )
 {
   char * line = NULL;
   int c;
@@ -306,7 +306,7 @@ int main( int argc, char** argv )
   config_init( &config );
 
   /* Parse config file.  */
-  while( (lineptr = line = getline(confile)) != NULL )
+  while( (lineptr = line = get_line(confile)) != NULL )
   {
     lineno++;
 

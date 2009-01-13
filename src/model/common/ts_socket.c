@@ -830,7 +830,7 @@ TSSocket createTSSocket(const char* address)
         return false;
     }
     free(host);
-    memcpy((char*)&addr.sin_addr,(char*)hp->h_addr,hp->h_length);
+    memcpy((char*)&addr.sin_addr,(char*)hp->h_addr_list,hp->h_length);
     addr.sin_port = htons(port);
 
     if (connect(result,(struct sockaddr*) &addr,sizeof(addr)) == -1)
