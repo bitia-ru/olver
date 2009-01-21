@@ -351,6 +351,10 @@ print RESXML "      <SpecificationMethodDesc identifier=\"$s\" kind=\"stimulus\"
 print RESXML "        <CoverageStructure name=\"$package/$signature\" noDisjuncts=\"true\">\n";
         foreach my $formulaid (sort keys %{$spec_desc{$package}{$signature}{'formula'}}){
             my $text = $spec_desc{$package}{$signature}{'formula'}{$formulaid}{'text'};
+            if(! defined($text)){$text = ""};
+            $text =~ s/</&lt;/g;
+            $text =~ s/>/&gt;/g;
+            $text =~ s/\"/\'/g;
 print RESXML "          <Formula id=\"$formulaid\" text=\"$text\" />\n";
         }
         foreach my $coverage (sort keys %{$spec_desc{$package}{$signature}{'coverage'}}){
@@ -358,6 +362,9 @@ print RESXML "          <CoverageDeclaration name=\"$coverage\" coverageStructur
             foreach my $cid (sort keys %{$spec_desc{$package}{$signature}{'coverage'}{$coverage}}){
                 my $text = $spec_desc{$package}{$signature}{'coverage'}{$coverage}{$cid}{'text'};
                 if(! defined($text)){$text = "The only branch"};
+                $text =~ s/</&lt;/g;
+                $text =~ s/>/&gt;/g;
+                $text =~ s/\"/\'/g;
 print RESXML "            <UserDefinedCoverageElement id=\"$cid\" text=\"$text\" />\n";
             }
 print RESXML "          </CoverageDeclaration>\n";
@@ -440,6 +447,7 @@ sub handle_elem_start {
     }
     elsif($name eq "coverage_element"){
         my $branch = $spec_desc{$package}{$signature}{'coverage'}{$atts{'coverage'}}{$atts{'id'}}{'text'};
+        if(! defined($branch)){$branch = ""};
         $coverage_element = "<tr>\n\t<td rowspan=\"1\">coverage<br>&amp; branch</td>\n\t<td>$atts{'coverage'}<br>$branch</td>\n</tr>\n";
         $xml_coverage_element = "    <CoveredElementDesc coverage=\"$atts{'coverage'}\" elementId=\"$atts{'id'}\" />";
         $spec_desc{$package}{$signature}{'coverage'}{$atts{'coverage'}}{$atts{'id'}}{'hits'}++;
