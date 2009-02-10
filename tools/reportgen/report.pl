@@ -544,9 +544,6 @@ sub handle_elem_end {
         $scenario = $cdata;
     }
     elsif($name eq "model_value"){
-        $cdata =~ s/</&lt\;/g;
-        $cdata =~ s/>/&gt\;/g;
-        
         $model_value = $model_value."<wbr/>$cdata</nobr></td>\n</tr>\n";
         $xml_model_value = $xml_model_value." value=\"$cdata\" />\n";
     }
@@ -566,8 +563,10 @@ sub handle_cdata_start {
 
 sub handle_cdata_end {
     $cdata = $text;
+    $cdata =~ s/&/&amp;/g;
     $cdata =~ s/</&lt;/g;
     $cdata =~ s/>/&gt;/g;
+    $cdata =~ s/\"/&\#x22;/g;
 }
 
 sub handle_char {
