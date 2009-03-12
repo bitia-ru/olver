@@ -1,6 +1,6 @@
 PACKAGE=lsb-test-olver-core
 VERSION=4.0.0
-RELEASE=6
+RELEASE=7
 
 # Derive date string for daily snapshots
 ISO_DATE=$(shell date +"%Y%m%d")
@@ -53,9 +53,13 @@ all: rpm_package
 endif
 
 clean:
-	@rm -f *.rpm *.deb *.tgz
+	@rm -f *.rpm *.deb *.tgz $(PACKAGE).spec
 
 tarball: $(TARBALL)
+
+# Specfile generation rule
+%.spec : %.spec.sed
+	sed -e "s#@NAME@#`echo $(PACKAGE)`#" -e "s#@VERSION@#`echo $(VERSION)`#" -e "s#@RELEASE@#`echo $(RELEASE)`#" < $< > $@
 
 deb_package: $(PACKAGE_NAME).*.deb
 
@@ -84,9 +88,9 @@ $(RPM_BINARY_NAME): $(PACKAGE).spec $(TARBALL)
 	@mkdir -p $(RPM_TMP_BUILD_DIR)/RPMS
 	@mkdir -p $(RPM_TMP_BUILD_DIR)/SRPMS
 ifdef SIGN_PACKAGES
-	@expect -c 'set timeout -1' -c "spawn $(RPM_BUILD_CMD) --sign --rcfile $(RCFILELIST) --define=_sourcedir\ $(PWD) --define=_topdir\ $(RPM_TMP_BUILD_DIR) --define=_target_cpu\ $(RPM_BUILD_ARCH) --define=name\ $(PACKAGE) --define=ver\ $(VERSION) --define=rel\ $(RELEASE) -ba $(PACKAGE).spec" -c 'expect -ex "Enter pass phrase:"' -c 'send "\n"' -c 'expect "Executing(%clean)"' -c 'expect "exit 0"' -c 'send "\n"'
+	@expect -c 'set timeout -1' -c "spawn $(RPM_BUILD_CMD) --sign --rcfile $(RCFILELIST) --define=_sourcedir\ $(PWD) --define=_topdir\ $(RPM_TMP_BUILD_DIR) --define=_target_cpu\ $(RPM_BUILD_ARCH) -ba $(PACKAGE).spec" -c 'expect -ex "Enter pass phrase:"' -c 'send "\n"' -c 'expect "Executing(%clean)"' -c 'expect "exit 0"' -c 'send "\n"'
 else
-	@$(RPM_BUILD_CMD) --rcfile $(RCFILELIST) --define="_sourcedir $(PWD)" --define="_topdir $(RPM_TMP_BUILD_DIR)" --define="_target_cpu $(RPM_BUILD_ARCH)" --define="name $(PACKAGE)" --define="ver $(VERSION)" --define="rel $(RELEASE)" -ba $(PACKAGE).spec
+	@$(RPM_BUILD_CMD) --rcfile $(RCFILELIST) --define="_sourcedir $(PWD)" --define="_topdir $(RPM_TMP_BUILD_DIR)" --define="_target_cpu $(RPM_BUILD_ARCH)" -ba $(PACKAGE).spec
 endif
 	@mv $(RPM_BINARY_DIR)/$(RPM_BINARY_NAME) .
 	@mv $(RPM_SRPM_DIR)/$(RPM_SOURCE_NAME) .

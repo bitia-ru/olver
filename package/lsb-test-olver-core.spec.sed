@@ -1,6 +1,11 @@
+# name, ver, rel are passed in from Makefile so we only have to set them one place
+%define name @NAME@
+%define ver @VERSION@
+%define rel @RELEASE@
+
 Summary: LSB OLVER Core Test Suite
 Vendor: ISPRAS
-# name, ver, rel are passed in from Makefile so we only have to set them one place
+
 Name: %{name}
 Version: %{ver}
 Release: %{rel}
