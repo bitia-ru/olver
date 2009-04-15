@@ -157,7 +157,7 @@ foreach my $pkg (sort keys %{$xmlreport->{PackageDesc}}){
                 }
                 
                 # Test Purpose Result: 220|activity TPnumber result time|result-name
-                print "220|$activity $tp_num 1 ".&mtime."|FAILED\n";
+                print "220|$activity $tp_num 1 ".&mtime."|FAIL\n";
                 # Invocable Component End: 410|activity ICnumber TPcount time|text
                 print "410|$activity $tp_num 1 ".&mtime."|IC end\n";
                 $num++;
