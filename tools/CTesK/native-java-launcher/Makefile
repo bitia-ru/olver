@@ -1,3 +1,5 @@
+SHELL=/bin/bash
+CC=lsbcc
 SRCS=src/launcher.c src/config.c src/config.h
 OBJS=src/launcher.o src/config.o
 

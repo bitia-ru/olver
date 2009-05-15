@@ -46,15 +46,17 @@ void setBadVerdict(const char *msg)
 {
   ts_fire_verdict_event( TS_VERDICT_MEDIATOR, false );
 
-  if (_ts_mediator_verdict)
-   {
+  if (_ts_mediator_verdict) {
+    if (msg != NULL) {
+      traceExceptionInfo(msg);
+	}
     ts_trace_bad_mediator_verdict();
-   }
+  } else {
+    if (msg != NULL) {
+      traceSystemInfo(msg);
+	}
+  }
   _ts_mediator_verdict = false;
-  if (msg != NULL)
-   {
-    traceSystemInfo(msg);
-   }
 }
 
 bool isBadVerdict(void)

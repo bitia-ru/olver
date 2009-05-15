@@ -46,26 +46,20 @@ char buffer[256];
 
 void ts_trace_bad_oracle_verdict(void)
 {
-  if (isInModelOperation())
-   {
-    traceException(POSTCONDITION_FAILED_MESSAGE);
-   }
-  else
-   {
+  if (isInSeries()) {
     traceInterimException(POSTCONDITION_FAILED_MESSAGE);
-   }
+  } else {
+    traceException(POSTCONDITION_FAILED_MESSAGE);
+  }
 }
 
 void ts_trace_bad_mediator_verdict(void)
 {
-  if (isInModelOperation())
-   {
-    traceException(MEDIATOR_FAILED_MESSAGE);
-   }
-  else
-   {
+  if (isInSeries()) {
     traceInterimException(MEDIATOR_FAILED_MESSAGE);
-   }
+  } else {
+    traceException(MEDIATOR_FAILED_MESSAGE);
+  }
 }
 
 

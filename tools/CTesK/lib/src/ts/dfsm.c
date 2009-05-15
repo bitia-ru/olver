@@ -26,6 +26,7 @@
 #include <ts/register_tsi.h>
 #include <ts/system.h>
 #include <atl/string.h>
+#include <atl/stringbuffer.h>
 #include <c_tracer/c_tracer.h>
 #include <utils/assertion.h>
 
@@ -161,8 +162,10 @@ static void trace_current_state (void)
 	type = "";
 	type_str = NULL;
   } else {
-	type_str = create_String(TYPE(new_node)->name);
-	type_str = concat_String(type_str, create_String(" *"));
+	StringBuffer *str_buf = create_StringBuffer();
+	append_StringBuffer( r(str_buf), TYPE(new_node)->name );
+	append_StringBuffer( r(str_buf), " *" );
+	type_str = toString(str_buf);
 	type = toCharArray_String(r(type_str));
   }
 
@@ -470,20 +473,24 @@ go_to_known_node (void*    tag_node, /* node to which we should go */
 
   /** IS THE RESULT OF PERFORMING BACK/PATH-OPERATION RIGHT? **/
   if (compare(GD->getState(), r(tag_node)))
-   {String* current_state = toString(GD->getState());
+  {
+	String* current_state = toString(GD->getState());
     String* buf;
+	String* tag_node_name = toString( r(tag_node) );
+
+    traceExceptionInfo("The dfsm test engine can be used for deterministic scenarios only");
+    buf = format_String("The last transition (id=%d) previously has led to: %s",
+			arc->id, toCharArray_String(r(tag_node_name)) );
+    traceExceptionInfo(toCharArray_String(r(buf)));
+    destroy(tag_node_name);
+    destroy(buf);
+
+    buf = format_String("Now it leads to: %s", toCharArray_String(r(current_state)) );
+    traceExceptionInfo(toCharArray_String(r(buf)));
+    destroy(buf);
+    destroy(current_state);
 
     traceException(NONDETERMINISTIC_GRAPH_MESSAGE);
-    traceSystemInfo("The dfsm test engine can be used for deterministic scenarios only");
-    buf = format_String("The last transition (id=%d) previously has led to: ",arc->id);
-    buf = concat_String(buf,toString(r(tag_node)));
-    traceSystemInfo(toCharArray_String(r(buf)));
-    destroy(buf);
-    buf = create_String("Now it leads to: ");
-    buf = concat_String(buf,r(current_state));
-    traceSystemInfo(toCharArray_String(r(buf)));
-    destroy(current_state);
-    destroy(buf);
     testVerdict = TD_faulted;
    }
 
@@ -529,24 +536,29 @@ int new_tested_id;
       /** BACK-ARC IS NOT EXIST **/
       String* current_state = toString(GD->getState());
       String* buf;
+	  StringBuffer *str_buf;
       void* untested_node;
 
-      traceException(UNCONNECTED_GRAPH_MESSAGE);
-      traceSystemInfo("The dfsm test engine can be used only for scenarios with mutually connected state transition graph");
-      buf = create_String("Current state is: ");
-      buf = concat_String(buf,r(current_state));
-      traceSystemInfo(toCharArray_String(r(buf)));
-      destroy(buf);
-      traceSystemInfo("All the states reachable from it are completely tested");
-      //
-      untested_node = TESTED(PATH(0)->tnum)->node;
-      buf = create_String("State '");
-      buf = concat_String(buf,toString(r(untested_node)));
-      buf = concat_String(buf,create_String("' may have untested transitions, but it is unreachable"));
-      traceSystemInfo(toCharArray_String(r(buf)));
+      traceExceptionInfo("The dfsm test engine can be used only for scenarios with mutually connected state transition graph");
+	  str_buf = create_StringBuffer();
+	  append_StringBuffer(       r(str_buf), "Current state is: ");
+	  appendString_StringBuffer( r(str_buf), current_state); // current_state destroyed
+	  buf = toString(str_buf);
+      traceExceptionInfo(toCharArray_String(r(buf)));
       destroy(buf);
 
-      destroy(current_state);
+      traceExceptionInfo("All the states reachable from it are completely tested");
+      //
+      untested_node = TESTED(PATH(0)->tnum)->node;
+	  str_buf = create_StringBuffer();
+      append_StringBuffer(       r(str_buf), "State '" );
+	  appendString_StringBuffer( r(str_buf), toString(r(untested_node)) );
+	  append_StringBuffer(       r(str_buf), "' may have untested transitions, but it is unreachable" );
+	  buf = toString(str_buf);
+      traceExceptionInfo(toCharArray_String(r(buf)));
+      destroy(buf);
+
+      traceException(UNCONNECTED_GRAPH_MESSAGE);
 
       no_last_transition = true;
       testVerdict = TD_faulted;

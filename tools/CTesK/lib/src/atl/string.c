@@ -652,9 +652,11 @@ String *vformat_String( const char * format, va_list args )
   assertion(format_cstring!=NULL,
             FORMAT("format_String: Failed to allocate %d bytes"),
             format_cstring_len);
+
   while( 1 )
   {
       num_written = _vsnprintf(format_cstring, format_cstring_len, format, args);
+
       if( num_written >= 0 )
           break;
 
@@ -704,6 +706,7 @@ String *vformat_String(const char * format, va_list args) {
              , FORMAT( "format_String: Failed to allocate %d bytes" )
              , size
              );
+
     format_cstring = (char *)p;
 
     total_size = vsnprintf( format_cstring, size, format, args_copy );

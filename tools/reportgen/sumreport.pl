@@ -4,8 +4,11 @@
 # them reliably without
 # Elinfo being in a separate file.
 
-BEGIN{push(@INC,"../share/perl")};
-use English;
+BEGIN{
+    chomp(my $program_dir = `dirname $0`);
+    unshift @INC, $program_dir."/../share/perl";
+}
+
 use XML::Parser;
 
 my %elements;
@@ -438,43 +441,45 @@ my @notprinted;
 my $curi=0;
 my $curline;
 
-die "Can't find runlog file \"$runlog\""
-  unless -f $runlog;
-
-open(RLOG, $runlog);
-
-while(<RLOG>)
-{
-	my $curstr= $_;
-	if($curstr =~ /Running scenario ([\w]+)/)
+if( -f $runlog ){
+	open(RLOG, $runlog);
+	
+	while(<RLOG>)
 	{
-		my $run_scen_name="$1";
-
-		if($run_scen_name eq "main_util_search_queue")
+		my $curstr= $_;
+		if($curstr =~ /Running scenario ([\w]+)/)
 		{
-			$run_scen_name="queue_scenario";
-		}
-		
-		if(!(defined $scenarios{$run_scen_name}))
-		{
-			$notprinted[$curi]=$run_scen_name;
-    		$curline = "<tr><td>$run_scen_name</td><td>Unresolved</td></tr>\n";
-    		$unresolved_scenarios .= $curline;
-			my $sc_name="$run_scen_name";
-			if(!(defined $scens_unknown{$sc_name}))
+			my $run_scen_name="$1";
+			
+			if($run_scen_name eq "main_util_search_queue")
 			{
-				print UNKN_FAILURES_FILE "$sc_name\n";
-				$scens_unknown{$sc_name}=1;
+				$run_scen_name="queue_scenario";
 			}
-			$curi=$curi+1;
+			
+			if(!(defined $scenarios{$run_scen_name}))
+			{
+				$notprinted[$curi]=$run_scen_name;
+	    		$curline = "<tr><td>$run_scen_name</td><td>Unresolved</td></tr>\n";
+	    		$unresolved_scenarios .= $curline;
+				my $sc_name="$run_scen_name";
+				if(!(defined $scens_unknown{$sc_name}))
+				{
+					print UNKN_FAILURES_FILE "$sc_name\n";
+					$scens_unknown{$sc_name}=1;
+				}
+				$curi=$curi+1;
+			}
+		}
+	    elsif($curstr =~ /PASSED\: ([\d]+), FAILED\: ([\d]+), TERMINATED\: ([\d]+), ABNORMAL\: ([\d]+), UNKNOWN\: ([\d]+)/ )
+		{
+			$realtotal = $1+$2+$3+$4+$5;
 		}
 	}
-    elsif($curstr =~ /PASSED\: ([\d]+), FAILED\: ([\d]+), TERMINATED\: ([\d]+), ABNORMAL\: ([\d]+), UNKNOWN\: ([\d]+)/ )
-	{
-		$realtotal = $1+$2+$3+$4+$5;
-	}
+	close(RLOG);
 }
-
+else{
+	print STDERR "Can't find runlog file \"$runlog\"";
+}
 close(UNKN_FAILURES_FILE);
 
 $unresolved_scenarios .= "</table>\n";
@@ -483,45 +488,48 @@ my $unresolved_sc = $realtotal-$count_scen_total;
 
 my %called_funcs;
 
-die "Can't find agentlog file \"$agentlog\""
-  unless -f $agentlog;
-
-open(AGLOG, $agentlog);
-
-while(<AGLOG>)
-{
-	my $curstr= $_;
-	if($curstr =~ /search for ([\w]+) \(([\d]+)\)\.\.\./)
+if( -f $agentlog ){
+	open(AGLOG, $agentlog);
+	while(<AGLOG>)
 	{
-		my $cur_key = "$1";
-		$cur_key .= "\n";
-		$called_funcs{$cur_key} = "1";
+		my $curstr= $_;
+		if($curstr =~ /search for ([\w]+) \(([\d]+)\)\.\.\./)
+		{
+			my $cur_key = "$1";
+			$cur_key .= "\n";
+			$called_funcs{$cur_key} = "1";
+		}
 	}
+	close(AGLOG);
+}
+else{
+	print STDERR "Can't find agentlog file \"$agentlog\""
 }
 
 my $not_tested_functions = "";
 
-die "Can't find all_lsb_funcs file \"$all_lsb_funcs\""
-  unless -f $all_lsb_funcs;
-
 my $tested_count = 0;
-
-open(ALLFUNCS, $all_lsb_funcs);
-
-while(<ALLFUNCS>)
-{
-	my $curstr= $_;
-	if(defined ($called_funcs{$curstr}))
+if( -f $all_lsb_funcs ){
+	open(ALLFUNCS, $all_lsb_funcs);
+	while(<ALLFUNCS>)
 	{
-		$curline = "<tr><td>$curstr</td><td>+</td></tr>\n";
-    	$tested_functions .= $curline;
-    	$tested_count++;
+		my $curstr= $_;
+		if(defined ($called_funcs{$curstr}))
+		{
+			$curline = "<tr><td>$curstr</td><td>+</td></tr>\n";
+	    	$tested_functions .= $curline;
+	    	$tested_count++;
+		}
+		else
+		{
+			$curline = "<tr><td>$curstr</td><td>-</td></tr>\n";
+			$not_tested_functions .= $curline;
+		}
 	}
-	else
-	{
-		$curline = "<tr><td>$curstr</td><td>-</td></tr>\n";
-		$not_tested_functions .= $curline;
-	}
+	close(ALLFUNCS);
+}
+else{
+	print STDERR "Can't find all_lsb_funcs file \"$all_lsb_funcs\""
 }
 
 $tested_functions .= $not_tested_functions;
@@ -530,7 +538,7 @@ $tested_functions .= "</table>\n";
 
 my $testhost = `uname -n`;
 chomp $testhost;
-my $testos = `uname -sr`;
+my $testos = `lsb_release -d`;
 chomp $testos;
 
 print <<ENDM;

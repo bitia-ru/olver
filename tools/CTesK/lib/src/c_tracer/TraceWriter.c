@@ -1,7 +1,7 @@
 /* 
  * File: TraceWriter.c 
  * Description: 
- *       his file contains an implementation of TraceWriter.
+ *       This file contains an implementation of TraceWriter.
  *
  * Copyright (c) 2002-2003 ISP RAS.
  * B.Communisticheskaya,25, Moscow, Russia.

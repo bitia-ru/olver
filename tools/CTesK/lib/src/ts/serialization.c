@@ -481,19 +481,19 @@ bool                findFirstSeriesOnly;
 		   {
             String* message;
 
-            traceException( SERIALIZATION_FAILED_MESSAGE );
-
-            traceSystemInfo("Non-deterministic serialization. Two successful serializations have been finished at different model states");
+            traceExceptionInfo("Non-deterministic serialization. Two successful serializations have been finished at different model states");
 
             message = create_String("The last serialization has been finished at ");
             message = concat_String( message, toString(model_state->saveModelState()) );
-            traceSystemInfo(toCharArray_String(r(message)));
+            traceExceptionInfo(toCharArray_String(r(message)));
             destroy(message);
 
             message = create_String("The previous successful serialization has been finished at ");
             message = concat_String( message, toString(r(finalModelState)) );
-            traceSystemInfo(toCharArray_String(r(message)));
+            traceExceptionInfo(toCharArray_String(r(message)));
             destroy(message);
+
+            traceException( SERIALIZATION_FAILED_MESSAGE );
 
             // Unsuccessful end of serialization
             serializationVerdict = false;

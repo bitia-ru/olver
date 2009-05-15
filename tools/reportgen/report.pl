@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
 
 # Script to generate OLVER-like report on mashines with no
 # java installed
@@ -7,9 +7,14 @@
 #
 # 02/12/2008 Roman Zybin, ISP RAS
 
-BEGIN{push(@INC,"../share/perl")};
-use XML::Parser;
+BEGIN{
+    chomp(my $program_dir = `dirname $0`);
+    unshift @INC, $program_dir."/../share/perl";
+}
+
 use strict;
+use XML::Parser;
+use File::Temp qw/tmpnam/;
 
 my $report_dir;
 my $res_xml;
@@ -301,35 +306,42 @@ div.probability {
 TEXT
 close CSS;
 
+my $tmp_file = tmpnam();
 foreach $trace_file_name (sort @ARGV){
-    if(! -f $trace_file_name){next};
-    $trace_file_name = `readlink -f $trace_file_name`;
-    chomp($trace_file_name);
-    if($trace_file_name =~ /\.utz/){
-        open(TRACE, "unzip -p $trace_file_name |");
-    }
-    elsif($trace_file_name =~ /\.utgz/){
-        open(TRACE, "gunzip -c $trace_file_name |");
-    }
-    else{
-        open(TRACE, "$trace_file_name");
-    }
-    
-    undef $/;
-    my $content = <TRACE>;
-    $/ = "\n";
+	if(! -f $trace_file_name){next};
+	chomp($trace_file_name = `readlink -f $trace_file_name`);
+	if($trace_file_name =~ /\.utz/){
+		open(TRACE, "unzip -p $trace_file_name |");
+	}
+	elsif($trace_file_name =~ /\.utgz/){
+		open(TRACE, "gunzip -c $trace_file_name |");
+	}
+	else{
+		open(TRACE, "$trace_file_name");
+	}
+	
+	open(TMP, "> $tmp_file");
+	my $norep = 0;
+	while(<TRACE>){
+		if(! $norep and $_ =~ s/encoding=\"iso(\d)/encoding=\"iso-$1/){
+			$norep = 1;
+		}
+		print TMP $_;
+	}
+	close(TMP);
+	close(TRACE);
     
     print "$trace_file_name parsing...\n";
     (my $short_file_name = $trace_file_name) =~ s/.*\///;
     print " Processing entry: $short_file_name\n";
     
-    $content =~ s/encoding=\"iso(\d)/encoding=\"iso-$1/;
-    eval {$parser->parse($content)};
+    eval {$parser->parsefile($tmp_file)};
     if($@){
         print "error: structural failures detected\n";
     }
-    close(TRACE);
 }
+
+system("rm -f $tmp_file");
 
 open(RESXML, "> $res_xml");
 print RESXML <<TEXT;
@@ -567,14 +579,10 @@ sub handle_cdata_end {
     $cdata =~ s/</&lt;/g;
     $cdata =~ s/>/&gt;/g;
     $cdata =~ s/\"/&\#x22;/g;
+    chomp($cdata);
 }
 
 sub handle_char {
-    my( $expat, $string) = @_;
-    if($string eq "]"){
-        $text = $text."]";
-    }
-    else{
-        $text = $string;
-    }
+	my( $expat, $string) = @_;
+	$text = $text.$string;
 }

@@ -1,9 +1,13 @@
 #!/usr/bin/perl
 
-BEGIN{push(@INC,"../share/perl")};
+BEGIN{
+    chomp(my $program_dir = `dirname $0`);
+    unshift @INC, $program_dir."/../share/perl";
+}
+
 use strict;
-use XML::Simple;
 use readbase;
+use XML::Simple;
 
 my $xmlfile = shift;
 
@@ -100,7 +104,7 @@ foreach my $pkg (sort keys %{$xmlreport->{PackageDesc}}){
                 }
                 
                 # Invocable Component Start: 400|activity ICnumber TPcount time|text
-                print "400|$activity $tp_num 1 ".&mtime."|IC start\n";                
+                print "400|$activity $tp_num 1 ".&mtime."|IC start\n";
                 # Test Purpose Start: 200|activity TPnumber time|text
                 print "200|$activity $tp_num ".&mtime."|TP Start\n";
                 my $ii = 0;
@@ -174,7 +178,7 @@ foreach my $pkg (sort keys %{$xmlreport->{PackageDesc}}){
                 print "220|$activity $tp_num 0 ".&mtime."|PASS\n";
                 # Invocable Component End: 410|activity ICnumber TPcount time|text
                 print "410|$activity $tp_num 1 ".&mtime."|IC end\n";
-                $num++;                
+                $num++;
             }
             # Print the rest requirements
             foreach my $req (keys %{$xmlreport->{PackageDesc}{"$pkg"}{SpecificationDesc}{SpecificationMethodDesc}{"$spec"}{CoveredStandaloneMark}}){

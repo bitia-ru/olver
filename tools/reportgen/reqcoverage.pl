@@ -2,14 +2,18 @@
 
 # Script to represent test coverage in a user-friendly way
 #
-# Copyright (c) 2005-2008 Institute for System Programming
+# Copyright (c) 2005-2009 Institute for System Programming
 #
-# 27/11/2008 Roman Zybin, ISP RAS
+# 07/05/2009 Roman Zybin, ISP RAS
 
-BEGIN{push(@INC,"../share/perl")};
+BEGIN{	
+    chomp(my $program_dir = `dirname $0`);
+    unshift @INC, $program_dir."/../share/perl";
+}
+
+use strict;
 use XML::Parser;
 use XML::Simple;
-use strict;
 
 my $res_xml = shift;
 my $out = shift;
@@ -20,7 +24,7 @@ if($out eq ""){$out = "-";}
 my $coverage;
 
 my $parser = XML::Parser->new(
-    Handlers => {
+        Handlers => {
         Start => \&handle_elem_start
     }
 );
@@ -84,12 +88,12 @@ sub chooseColors{
             else{
                 $hashref->{$req}{'color'} = "#888888"; #gray
             }
-    	}
+        }
         elsif(defined($hashref->{$req}{"isgen"}) && scalar($hashref->{$req}{"gsub"}) > 0){
             my $gsub_red = 0;
             my $gsub_yellow = 0;
             my $gsub_green = 0;
-    	    foreach my $gsub (keys %{$hashref->{$req}{"gsub"}}){
+            foreach my $gsub (keys %{$hashref->{$req}{"gsub"}}){
                 if(!defined($hashref->{$req}{"gsub"}{$gsub}{"struct"}) && !($gsub =~ m/app./)){
                     if(defined($coverage->{$gsub}{'covered'})){
                         if($coverage->{$gsub}{'covered'} == 1){
@@ -143,14 +147,14 @@ sub chooseColors{
 }
 
 sub searchBaseReq($$$){
-	my $hashref = shift;
+    my $hashref = shift;
     my $basereq = shift;
     my $descr = shift;
 
-	foreach my $req (keys %{$hashref}){
-	    if(defined($hashref->{$req}{"req"})){
-			searchBaseReq($hashref->{$req}{"req"}, $basereq, $descr);
-		}
+    foreach my $req (keys %{$hashref}){
+        if(defined($hashref->{$req}{"req"})){
+            searchBaseReq($hashref->{$req}{"req"}, $basereq, $descr);
+        }
         else{
             if($req eq $basereq){
                 $hashref->{$basereq}{"descr"} = $hashref->{$basereq}{"descr"}."<br>".$descr;
@@ -160,12 +164,12 @@ sub searchBaseReq($$$){
 }
 
 sub processFuncReqs{
-	my $hashref = shift;
-	
-	foreach my $req (keys %{$hashref}){
-	    if(defined($hashref->{$req}{"req"})){
-			processFuncReqs($hashref->{$req}{"req"});
-		}
+    my $hashref = shift;
+    
+    foreach my $req (keys %{$hashref}){
+        if(defined($hashref->{$req}{"req"})){
+            processFuncReqs($hashref->{$req}{"req"});
+        }
         else{
             if(!defined($hashref->{$req}{"dummy"}) && !defined($hashref->{$req}{"struct"}) && !($req =~ m/app./) && !($req =~ m/&/)){
                 $ids_xml->{"group"}{$group}{"func"}{$func}{"total"}++;
@@ -189,7 +193,7 @@ sub processFuncReqs{
             }
         }
         $coverage->{$req}{'processed'} = 1;
-	}
+    }
 }
 
 sub processIdsXML
@@ -197,15 +201,15 @@ sub processIdsXML
     $ids_xml->{"total"} = 0;
     $ids_xml->{"covered"} = 0;
     $ids_xml->{"failed"} = 0;
-	foreach $group (keys %{$ids_xml->{"group"}}){
+    foreach $group (keys %{$ids_xml->{"group"}}){
         $ids_xml->{"group"}{$group}{"total"} = 0;
         $ids_xml->{"group"}{$group}{"covered"} = 0;
         $ids_xml->{"group"}{$group}{"failed"} = 0;
-		foreach $func (keys %{$ids_xml->{"group"}{$group}{"func"}}){
+        foreach $func (keys %{$ids_xml->{"group"}{$group}{"func"}}){
             $ids_xml->{"group"}{$group}{"func"}{$func}{"total"} = 0;
             $ids_xml->{"group"}{$group}{"func"}{$func}{"covered"} = 0;
             $ids_xml->{"group"}{$group}{"func"}{$func}{"failed"} = 0;
-			processFuncReqs($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
+            processFuncReqs($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
             if($ids_xml->{"group"}{$group}{"func"}{$func}{"covered"} == 0){
                 $ids_xml->{"group"}{$group}{"func"}{$func}{"color"} = "#CC0000"; #red
             }
@@ -213,14 +217,14 @@ sub processIdsXML
                 $ids_xml->{"group"}{$group}{"func"}{$func}{"color"} = "#009900"; #green
             }
             chooseColors($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
-		}
+        }
         if($ids_xml->{"group"}{$group}{"covered"} == 0){
             $ids_xml->{"group"}{$group}{"color"} = "#CC0000"; #red
         }
         if($ids_xml->{"group"}{$group}{"covered"} == $ids_xml->{"group"}{$group}{"total"}){
             $ids_xml->{"group"}{$group}{"color"} = "#009900"; #green
         }
-	}
+    }
 }
 
 sub mysort {
@@ -232,9 +236,9 @@ sub mysort {
 }
 
 sub printFuncCoverage{
-	my $hashref = shift;
-	
-	foreach my $req (sort mysort keys %{$hashref}){
+    my $hashref = shift;
+    
+    foreach my $req (sort mysort keys %{$hashref}){
         if(! defined($hashref->{$req}{"dummy"}) && !($req =~ m/&/)){
 print HTM "<li>";
             if(defined($hashref->{$req}{'color'})){
@@ -251,9 +255,9 @@ print HTM " (failed)";
 print HTM "</font>";
             }
 print HTM "<br><font color=\"#000088\">$hashref->{$req}{'descr'}</font>";
-		    if(defined($hashref->{$req}{"isgen"}) && scalar($hashref->{$req}{"gsub"}) > 0){
+            if(defined($hashref->{$req}{"isgen"}) && scalar($hashref->{$req}{"gsub"}) > 0){
 print HTM "<br>Generalizes:<ul>\n";
-			    foreach my $gsub (sort keys %{$hashref->{$req}{"gsub"}}){
+                foreach my $gsub (sort keys %{$hashref->{$req}{"gsub"}}){
 print HTM "<li>";
                     if(defined($hashref->{$req}{'gsub'}{$gsub}{'color'})){
 print HTM "<font color=\"$hashref->{$req}{'gsub'}{$gsub}{'color'}\">";
@@ -265,18 +269,18 @@ print HTM "</font>";
 print HTM "</li>\n";
                 }
 print HTM "</ul>";
-		    }
+            }
 print HTM "</li>\n";
         }
-		if(defined($hashref->{$req}{"req"})){
-			printFuncCoverage($hashref->{$req}{"req"});
-		}
-	}
+        if(defined($hashref->{$req}{"req"})){
+            printFuncCoverage($hashref->{$req}{"req"});
+        }
+    }
 }
 
 sub printCoverage
 {
-	foreach $group (sort keys %{$ids_xml->{"group"}}) {
+    foreach $group (sort keys %{$ids_xml->{"group"}}) {
         my $gr_total = $ids_xml->{"group"}{$group}{"total"};
         my $gr_covered = $ids_xml->{"group"}{$group}{"covered"};
         my $gr_failed = $ids_xml->{"group"}{$group}{"failed"};
@@ -289,7 +293,7 @@ print HTM "<font color=\"$g_color\"><b>$group</b></font>";
 print HTM "<b>$group</b>";
         }
 print HTM " ($gr_total / $gr_covered / $gr_failed)<ul id=\"id$n_id\" style=\"display:none\">\n";
-		foreach $func (sort keys %{$ids_xml->{"group"}{$group}{"func"}}){
+        foreach $func (sort keys %{$ids_xml->{"group"}{$group}{"func"}}){
             my $f_total = $ids_xml->{"group"}{$group}{"func"}{$func}{"total"};
             my $f_covered = $ids_xml->{"group"}{$group}{"func"}{$func}{"covered"};
             my $f_failed = $ids_xml->{"group"}{$group}{"func"}{$func}{"failed"};
@@ -302,11 +306,11 @@ print HTM "<font color=\"$f_color\"><b>$func</b></font>";
 print HTM "<b>$func</b>";
             }
 print HTM " ($f_total / $f_covered / $f_failed)<ul id=\"id$n_id\" style=\"display:none\">\n";
-			printFuncCoverage($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
+            printFuncCoverage($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
 print HTM "</ul></li>\n";
-		}
+        }
 print HTM "</ul></li>\n";
-	}
+    }
 }
 
 processIdsXML();
@@ -322,19 +326,19 @@ open(HTM, "> $out");
 print HTM<<TEXT;
 <html>
 <script>
-	function show(id,al)
-	{
-	    el=document.getElementById(id);
-		if(el.style.display!='none')
-		{
-			el.style.display='none';
-			al.innerHTML = "+";
-		}else{
-			el.style.display='';
-			al.innerHTML = "&#150;";
-		}
-		return false;
-	}
+    function show(id,al)
+    {
+        el=document.getElementById(id);
+        if(el.style.display!='none')
+        {
+            el.style.display='none';
+            al.innerHTML = "+";
+        }else{
+            el.style.display='';
+            al.innerHTML = "&#150;";
+        }
+        return false;
+    }
 </script>
 <style>
     a {text-decoration:none}

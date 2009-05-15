@@ -90,12 +90,10 @@ mkdir tools
 mkdir tools/BugDB
 mkdir tools/TraceTools
 mkdir tools/reportgen
-mkdir tools/share
 cp -f $SOURCE/tools/BugDB/BugDB.xml tools/BugDB/BugDB.xml
 cp -f $SOURCE/tools/BugDB/Readme.doc tools/BugDB/Readme.doc
 cp -rf $SOURCE/tools/TraceTools/* tools/TraceTools/
 cp -rf $SOURCE/tools/reportgen/* tools/reportgen/
-cp -rf $SOURCE/tools/share/* tools/share/
 
 # Testdata section
 mkdir -p testdata

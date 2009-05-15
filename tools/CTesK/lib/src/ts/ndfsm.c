@@ -24,6 +24,7 @@
 #include <ts/register_tsi.h>
 #include <ts/system.h>
 #include <atl/string.h>
+#include <atl/stringbuffer.h>
 #include <c_tracer/c_tracer.h>
 #include <utils/assertion.h>
 
@@ -750,25 +751,26 @@ void traceDeterministicPathNotFound( NDFSM_TestEngineData* ndfsm_state, NDFSM_No
 NDFSM_Node* untested_node;
 String* buf;
 
-  traceException(UNCONNECTED_GRAPH_MESSAGE);
-  traceSystemInfo("Deterministic path to the incompletely tested states not found. The ndfsm test engine can be used only for scenarios with state transition graph, "
+  traceExceptionInfo("Deterministic path to the incompletely tested states not found. The ndfsm test engine can be used only for scenarios with state transition graph, "
                   "which contains mutually connected deterministic frame subgraph"
                  );
-  buf = create_String("Current state is: ");
-  buf = concat_String(buf,r(current_node->node_string));
-  traceSystemInfo(toCharArray_String(r(buf)));
+  buf = format_String("Current state is: %s", toCharArray_String(r(current_node->node_string)) );
+  traceExceptionInfo(toCharArray_String(r(buf)));
   destroy(buf);
-  traceSystemInfo("All the states deterministically reachable from it are completely tested");
+  traceExceptionInfo("All the states deterministically reachable from it are completely tested");
   //
   untested_node = findNonfinishedNode_NDFSM( ndfsm_state );
   if (untested_node != NULL)
-   {
-    buf = create_String("State '");
-    buf = concat_String(buf,r(untested_node->node_string));
-    buf = concat_String(buf,create_String("' may have untested transitions, but it is unreachable"));
-    traceSystemInfo(toCharArray_String(r(buf)));
+  {
+	StringBuffer *str_buf = create_StringBuffer();
+	append_StringBuffer(       r(str_buf), "State '" );
+	appendString_StringBuffer( r(str_buf), r(untested_node->node_string) );
+    append_StringBuffer(       r(str_buf), "' may have untested transitions, but it is unreachable" );
+	buf = toString(str_buf);
+    traceExceptionInfo(toCharArray_String(r(buf)));
     destroy(buf);
-   }
+  }
+  traceException(UNCONNECTED_GRAPH_MESSAGE);
 }
 
 void traverse_NDFSM( NDFSM_TestEngineData* ndfsm_state )

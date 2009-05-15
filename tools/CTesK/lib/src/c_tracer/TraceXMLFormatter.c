@@ -17,6 +17,7 @@
 #include "TraceBool.h"
 #include "TraceList.h"
 #include <atl/stringbuffer.h>
+#include <utils/assertion.h>
 
 
 /*
@@ -119,13 +120,22 @@ static char * encodeBoolValue(TraceBool value)
 /** Append indent to string buffer */
 void Indent_print(Indent ind, StringBuffer *ss)
 {
-  char *buf = (char *)malloc(ind.cur_indent + 1);
-  if(buf != NULL) {
-    memset(buf, ind.indent_char, ind.cur_indent);
-    buf[ind.cur_indent] = '\0';
-  }
+char *buf;
+char buf2[128];
+
+  assertion(ind.cur_indent >= 0, "Invalid indent");
+  if (ind.cur_indent == 0)	return;
+
+  if (ind.cur_indent < sizeof(buf2))	buf = buf2;	// Usual situation
+  else	buf = (char *)malloc(ind.cur_indent + 1);
+
+  if(buf == NULL)	return;
+
+  memset(buf, ind.indent_char, ind.cur_indent);
+  buf[ind.cur_indent] = 0;
   append_StringBuffer( r(ss), buf );
-  free(buf);
+
+  if (buf != buf2)	free(buf);
 }
 
 
@@ -997,6 +1007,8 @@ String * TraceXMLFormatter_traceInterimException(void *state, int traceId, const
   if(st == NULL || ss == NULL)	return NULL;
 
 //  ss << indent++ << "<exception" << " trace=\"" << traceId << "\"" << " internal=\"false\"" << " interim=\"true\"" << ">" << endl;
+  Indent_print(st->indent, ss);
+  st->indent.cur_indent += st->indent.indent_size;
   append_StringBuffer(       r(ss), "<exception trace=\"");
   appendFormat_StringBuffer( r(ss), "%d", traceId);
   append_StringBuffer(       r(ss), "\" kind=\"");
@@ -1011,7 +1023,7 @@ String * TraceXMLFormatter_traceInterimException(void *state, int traceId, const
       if(!vl) continue;
 //  ss << indent << "<property name='"<< cur.first <<"' value='"<< cur.second <<"' />" << endl;
       Indent_print(st->indent, ss);
-      append_StringBuffer(r(ss), "<property name='");
+      append_StringBuffer(r(ss), "<property name=\"");
       append_StringBuffer(r(ss), vl->first);
       append_StringBuffer(r(ss), "\" value=\"");
       append_StringBuffer(r(ss), vl->second);
@@ -1019,17 +1031,17 @@ String * TraceXMLFormatter_traceInterimException(void *state, int traceId, const
     }
   }
 
-//  ss << --indent << "</exception>" << endl;
-  st->indent.cur_indent -= st->indent.indent_size;
-  Indent_print(st->indent, ss);
-  append_StringBuffer(r(ss), "</exception>\n");
-
   // Trace exception infos
   if(NULL != infos) {
     for(item = infos->head;(item != NULL); item = item->next) {
       appendString_StringBuffer(r(ss), TraceXMLFormatter_traceSystemInfo(state,traceId,(char *)item->data));
     }
   }
+
+//  ss << --indent << "</exception>" << endl;
+  st->indent.cur_indent -= st->indent.indent_size;
+  Indent_print(st->indent, ss);
+  append_StringBuffer(r(ss), "</exception>\n");
 
   return toString(ss);
 }

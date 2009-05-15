@@ -761,8 +761,8 @@ Interactions* interactions;
   if (!interactions->is_correct)
    {
     // Incorrect set of interactions
+    traceExceptionInfo(interactions->defect_description);
     traceException(INCORRECT_SET_OF_INTERACTIONS_MESSAGE);
-    traceSystemInfo(interactions->defect_description);
     verdict = false;
    }
   else

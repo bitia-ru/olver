@@ -384,8 +384,8 @@ static char buff[256];
                                 info->ExceptionRecord->ExceptionInformation[1],
                                 info->ExceptionRecord->ExceptionInformation[0] ? "written" : "read"
              );
+      traceExceptionInfo(buff);
       traceInternalError("Memory access violation");
-      traceSystemInfo(buff);
       closeTrace();
       break;
     default :
