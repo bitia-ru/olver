@@ -27,6 +27,7 @@ static String * encodeAttValue(const char *value)
 {
 unsigned i, last, len;
 StringBuffer * buff;
+char buff2[20];
 
   len = strlen(value);
   buff = createCustomized_StringBuffer( 2 * len + 1 );
@@ -34,23 +35,25 @@ StringBuffer * buff;
 
   last = 0;
   for(i=0; i<len; i++) {
-    switch (value[i]) {
-      case '<':
+	  if ((/*signed*/ unsigned char)value[i] < 32) {
+        appendCharArray_StringBuffer( r(buff), value+last, i-last);
+	    sprintf(buff2, "&amp;#x%02X;", value[i]);
+        append_StringBuffer( r(buff), buff2);
+        last = i+1;
+      } else if (value[i] == '<') {
         appendCharArray_StringBuffer( r(buff), value+last, i-last);
         append_StringBuffer( r(buff), "&lt;" );
         last = i+1;
-        break;
-      case '&':
+      } else if (value[i] == '&') {
         appendCharArray_StringBuffer( r(buff), value+last, i-last);
         append_StringBuffer( r(buff), "&amp;" );
         last = i+1;
         break;
-      case '"':
+      } else if (value[i] == '"') {
         appendCharArray_StringBuffer( r(buff), value+last, i-last);
         append_StringBuffer( r(buff), "&quot;" );
         last = i+1;
-        break;
-     }
+	  }
    }
   appendCharArray_StringBuffer( r(buff), value+last, len-last );
 
@@ -91,7 +94,7 @@ char buff2[10];
 //      append_StringBuffer( r(buff), extraEscaping ? "&#x26;amp;" : "&amp;" );
       append_StringBuffer( r(buff), "&amp;" );
       last = i+1;
-	} else if ((signed char)value[i] < 32
+	} else if ((/*signed*/ unsigned char)value[i] < 32
 		&& value[i] != '\n' && value[i] != '\t' && value[i] != '\r')
 	{
       appendCharArray_StringBuffer( r(buff), value+last, i-last);
@@ -592,7 +595,7 @@ String * TraceXMLFormatter_traceModelOperationTimestamp(void *state, int traceId
   return toString(ss);
 }
 ///////////////////////////////////
-String * TraceXMLFormatter_traceOracleStart(void *state, int traceId, const char *subsystem, const char *signature, unsigned ref)
+String * TraceXMLFormatter_traceOracleStart(void *state, int traceId, const char *subsystem, const char *signature, long ref)
 {
   TraceXMLFormatter_state * st = (TraceXMLFormatter_state *)state;
   StringBuffer * ss = create_StringBuffer();
@@ -621,7 +624,7 @@ String * TraceXMLFormatter_traceOracleStart(void *state, int traceId, const char
 
   if (ref > 0) {
     append_StringBuffer(       r(ss), " ref=\"");
-    appendFormat_StringBuffer( r(ss), "%u", ref);
+    appendFormat_StringBuffer( r(ss), "%ld", ref);
     append_StringBuffer(       r(ss), "\"");
   }
   append_StringBuffer(       r(ss), "/>\n");
@@ -945,24 +948,30 @@ String * TraceXMLFormatter_traceCoverageStructureEnd(void *state)
 String * TraceXMLFormatter_traceSystemInfo(void *state, int traceId, const char *info);
 
 // TODO: <where> ?
-// const list< pair<char *,char *> > &values, const list< char * > &infos
-
-String * TraceXMLFormatter_traceException(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos)
+static String *format_exception(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos, bool isInterim)
 {
   TraceXMLFormatter_state * st = (TraceXMLFormatter_state *)state;
   TracePair *vl;
   TraceListitem *item;
+  char buff[3*sizeof(int)+2];
 
   StringBuffer * ss = create_StringBuffer();
   if(st == NULL || ss == NULL)	return NULL;
 
+//  ss << indent++ << "<exception" << " trace=\"" << traceId << "\""
+//  << " internal=\"false\"" << (isInterim ? " interim=\"true\"" : "") << ">" << endl;
   Indent_print(st->indent, ss);
   st->indent.cur_indent += st->indent.indent_size;
-  append_StringBuffer(       r(ss), "<exception trace=\"");
-  appendFormat_StringBuffer( r(ss), "%d", traceId);
-  append_StringBuffer(       r(ss), "\" kind=\"");
-  append_StringBuffer(       r(ss), kind);
-  append_StringBuffer(       r(ss), "\" internal=\"false\">\n");
+  sprintf(buff, "%d", traceId);
+
+  append_StringBuffer( r(ss), "<exception trace=\"");
+  append_StringBuffer( r(ss), buff);
+  append_StringBuffer( r(ss), "\" kind=\"");
+  append_StringBuffer( r(ss), kind);	// Hope, it does not need escaping
+  append_StringBuffer( r(ss), "\" internal=\"false\"");
+  if (isInterim)
+	append_StringBuffer( r(ss), " interim=\"true\"");
+  append_StringBuffer( r(ss), ">\n");
 
   // Trace exception values
   if(NULL != values) {
@@ -970,13 +979,14 @@ String * TraceXMLFormatter_traceException(void *state, int traceId, const char *
     {
       vl = (TracePair *)item->data;
       if(!vl) continue;
-// ss << indent << "<property name='"<< cur.first <<"' value='"<< cur.second <<"' />" << endl;
+// ss << indent << "<property name='"<< encodeAttValue(cur.first)
+//	  << "' value='"<< encodeAttValue(cur.second) <<"' />" << endl;
       Indent_print(st->indent, ss);
-      append_StringBuffer(r(ss), "<property name=\"");
-      append_StringBuffer(r(ss), vl->first);
-      append_StringBuffer(r(ss), "\" value=\"");
-      append_StringBuffer(r(ss), vl->second);
-      append_StringBuffer(r(ss), "\"/>\n");
+      append_StringBuffer(       r(ss), "<property name=\"");
+      appendString_StringBuffer( r(ss), encodeAttValue(vl->first));
+      append_StringBuffer(       r(ss), "\" value=\"");
+      appendString_StringBuffer( r(ss), encodeAttValue(vl->second));
+      append_StringBuffer(       r(ss), "\"/>\n");
     }
   }
 
@@ -994,57 +1004,17 @@ String * TraceXMLFormatter_traceException(void *state, int traceId, const char *
 
   return toString(ss);
 }
-///////////////////////////////////
-// TODO: <where> ?
-// const list< pair<char *,char *> > &values, const list< char * > &infos
+
+String * TraceXMLFormatter_traceException(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos)
+{
+	return format_exception(state, traceId, kind, values, infos, false);
+}
+
 String * TraceXMLFormatter_traceInterimException(void *state, int traceId, const char *kind, const TraceList *values, const TraceList *infos)
 {
-  TraceXMLFormatter_state * st = (TraceXMLFormatter_state *)state;
-  TracePair *vl;
-  TraceListitem *item;
-
-  StringBuffer * ss = create_StringBuffer();
-  if(st == NULL || ss == NULL)	return NULL;
-
-//  ss << indent++ << "<exception" << " trace=\"" << traceId << "\"" << " internal=\"false\"" << " interim=\"true\"" << ">" << endl;
-  Indent_print(st->indent, ss);
-  st->indent.cur_indent += st->indent.indent_size;
-  append_StringBuffer(       r(ss), "<exception trace=\"");
-  appendFormat_StringBuffer( r(ss), "%d", traceId);
-  append_StringBuffer(       r(ss), "\" kind=\"");
-  append_StringBuffer(       r(ss), kind);
-  append_StringBuffer(       r(ss), "\" internal=\"false\" interim=\"true\">\n");
-
-  // Trace exception values
-  if(NULL != values) {
-    for(item = values->head;(item != NULL); item = item->next)
-    {
-      vl = (TracePair *)item->data;
-      if(!vl) continue;
-//  ss << indent << "<property name='"<< cur.first <<"' value='"<< cur.second <<"' />" << endl;
-      Indent_print(st->indent, ss);
-      append_StringBuffer(r(ss), "<property name=\"");
-      append_StringBuffer(r(ss), vl->first);
-      append_StringBuffer(r(ss), "\" value=\"");
-      append_StringBuffer(r(ss), vl->second);
-      append_StringBuffer(r(ss), "\"/>\n");
-    }
-  }
-
-  // Trace exception infos
-  if(NULL != infos) {
-    for(item = infos->head;(item != NULL); item = item->next) {
-      appendString_StringBuffer(r(ss), TraceXMLFormatter_traceSystemInfo(state,traceId,(char *)item->data));
-    }
-  }
-
-//  ss << --indent << "</exception>" << endl;
-  st->indent.cur_indent -= st->indent.indent_size;
-  Indent_print(st->indent, ss);
-  append_StringBuffer(r(ss), "</exception>\n");
-
-  return toString(ss);
+	return format_exception(state, traceId, kind, values, infos, true);
 }
+
 ///////////////////////////////////
 // TODO: <where> ?
 String * TraceXMLFormatter_traceInternalError(void *state, int traceId, const char *info)

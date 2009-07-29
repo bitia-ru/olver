@@ -293,7 +293,7 @@ TimeFrameOfReferenceID frame;
   if (ti2.maxMark.frame != infiniteTimeFrameOfReferenceID)
    {if (frame != infiniteTimeFrameOfReferenceID)
       assertion( frame==ti2.maxMark.frame, "areIntersectedTimeIntervals: intervals should be comparable" );
-    frame = ti1.maxMark.frame;
+    frame = ti2.maxMark.frame;
    }
   if (frame == infiniteTimeFrameOfReferenceID)
     return false;

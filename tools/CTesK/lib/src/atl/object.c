@@ -553,12 +553,12 @@ String* res;
      }
     else
      {
-      res = create_String( "CYCLIC_PTR" );
+      res = create_String( "<CYCLIC_PTR>" );
      }
    }
   else
    {
-    res = create_String( "NULL" );
+    res = create_String( "<NULL>" );
    }
 
   destroy( ref );

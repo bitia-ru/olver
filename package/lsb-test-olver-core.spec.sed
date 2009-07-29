@@ -37,7 +37,7 @@ if [ ! -z "${RPM_BUILD_ROOT}"  -a "${RPM_BUILD_ROOT}" != "/" ]; then
     rm -rf ${RPM_BUILD_ROOT}/*
 fi
 mkdir -p ${RPM_BUILD_ROOT}/opt/lsb/test/olver-core
-pushd ${RPM_BUILD_ROOT}/opt/lsb/test/olver-core >/dev/null 2>/dev/null
+cd ${RPM_BUILD_ROOT}/opt/lsb/test/olver-core
 
 # Binary section
 mkdir bin
@@ -90,10 +90,12 @@ mkdir tools
 mkdir tools/BugDB
 mkdir tools/TraceTools
 mkdir tools/reportgen
+mkdir -p tools/share/perl/XML
 cp -f $SOURCE/tools/BugDB/BugDB.xml tools/BugDB/BugDB.xml
 cp -f $SOURCE/tools/BugDB/Readme.doc tools/BugDB/Readme.doc
 cp -rf $SOURCE/tools/TraceTools/* tools/TraceTools/
 cp -rf $SOURCE/tools/reportgen/* tools/reportgen/
+cp -rf $SOURCE/tools/share/perl/XML/* tools/share/perl/XML/
 
 # Testdata section
 mkdir -p testdata
@@ -103,15 +105,16 @@ cp -f $SOURCE/src/testdata/uninstall_testdata.sh testdata/
 cp -rf $SOURCE/src/testdata/math.exp testdata/
 cp -rf $SOURCE/src/testdata/math.trig testdata/
 cp -rf $SOURCE/src/testdata/math.bessel testdata/
+cp -rf $SOURCE/src/testdata/locale.locale testdata/
 
 mkdir -p testdata/util.dl
 cp -f $SOURCE/src/testdata/util.dl/libmy.so testdata/util.dl
 
-mkdir -p testdata/locale.textdomain/Path1/en_US/LC_MESSAGES
-cp -f $SOURCE/src/testdata/locale.textdomain/Path1/en_US/LC_MESSAGES/testdomain.po testdata/locale.textdomain/Path1/en_US/LC_MESSAGES
+mkdir -p testdata/locale.textdomain/Path1/Olver_Locale/LC_MESSAGES
+cp -f $SOURCE/src/testdata/locale.textdomain/Path1/Olver_Locale/LC_MESSAGES/testdomain.po testdata/locale.textdomain/Path1/Olver_Locale/LC_MESSAGES
 
-mkdir -p testdata/locale.textdomain/Path2/en_US/LC_MESSAGES
-cp -f $SOURCE/src/testdata/locale.textdomain/Path2/en_US/LC_MESSAGES/anotherdomain.po testdata/locale.textdomain/Path2/en_US/LC_MESSAGES
+mkdir -p testdata/locale.textdomain/Path2/Olver_Locale/LC_MESSAGES
+cp -f $SOURCE/src/testdata/locale.textdomain/Path2/Olver_Locale/LC_MESSAGES/anotherdomain.po testdata/locale.textdomain/Path2/Olver_Locale/LC_MESSAGES
 
 mkdir testdata/locale.nlcat
 find $SOURCE/src/testdata/locale.nlcat -name '*.msg' -exec cp -f '{}' testdata/locale.nlcat/ \; >/dev/null 2>/dev/null
@@ -120,8 +123,8 @@ find $SOURCE/src/testdata/locale.nlcat -name '*.msg' -exec cp -f '{}' testdata/l
 mkdir doc
 cp -rf $SOURCE/doc/* doc/
 
-popd >/dev/null 2>/dev/null
-pushd ${RPM_BUILD_ROOT} >/dev/null 2>/dev/null
+#${RPM_BUILD_ROOT}
+cd ../../../..
 
 find opt/lsb/test/olver-core -type d -exec chmod 775 '{}' \; >/dev/null
 find opt/lsb/test/olver-core -type f -exec chmod 664 '{}' \; >/dev/null
@@ -136,7 +139,7 @@ find opt/lsb/test/olver-core -name '*.bat' -exec chmod 775 '{}' \; >/dev/null
 chmod 775 usr/share/terminfo/o/olverct >/dev/null
 chmod +s opt/lsb/test/olver-core/bin/agent >/dev/null
 
-popd >/dev/null 2>/dev/null
+cd ..
 
 %files
 %defattr(-,olver_tester,olver)
@@ -187,11 +190,15 @@ fi
 %post
 if [ "$1" = "1" -o \( "$1" = "configure" -a -z "$2" \) ] ; then  # install
 /opt/lsb/test/olver-core/testdata/install_testdata.sh
+echo > /opt/lsb/test/olver-core/tools/share/perl/SAX.ini
+chown olver_tester:olver /opt/lsb/test/olver-core/tools/share/perl/SAX.ini
+chmod 664 /opt/lsb/test/olver-core/tools/share/perl/SAX.ini
 fi
 
 %preun
 if [ "$1" = "0" -o "$1" = "remove" ] ; then # remove
 /opt/lsb/test/olver-core/testdata/uninstall_testdata.sh
+rm -f /opt/lsb/test/olver-core/tools/share/perl/SAX.ini
 fi
 
 %postun

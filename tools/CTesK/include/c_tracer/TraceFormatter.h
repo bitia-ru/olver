@@ -63,7 +63,7 @@ struct _TraceFormatter
   String * (*traceModelOperationResult)(void *state, int traceId, const char *type, const char *value);
   String * (*traceModelOperationChannel)(void *state, int traceId, const char *channel);
   String * (*traceModelOperationTimestamp)(void *state, int traceId, const char *timestamp);
-  String * (*traceOracleStart)(void *state, int traceId, const char *subsystem, const char *signature, unsigned ref);
+  String * (*traceOracleStart)(void *state, int traceId, const char *subsystem, const char *signature, long ref);
   String * (*tracePreconditionEnd)(void *state, int traceId);
   String * (*traceOracleEnd)(void *state, int traceId);
   String * (*traceModelOperationEnd)(void *state, int traceId);

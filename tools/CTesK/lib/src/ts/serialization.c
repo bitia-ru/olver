@@ -503,8 +503,8 @@ bool                findFirstSeriesOnly;
        }
       else
        {
-    	  traceInterimException( "Series has been finished in a nonstationary state" );
-        traceSeriesEnd();
+    	  traceInterimException( NONSTATIONARY_STATE_MESSAGE );
+          traceSeriesEnd();
        }
      }
     if (!nextSeries(serialization))

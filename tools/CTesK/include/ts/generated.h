@@ -196,6 +196,7 @@ extern const char UNCONNECTED_GRAPH_MESSAGE[];
 extern const char NONDETERMINISTIC_GRAPH_MESSAGE[];
 extern const char SCENARIO_INITIALIZATION_FAILED_MESSAGE[];
 extern const char SERIALIZATION_FAILED_MESSAGE[];
+extern const char NONSTATIONARY_STATE_MESSAGE[];
 
 #ifdef __SEC__
 #pragma SEC force_use_end

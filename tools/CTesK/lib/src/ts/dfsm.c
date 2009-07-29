@@ -45,6 +45,19 @@ static unsigned is_node_new(void* new_node);
 
 
 /********************************************************************/
+/**                          Type of FSM arcs                      **/
+/********************************************************************/
+typedef struct
+{
+  Object *par;  /* pointer to the object type containing test model parameters */
+  int     fnum; /* number of function (kind of stimuli) in tested group */
+  int     refs; /* reference counter */
+  int     id;   /* unique transition identifier */
+} FSM_Arc;
+
+static int arc_id;
+
+/********************************************************************/
 /**                Operations for work with FSM arcs               **/
 /********************************************************************/
 /*
@@ -67,19 +80,6 @@ static void addRef(FSM_Arc *x) {
 #else
 #define addRef(x)   if ((x)) (x)->refs++
 #endif
-
-/********************************************************************/
-/**                          Type of FSM arcs                      **/
-/********************************************************************/
-typedef struct
-{
-  Object *par;  /* pointer to the object type containing test model parameters */
-  int     fnum; /* number of function (kind of stimuli) in tested group */
-  int     refs; /* reference counter */
-  int     id;   /* unique transition identifier */
-} FSM_Arc;
-
-static int arc_id;
 
 static FSM_Arc* newFSM_Arc(int n)
 {

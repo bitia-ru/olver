@@ -72,7 +72,7 @@ static void copy_StringBuffer( StringBuffer* src, StringBuffer* dst )
 {
   dst->allocateBy = src->allocateBy;
 
-  // clone_Array() is not suitable
+  // clone_Array() is not suitable here
   dst->header = create_Array( sizeof(StringHeader), 1, src->header->capacity );
   dst->header->length = src->header->length;
   memcpy( CONTENTS(dst), CONTENTS(src), LENGTH(src) );
@@ -99,7 +99,15 @@ int ref_cnt = header( self )->hard_ref_cnt + header( self )->weak_ref_cnt;
 	res->header = self->header;
 	CONTENTS(self) [ LENGTH(self) ] = 0;
 
+	// Free unused memory. Hope, this will just shrink, without moving.
+	if (res->header->capacity > res->header->length + 1) {
+		res->header->capacity = res->header->length + 1;
+		res->header = (StringHeader*)realloc(res->header, sizeof(StringHeader) + res->header->capacity);
+		assertion( res->header != NULL, FORMAT( "to_string_StringBuffer: No memory" ) );	// Should never fail since this is always shrinking
+	}
+
 	self->header = NULL;	// Preserve contents during further destruction
+
 	return res;
   }
 
@@ -107,7 +115,7 @@ int ref_cnt = header( self )->hard_ref_cnt + header( self )->weak_ref_cnt;
   res = create( &type_String, NULL, LENGTH(self) );	// Will allocate length+1 bytes
   cstr = (char*)toCharArray_String( r(res) );
   memcpy( cstr, CONTENTS(self), LENGTH(self) );
-  cstr[LENGTH(self)] = '\0';
+  cstr[ LENGTH(self) ] = '\0';
   return res;
 }
 

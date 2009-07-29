@@ -41,18 +41,23 @@ TTIMEMARK=${TTIMEMARK:-`date +%Y-%m-%d_%H-%M-%S`}
 REPORT_DIR=${REPORT_DIR:-`ls -1vd /var/opt/lsb/test/olver-core/* | tail -1`}
 
 #
+# Define appropriate XML parser
+#
+../tools/reportgen/select_xml_parser.pl $OLVER_XML_PARSER > ../tools/share/perl/SAX.ini
+
+#
 # Generate UniTesK report
 #
 echo ""
 echo "Generate UniTesK report"
 echo "----------------------------"
 ls $REPORT_DIR/*.utz >/dev/null 2>&1
-if [ $? = 0 ]; then
+if [ $? -eq 0 ]; then
     $GENERATE $GENOPT $REPORT_DIR/*.utz
 fi
 
 ls $REPORT_DIR/*.utgz >/dev/null 2>&1
-if [ $? = 0 ]; then
+if [ $? -eq 0 ]; then
     for file in $REPORT_DIR/*.utgz ; do
         gunzip -q -c $file > ${file%.utgz}.utt
     done
@@ -61,27 +66,24 @@ if [ $? = 0 ]; then
 fi
 
 ls $REPORT_DIR/*.utt >/dev/null 2>&1
-if [ $? = 0 ]; then
+if [ $? -eq 0 ]; then
     $GENERATE $GENOPT $REPORT_DIR/*.utt
 fi
 
 perl <<SCRIPT
-BEGIN{
-    chomp(my \$program_dir = \`dirname \$0\`);
-    unshift @INC, \$program_dir."/../share/perl";
+open(RES, '$REPORT_DIR/res.xml');
+while(reverse <RES>){
+    exit 0 if(/<\/Report>/);
 }
-use XML::Parser;
-\$parser = XML::Parser->new();
-eval{\$parser->parsefile('$REPORT_DIR/res.xml')};
-exit 1 if \$@;
-exit 0;
+close(RES);
+exit 1;
 SCRIPT
 
-if [ $? != 0 ]; then
-ls $REPORT_DIR/*.ut* >/dev/null 2>&1
-if [ $? = 0 ]; then
-    ../tools/reportgen/report.pl -d $REPORT_DIR/report -x $REPORT_DIR/res.xml $REPORT_DIR/*.ut*
-fi
+if [ $? -ne 0 ]; then
+    ls $REPORT_DIR/*.ut* >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        ../tools/reportgen/report.pl -d $REPORT_DIR/report -x $REPORT_DIR/res.xml $REPORT_DIR/*.ut*
+    fi
 fi
 
 #
@@ -92,48 +94,49 @@ cd ../tools/reportgen
 #
 # Generate REQ coverage report
 #
-echo ""
-echo "Generate REQ coverage report"
-echo "----------------------------"
-{ timer $$ & timerid=$! ;}
 if test -x /usr/bin/perl; then
-    ./reqcoverage.pl $REPORT_DIR/res.xml $REPORT_DIR/result.htm
+    echo
+    echo "Generate REQ coverage report"
+    echo "----------------------------"
+    { timer $$ & timerid=$! ;}
+    ./reqcoverage.pl -o $REPORT_DIR/result.htm $REPORT_DIR/res.xml ./ids.xml
+    { kill -s 9 $timerid & sleep 1 ;} >/dev/null 2>&1
 else
     echo "Coverage report skipped because '/usr/bin/perl' is absent"
 fi
 echo
-{ kill -s 9 $timerid & sleep 1 ;} >/dev/null 2>&1
 
 #
 # Generate TET report
 #
 if test -x /usr/bin/perl; then
-    echo ""
+    echo
     echo "Generate TET-like report"
     echo "----------------------------"
     { timer $$ & timerid=$! ;}
     mkdir -p $REPORT_DIR/tet
     ./tetreport.pl $REPORT_DIR/res.xml > $REPORT_DIR/tet/tetreport.log
     ./tjreport -d $REPORT_DIR/tet/tetreport.log > $REPORT_DIR/tet/nice_tet.log
-    echo
     { kill -s 9 $timerid & sleep 1 ;} >/dev/null 2>&1
 else
     echo "TET-like report skipped because '/usr/bin/perl' is absent"
 fi
+echo
 
 #
 # Generate Summary Report
 #
 if test -x /usr/bin/perl; then
-    echo ""
+    echo
     echo "Generate OLVER summary report"
     echo "----------------------------"
-    ./sumreport.pl $REPORT_DIR/res.xml $REPORT_DIR/result.htm $REPORT_DIR/run.log $REPORT_DIR/agent.log ./LSBCoreFunctions $TTIMEMARK $REPORT_DIR/unknown_failures.txt > $REPORT_DIR/summary.htm
+    { timer $$ & timerid=$! ;}
+    ./sumreport.pl -c $REPORT_DIR/result.htm -r $REPORT_DIR/run.log -a $REPORT_DIR/agent.log -l ./LSBCoreFunctions -o $REPORT_DIR/summary.htm $REPORT_DIR/res.xml
+    echo
+    echo
+    { kill -s 9 $timerid & sleep 1 ;} >/dev/null 2>&1
+    echo "Open $REPORT_DIR/summary.htm to see reports"
 else
+    echo
     echo "OLVER summary report skipped because '/usr/bin/perl' is absent"
 fi
-
-echo ""
-echo "Open $REPORT_DIR/summary.htm to see reports"
-echo ""
-

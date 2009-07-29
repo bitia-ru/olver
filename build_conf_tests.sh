@@ -55,7 +55,7 @@ launch_build_status=1
 ctesk_lib_build_status=1
 model_build_status=1
 agent_permission_status=1
-	
+
 #
 # Step 1: Build handbook
 #
@@ -89,7 +89,10 @@ cd ../..
 #
 echo "Building agent ..."
 cd src/agent
-./build_config.sh
+# It is required when non-LSB compliant system is testing.
+# It generates stabs for all missing functions.
+# It hangs up on Ubuntu 8.10.
+#./build_config.sh
 make all
 agent_build_status=$?
 cd ../..
@@ -104,7 +107,7 @@ make
 launch_build_status=$?
 cp -f ./launcher ../bin/secc
 cp -f ./launcher ../../TraceTools/bin/stargen
-cp -f ./launcher ../../TraceTools/bin/trig
+cp -f ./launcher ../../TraceTools/bin/trg
 cd ../../..
 
 

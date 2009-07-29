@@ -4,55 +4,79 @@
 #
 # Copyright (c) 2005-2009 Institute for System Programming
 #
-# 07/05/2009 Roman Zybin, ISP RAS
+# 24/07/2009 Roman Zybin, ISP RAS
 
-BEGIN{	
+BEGIN{    
     chomp(my $program_dir = `dirname $0`);
     unshift @INC, $program_dir."/../share/perl";
 }
 
 use strict;
-use XML::Parser;
+use XML::SAX;
 use XML::Simple;
+use Getopt::Long;
 
-my $res_xml = shift;
-my $out = shift;
+package CoverageHandler;
+use base qw(XML::SAX::Base);
 
-die "Can't find file containing test results \"$res_xml\"" unless -f $res_xml;
-if($out eq ""){$out = "-";}
+### Handlers ###
 
-my $coverage;
+sub start_element {
+    my ($self, $el) = @_;
+    my $name = $el->{'Name'};
 
-my $parser = XML::Parser->new(
-        Handlers => {
-        Start => \&handle_elem_start
-    }
-);
-
-sub handle_elem_start {
-    my( $expat, $name, %atts ) = @_;
+	my %atts;
+	if(defined $el->{'Attributes'}){
+		while (my ( $key, $value ) = each %{$el->{'Attributes'}}){
+			if(ref $value){
+				$atts{$value->{'Name'}} = $value->{'Value'};
+			}
+			else{
+				$atts{$key} = $value;
+			}
+		}
+	}
+    
     my $req = $atts{'name'};
+        
     if($name eq "CoveredStandaloneMark"){
         if($req =~ s/\?//){
-            $coverage->{$req}{'covered'} = 0;
+            $self->{'coverage'}{$req}{'covered'} = 0;
         }
         else{
-            $coverage->{$req}{'covered'} = 1;
+            $self->{'coverage'}{$req}{'covered'} = 1;
         }
     }
     elsif($name eq "Property"){
         if($req =~ s/req_id.//){
-            $coverage->{$req}{'failed'} = 1;
+            $self->{'coverage'}{$req}{'failed'} = 1;
         }
     }
 }
 
-$parser->parsefile("$res_xml");
+package main;
+
+my $out_file = "-";
+
+GetOptions(
+    "out|o=s" => \$out_file
+    );
+
+my $res_file = shift;
+die "Can't find file containing test results '$res_file'" unless -f $res_file;
+my $reqs_file = shift;
+die "Can't find file containing requirements description '$reqs_file'" unless -f $reqs_file;
+
+my $handler = CoverageHandler->new();
+my $parser = XML::SAX::ParserFactory->parser(Handler => $handler);
+$parser->parse({Source => {SystemId => $res_file}});
+my $coverage = delete $handler->{'coverage'};
+
+my $reqs = XMLin($reqs_file, ForceArray => ["group", "func", "req", "gsub"]);
 
 our $group;
 our $func;
 our $n_id = 0;
-my $ids_xml = XMLin("./ids.xml", ForceArray => ["group", "func", "req", "gsub"]);
 
 sub chooseColors{
     my $hashref = shift;
@@ -172,24 +196,24 @@ sub processFuncReqs{
         }
         else{
             if(!defined($hashref->{$req}{"dummy"}) && !defined($hashref->{$req}{"struct"}) && !($req =~ m/app./) && !($req =~ m/&/)){
-                $ids_xml->{"group"}{$group}{"func"}{$func}{"total"}++;
-                $ids_xml->{"group"}{$group}{"total"}++;
-                $ids_xml->{"total"}++;
+                $reqs->{"group"}{$group}{"func"}{$func}{"total"}++;
+                $reqs->{"group"}{$group}{"total"}++;
+                $reqs->{"total"}++;
                 if(defined($coverage->{$req}{'covered'})){
-                    $ids_xml->{"group"}{$group}{"func"}{$func}{"covered"}++;
-                    $ids_xml->{"group"}{$group}{"covered"}++;
-                    $ids_xml->{"covered"}++;
+                    $reqs->{"group"}{$group}{"func"}{$func}{"covered"}++;
+                    $reqs->{"group"}{$group}{"covered"}++;
+                    $reqs->{"covered"}++;
                 }
                 if(defined($coverage->{$req}{'failed'})){
-                    $ids_xml->{"group"}{$group}{"func"}{$func}{"failed"}++;
-                    $ids_xml->{"group"}{$group}{"failed"}++;
-                    $ids_xml->{"failed"}++;
+                    $reqs->{"group"}{$group}{"func"}{$func}{"failed"}++;
+                    $reqs->{"group"}{$group}{"failed"}++;
+                    $reqs->{"failed"}++;
                 }
             }
             if($req =~ m/&/){
                 my $basereq = $req;
                 $basereq =~ s/&//g;
-                searchBaseReq($ids_xml->{"group"}{$group}{"func"}{$func}{"req"}, $basereq, $hashref->{$req}{"descr"});
+                searchBaseReq($reqs->{"group"}{$group}{"func"}{$func}{"req"}, $basereq, $hashref->{$req}{"descr"});
             }
         }
         $coverage->{$req}{'processed'} = 1;
@@ -198,31 +222,31 @@ sub processFuncReqs{
 
 sub processIdsXML
 {
-    $ids_xml->{"total"} = 0;
-    $ids_xml->{"covered"} = 0;
-    $ids_xml->{"failed"} = 0;
-    foreach $group (keys %{$ids_xml->{"group"}}){
-        $ids_xml->{"group"}{$group}{"total"} = 0;
-        $ids_xml->{"group"}{$group}{"covered"} = 0;
-        $ids_xml->{"group"}{$group}{"failed"} = 0;
-        foreach $func (keys %{$ids_xml->{"group"}{$group}{"func"}}){
-            $ids_xml->{"group"}{$group}{"func"}{$func}{"total"} = 0;
-            $ids_xml->{"group"}{$group}{"func"}{$func}{"covered"} = 0;
-            $ids_xml->{"group"}{$group}{"func"}{$func}{"failed"} = 0;
-            processFuncReqs($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
-            if($ids_xml->{"group"}{$group}{"func"}{$func}{"covered"} == 0){
-                $ids_xml->{"group"}{$group}{"func"}{$func}{"color"} = "#CC0000"; #red
+    $reqs->{"total"} = 0;
+    $reqs->{"covered"} = 0;
+    $reqs->{"failed"} = 0;
+    foreach $group (keys %{$reqs->{"group"}}){
+        $reqs->{"group"}{$group}{"total"} = 0;
+        $reqs->{"group"}{$group}{"covered"} = 0;
+        $reqs->{"group"}{$group}{"failed"} = 0;
+        foreach $func (keys %{$reqs->{"group"}{$group}{"func"}}){
+            $reqs->{"group"}{$group}{"func"}{$func}{"total"} = 0;
+            $reqs->{"group"}{$group}{"func"}{$func}{"covered"} = 0;
+            $reqs->{"group"}{$group}{"func"}{$func}{"failed"} = 0;
+            processFuncReqs($reqs->{"group"}{$group}{"func"}{$func}{"req"});
+            if($reqs->{"group"}{$group}{"func"}{$func}{"covered"} == 0){
+                $reqs->{"group"}{$group}{"func"}{$func}{"color"} = "#CC0000"; #red
             }
-            if($ids_xml->{"group"}{$group}{"func"}{$func}{"covered"} == $ids_xml->{"group"}{$group}{"func"}{$func}{"total"}){
-                $ids_xml->{"group"}{$group}{"func"}{$func}{"color"} = "#009900"; #green
+            if($reqs->{"group"}{$group}{"func"}{$func}{"covered"} == $reqs->{"group"}{$group}{"func"}{$func}{"total"}){
+                $reqs->{"group"}{$group}{"func"}{$func}{"color"} = "#009900"; #green
             }
-            chooseColors($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
+            chooseColors($reqs->{"group"}{$group}{"func"}{$func}{"req"});
         }
-        if($ids_xml->{"group"}{$group}{"covered"} == 0){
-            $ids_xml->{"group"}{$group}{"color"} = "#CC0000"; #red
+        if($reqs->{"group"}{$group}{"covered"} == 0){
+            $reqs->{"group"}{$group}{"color"} = "#CC0000"; #red
         }
-        if($ids_xml->{"group"}{$group}{"covered"} == $ids_xml->{"group"}{$group}{"total"}){
-            $ids_xml->{"group"}{$group}{"color"} = "#009900"; #green
+        if($reqs->{"group"}{$group}{"covered"} == $reqs->{"group"}{$group}{"total"}){
+            $reqs->{"group"}{$group}{"color"} = "#009900"; #green
         }
     }
 }
@@ -254,6 +278,7 @@ print HTM " (failed)";
             if(defined($hashref->{$req}{'color'})){
 print HTM "</font>";
             }
+            $hashref->{$req}{'descr'} =~ s/[^[:ascii:]]+/?/g;
 print HTM "<br><font color=\"#000088\">$hashref->{$req}{'descr'}</font>";
             if(defined($hashref->{$req}{"isgen"}) && scalar($hashref->{$req}{"gsub"}) > 0){
 print HTM "<br>Generalizes:<ul>\n";
@@ -280,33 +305,33 @@ print HTM "</li>\n";
 
 sub printCoverage
 {
-    foreach $group (sort keys %{$ids_xml->{"group"}}) {
-        my $gr_total = $ids_xml->{"group"}{$group}{"total"};
-        my $gr_covered = $ids_xml->{"group"}{$group}{"covered"};
-        my $gr_failed = $ids_xml->{"group"}{$group}{"failed"};
+    foreach $group (sort keys %{$reqs->{"group"}}) {
+        my $gr_total = $reqs->{"group"}{$group}{"total"};
+        my $gr_covered = $reqs->{"group"}{$group}{"covered"};
+        my $gr_failed = $reqs->{"group"}{$group}{"failed"};
 print HTM "<li>[<a onclick=\"return show('id".++$n_id."',this)\" href=\"#\">+</a>]";
-        if(defined($ids_xml->{"group"}{$group}{"color"})){
-            my $g_color = $ids_xml->{"group"}{$group}{"color"};
+        if(defined($reqs->{"group"}{$group}{"color"})){
+            my $g_color = $reqs->{"group"}{$group}{"color"};
 print HTM "<font color=\"$g_color\"><b>$group</b></font>";
         }
         else{
 print HTM "<b>$group</b>";
         }
 print HTM " ($gr_total / $gr_covered / $gr_failed)<ul id=\"id$n_id\" style=\"display:none\">\n";
-        foreach $func (sort keys %{$ids_xml->{"group"}{$group}{"func"}}){
-            my $f_total = $ids_xml->{"group"}{$group}{"func"}{$func}{"total"};
-            my $f_covered = $ids_xml->{"group"}{$group}{"func"}{$func}{"covered"};
-            my $f_failed = $ids_xml->{"group"}{$group}{"func"}{$func}{"failed"};
+        foreach $func (sort keys %{$reqs->{"group"}{$group}{"func"}}){
+            my $f_total = $reqs->{"group"}{$group}{"func"}{$func}{"total"};
+            my $f_covered = $reqs->{"group"}{$group}{"func"}{$func}{"covered"};
+            my $f_failed = $reqs->{"group"}{$group}{"func"}{$func}{"failed"};
 print HTM "<li>[<a onclick=\"return show('id".++$n_id."',this)\" href=\"#\">+</a>]";
-            if(defined($ids_xml->{"group"}{$group}{"func"}{$func}{"color"})){
-                my $f_color = $ids_xml->{"group"}{$group}{"func"}{$func}{"color"};
+            if(defined($reqs->{"group"}{$group}{"func"}{$func}{"color"})){
+                my $f_color = $reqs->{"group"}{$group}{"func"}{$func}{"color"};
 print HTM "<font color=\"$f_color\"><b>$func</b></font>";
             }
             else{
 print HTM "<b>$func</b>";
             }
 print HTM " ($f_total / $f_covered / $f_failed)<ul id=\"id$n_id\" style=\"display:none\">\n";
-            printFuncCoverage($ids_xml->{"group"}{$group}{"func"}{$func}{"req"});
+            printFuncCoverage($reqs->{"group"}{$group}{"func"}{$func}{"req"});
 print HTM "</ul></li>\n";
         }
 print HTM "</ul></li>\n";
@@ -322,7 +347,7 @@ foreach my $req (sort keys %{$coverage}){
     }
 }
 
-open(HTM, "> $out");
+open(HTM, "> $out_file");
 print HTM<<TEXT;
 <html>
 <script>
@@ -355,7 +380,7 @@ $misprints
 TEXT
 }
 print HTM<<TEXT;
-<h4>Summary:( Total:$ids_xml->{"total"} / Covered:$ids_xml->{"covered"} / Failed:$ids_xml->{"failed"})</h4>
+<h4>Summary:( Total:$reqs->{"total"} / Covered:$reqs->{"covered"} / Failed:$reqs->{"failed"})</h4>
 <ul>
 TEXT
 printCoverage();
