@@ -105,16 +105,15 @@ cp -f $SOURCE/src/testdata/uninstall_testdata.sh testdata/
 cp -rf $SOURCE/src/testdata/math.exp testdata/
 cp -rf $SOURCE/src/testdata/math.trig testdata/
 cp -rf $SOURCE/src/testdata/math.bessel testdata/
-cp -rf $SOURCE/src/testdata/locale.locale testdata/
 
 mkdir -p testdata/util.dl
 cp -f $SOURCE/src/testdata/util.dl/libmy.so testdata/util.dl
 
-mkdir -p testdata/locale.textdomain/Path1/Olver_Locale/LC_MESSAGES
-cp -f $SOURCE/src/testdata/locale.textdomain/Path1/Olver_Locale/LC_MESSAGES/testdomain.po testdata/locale.textdomain/Path1/Olver_Locale/LC_MESSAGES
+mkdir -p testdata/locale.textdomain/Path1/en_US/LC_MESSAGES
+cp -f $SOURCE/src/testdata/locale.textdomain/Path1/en_US/LC_MESSAGES/testdomain.po testdata/locale.textdomain/Path1/en_US/LC_MESSAGES
 
-mkdir -p testdata/locale.textdomain/Path2/Olver_Locale/LC_MESSAGES
-cp -f $SOURCE/src/testdata/locale.textdomain/Path2/Olver_Locale/LC_MESSAGES/anotherdomain.po testdata/locale.textdomain/Path2/Olver_Locale/LC_MESSAGES
+mkdir -p testdata/locale.textdomain/Path2/en_US/LC_MESSAGES
+cp -f $SOURCE/src/testdata/locale.textdomain/Path2/en_US/LC_MESSAGES/anotherdomain.po testdata/locale.textdomain/Path2/en_US/LC_MESSAGES
 
 mkdir testdata/locale.nlcat
 find $SOURCE/src/testdata/locale.nlcat -name '*.msg' -exec cp -f '{}' testdata/locale.nlcat/ \; >/dev/null 2>/dev/null
