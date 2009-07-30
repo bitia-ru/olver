@@ -335,7 +335,7 @@ sub start_element {
 		if(defined $op_id){
 			$exception{$exc_id}{'model'}{$op_id} = $operation->{$op_id};
 		}
-		else{
+		elsif($atts{'kind'} eq 'SERIALIZATION_FAILED'){
 			$exception{$exc_id}{'model'} = $operation;
 		}
 		
@@ -588,9 +588,6 @@ sub generate_struct_exception{
 	
 	$info =~ s/\n//go;
 	
-	print $tracename."\n";
-	print $info."\n\n";
-	
 	### TODO: constraint of structural fails per scenario
 
 	my $exc = {
@@ -711,7 +708,6 @@ foreach $trace_file_name (sort @ARGV){
     print "error: structural failures detected\n" if $is_struct_fail;
 }
 system("rm -f $tmp_file");
-
 
 print "Generating results...\n";
 
