@@ -5,7 +5,7 @@
 #
 # Copyright (c) 2005-2009 Institute for System Programming
 #
-# 24/07/2009 Roman Zybin, ISP RAS
+# 04/08/2009 Roman Zybin, ISP RAS
 
 BEGIN{
     chomp(my $program_dir = `dirname $0`);
@@ -24,221 +24,221 @@ my $bugDB;
 package Exception;
 
 sub new {
-	my $self = shift;
-	$self = {} unless $self;
-	bless($self, "Exception");
+    my $self = shift;
+    $self = {} unless $self;
+    bless($self, "Exception");
 }
 
 sub kind{
-	my $self = shift;
-	return $self->{'kind'};
+    my $self = shift;
+    return $self->{'kind'};
 }
 
 sub reqs{
-	my $self = shift;
-	
-	return undef if ! defined $self->{'property'};
-	return join (';', sort map { $_->{'name'} =~ /req_id\.(.*)/; $1 } grep { $_->{'name'} =~ /req_id/ } @{$self->{'property'}} );
+    my $self = shift;
+    
+    return undef if ! defined $self->{'property'};
+    return join (';', sort map { $_->{'name'} =~ /req_id\.(.*)/; $1 } grep { $_->{'name'} =~ /req_id/ } @{$self->{'property'}} );
 }
 
 sub origin{
-	my $self = shift;
+    my $self = shift;
 
-	if(defined $self->{'model'}){
-		my @ids = sort keys %{$self->{'model'}};
-		my $id = shift @ids;
-		return ($self->{'model'}{$id}{'package'}, $self->{'model'}{$id}{'name'});
-	}
-	else{
-		return ('unknown package', 'unknown model operation');
-	}
+    if(defined $self->{'model'}){
+        my @ids = sort keys %{$self->{'model'}};
+        my $id = shift @ids;
+        return ($self->{'model'}{$id}{'package'}, $self->{'model'}{$id}{'name'});
+    }
+    else{
+        return ('unknown package', 'unknown model operation');
+    }
 }
 
 sub isRequirementFailed{
-	my $self = shift;
-	my $req_list = shift;
-	my %reqs = map { $_ => 1 } split (';', $req_list);
-	
-	return 0 if ! defined $self->{'property'};
-		
-	foreach my $p (@{$self->{'property'}}){
-		if ($p->{'name'} =~ /req_id\.(.*)/){
-			return 1 if (defined $reqs{$1});
-		}
-	}
-	return 0;
+    my $self = shift;
+    my $req_list = shift;
+    my %reqs = map { $_ => 1 } split (';', $req_list);
+    
+    return 0 if ! defined $self->{'property'};
+        
+    foreach my $p (@{$self->{'property'}}){
+        if ($p->{'name'} =~ /req_id\.(.*)/){
+            return 1 if (defined $reqs{$1});
+        }
+    }
+    return 0;
 }
 
 sub modelOperation{
-	my $self = shift;
-	if(defined $self->{'model'}){
-		my @ids = sort keys %{$self->{'model'}};
-		my $id = shift @ids;
-		return $self->{'model'}{$id};
-	}
-	else{
-		return Operation::new();
-	}
+    my $self = shift;
+    if(defined $self->{'model'}){
+        my @ids = sort keys %{$self->{'model'}};
+        my $id = shift @ids;
+        return $self->{'model'}{$id};
+    }
+    else{
+        return Operation::new();
+    }
 }
 
 sub interimFailures{
-	my $self = shift;
-	return List::new($self->{'interim_fail'}); 
+    my $self = shift;
+    return List::new($self->{'interim_fail'}); 
 }
 
 sub modelOperationSeries{
-	my $self = shift;
-	return List::new($self->{'series'}); 
+    my $self = shift;
+    return List::new($self->{'series'}); 
 }
 
 sub info{
-	my $self = shift;
-	return $self->{'info'};
+    my $self = shift;
+    return $self->{'info'};
 }
 
 sub getCoveredElementId{
-	my $self = shift;
-	my $coverage = shift;
-	return $self->modelOperation->coveredElementId($coverage);
+    my $self = shift;
+    my $coverage = shift;
+    return $self->modelOperation->coveredElementId($coverage);
 }
 
 sub transitionName{
-	my $self = shift;
-	return $self->{'transition'};
+    my $self = shift;
+    return $self->{'transition'};
 }
 
 package Operation;
 
 sub new {
-	my $self = shift;
-	$self = {} unless $self;
-	bless($self, "Operation");
+    my $self = shift;
+    $self = {} unless $self;
+    bless($self, "Operation");
 }
 
 sub name{
-	my $self = shift;
-	return $self->{'name'};
+    my $self = shift;
+    return $self->{'name'};
 }
 
 sub getParameterValue{
-	my $self = shift;
-	my $arg = shift;
-	return undef if ! defined $self->{'model_value'};
-	foreach my $p (@{$self->{'model_value'}}){
-		if ($p->{'name'} eq $arg){
-			return $p->{'value'};
-		}
-	}
+    my $self = shift;
+    my $arg = shift;
+    return undef if ! defined $self->{'model_value'};
+    foreach my $p (@{$self->{'model_value'}}){
+        if ($p->{'name'} eq $arg){
+            return $p->{'value'};
+        }
+    }
 }
 
 sub returnValue{
-	my $self = shift;
-	return undef if ! defined $self->{'model_value'};
-	foreach my $p (@{$self->{'model_value'}}){
-		if ($p->{'kind'} eq 'result'){
-			return $p->{'value'};
-		}
-	}
+    my $self = shift;
+    return undef if ! defined $self->{'model_value'};
+    foreach my $p (@{$self->{'model_value'}}){
+        if ($p->{'kind'} eq 'result'){
+            return $p->{'value'};
+        }
+    }
 }
 
 sub channel{
-	my $self = shift;
-	return undef if ! defined $self->{'model_value'};
-	foreach my $p (@{$self->{'model_value'}}){
-		if ($p->{'kind'} eq 'channel'){
-			return $p->{'value'};
-		}
-	}
+    my $self = shift;
+    return undef if ! defined $self->{'model_value'};
+    foreach my $p (@{$self->{'model_value'}}){
+        if ($p->{'kind'} eq 'channel'){
+            return $p->{'value'};
+        }
+    }
 }
 
 sub coveredElementId{
-	my $self = shift;
-	my $coverage = shift;
-	return $self->{'coverage'}{$coverage};
+    my $self = shift;
+    my $coverage = shift;
+    return $self->{'coverage'}{$coverage};
 }
 
 package List;
 
 sub new {
-	my $self = shift;
-	$self = {} unless $self;
-	bless($self, "List");
+    my $self = shift;
+    $self = {} unless $self;
+    bless($self, "List");
 }
 
 sub size{
-	my $self = shift;
-	return defined $self ? scalar @{$self} : 0;
+    my $self = shift;
+    return defined $self ? scalar @{$self} : 0;
 }
 
 sub get{
-	my $self = shift;
-	my $num = shift;
-	
-	return defined $self ? @{$self}[$num] : undef;
+    my $self = shift;
+    my $num = shift;
+    
+    return defined $self ? @{$self}[$num] : undef;
 }
 
 
 package main;
 
 sub processBugDB{
-	my $bugDB = shift;
-	
-	while (my ($id , $bug) = each(%{$bugDB->{'bug'}})){
-		### normalize text ###
-		my $pattern_union;
-		foreach my $pattern (values %{$bug->{'pattern'}}){
-			$pattern->{'content'} =~ s/\n\s*/ /go;
-			$pattern->{'content'} =~ s/^\s+//o;
-			$pattern->{'content'} =~ s/\s+$//o;
-			$pattern->{'content'} =~ s/\s*&&\s*/ && /go;
-			$pattern->{'content'} =~ s/\s*\|\|\s*/ || /go;
-			if(! defined $pattern_union){
-				$pattern_union = $pattern->{'content'};
-			}
-			else{
-				$pattern_union = '('.$pattern_union.') || ('.$pattern->{'content'}.')';
-			}
-		}
-		$bug->{'body'} =~ s/\n\s*/ /go;
-		$bug->{'body'} =~ s/^\s+//o;
-		$bug->{'body'} =~ s/\s+$//o;
+    my $bugDB = shift;
+    
+    while (my ($id , $bug) = each(%{$bugDB->{'bug'}})){
+        ### normalize text ###
+        my $pattern_union;
+        foreach my $pattern (values %{$bug->{'pattern'}}){
+            $pattern->{'content'} =~ s/\n\s*/ /go;
+            $pattern->{'content'} =~ s/^\s+//o;
+            $pattern->{'content'} =~ s/\s+$//o;
+            $pattern->{'content'} =~ s/\s*&&\s*/ && /go;
+            $pattern->{'content'} =~ s/\s*\|\|\s*/ || /go;
+            if(! defined $pattern_union){
+                $pattern_union = $pattern->{'content'};
+            }
+            else{
+                $pattern_union = '('.$pattern_union.') || ('.$pattern->{'content'}.')';
+            }
+        }
+        $bug->{'body'} =~ s/\n\s*/ /go;
+        $bug->{'body'} =~ s/^\s+//o;
+        $bug->{'body'} =~ s/\s+$//o;
 
-		my $pattern = $pattern_union;
+        my $pattern = $pattern_union;
 
-		# == and ""
-		$pattern =~ s/(\b)(\w+_FAILED)(\b)/'$2'/go;
-		$pattern =~ s/==(\s*["'])/eq$1/go;
-		$pattern =~ s/(['"]\s*)==/$1eq/go;
-		$pattern =~ s/"/'/go;
-		#$pattern =~ s/([\@\%\$])/\$1/go; ### TODO ???
-		
-		my $old = $pattern;
-		### convert bug pattern to internal format ###
-		
-		my $key_words = "get|kind|info|isRequirementFailed|modelOperation|modelOperationSeries|size|transitionName|interimFailures|name|returnValue|getParameterValue|getCoveredElementId";
-		
-		$pattern =~ s/(?<!\.)(?:\b)($key_words)(\b)/\$exc->$1/go;
-		$pattern =~ s/\.($key_words)(\b)/->$1/go;
-		
-		$pattern =~ s/(\$[^\$]*)\.indexOf\(/index($1, /go;
-		$pattern =~ s/\.endsWith\(['"](.*?[^\\])['"]\)/ =~ \/$1\$\//go;
-		$pattern =~ s/\.matches\(['"](.*?[^\\])['"]\)/ =~ \/$1\//go;
-		
-		$bug->{'pattern'} = $pattern;
+        # == and ""
+        $pattern =~ s/(\b)(\w+_FAILED)(\b)/'$2'/go;
+        $pattern =~ s/==(\s*["'])/eq$1/go;
+        $pattern =~ s/(['"]\s*)==/$1eq/go;
+        $pattern =~ s/"/'/go;
+        #$pattern =~ s/([\@\%\$])/\$1/go; ### TODO ???
+        
+        my $old = $pattern;
+        ### convert bug pattern to internal format ###
+        
+        my $key_words = "get|kind|info|isRequirementFailed|modelOperation|modelOperationSeries|size|transitionName|interimFailures|name|returnValue|getParameterValue|getCoveredElementId";
+        
+        $pattern =~ s/(?<!\.)(?:\b)($key_words)(\b)/\$exc->$1/go;
+        $pattern =~ s/\.($key_words)(\b)/->$1/go;
+        
+        $pattern =~ s/(\$[^\$]*)\.indexOf\(/index($1, /go;
+        $pattern =~ s/\.endsWith\(['"](.*?[^\\])['"]\)/ =~ \/$1\$\//go;
+        $pattern =~ s/\.matches\(['"](.*?[^\\])['"]\)/ =~ \/$1\//go;
+        
+        $bug->{'pattern'} = $pattern;
 
-		delete $bug->{'property'}; ### TODO: useful to use this ussue
-		
-		my $funcref = eval( 'sub {my $exc = shift; return '.$pattern.';}' );
-		if($@){
-			print $old."\n\n";
-			print $pattern."\n\n";
-			print $@;
-			exit;
-		}
-		else{
-			$bug->{'func'} = $funcref;
-		}
-	}
+        delete $bug->{'property'}; ### TODO: useful to use this ussue
+        
+        my $funcref = eval( 'sub {my $exc = shift; return '.$pattern.';}' );
+        if($@){
+            print $old."\n\n";
+            print $pattern."\n\n";
+            print $@;
+            exit;
+        }
+        else{
+            $bug->{'func'} = $funcref;
+        }
+    }
 }
 
 
@@ -268,371 +268,351 @@ my $cdata;
 ### Handlers ###
 
 sub start_element {
-	my ($self, $el) = @_;
-	my $name = $el->{'Name'};
+    my ($self, $el) = @_;
+    my $name = $el->{'Name'};
 
-	my %atts;
-	if(defined $el->{'Attributes'}){
-		while (my ( $key, $value ) = each %{$el->{'Attributes'}}){
-			if(ref $value){
-				$atts{$value->{'Name'}} = $value->{'Value'};
-			}
-			else{
-				$atts{$key} = $value;
-			}
-		}
-	}
-	
-	if($name eq 'model_operation_start'){
-		$model_id = $atts{'refid'};
-		
-		if(defined $operation->{$model_id}){
-			generate_struct_exception($self, "Duplicate model id '$model_id'");
-			print Dumper($operation);
-		}
-		
-		$operation->{$model_id} = \%atts;
-		Operation::new($operation->{$model_id});
-		
-		if($atts{'signature'} =~ /.*?(\w+)\(.*/){
-			$operation->{$model_id}{'name'} = $1
-		}
-				
-		$self->{'coverage'}{$atts{'package'}}{$atts{'signature'}}{'kind'} = $atts{'kind'};
-	}
-	elsif($name eq 'model_value'){
-		push (@{$operation->{$model_id}{'model_value'}}, \%atts);
-	}
-	elsif($name eq 'model_operation_end'){
-		undef $model_id;
-	}
-	elsif($name eq 'oracle_start'){
-		$op_id = defined $atts{'ref'} ? $atts{'ref'} : $model_id;
-		
-		push(@{$series->[-1]}, "op_$op_id");
-		
-		if(not defined $operation->{$op_id}){
-			$operation->{$op_id} = {'package' => $atts{'package'}, 'signature' => $atts{'signature'}};
-			generate_struct_exception($self, "No model call with id '$op_id'");
-		}
-	}
-	elsif($name eq 'oracle_end'){
-		undef $op_id;
-	}
-	elsif($name eq 'exception'){
-		$exc_id++;
+    my %atts;
+    if(defined $el->{'Attributes'}){
+        while (my ( $key, $value ) = each %{$el->{'Attributes'}}){
+            if(ref $value){
+                $atts{$value->{'Name'}} = $value->{'Value'};
+            }
+            else{
+                $atts{$key} = $value;
+            }
+        }
+    }
+    
+    if($name eq 'model_operation_start'){
+        $model_id = $atts{'refid'};
+        
+        if(defined $operation->{$model_id}){
+            generate_struct_exception($self, "Duplicate model id '$model_id'");
+            print Dumper($operation);
+        }
+        
+        $operation->{$model_id} = \%atts;
+        Operation::new($operation->{$model_id});
+        
+        if($atts{'signature'} =~ /.*?(\w+)\(.*/){
+            $operation->{$model_id}{'name'} = $1
+        }
+                
+        $self->{'coverage'}{$atts{'package'}}{$atts{'signature'}}{'kind'} = $atts{'kind'};
+    }
+    elsif($name eq 'model_value'){
+        push (@{$operation->{$model_id}{'model_value'}}, \%atts);
+    }
+    elsif($name eq 'model_operation_end'){
+        undef $model_id;
+    }
+    elsif($name eq 'oracle_start'){
+        $op_id = defined $atts{'ref'} ? $atts{'ref'} : $model_id;
+        
+        push(@{$series->[-1]}, "op_$op_id");
+        
+        if(not defined $operation->{$op_id}){
+            $operation->{$op_id} = {'package' => $atts{'package'}, 'signature' => $atts{'signature'}};
+            generate_struct_exception($self, "No model call with id '$op_id'");
+        }
+    }
+    elsif($name eq 'oracle_end'){
+        undef $op_id;
+    }
+    elsif($name eq 'exception'){
+        $exc_id++;
 
-		$exception{$exc_id} = \%atts;
-		$exception{$exc_id}{'transition'} = $transition;
-		$exception{$exc_id}{'scenario'} = $scenario;
-		$exception{$exc_id}{'traceName'} = $main::trace_file_name.", transition $transition (id=$transition_id)";
-		Exception::new($exception{$exc_id});
-		
-		if(defined $operation->{''}){
-			delete $operation->{''};
-		}
-		
-		if(defined $op_id){
-			$exception{$exc_id}{'model'}{$op_id} = $operation->{$op_id};
-		}
-		elsif($atts{'kind'} eq 'SERIALIZATION_FAILED'){
-			$exception{$exc_id}{'model'} = $operation;
-		}
-		
-		if ($atts{'kind'} eq 'SERIALIZATION_FAILED'){
-			$atts{'series'} = $series;
-			$atts{'info'} = 'Serialization Failed';
-		}
-		else{
-			push(@{$series->[-1]}, "exc_$exc_id");
-		}
-	}
-	elsif($name eq 'property'){
-		push(@{$exception{$exc_id}{'property'}}, \%atts);
-	}
-	elsif($name eq 'serialization_start'){
-		push(@$series, []) if scalar @{$series->[-1]};
-	}
-	
-	elsif($name eq 'coverage'){
-		$coverage_id = $atts{'id'};
-	}
-	elsif($name eq 'element'){
-		my $p = $operation->{$op_id}{'package'};
-		my $s = $operation->{$op_id}{'signature'};
-		
-		$self->{'coverage'}{$p}{$s}{'coverage'}{$coverage_id}{$atts{'id'}}{'name'} = $atts{'name'};
-	}
-	elsif($name eq 'formula'){
-		$formula_id = $atts{'id'};
-	}
-	elsif($name eq 'coverage_element'){
-		my $p = $operation->{$op_id}{'package'};
-		my $s = $operation->{$op_id}{'signature'};
-		$self->{'coverage'}{$p}{$s}{'coverage'}{$atts{'coverage'}}{$atts{'id'}}{'hits'}++;
-		
-		$operation->{$op_id}{'coverage'}{$atts{'coverage'}} = $atts{'id'};
-	}
-	elsif($name eq 'prime_formula'){
-		$operation->{$op_id}{'formula'}{$atts{'id'}} = $atts{'value'};
-	}
-	elsif($name eq 'mark'){
-		my ($p, $s);
-		if(defined $op_id and defined $operation->{$op_id}){
-			$p = $operation->{$op_id}{'package'};
-			$s = $operation->{$op_id}{'signature'};
-		}
-		elsif(defined $operation){
-			my $id = (sort {$a <=> $b} keys %$operation)[0];
-			$p = $operation->{$id}{'package'};
-			$s = $operation->{$id}{'signature'};
-		}
-		else{
-			$p = 'unknown package';
-			$s = 'unknown model operation';
-		}
-		$self->{'coverage'}{$p}{$s}{'mark'}{$atts{'name'}}++;
-	}
-	elsif($name eq 'scenario_start'){
-		$scenario = delete $atts{'name'};
-		$self->{'scenario'}{$scenario} = \%atts;
-		$self->{'scenario'}{$scenario}{'trace'} = $main::trace_file_name;
-		$exc_id = 0;
-	}
-	elsif($name eq 'scenario_end'){
-		$self->{'scenario'}{$scenario}{'end_time'} = $atts{'time'};
-	}
-	elsif($name eq 'scenario_value'){
-		if ($atts{'kind'} eq 'scenario method'){
-			$transition = '?';
-		}
-	}
-	elsif($name eq 'transition_start'){
-		$transition_id = $atts{'id'};
-		
-		undef $operation;
-		undef %exception;
-		undef $series;
-		push(@$series, []);
-	}
-	elsif($name eq 'transition_end'){
-		foreach my $c_id (sort {$a <=> $b} keys %exception){
-			next if(defined $main::mfpsc and $c_id > $main::mfpsc);
-			
-			my $exc = $exception{$c_id};
-			
-			if(! defined $exc->{'interim'} or $exc->{'interim'} eq 'false'){
-				if(defined $exc->{'series'}){
-					foreach my $s (@{$exc->{'series'}}){
-						foreach (@$s){
-							if ($_ =~ /exc_(\w+)/){
-								$self->{'interim'}{'Interim failure '.(++$im_id)} = $exception{$1};
-								$_ = 'im_'.$im_id;
-								
-								push(@{$exc->{'interim_fail'}}, $exception{$1});
-							}
-						}
-					}
-				}
-				
-				foreach my $b_id (keys %{$bugDB->{'bug'}}){
-					if ($bugDB->{'bug'}{$b_id}{'func'}($exc) ){
-						$exc->{'bug'} = $b_id;
-					}
-				}
-				
-				$self->{'failure'}{'failure '.(++$f_id)} = $exc;
-
-				prepare_for_printing($exc);
-				
-				### failure grouping according to scenario name ###
-				push(@{$self->{'scenario'}{$scenario}{'failure'}}, "failure $f_id");
-				
-				### failure grouping according to failure.grouping.xml ###
-				my ($p, $s) = $exception{$c_id}->origin;
-				
-				if(my $b_id = $exception{$c_id}{'bug'}){
-					push(@{$self->{'grouping'}{'known bugs'}{$p}{$s}{$b_id}}, "failure $f_id");
-				}
-				elsif ($exception{$c_id}->reqs ){
-					push(@{$self->{'grouping'}{'req failures'}{$p}{$s}}, "failure $f_id");
-				}
-				else{
-					if($exc->kind eq 'POSTCONDITION_FAILED' or $exc->kind eq 'INVARIANT_FAILED'){
-						push(@{$self->{'grouping'}{'other failures'}{'postcondition violation'}{$p}{$s}}, "failure $f_id");
-					}
-					elsif($exc->kind eq 'SCENARIO_FUNCTION_FAILED'){
-						push(@{$self->{'grouping'}{'other failures'}{'extra assertion violation'}}, "failure $f_id");
-					}
-					elsif($exc->kind eq 'MEDIATOR_FAILED'){
-						push(@{$self->{'grouping'}{'other failures'}{'target function failures'}{$p}{$s}}, "failure $f_id");
-					}
-					elsif($exc->kind eq 'INCORRECT_SET_OF_INTERACTIONS' or $exc->kind eq 'SERIALIZATION_FAILED'){
-						push(@{$self->{'grouping'}{'other failures'}{'serialization failures'}}, "failure $f_id");
-					}
-					elsif($exc->kind eq 'PRECONDITION_FAILED' or $exc->kind eq 'UNCONNECTED_GRAPH'
-						or $exc->kind eq 'NONDETERMINISTIC_GRAPH' or $exc->kind eq 'SCENARIO_INITIALIZATION_FAILED'
-						or $exc->kind eq 'INVALID_SCENARIO' or $exc->kind eq 'NONDETERMINISTIC_MODEL'
-						){
-						push(@{$self->{'grouping'}{'other failures'}{'test failures'}}, "failure $f_id");
-					}
-					elsif($exc->kind eq 'INTERNAL_ERROR' or $exc->kind eq 'UNKNOWN_KIND'){
-						push(@{$self->{'grouping'}{'other failures'}{'internal failures'}}, "failure $f_id");
-					}
-					elsif($exc->kind eq 'STRUCTURAL_FAILURE'){
-						push(@{$self->{'grouping'}{'other failures'}{'structural failures'}}, "failure $f_id");
-					}
-				}
-			}
-		}
-		
-		$transition = '';
-		undef $transition_id;
-	}
+        $exception{$exc_id} = \%atts;
+        $exception{$exc_id}{'transition'} = $transition;
+        $exception{$exc_id}{'scenario'} = $scenario;
+        $exception{$exc_id}{'traceName'} = $main::trace_file_name.", transition $transition (id=$transition_id)";
+        Exception::new($exception{$exc_id});
+        
+        if(defined $operation->{''}){
+            delete $operation->{''};
+        }
+        
+        if(defined $op_id){
+            $exception{$exc_id}{'model'}{$op_id} = $operation->{$op_id};
+        }
+        elsif($atts{'kind'} eq 'SERIALIZATION_FAILED'){
+            $exception{$exc_id}{'model'} = $operation;
+        }
+        
+        if ($atts{'kind'} eq 'SERIALIZATION_FAILED'){
+            $atts{'series'} = $series;
+            $atts{'info'} = 'Serialization Failed';
+        }
+        else{
+            push(@{$series->[-1]}, "exc_$exc_id");
+        }
+    }
+    elsif($name eq 'property'){
+        push(@{$exception{$exc_id}{'property'}}, \%atts);
+    }
+    elsif($name eq 'serialization_start'){
+        push(@$series, []) if scalar @{$series->[-1]};
+    }
+    
+    elsif($name eq 'coverage'){
+        $coverage_id = $atts{'id'};
+    }
+    elsif($name eq 'element'){
+        my $p = $operation->{$op_id}{'package'};
+        my $s = $operation->{$op_id}{'signature'};
+        
+        $atts{'name'} =~ s/&amp;/&/go;
+        $atts{'name'} =~ s/&/&amp;/go;
+        $atts{'name'} =~ s/</&lt;/go;
+            
+        $self->{'coverage'}{$p}{$s}{'coverage'}{$coverage_id}{$atts{'id'}}{'name'} = $atts{'name'};
+    }
+    elsif($name eq 'formula'){
+        $formula_id = $atts{'id'};
+    }
+    elsif($name eq 'coverage_element'){
+        my $p = $operation->{$op_id}{'package'};
+        my $s = $operation->{$op_id}{'signature'};
+        $self->{'coverage'}{$p}{$s}{'coverage'}{$atts{'coverage'}}{$atts{'id'}}{'hits'}++;
+        
+        $operation->{$op_id}{'coverage'}{$atts{'coverage'}} = $atts{'id'};
+    }
+    elsif($name eq 'prime_formula'){
+        $operation->{$op_id}{'formula'}{$atts{'id'}} = $atts{'value'};
+    }
+    elsif($name eq 'mark'){
+        my ($p, $s);
+        if(defined $op_id and defined $operation->{$op_id}){
+            $p = $operation->{$op_id}{'package'};
+            $s = $operation->{$op_id}{'signature'};
+        }
+        elsif(defined $operation){
+            my $id = (sort {$a <=> $b} keys %$operation)[0];
+            $p = $operation->{$id}{'package'};
+            $s = $operation->{$id}{'signature'};
+        }
+        else{
+            $p = 'unknown package';
+            $s = 'unknown model operation';
+        }
+        $self->{'coverage'}{$p}{$s}{'mark'}{$atts{'name'}}++;
+    }
+    elsif($name eq 'scenario_start'){
+        $scenario = delete $atts{'name'};
+        $self->{'scenario'}{$scenario} = \%atts;
+        $self->{'scenario'}{$scenario}{'trace'} = $main::trace_file_name;
+        $exc_id = 0;
+    }
+    elsif($name eq 'scenario_end'){
+        $self->{'scenario'}{$scenario}{'end_time'} = $atts{'time'};
+    }
+    elsif($name eq 'scenario_value'){
+        if ($atts{'kind'} eq 'scenario method'){
+            $transition = '?';
+        }
+    }
+    elsif($name eq 'transition_start'){
+        $transition_id = $atts{'id'};
+        
+        undef $operation;
+        undef %exception;
+        undef $series;
+        push(@$series, []);
+    }
+    elsif($name eq 'transition_end'){
+        foreach my $c_id (sort {$a <=> $b} keys %exception){
+            next if(defined $main::mfpsc and $c_id > $main::mfpsc);
+            
+            my $exc = $exception{$c_id};
+            
+            if(! defined $exc->{'interim'} or $exc->{'interim'} eq 'false'){
+                if(defined $exc->{'series'}){
+                    foreach my $s (@{$exc->{'series'}}){
+                        foreach (@$s){
+                            if ($_ =~ /exc_(\w+)/){
+                                $self->{'interim'}{'Interim failure '.(++$im_id)} = $exception{$1};
+                                $_ = 'im_'.$im_id;
+                                
+                                push(@{$exc->{'interim_fail'}}, $exception{$1});
+                            }
+                        }
+                    }
+                }
+                
+                foreach my $b_id (keys %{$bugDB->{'bug'}}){
+                    if ($bugDB->{'bug'}{$b_id}{'func'}($exc) ){
+                        $exc->{'bug'} = $b_id;
+                    }
+                }
+                
+                $self->{'failure'}{'failure '.(++$f_id)} = $exc;
+                
+                ### failure grouping according to scenario name ###
+                push(@{$self->{'scenario'}{$scenario}{'failure'}}, "failure $f_id");
+                
+                ### failure grouping according to failure.grouping.xml ###
+                my ($p, $s) = $exception{$c_id}->origin;
+                
+                if(my $b_id = $exception{$c_id}{'bug'}){
+                    push(@{$self->{'grouping'}{'known bugs'}{$p}{$s}{$b_id}}, "failure $f_id");
+                }
+                elsif ($exception{$c_id}->reqs ){
+                    push(@{$self->{'grouping'}{'req failures'}{$p}{$s}}, "failure $f_id");
+                }
+                else{
+                    if($exc->kind eq 'POSTCONDITION_FAILED' or $exc->kind eq 'INVARIANT_FAILED'){
+                        push(@{$self->{'grouping'}{'other failures'}{'postcondition violation'}{$p}{$s}}, "failure $f_id");
+                    }
+                    elsif($exc->kind eq 'SCENARIO_FUNCTION_FAILED'){
+                        push(@{$self->{'grouping'}{'other failures'}{'extra assertion violation'}}, "failure $f_id");
+                    }
+                    elsif($exc->kind eq 'MEDIATOR_FAILED'){
+                        push(@{$self->{'grouping'}{'other failures'}{'target function failures'}{$p}{$s}}, "failure $f_id");
+                    }
+                    elsif($exc->kind eq 'INCORRECT_SET_OF_INTERACTIONS' or $exc->kind eq 'SERIALIZATION_FAILED'){
+                        push(@{$self->{'grouping'}{'other failures'}{'serialization failures'}}, "failure $f_id");
+                    }
+                    elsif($exc->kind eq 'PRECONDITION_FAILED' or $exc->kind eq 'UNCONNECTED_GRAPH'
+                        or $exc->kind eq 'NONDETERMINISTIC_GRAPH' or $exc->kind eq 'SCENARIO_INITIALIZATION_FAILED'
+                        or $exc->kind eq 'INVALID_SCENARIO' or $exc->kind eq 'NONDETERMINISTIC_MODEL'
+                        ){
+                        push(@{$self->{'grouping'}{'other failures'}{'test failures'}}, "failure $f_id");
+                    }
+                    elsif($exc->kind eq 'INTERNAL_ERROR' or $exc->kind eq 'UNKNOWN_KIND'){
+                        push(@{$self->{'grouping'}{'other failures'}{'internal failures'}}, "failure $f_id");
+                    }
+                    elsif($exc->kind eq 'STRUCTURAL_FAILURE'){
+                        push(@{$self->{'grouping'}{'other failures'}{'structural failures'}}, "failure $f_id");
+                    }
+                }
+            }
+        }
+        
+        $transition = '';
+        undef $transition_id;
+    }
 }
 
 sub end_element {
-	my ($self, $el) = @_;
-	my $name = $el->{'Name'};
+    my ($self, $el) = @_;
+    my $name = $el->{'Name'};
 
-	my %atts;
-	if(defined $el->{'Attributes'}){
-		while (my ( $key, $value ) = each %{$el->{'Attributes'}}){
-			if(ref $value){
-				$atts{$value->{'Name'}} = $value->{'Value'};
-			}
-			else{
-				$atts{$key} = $value;
-			}
-		}
-	}
+    my %atts;
+    if(defined $el->{'Attributes'}){
+        while (my ( $key, $value ) = each %{$el->{'Attributes'}}){
+            if(ref $value){
+                $atts{$value->{'Name'}} = $value->{'Value'};
+            }
+            else{
+                $atts{$key} = $value;
+            }
+        }
+    }
 
-	if ($name eq 'model_value'){
-		$operation->{$model_id}{'model_value'}[-1]{'value'} = $cdata;
-	}
-	elsif ($name eq 'info'){
-		$exception{$exc_id}{'info'} = $cdata;
-	}
-	elsif ($name eq 'coverage'){
-		$coverage_id = '';
-	}
-	elsif ($name eq 'formula'){
-		my $p = $operation->{$op_id}{'package'};
-		my $s = $operation->{$op_id}{'signature'};
-		
-		$self->{'coverage'}{$p}{$s}{'formula'}{$formula_id} = $cdata;
-		$formula_id = '';
-	}
-	elsif($name eq 'scenario_value'){
-		if ($transition eq '?'){
-			$transition = $cdata;
-		}
-	}
+    if ($name eq 'model_value'){
+        $operation->{$model_id}{'model_value'}[-1]{'value'} = $cdata;
+    }
+    elsif ($name eq 'info'){
+        $exception{$exc_id}{'info'} = $cdata;
+    }
+    elsif ($name eq 'coverage'){
+        $coverage_id = '';
+    }
+    elsif ($name eq 'formula'){
+        my $p = $operation->{$op_id}{'package'};
+        my $s = $operation->{$op_id}{'signature'};
+        
+        $self->{'coverage'}{$p}{$s}{'formula'}{$formula_id} = $cdata;
+        $formula_id = '';
+    }
+    elsif($name eq 'scenario_value'){
+        if ($transition eq '?'){
+            $transition = $cdata;
+        }
+    }
 }
 
 sub start_cdata {
     $cdata = '';
 }
 
+sub end_cdata {
+    $cdata =~ s/&amp;/&/go;
+    $cdata =~ s/&/&amp;/go;
+    $cdata =~ s/</&lt;/go;
+#    $cdata =~ s/>/&gt;/go;
+#    $cdata =~ s/\'/&apos;/go;
+#    $cdata =~ s/\"/&quot;/go;
+}
+
 sub characters {
-	my ($self, $el) = @_;
-	$el->{'Data'} =~ s/\n^[\s\t]+(.*)/$1 /gm;
-	$el->{'Data'} =~ s/\s+$//;
-	$cdata = $cdata.$el->{'Data'};
+    my ($self, $el) = @_;
+    $el->{'Data'} =~ s/\n^[\s\t]+(.*)/$1 /gm;
+    $el->{'Data'} =~ s/\s+$//;
+    $cdata = $cdata.$el->{'Data'};
 }
 
 sub error {
-	my ($self, $el) = @_;
-	generate_struct_exception($self, $el);
+    my ($self, $el) = @_;
+    generate_struct_exception($self, $el);
 }
 
 sub fatal_error {
-	my ($self, $el) = @_;
-	generate_struct_exception($self, $el);
+    my ($self, $el) = @_;
+    generate_struct_exception($self, $el);
 }
 
 sub generate_struct_exception{
-	my $self = shift;
-	my $error = shift;
-	
-	my $info;
-	my $tracename = $main::trace_file_name;
-		
-	if(ref($error)){
-		if(defined $error->{'Message'}){
-			$info = $error->{'Message'};
-		}
-		else{
-			$info = $error;
-		}
-		
-		if(defined $error->{'LineNumber'}){
-			$tracename .= ', line '.$error->{'LineNumber'};
-		}
-		elsif(defined $error->{'reader'}){
-			$tracename .= ', line '.$error->{'reader'}[3];
-		}
-		else{
-			$tracename .= ", transition $transition (id=$transition_id)";
-		}
-	}
-	else{
-		$info = $error;
-		if($error =~ /line (\d+)/){
-			$tracename .= ', line '.$1;
-		}
-		else{
-			$tracename .= ", transition $transition (id=$transition_id)";
-		}
-	}
-	
-	$info =~ s/\n//go;
-	
-	### TODO: constraint of structural fails per scenario
+    my $self = shift;
+    my $error = shift;
+    
+    my $info;
+    my $tracename = $main::trace_file_name;
+        
+    if(ref($error)){
+        if(defined $error->{'Message'}){
+            $info = $error->{'Message'};
+        }
+        else{
+            $info = $error;
+        }
+        
+        if(defined $error->{'LineNumber'}){
+            $tracename .= ', line '.$error->{'LineNumber'};
+        }
+        elsif(defined $error->{'reader'}){
+            $tracename .= ', line '.$error->{'reader'}[3];
+        }
+        else{
+            $tracename .= ", transition $transition (id=$transition_id)";
+        }
+    }
+    else{
+        $info = $error;
+        if($error =~ /line (\d+)/){
+            $tracename .= ', line '.$1;
+        }
+        else{
+            $tracename .= ", transition $transition (id=$transition_id)";
+        }
+    }
+    
+    $info =~ s/\n//go;
+    
+    ### TODO: constraint of structural fails per scenario
 
-	my $exc = {
-		'info' => $info,
-		'structural' => 'true',
-		'traceName' => $tracename,
-		'scenario' => $scenario,
-		};
+    my $exc = {
+        'info' => $info,
+        'structural' => 'true',
+        'traceName' => $tracename,
+        'scenario' => $scenario,
+        };
 
-	prepare_for_printing($exc);
-	Exception::new($exc);
-	$self->{'failure'}{'failure '.(++$f_id).' (structural)'} = $exc;
-	push(@{$self->{'grouping'}{'other failures'}{'structural failures'}}, "failure $f_id (structural)");
-	
-	$main::is_struct_fail = 1;
-}
-
-### prepare data for printing ###
-sub prepare_for_printing{
-	my $exc = shift;
-
-	if(defined $exc->{'info'}){
-		$exc->{'info'} =~ s/&amp;/&/go;
-		$exc->{'info'} =~ s/&/&amp;/go;
-		$exc->{'info'} =~ s/</&lt;/go;
-	}
-	if(defined $exc->{'property'}){
-		foreach (@{$exc->{'property'}}){
-			$_->{'value'} =~ s/&/&amp;/go;
-			$_->{'value'} =~ s/</&lt;/go;
-		}
-	}
-	if(defined $exc->{'model'}){
-		foreach (values %{$exc->{'model'}}){
-			foreach my $param (@{$_->{'model_value'}}){
-				$param->{'value'} =~ s/&/&amp;/go;
-				$param->{'value'} =~ s/</&lt;/go;
-			}
-		}
-	}
-	if(defined $exc->{'interim_fail'}){
-		foreach (@{$exc->{'interim_fail'}}){
-			prepare_for_printing($_);
-		}
-	}
+    Exception::new($exc);
+    $self->{'failure'}{'failure '.(++$f_id).' (structural)'} = $exc;
+    push(@{$self->{'grouping'}{'other failures'}{'structural failures'}}, "failure $f_id (structural)");
+    
+    $main::is_struct_fail = 1;
 }
 
 package main;
@@ -644,12 +624,12 @@ my $crpfm;
 our $mfpsc;
 
 GetOptions(
-	"d=s" => \$report_dir,
-	"x=s" => \$res_file,
-	"crpfm=s" => \$crpfm,
-	"mfpsc=s" => \$mfpsc, # max fails per scenario
-	"bdbs=s" => \$bug_db_file
-	);
+    "d=s" => \$report_dir,
+    "x=s" => \$res_file,
+    "crpfm=s" => \$crpfm,
+    "mfpsc=s" => \$mfpsc, # max fails per scenario
+    "bdbs=s" => \$bug_db_file
+    );
 
 if(-f $bug_db_file){
     $bugDB = XMLin($bug_db_file,
@@ -660,7 +640,7 @@ if(-f $bug_db_file){
             "property" => "name"
             }
         );
-	processBugDB($bugDB);
+    processBugDB($bugDB);
 }
 
 our $trace_file_name;
@@ -671,37 +651,37 @@ our $parser = XML::SAX::ParserFactory->parser(Handler => $handler);
 
 my $tmp_file = tmpnam();
 foreach $trace_file_name (sort @ARGV){
-	$is_struct_fail = 0;
-	
-	if(! -f $trace_file_name){next};
-	chomp($trace_file_name = `readlink -f $trace_file_name`);
-	if($trace_file_name =~ /\.utz/){
-		open(TRACE, "unzip -p $trace_file_name |");
-	}
-	elsif($trace_file_name =~ /\.utgz/){
-		open(TRACE, "gunzip -c $trace_file_name |");
-	}
-	else{
-		open(TRACE, "$trace_file_name");
-	}
-	
-	open(TMP, "> $tmp_file");
-	my $norep = 0;
-	while(<TRACE>){
-		if(! $norep and $_ =~ s/encoding=\"iso(\d)/encoding=\"iso-$1/){
-			$norep = 1;
-		}
-		print TMP $_;
-	}
-	close(TMP);
-	close(TRACE);
+    $is_struct_fail = 0;
+    
+    if(! -f $trace_file_name){next};
+    chomp($trace_file_name = `readlink -f $trace_file_name`);
+    if($trace_file_name =~ /\.utz/){
+        open(TRACE, "unzip -p $trace_file_name |");
+    }
+    elsif($trace_file_name =~ /\.utgz/){
+        open(TRACE, "gunzip -c $trace_file_name |");
+    }
+    else{
+        open(TRACE, "$trace_file_name");
+    }
+    
+    open(TMP, "> $tmp_file");
+    my $norep = 0;
+    while(<TRACE>){
+        if(! $norep and $_ =~ s/encoding=\"iso(\d)/encoding=\"iso-$1/){
+            $norep = 1;
+        }
+        print TMP $_;
+    }
+    close(TMP);
+    close(TRACE);
     
     print "$trace_file_name parsing...\n";
     (my $short_file_name = $trace_file_name) =~ s/.*\///;
     print "Processing entry: $short_file_name\n";
 
     eval { $parser->parse({Source => {SystemId => $tmp_file}}) };
-	if($@){
+    if($@){
         ReportHandler::generate_struct_exception($handler, $@);
     }
     
@@ -721,59 +701,59 @@ print RES "<Report technology=\"CTesK\" isCorrect=\"false\">\n";
 ### coverage ###
 
 foreach my $p ( keys %{$handler->{'coverage'}}){
-	print RES <<XML;
+    print RES <<XML;
   <PackageDesc identifier="$p">
     <SpecificationDesc identifier="~undefined class~">
 XML
-	foreach my $s ( keys %{$handler->{'coverage'}{$p}}){
-		my $kind = $handler->{'coverage'}{$p}{$s}{'kind'};
-		print RES <<XML;
+    foreach my $s ( keys %{$handler->{'coverage'}{$p}}){
+        my $kind = $handler->{'coverage'}{$p}{$s}{'kind'};
+        print RES <<XML;
       <SpecificationMethodDesc identifier="$s" kind="$kind">
         <CoverageStructure name="$p/$s" noDisjuncts="true">
 XML
-		foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'formula'}}){
-			my $name = $handler->{'coverage'}{$p}{$s}{'formula'}{$id};
-			print RES <<XML;
+        foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'formula'}}){
+            my $name = $handler->{'coverage'}{$p}{$s}{'formula'}{$id};
+            print RES <<XML;
           <Formula id="$id" text="$name" />
 XML
-		}
-		foreach my $cov ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}}){
-			print RES <<XML;
+        }
+        foreach my $cov ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}}){
+            print RES <<XML;
           <CoverageDeclaration name="$cov" coverageStructure="$p/$s">
 XML
-			foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}}){
-				my $name = $handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}{$id}{'name'};
-				print RES <<XML;
+            foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}}){
+                my $name = $handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}{$id}{'name'};
+                print RES <<XML;
             <UserDefinedCoverageElement id="$id" text="$name" />
 XML
-			}
-			print RES <<XML;
+            }
+            print RES <<XML;
           </CoverageDeclaration>
 XML
-		}
-		print RES <<XML;
+        }
+        print RES <<XML;
         </CoverageStructure>
 XML
-		foreach my $cov ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}}){
-			foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}}){
-				my $hits = $handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}{$id}{'hits'};
-				$hits = 0 if ! defined $hits;
-				print RES <<XML;
+        foreach my $cov ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}}){
+            foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}}){
+                my $hits = $handler->{'coverage'}{$p}{$s}{'coverage'}{$cov}{$id}{'hits'};
+                $hits = 0 if ! defined $hits;
+                print RES <<XML;
         <CoveredUserDefElement coverageName="$cov" elementId="$id" hits="$hits"></CoveredUserDefElement>
 XML
-			}
-		}
-		foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'mark'}}){
-			my $hits = $handler->{'coverage'}{$p}{$s}{'mark'}{$id};
-			print RES <<XML;
+            }
+        }
+        foreach my $id ( sort keys %{$handler->{'coverage'}{$p}{$s}{'mark'}}){
+            my $hits = $handler->{'coverage'}{$p}{$s}{'mark'}{$id};
+            print RES <<XML;
         <CoveredStandaloneMark name="$id" hits="$hits" />
 XML
-		}
-		print RES <<XML;
+        }
+        print RES <<XML;
       </SpecificationMethodDesc>
 XML
-	}
-	print RES <<XML;
+    }
+    print RES <<XML;
     </SpecificationDesc>
   </PackageDesc>
 XML
@@ -785,25 +765,25 @@ print RES <<XML;
   <PackageDesc identifier="~default package~">
 XML
 foreach my $scen ( sort keys %{$handler->{'scenario'}}){
-	my $start_time = localtime($handler->{'scenario'}{$scen}{'time'} / 1000);
-	my $end_time = localtime($handler->{'scenario'}{$scen}{'end_time'} / 1000);
-	my $os = $handler->{'scenario'}{$scen}{'os'};
-	my $host = $handler->{'scenario'}{$scen}{'host'};
-	my $trace = $handler->{'scenario'}{$scen}{'trace'};
+    my $start_time = localtime($handler->{'scenario'}{$scen}{'time'} / 1000);
+    my $end_time = localtime($handler->{'scenario'}{$scen}{'end_time'} / 1000);
+    my $os = $handler->{'scenario'}{$scen}{'os'};
+    my $host = $handler->{'scenario'}{$scen}{'host'};
+    my $trace = $handler->{'scenario'}{$scen}{'trace'};
 
-	print RES <<XML;
+    print RES <<XML;
     <ScenarioDesc identifier="$scen">
       <ScenarioEnvironment startTime="$start_time" endTime="$end_time" trace="$trace">
         <EnvironmentProperty name="Host" value="$host" />
         <EnvironmentProperty name="Operating System" value="$os" />
       </ScenarioEnvironment>
 XML
-	foreach my $fail ( @{$handler->{'scenario'}{$scen}{'failure'}}){
-		print RES <<XML;
+    foreach my $fail ( @{$handler->{'scenario'}{$scen}{'failure'}}){
+        print RES <<XML;
       <FailureId identifier="$fail" isCertain="false" />
 XML
-	}
-	print RES <<XML;
+    }
+    print RES <<XML;
     </ScenarioDesc>
 XML
 }
@@ -814,137 +794,137 @@ XML
 ### failures ###
 
 foreach my $fid ( sort keys %{$handler->{'failure'}}){
-	print_failure($fid, $handler->{'failure'}{$fid});
+    print_failure($fid, $handler->{'failure'}{$fid});
 }
 foreach my $fid ( sort keys %{$handler->{'interim'}}){
-	print_failure($fid, $handler->{'interim'}{$fid});
+    print_failure($fid, $handler->{'interim'}{$fid});
 }
 
 sub print_failure{
-	my $fid = shift;
-	my $fail = shift;
-	
-	my ($p, $s) = $fail->origin;
-	my $info = $fail->{'info'};
-	my $scen = $fail->{'scenario'};
-	my $trace_name = $fail->{'traceName'};
-	my $structural = defined $fail->{'structural'} ? $fail->{'structural'} : 'false';
-	my $interim = defined $fail->{'interim'} ? $fail->{'interim'} : 'false';
-	
-	print RES <<XML;
+    my $fid = shift;
+    my $fail = shift;
+    
+    my ($p, $s) = $fail->origin;
+    my $info = $fail->{'info'};
+    my $scen = $fail->{'scenario'};
+    my $trace_name = $fail->{'traceName'};
+    my $structural = defined $fail->{'structural'} ? $fail->{'structural'} : 'false';
+    my $interim = defined $fail->{'interim'} ? $fail->{'interim'} : 'false';
+    
+    print RES <<XML;
   <FailureDesc identifier="$fid" scenarioDesc="$scen" structural="$structural" interim="$interim" traceName="$trace_name" currentOracleSignature="$s" info="$info">
 XML
-	my $model = $fail->modelOperation;
-	
-	if (not defined $fail->{'series'}){
-		if(defined $model->{'formula'}){
-			foreach my $id ( sort keys %{$model->{'formula'}}){
-				my $value = $model->{'formula'}{$id};
-				print RES <<XML;
+    my $model = $fail->modelOperation;
+    
+    if (not defined $fail->{'series'}){
+        if(defined $model->{'formula'}){
+            foreach my $id ( sort keys %{$model->{'formula'}}){
+                my $value = $model->{'formula'}{$id};
+                print RES <<XML;
     <FormulaInfo id="$id" value="$value" />
 XML
-			}
-		}
-		if(defined $model->{'coverage'}){
-			foreach my $id ( keys %{$model->{'coverage'}}){
-				my $value = $model->{'coverage'}{$id};
-				print RES <<XML;
+            }
+        }
+        if(defined $model->{'coverage'}){
+            foreach my $id ( keys %{$model->{'coverage'}}){
+                my $value = $model->{'coverage'}{$id};
+                print RES <<XML;
     <CoveredElementDesc coverage="$id" elementId="$value" />
 XML
-			}
-		}
-	}
-	
-	foreach my $param (@{$model->{'model_value'}}){
-		if ($param->{'kind'} eq 'argument'){
-			print RES <<XML;
+            }
+        }
+    }
+    
+    foreach my $param (@{$model->{'model_value'}}){
+        if ($param->{'kind'} eq 'argument'){
+            print RES <<XML;
     <Parameter type="$param->{type}" name="$param->{name}" value="$param->{value}" />
 XML
-		}
-	}
-	foreach my $param (@{$model->{'model_value'}}){
-		if ($param->{'kind'} eq 'result'){
-			print RES <<XML;
+        }
+    }
+    foreach my $param (@{$model->{'model_value'}}){
+        if ($param->{'kind'} eq 'result'){
+            print RES <<XML;
     <Result value="$param->{value}" />
 XML
-		}
-	}
-	foreach my $id (sort keys %{$fail->{'model'}}){
-		my $model = $fail->{'model'}{$id};
-		my $channel = $model->channel;
-		my $signature = $model->{'signature'};
-		my $package = $model->{'package'};
-		print RES <<XML;
+        }
+    }
+    foreach my $id (sort keys %{$fail->{'model'}}){
+        my $model = $fail->{'model'}{$id};
+        my $channel = $model->channel;
+        my $signature = $model->{'signature'};
+        my $package = $model->{'package'};
+        print RES <<XML;
     <ModelCall refid="$id" channel="$channel" signature="$signature" package="$package">
 XML
-		foreach my $param (@{$model->{'model_value'}}){
-			if ($param->{'kind'} eq 'argument'){
-				print RES <<XML;
+        foreach my $param (@{$model->{'model_value'}}){
+            if ($param->{'kind'} eq 'argument'){
+                print RES <<XML;
       <Parameter type="$param->{type}" name="$param->{name}" value="$param->{value}" />
 XML
-			}
-		}
-		print RES <<XML;
+            }
+        }
+        print RES <<XML;
     </ModelCall>
 XML
-	}
-	if(defined $fail->{'series'}){
-		foreach (@{$fail->{'series'}}){
-			print RES <<XML;
+    }
+    if(defined $fail->{'series'}){
+        foreach (@{$fail->{'series'}}){
+            print RES <<XML;
     <Series>
 XML
-			foreach my $item (@{$_}){
-				if($item =~ /op_(\d+)/){
-					my $id = $1;
-					my $model = $fail->{'model'}{$id};
-					print RES <<XML;
+            foreach my $item (@{$_}){
+                if($item =~ /op_(\d+)/){
+                    my $id = $1;
+                    my $model = $fail->{'model'}{$id};
+                    print RES <<XML;
       <OracleCall ref="$id">
 XML
-					if(defined $model->{'coverage'}){
-						foreach my $id ( keys %{$model->{'coverage'}}){
-							my $value = $model->{'coverage'}{$id};
-							print RES <<XML;
+                    if(defined $model->{'coverage'}){
+                        foreach my $id ( keys %{$model->{'coverage'}}){
+                            my $value = $model->{'coverage'}{$id};
+                            print RES <<XML;
         <CoveredElementDesc coverage="$id" elementId="$value" />
 XML
-						}
-					}
-					print RES <<XML;
+                        }
+                    }
+                    print RES <<XML;
       </OracleCall>
 XML
-				}
-				elsif($item =~ /im_(\d+)/){
-					print RES <<XML;
+                }
+                elsif($item =~ /im_(\d+)/){
+                    print RES <<XML;
       <FailureId identifier="Interim failure $1" />
 XML
-				}
-			}
-			print RES <<XML;
+                }
+            }
+            print RES <<XML;
     </Series>
 XML
-		}
-	}
-	foreach my $param (@{$fail->{'property'}}){
-		print RES <<XML;
+        }
+    }
+    foreach my $param (@{$fail->{'property'}}){
+        print RES <<XML;
     <Property name="$param->{name}" value="$param->{value}" />
 XML
-	}
-	if(defined $fail->{'info'}){
-		print RES <<XML;
+    }
+    if(defined $fail->{'info'}){
+        print RES <<XML;
     <Property name="info" value="$fail->{info}" />
 XML
-	}
-	
-	if(defined $fail->{'bug'}){
-		my $bid = $fail->{'bug'};
-		my $text = join ("\n        ",  grep /./o,  $bugDB->{'bug'}{$bid}{'body'} =~ /(.{100,}?(?:[\s\;](?=\S)|\z))/gs );
-		print RES <<XML;
+    }
+    
+    if(defined $fail->{'bug'}){
+        my $bid = $fail->{'bug'};
+        my $text = join ("\n        ",  grep /./o,  $bugDB->{'bug'}{$bid}{'body'} =~ /(.{100,}?(?:[\s\;](?=\S)|\z))/gs );
+        print RES <<XML;
     <bug id="$bid"><body>
         $text
     </body>
     </bug>
 XML
-	}
-	print RES <<XML;
+    }
+    print RES <<XML;
   </FailureDesc>
 XML
 }
@@ -954,28 +934,28 @@ XML
 print_group({"&lt;root group>" => $handler->{'grouping'}}, '');
 
 sub print_group{
-	my $group = shift;
-	my $space = shift;
-	$space = $space.'  ';
-	foreach my $sg (keys %$group){
-		print RES <<XML;
+    my $group = shift;
+    my $space = shift;
+    $space = $space.'  ';
+    foreach my $sg (keys %$group){
+        print RES <<XML;
 $space<FailureGroup name="$sg">
 XML
-		if(ref($group->{$sg}) eq 'HASH'){
-			print_group($group->{$sg}, $space);
-		}
-		else{
-			foreach my $f (@{$group->{$sg}}){
-				print RES <<XML;
+        if(ref($group->{$sg}) eq 'HASH'){
+            print_group($group->{$sg}, $space);
+        }
+        else{
+            foreach my $f (@{$group->{$sg}}){
+                print RES <<XML;
 $space  <FailureId identifier="$f" />
 XML
-			}
-		}
-		print RES <<XML;
+            }
+        }
+        print RES <<XML;
 $space</FailureGroup>
 XML
-	}
-	$space = substr($space, 2);
+    }
+    $space = substr($space, 2);
 }
 
 print RES "</Report>\n";
@@ -1235,25 +1215,25 @@ close CSS;
 
 
 foreach my $fid ( sort keys %{$handler->{'failure'}}){
-	print_failure_html($fid, $handler->{'failure'}{$fid});
+    print_failure_html($fid, $handler->{'failure'}{$fid});
 }
 foreach my $fid ( sort keys %{$handler->{'interim'}}){
-	print_failure_html($fid, $handler->{'interim'}{$fid});
+    print_failure_html($fid, $handler->{'interim'}{$fid});
 }
 
 sub print_failure_html{
-	my $fid = shift;
-	my $fail = shift;
-	
-	open(FAIL, "> $report_dir/report/failures/${fid}_0.html");
-	
-	my $info = $fail->{'info'};
-	my $scenario = $fail->{'scenario'};
-	my $trace_name = $fail->{'traceName'};
-	my $structural = defined $fail->{'structural'} ? $fail->{'structural'} : 'false';
-	my $interim = defined $fail->{'interim'} ? $fail->{'interim'} : 'false';
+    my $fid = shift;
+    my $fail = shift;
+    
+    open(FAIL, "> $report_dir/report/failures/${fid}_0.html");
+    
+    my $info = $fail->{'info'};
+    my $scenario = $fail->{'scenario'};
+    my $trace_name = $fail->{'traceName'};
+    my $structural = defined $fail->{'structural'} ? $fail->{'structural'} : 'false';
+    my $interim = defined $fail->{'interim'} ? $fail->{'interim'} : 'false';
 
-	print FAIL <<HTM;
+    print FAIL <<HTM;
 <html>
 <head>
 <title>$fid: $info</title>
@@ -1268,7 +1248,7 @@ sub print_failure_html{
 <td class="content">
 HTM
 
-	print FAIL <<HTM;
+    print FAIL <<HTM;
 <h1>$fid:</h1>
 <b>$info</b>
 
@@ -1285,98 +1265,98 @@ HTM
   <th colspan="2">occurence</th>
 </tr>
 HTM
-	if(defined $scenario){
-		print FAIL <<HTM;
+    if(defined $scenario){
+        print FAIL <<HTM;
 <tr>
   <td>scenario</td>
   <td><a href="">$scenario</a></td>
 </tr>
 HTM
-	}
+    }
 
 if(not defined $fail->{'series'}){
 
-	my $model = $fail->modelOperation;
-	
-	if(defined $model->{'name'}){
-		print FAIL <<HTM;
+    my $model = $fail->modelOperation;
+    
+    if(defined $model->{'name'}){
+        print FAIL <<HTM;
 <tr>
   <td>specification function</td>
   <td><a href="">$model->{name}()</a></td>
 </tr>
 HTM
-	}
-	
-		
-	foreach my $param (@{$model->{'model_value'}}){
-		if ($param->{'kind'} eq 'argument'){
-			print FAIL <<HTM;
+    }
+    
+        
+    foreach my $param (@{$model->{'model_value'}}){
+        if ($param->{'kind'} eq 'argument'){
+            print FAIL <<HTM;
 <tr>
   <td>parameter value</td>
   <td><nobr>&nbsp;$param->{type} $param->{name} =<wbr/> $param->{value}</nobr></td>
 </tr>
 HTM
-		}
-	}
-	foreach my $param (@{$model->{'model_value'}}){
-		if ($param->{'kind'} eq 'result'){
-			print FAIL <<HTM;
+        }
+    }
+    foreach my $param (@{$model->{'model_value'}}){
+        if ($param->{'kind'} eq 'result'){
+            print FAIL <<HTM;
 <tr>
   <td>return value</td>
   <td><nobr>&nbsp;$param->{type}<wbr/> $param->{value}</nobr></td>
 </tr>
 HTM
-		}
-	}
+        }
+    }
 
-	if(defined $model->{'coverage'}){
-		my $rowspan = keys %{$model->{'coverage'}};
-		print FAIL <<HTM;
+    if(defined $model->{'coverage'}){
+        my $rowspan = keys %{$model->{'coverage'}};
+        print FAIL <<HTM;
 <tr>
   <td rowspan="$rowspan">coverage<br>&amp; branch</td>
 HTM
-		my $first = 1;
-		foreach my $cov (keys %{$model->{'coverage'}}){
-			my $branch = $handler->{'coverage'}{$model->{'package'}}{$model->{'signature'}}{'coverage'}{$cov}{$model->{'coverage'}{$cov}}{'name'};
-		
-			if(! $first){
-				print "<tr>\n";
-			}
-			else{
-				$first = 0;
-			}
+        my $first = 1;
+        foreach my $cov (keys %{$model->{'coverage'}}){
+            my $branch = $handler->{'coverage'}{$model->{'package'}}{$model->{'signature'}}{'coverage'}{$cov}{$model->{'coverage'}{$cov}}{'name'};
+        
+            if(! $first){
+                print FAIL "<tr>\n";
+            }
+            else{
+                $first = 0;
+            }
 
-			print FAIL <<HTM;
+            print FAIL <<HTM;
   <td>$cov<br>$branch</td>
 </tr>
 HTM
-		}
-	}
+        }
+    }
 }
 
-	if(defined $fail->{'property'} and scalar @{$fail->{'property'}}){
-		print FAIL <<HTM;
+    if(defined $fail->{'property'} and scalar @{$fail->{'property'}}){
+        print FAIL <<HTM;
   <tr>
     <th colspan="2">properties</th>
   </tr>
 HTM
-	}
-	
-	foreach my $param (@{$fail->{'property'}}){
-		print FAIL <<HTM;
+    }
+    
+    foreach my $param (@{$fail->{'property'}}){
+        print FAIL <<HTM;
 <tr>
   <td>$param->{name}</td>
   <td>$param->{value}</td>
 </tr>
 HTM
-	}
-	
-	print FAIL <<HTM;
+    }
+    
+    print FAIL <<HTM;
 </table>
 HTM
 
 if(defined $fail->{'series'}){
-	print FAIL <<HTM;
+    print FAIL <<HTM;
 <table class="border">
 <caption>Stimuli &amp; reactions in the serialization:</caption>
   <tr>
@@ -1386,59 +1366,59 @@ if(defined $fail->{'series'}){
     <th>parameter</th>
   </tr>
 HTM
-	foreach my $id (sort keys %{$fail->{'model'}}){
-		my $model = $fail->{'model'}{$id};
-		my $channel = $model->channel;
-		my $signature = $model->{'signature'};
-		my $kind = $model->{'kind'};
+    foreach my $id (sort keys %{$fail->{'model'}}){
+        my $model = $fail->{'model'}{$id};
+        my $channel = $model->channel;
+        my $signature = $model->{'signature'};
+        my $kind = $model->{'kind'};
 
-		my $rowspan = scalar grep( ($_->{'kind'} eq 'argument' or $_->{'kind'} eq 'result'), @{$model->{'model_value'}});
-		my $letter = chr($id + 96);
-		print FAIL <<HTM;
+        my $rowspan = scalar grep( ($_->{'kind'} eq 'argument' or $_->{'kind'} eq 'result'), @{$model->{'model_value'}});
+        my $letter = chr($id + 96);
+        print FAIL <<HTM;
   <tr>
     <td class='double-up' rowspan="$rowspan">$letter) $kind $signature</td>
     <td class='double-up' rowspan="$rowspan">$channel</td>
     <td class='double-up' rowspan="$rowspan"></td>
 HTM
-		my $first = 1;
+        my $first = 1;
 
-		foreach my $param (@{$model->{'model_value'}}){
-			if ($param->{'kind'} eq 'argument'){
+        foreach my $param (@{$model->{'model_value'}}){
+            if ($param->{'kind'} eq 'argument'){
 
-				if(! $first){
-					print FAIL "  <tr>\n";
-					print FAIL "    <td>";
-				}
-				else{
-					print FAIL "    <td class='double-up'>";
-					$first = 0;
-				}
+                if(! $first){
+                    print FAIL "  <tr>\n";
+                    print FAIL "    <td>";
+                }
+                else{
+                    print FAIL "    <td class='double-up'>";
+                    $first = 0;
+                }
 
-				print FAIL <<HTM;
+                print FAIL <<HTM;
 <nobr>&nbsp;$param->{'type'} $param->{'name'} =<wbr/> $param->{'value'}</nobr></td>
   </tr>
 HTM
-			}
-		}
-		foreach my $param (@{$model->{'model_value'}}){
-			if ($param->{'kind'} eq 'result'){
+            }
+        }
+        foreach my $param (@{$model->{'model_value'}}){
+            if ($param->{'kind'} eq 'result'){
 
-				if(! $first){
-					print FAIL "  <tr>\n";
-					print FAIL "    <td>";
-				}
-				else{
-					print FAIL "    <td class='double-up'>";
-					$first = 0;
-				}
+                if(! $first){
+                    print FAIL "  <tr>\n";
+                    print FAIL "    <td>";
+                }
+                else{
+                    print FAIL "    <td class='double-up'>";
+                    $first = 0;
+                }
 
-			print FAIL <<HTM;
+            print FAIL <<HTM;
 <nobr>&nbsp;result =<wbr/> $param->{type}<wbr/> $param->{value}</nobr></td>
   </tr>
 HTM
-			}
-		}
-	}
+            }
+        }
+    }
 print FAIL <<HTM;
 </table>
 <table class="border">
@@ -1451,96 +1431,96 @@ print FAIL <<HTM;
   </tr>
 HTM
 
-	my $ser_num = 0;
-	foreach (@{$fail->{'series'}}){
-		my $rowspan = scalar map { if ($_ =~ /op_(\d+)/){ defined $fail->{'model'}{$1}{'coverage'} ? keys %{$fail->{'model'}{$1}{'coverage'}} : $_ }else{ $_ } } @{$_};
-		$ser_num++;
-		
-		print FAIL <<HTM;
+    my $ser_num = 0;
+    foreach (@{$fail->{'series'}}){
+        my $rowspan = scalar map { if ($_ =~ /op_(\d+)/){ defined $fail->{'model'}{$1}{'coverage'} ? keys %{$fail->{'model'}{$1}{'coverage'}} : $_ }else{ $_ } } @{$_};
+        $ser_num++;
+        
+        print FAIL <<HTM;
   <tr>
     <td class='double-up' rowspan="$rowspan">$ser_num</td>
 HTM
-		
-		my $first_line = 1;
-		my $num = 0;
-		foreach my $item (@{$_}){
-			$num++;
-			
-			if($item =~ /op_(\d+)/){
-				my $model = $fail->{'model'}{$1};
-				my $cov_rowspan = defined $model->{'coverage'} ? scalar keys %{$model->{'coverage'}} : 1;
-				my $letter = chr($1 + 96);
-				my $first = 1;
-				
-				if($first_line){
-					print FAIL "    <td class='double-up rowspan=\"$cov_rowspan\"'>";
-				}
-				else{
-					print FAIL "  <tr>\n";
-					print FAIL "    <td rowspan=\"$cov_rowspan\">";
-				}
-				print FAIL <<HTM;
+        
+        my $first_line = 1;
+        my $num = 0;
+        foreach my $item (@{$_}){
+            $num++;
+            
+            if($item =~ /op_(\d+)/){
+                my $model = $fail->{'model'}{$1};
+                my $cov_rowspan = defined $model->{'coverage'} ? scalar keys %{$model->{'coverage'}} : 1;
+                my $letter = chr($1 + 96);
+                my $first = 1;
+                
+                if($first_line){
+                    print FAIL "    <td class='double-up rowspan=\"$cov_rowspan\"'>";
+                }
+                else{
+                    print FAIL "  <tr>\n";
+                    print FAIL "    <td rowspan=\"$cov_rowspan\">";
+                }
+                print FAIL <<HTM;
 <span title="$model->{kind} $model->{signature}">$num. $model->{name} ($letter)</span></td>
 HTM
-				foreach my $cov (defined $model->{'coverage'} ? keys %{$model->{'coverage'}} : '--'){
-					my $branch = ($cov eq '--') ? '--' : $handler->{'coverage'}{$model->{'package'}}{$model->{'signature'}}{'coverage'}{$cov}{$model->{'coverage'}{$cov}}{'name'};
+                foreach my $cov (defined $model->{'coverage'} ? keys %{$model->{'coverage'}} : '--'){
+                    my $branch = ($cov eq '--') ? '--' : $handler->{'coverage'}{$model->{'package'}}{$model->{'signature'}}{'coverage'}{$cov}{$model->{'coverage'}{$cov}}{'name'};
 
-					if($first_line){
-						$first_line = 0;
-						print FAIL <<HTM;
+                    if($first_line){
+                        $first_line = 0;
+                        print FAIL <<HTM;
     <td class='double-up'>$cov</td>
     <td class='double-up'>$branch</td>
   </tr>
 HTM
-					}
-					elsif($first){
-						$first = 0;
-						print FAIL <<HTM;
+                    }
+                    elsif($first){
+                        $first = 0;
+                        print FAIL <<HTM;
     <td>$cov</td>
     <td>$branch</td>
   </tr>
 HTM
-					}
-					else{
-						print FAIL <<HTM;
+                    }
+                    else{
+                        print FAIL <<HTM;
   <tr>
     <td>$cov</td>
     <td>$branch</td>
   </tr>
 HTM
-					}
-				}
-			}
-			elsif($item =~ /im_(\d+)/){
-				my $im = $handler->{'interim'}{'Interim failure '.$1};
-				my $info = defined $im->{'info'} ? $im->{'info'} : $im->{'kind'};
-				print FAIL <<HTM;
+                    }
+                }
+            }
+            elsif($item =~ /im_(\d+)/){
+                my $im = $handler->{'interim'}{'Interim failure '.$1};
+                my $info = defined $im->{'info'} ? $im->{'info'} : $im->{'kind'};
+                print FAIL <<HTM;
   <tr>
     <td colspan="3">
-  	<a href="../failures/Interim failure ${1}_0.html"> $info</a><br/>
+      <a href="../failures/Interim failure ${1}_0.html"> $info</a><br/>
     </td>
   </tr>
 HTM
-			}
-		}
-	}
-		print FAIL <<HTM;
+            }
+        }
+    }
+        print FAIL <<HTM;
 </table>
 HTM
 }
 
-	if(defined $fail->{'bug'}){
-		my $bid = $fail->{'bug'};
-		my $text = join ("<br/>",  grep /./o,  $bugDB->{'bug'}{$bid}{'body'} =~ /(.{0,100}(?:[\s\;\,](?=\S)|\z))/gs );
-		print FAIL <<HTM;
+    if(defined $fail->{'bug'}){
+        my $bid = $fail->{'bug'};
+        my $text = join ("<br/>",  grep /./o,  $bugDB->{'bug'}{$bid}{'body'} =~ /(.{0,100}(?:[\s\;\,](?=\S)|\z))/gs );
+        print FAIL <<HTM;
 <table class="border">
   <caption>similar known bug(s)</caption>
   <tr><td>$text</td></tr>
 </table>
 HTM
-	}
-	
-	print FAIL <<HTM;
+    }
+    
+    print FAIL <<HTM;
 </td>
 </tr>
 </table>
@@ -1548,6 +1528,6 @@ HTM
 </html>
 HTM
 
-	close(FAIL);
+    close(FAIL);
 }
 print "done\n";
