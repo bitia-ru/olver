@@ -8,6 +8,7 @@ default_goal: all
 ###########################################################
 DIR = ./lib
 
+SHELL = /bin/bash
 CC = lsbcc
 CFLAGS = -g -D_XOPEN_SOURCE=500 -D_XOPEN_SOURCE_EXTENDED -D_CURSES_HEADER="\"curses.h\"" -I/opt/lsb/include -I$(DIR)/include
 LIB = -lncurses
@@ -35,7 +36,7 @@ socket.o: socket.c
 
 libiterm.a:
 	find $(DIR) -name *.am -exec touch {} \;
-	pushd $(DIR); aclocal; autoreconf -f -i; ./configure; make; cp ./src/.libs/libiterm.a ../libiterm.a; popd
+	pushd $(DIR); autoreconf -f -i; CC=$(CC) ./configure; make; cp ./src/.libs/libiterm.a ../libiterm.a; popd
 
 $(OLVERTERM): $(CFILES) ../agent/libolverterm.a libiterm.a
 	echo "Building olverterm"

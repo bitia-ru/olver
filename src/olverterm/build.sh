@@ -1,3 +1,4 @@
+#!/bin/bash
 tic dep/olverct.terminfo
 export ALLFLAGS="-g -D_XOPEN_SOURCE=500 -D_XOPEN_SOURCE_EXTENDED -D_CURSES_HEADER="\"curses.h\"" -I../../lsb/include"
 echo $ALLFLAGS

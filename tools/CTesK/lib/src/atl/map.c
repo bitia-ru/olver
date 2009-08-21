@@ -514,14 +514,17 @@ MapEntry *entry;
     }
 
     if( i == size )
-    {
-
+    {	/* new entry: hold weak reference to key */
         expand_Map( self );
         header_Map( self )->size++;
         entry = entry_Map( self, i );
         entry->key = r_hard2weak( key );
         entry->val = 0;
     }
+	else
+	{	/* Old entry: key is no longer needed */
+		destroy( key );
+	}
 
     {
       /* We already know the entry, no need to recalculate it twice */

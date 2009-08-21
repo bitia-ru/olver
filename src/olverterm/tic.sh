@@ -1,3 +1,4 @@
+#!/bin/bash
 #if ! [[ -e /usr/share/terminfo/o ]]
 #then
 #	mkdir /usr/share/terminfo/o

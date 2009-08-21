@@ -399,7 +399,7 @@ va_list args_copy;
     added_len = vsnprintf( CONTENTS(self) + LENGTH(self)
 						 , self->header->capacity - LENGTH(self)
 						 , format
-						 , args );
+						 , args_copy );
   }
   LENGTH(self) += added_len;
 

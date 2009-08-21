@@ -181,8 +181,8 @@ static int open_master(char *slave_name)
 #define I_FIND      (__SID |11) /* Compares the names of all modules currently
                    present in the STREAM to the name pointed to
                    by `arg'.  */
-#if __powerpc__
-	#define TIOCSWINSZ   _IOW('t', 103, struct winsize)
+#if ( __powerpc__ || __powerpc64__ )
+	#define TIOCSWINSZ  0x80087467 //actually _IOW('t', 103, struct winsize)
 #else
 	#define TIOCSWINSZ  0x5414
 #endif

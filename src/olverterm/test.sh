@@ -1,3 +1,4 @@
+#!/bin/bash
 #echo Building test program
 
 cp ../agent/olverterm .

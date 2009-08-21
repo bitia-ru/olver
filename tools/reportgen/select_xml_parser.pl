@@ -18,7 +18,7 @@ foreach (@preferred){
 	try_parser($_);
 }
 
-eval ( "use XML::SAX; my \@parsers = map { \$_->{'Name'} } \@{XML::SAX->parsers}; foreach (reverse \@parsers){ try_parser(\$_); }" );
+eval ("use XML::SAX; my \@parsers = map { \$_->{'Name'} } \@{XML::SAX->parsers}; foreach (reverse \@parsers){ try_parser(\$_); }");
 
 sub try_parser($)
 {
