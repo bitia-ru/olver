@@ -31,6 +31,7 @@ include $(MODULES:%=%/Makefile)
 # Parameters of compilation
 ###########################################################
 
+SHELL = /bin/bash
 #CC = gcc
 CC = lsbcc
 

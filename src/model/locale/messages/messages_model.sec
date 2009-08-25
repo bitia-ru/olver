@@ -32,6 +32,7 @@
 
 #include "process/process/process_model.seh"
 #include "locale/messages/messages_model.seh"
+#include "locale/locale/locale_model.seh"
 
 #pragma SEC subsystem messages "locale.messages"
 
@@ -41,6 +42,68 @@
        strerror [2]
        strerror_r [1]
  */
+
+
+/********************************************************************/
+/**                         Model State API                        **/
+/********************************************************************/
+
+specification typedef CString* PCString = {};
+
+PCString * create_PCString(CString * str)
+{
+    return create(&type_PCString, str);
+}
+
+PCString* getStdErr(CallContext context)
+{
+    PCString* StdErr = create_PCString( _CS(""));
+
+    registerProcessStaticData(context, _CS("stderr"), StdErr);
+
+    return getProcessStaticData(context, _CS("stderr"));
+}
+
+specification typedef struct LocaleMessagesSt LocaleMessages = {};
+
+LocaleMessages* create_LocaleMessages(void)
+{
+    return create(&type_LocaleMessages, NULL, create_Map(&type_IntTObj, &type_CString));
+}
+
+LocaleMessages* getState_LocaleMessages(CallContext context)
+{
+    registerProcessStaticData(context, _CS("locale.messages"),
+        create_LocaleMessages());
+
+    return getProcessStaticData(context, _CS("locale.messages"));
+}
+
+void put_LocaleMessages(CallContext context, IntT errnum, CString* msg)
+{
+    CString* currentLocale = getLocale_Locale(context, SUT_LC_MESSAGES);
+    LocaleMessages* st = getState_LocaleMessages(context);
+    
+    if(st->localeName == NULL || !equals(st->localeName, currentLocale))
+    {
+        st->localeName = currentLocale;
+        clear_Map(st->msgMap);
+    }
+
+    put_Map(st->msgMap, create_IntTObj(errnum), msg);
+}
+
+CString* get_LocaleMessages(CallContext context, IntT errnum)
+{
+    CString* currentLocale = getLocale_Locale(context, SUT_LC_MESSAGES);
+    LocaleMessages* st = getState_LocaleMessages(context);
+
+    if(st->localeName == NULL || !equals(st->localeName, currentLocale))
+        return NULL;
+    
+    return get_Map(st->msgMap, create_IntTObj(errnum));
+}
+
 
 /********************************************************************/
 /**                      Interface Functions                       **/
@@ -161,8 +224,24 @@ void perror_spec(CallContext context, CString* s, ErrorCode* errno)
          */
         REQ("perror.04", "", TODO_REQ());
 
-
         return true;
+    }
+}
+
+void onPerror(CallContext context, CString* s, ErrorCode* errno)
+{
+    SizeT prev = 2;
+    CString* StdErr = *getStdErr(context);
+    CString* eMsg;
+    
+    if(s != NULL) prev += length_CString(s);
+    
+    eMsg = substring_CString(StdErr, prev, length_CString(StdErr)-2);
+    
+    if(isEINVALstrerror(*errno) == False_Bool3 &&
+        get_LocaleMessages(context, *errno) == NULL)
+    {
+        put_LocaleMessages(context, *errno, eMsg);
     }
 }
 
@@ -246,164 +325,206 @@ ERRORS
     contain the generated message string.
 */
 
-//This specification refers to: strerror_r, strerror
 specification
-CString* strerror_spec(CallContext context, IntT errnum, CString** strerrbuf,
-    SizeT buflen, ErrorCode* errno)
+CString* strerror_spec(CallContext context, IntT errnum, ErrorCode* errno)
 {
+    Bool3 errnumInvalid = isEINVALstrerror(errnum);
+    
     pre
     {
-        if(strerrbuf != NULL)
-        {
-            FILTER("strerror_r");
-            FILTER("lsb.strerror_r");
-        }
-        else
-        {
-            FILTER("strerror");
-        }
-
         return true;
     }
-
-    coverage Func
+    
+    coverage Errnum
     {
-        if(strerrbuf != NULL)
-            return { STRERROR_R_FUNC, "strerror_r is called" };
+        if(errnumInvalid == False_Bool3)
+            return { Valid_Errnum, "Valid errnum value" };
+        else if(errnumInvalid == True_Bool3)
+            return { Invalid_Errnum, "Invalid errnum value" };
         /* else */
-            return { STRERROR_FUNC, "strerror is called" };
+            return { Unknown_Errnum, "Unknown errnum value" };
     }
 
     post
     {
-#ifdef NewCTesK
-        if( Func == Func.STRERROR_FUNC )
-#else
-        if(coverage(Func) == STRERROR_FUNC)
-#endif // NewCTesK
+        CString* trueResult = get_LocaleMessages(context, errnum);
+        
+        ERROR_BEGIN(POSIX_STRERROR, "strerror.12", *errno != 0, *errno)
+
+            /*
+             * These functions may fail if:
+             *
+             * [EINVAL] The value of errnum is not a valid error number.
+             */
+            ERROR_MAY3(POSIX_STRERROR, EINVAL, "strerror.12.01", errnumInvalid)
+
+        ERROR_END()
+        
+        /*
+         * strerror() shall map any value of type int to a message.
+         */
+        REQ("strerror.02", "shall always return a string", strerror_spec != NULL);
+        
+        if(errno != 0) return true;
+        
+        if(errnumInvalid == False_Bool3)
         {
-            ERROR_BEGIN(POSIX_STRERROR, "strerror.12", *errno, *errno)
-
-                /*
-                 * These functions may fail if:
-                 *
-                 * [EINVAL] The value of errnum is not a valid error number.
-                 */
-                ERROR_MAY3(POSIX_STRERROR, EINVAL, "strerror.12.01", isEINVALstrerror(errnum))
-
-            ERROR_END()
-        }
-        else
-        {
-            ERROR_BEGIN(POSIX_STRERROR_R, "strerror_r.04", *errno, *errno)
-
-                /*
-                 * These functions may fail if:
-                 *
-                 * [EINVAL] The value of errnum is not a valid error number.
-                 */
-                ERROR_MAY3(POSIX_STRERROR_R, EINVAL, "strerror_r.04.01", isEINVALstrerror(errnum))
-
-                /*
-                 * These functions may fail if:
-                 *
-                 * [ERANGE] [TSF] Insufficient storage was supplied via strerrbuf and buflen to
-                 * contain the generated message string.
-                 */
-                ERROR_MAY(POSIX_STRERROR_R, ERANGE, "strerror_r.04.02", TODO_ERR(ERANGE))
-
-            ERROR_END()
-        }
-
-        if(*errno != 0 || (strerrbuf && compare(strerror_spec, _CS("Unknown error")) == 0))
-        {
-            return true;
-        }
-
-        if(isEINVALstrerror(errnum) == False_Bool3
-            || (strerrbuf && compare(strerror_spec, _CS("Unknown error")) != 0))
-        {
-            /*
-             * The strerror() function shall map the error number in errnum to a locale-
-             * dependent error message string and shall return a pointer to it.
-             */
-            /*
-             * Upon successful completion, strerror() shall return a pointer to the generated
-             * message string.
-             */
-            /*
-             * The strerror_r() function shall return a pointer to the string corresponding to
-             * errno.
-             */
-            /*
-             * On success, strerror_r() shall return a pointer to the generated message string
-             * (determined by the setting of the LC_MESSAGES category in the current locale).
-             */
-            REQ("strerror.01;strerror.10;lsb.strerror_r.02", "shall return a string",
-                strerror_spec != NULL && length_CString(strerror_spec));
-
-            /*
-             * [CX] The contents of the error message strings returned by strerror() should be
-             * determined by the setting of the LC_MESSAGES category in the current locale.
-             */
-            REQ("strerror.05", "", TODO_REQ());
-
-
-            if(strerrbuf && strerror_spec != NULL)
+            if(trueResult != NULL)
             {
-                CString* buf = buflen < length_CString(strerror_spec) ?
-                    substring_CString(strerror_spec, 0, buflen) : strerror_spec;
-
-
-
                 /*
-                 * [TSF] The strerror_r() function shall map the error number in errnum to a
-                 * locale-dependent error message string and shall return the string in the buffer
-                 * pointed to by strerrbuf, with length buflen.
+                 * Upon successful completion, strerror() shall return a pointer to the generated 
+                 * message string.
                  */
-                REQ("strerror_r.01", "shall map the error number", compare(buf, *strerrbuf) == 0);
-
-
-           }
-
+                /*
+                 * [CX] The contents of the error message strings returned by strerror() should be 
+                 * determined by the setting of the LC_MESSAGES category in the current locale.
+                 */
+                REQ("strerror.05;strerror.10", "shall return the generated string",
+                    compare(strerror_spec, trueResult) == 0);
+            }
         }
 
+        /*
+         * [CX] The strerror() function shall not change the setting of errno if 
+         * successful.
+         */
+        REQ("strerror.07", "", TODO_REQ());
+        
+        /*
+         * The implementation shall behave as if no function defined in this volume of 
+         * IEEE Std 1003.1-2001 calls strerror().
+         */
+        /*
+         * This is requirement for all functions from IEEE Std 1003.1-2001
+         */
+        REQ("strerror.06", "", TODO_REQ());
 
         return true;
     }
-
-    FILTER_CLEAN;
 }
 
-void onStrError(CallContext context, IntT errnum, CString** strerrbuf,
+void onStrError(CallContext context, IntT errnum, ErrorCode* errno, CString* res)
+{
+    if(*errno != 0 || res == NULL) return;
+    
+    if(isEINVALstrerror(errnum) == False_Bool3 &&
+        get_LocaleMessages(context, errnum) == NULL)
+    {
+        put_LocaleMessages(context, errnum, res);
+    }
+}
+
+specification
+CString* strerror_r_spec (
+                          CallContext context,
+                          IntT        errnum,
+                          CString**   strerrbuf,
+                          SizeT       buflen,
+                          ErrorCode*  errno
+                         )
+{
+    Bool3 errnumInvalid = isEINVALstrerror(errnum);
+    
+    pre
+    {
+        return true;
+    }
+    
+    coverage Errnum
+    {
+        if(errnumInvalid == False_Bool3)
+            return { Valid_Errnum, "Valid errnum value" };
+        else if(errnumInvalid == True_Bool3)
+            return { Invalid_Errnum, "Invalid errnum value" };
+        /* else */
+            return { Unknown_Errnum, "Unknown errnum value" };
+    }
+
+    post
+    {
+        Bool3 bERANGE = False_Bool3;
+        CString* trueResult = get_LocaleMessages(context, errnum);
+        
+        if(trueResult != NULL)
+        {
+            bERANGE = length_CString(trueResult) > buflen;
+        }
+        
+        ERROR_BEGIN(POSIX_STRERROR_R, "strerror_r.05", *errno != 0, *errno)
+
+            /*
+             * These functions may fail if:
+             *
+             * [EINVAL] The value of errnum is not a valid error number.
+             */
+            ERROR_MAY3(POSIX_STRERROR_R, EINVAL, "strerror_r.05.01", errnumInvalid)
+
+            /*
+             * These functions may fail if:
+             *
+             * [ERANGE] [TSF] Insufficient storage was supplied via strerrbuf and buflen to 
+             * contain the generated message string.
+             */
+            ERROR_MAY3(POSIX_STRERROR_R, ERANGE, "strerror_r.05.02", bERANGE)
+
+        ERROR_END()
+        
+        /*
+         * strerror() shall map any value of type int to a message.
+         */
+        REQ("strerror_r.01", "shall always return a string", strerror_r_spec != NULL);
+        
+        if(errno != 0) return true;
+        
+        if(errnumInvalid == False_Bool3)
+        {
+            if(trueResult != NULL)
+            {
+                /*
+                 * The strerror_r() function shall return a pointer to the string corresponding to 
+                 * errno.
+                 */
+                /*
+                 * [TSF] The strerror_r() function shall map the error number in errnum to a 
+                 * locale-dependent error message string and shall return the string in the buffer 
+                 * pointed to by strerrbuf, with length buflen.
+                 */
+                REQ("lsb.strerror_r.02;strerror_r.02", "shall return the generated string",
+                    compare(strerror_r_spec, trueResult) == 0);
+            }
+        }
+        
+        /*
+         * The strerror_r() shall behave as specified in ISO POSIX (2003), except as 
+         * described below.
+         */
+        REQ("lsb.strerror_r.01", "", true);
+        
+        /*
+         * Otherwise, strerror_r() shall return the string corresponding to "Unknown error" 
+         * .
+         */
+        REQ("lsb.strerror_r.04", "", TODO_REQ());
+        
+        return true;
+    }
+}
+
+void onStrErrorR(CallContext context, IntT errnum, CString** strerrbuf,
     SizeT buflen, ErrorCode* errno, CString* res)
 {
-    if(errno == NULL) return;// ignore strerror_r
-
-    if(*errno == SUT_EOK)
+    if(*errno != 0 || res == NULL) return;
+    
+    if(isEINVALstrerror(errnum) == False_Bool3 &&
+        get_LocaleMessages(context, errnum) == NULL)
     {
+        put_LocaleMessages(context, errnum, res);
     }
 }
 
 /********************************************************************/
 /**                       Helper Functions                         **/
 /********************************************************************/
-
-specification typedef CString* PCString = {};
-
-PCString * create_PCString(CString * str)
-{
-    return create(&type_PCString, str);
-}
-
-PCString* getStdErr(CallContext context)
-{
-    PCString* StdErr = create_PCString( _CS(""));
-
-    registerProcessStaticData(context, _CS("stderr"), StdErr);
-
-    return getProcessStaticData(context, _CS("stderr"));
-}
 
 Bool3 isEINVALstrerror(IntT errnum)
 {

@@ -115,67 +115,50 @@ void reverse_filter()
     filter_reverse = true;
 }
 
+static bool isDigit(char ch)
+{
+    if(ch >= '0' && ch <= '9') return true;
+    
+    return false;
+}
+
 static int isMarkAllowed(char *s)
 {
-
-    if(strncmp(s,"app.",4)==0) // suppress apps
-        return 0;
-
-    if( (req_filters!=NULL) && (size_List(req_filters)>0) )
+    // Filters are not set
+    if((req_filters == NULL) || (size_List(req_filters) == 0)) return 1;
+    
+    char *ps = s, *pt;
+    int l = strlen(s);
+    CString* cstr;
+    char buf[128];
+    int iBuf = 0;
+    
+    // Skiping spaces at the begin of string
+    for(; ((ps-s) < l) && (*ps == ' '); ps++);
+    
+    if(*ps == '!' || *ps == '?' || *ps == '$') ps++;
+    
+    // suppress apps
+    if(strncmp(ps, "app.", 4) == 0) return 0;
+    
+    while(pt = strchr(ps, '.'))
     {
-        char sbuffer[4096];
-        char *buffer = (char*)sbuffer;
-        int i;
-        int l = strlen(s);
-        int start = 0;
-        char pref = 0; // prefix !,? or $
-        bool app = false;
-        CString * cstring;
-
-        buffer[0] = 0;
-
-        for( i=0; (i<l) && (s[i]==32); i++ );
-
-        for(;i<l;i++)
-        {
-            if(s[i]=='.')
-            {
-                assertion( i < sizeof(sbuffer), "isMarkAllowed: not enough memory" );
-                buffer = sbuffer;
-                buffer[i-start]=0;
-                strncpy(buffer, s+start, i-start);
-        
-                if( (buffer[0] == '!') || (buffer[0] == '?') || (buffer[0] == '$') )
-                {
-                    pref = buffer[0];
-                    buffer++;
-                }
-                if( strcmp(buffer,"app")==0 )
-                {
-                    start = i+1;
-                    app = true;
-                    continue;
-                }
-                break;
-            }
-        }
-
-        if( buffer[0] != 0 )
-        {
-            cstring = create_CString(buffer);
-            if( filter_reverse )
-            {
-                if( contains_List(req_filters, cstring) )
-                    return 0;
-            }
-            else
-                if( !contains_List(req_filters, cstring) )
-                    return 0;
-        }
+        if(isDigit(*ps)) break;
+    
+        strncpy(buf+iBuf, ps, pt-ps); iBuf += pt-ps+1;
+        buf[iBuf-1] = '.';
+        ps = pt+1;
     }
-
-    if( (s[0] == '!') /*|| (s[0] == '?')*/ || (s[0] == '$') )
-        s++;
+    
+    if(iBuf == 0) strcpy(buf, s);
+    else buf[iBuf-1] = '\0';
+    
+    cstr = create_CString(buf);
+    
+    if(filter_reverse) {
+        if(contains_List(req_filters, cstr)) return 0;
+    }
+    else if(!contains_List(req_filters, cstr)) return 0;
 
     return 1;
 }
@@ -200,52 +183,61 @@ static void filterFailedMark(char * s)
      }
 }
 
-String* filterAllowedRequirements(char * id)
+String* filterAllowedRequirements(char* id)
 {
-char  sbuffer[4096];
-int i,j,len;
-StringBuffer* res = create_StringBuffer();
-bool first = true;
+    char sbuffer[4096];
+    int i, j, len;
+    StringBuffer* res = create_StringBuffer();
+    bool first = true;
 
-    if (id == NULL)
-        return toString(res);
+    if(id == NULL) return toString(res);
+    
     len = strlen(id);
-    if (len == 0)
-        return toString(res);
-    j = 0;
+    
+    if(len == 0) return toString(res);
+    
     // Main cycle
-    for(i=0;id[i]!=0;i++)
+    for(i = 0, j = 0; id[i] != '\0'; i++)
     {
-        if (id[i] == ';')
+        if(id[i] == ';')
         {
             // Create copy of id
-            if (j == 0)
+            if(j == 0)
             {
-                assertion( i < sizeof(sbuffer), "filterAllowedRequirements: not enough memory" );
-                strcpy(sbuffer,id);
+                assertion(i < sizeof(sbuffer), "filterAllowedRequirements: not enough memory");
+                strcpy(sbuffer, id);
             }
+
             sbuffer[i] = 0;
-            if (i>j && isMarkAllowed(sbuffer+j))
+
+            if(i > j && isMarkAllowed(sbuffer+j) != 0)
             {
                 if(!first)
-                 {
-                    append_StringBuffer( res, ";" );
-                 }
-                append_StringBuffer( res, sbuffer+j );
+                {
+                    append_StringBuffer(res, ";");
+                }
+
+                append_StringBuffer(res, sbuffer+j);
+
                 first = false;
             }
+
             j = i+1;
         }
     }
-    if (i>j && isMarkAllowed(id+j) )
+
+    if(i > j && isMarkAllowed(id+j))
     {
         if(!first)
-         {
-            append_StringBuffer( res, ";" );
-         }
-        append_StringBuffer( res, id+j );
+        {
+            append_StringBuffer(res, ";");
+        }
+
+        append_StringBuffer(res, id+j);
+
         first = false;
     }
+
     return toString(res);
 }
 

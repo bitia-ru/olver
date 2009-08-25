@@ -25,10 +25,6 @@
 #include "ts/timemark.h"
 
 
-// Tmp
-extern const TimeInterval overallTimeInterval;
-
-
 /********************************************************************/
 /**                         Auxiliary Types                        **/
 /********************************************************************/

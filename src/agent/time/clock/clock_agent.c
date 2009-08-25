@@ -56,11 +56,14 @@ static TACommandVerdict clock_getres_cmd(TAThread thread,TAInputStream stream)
     // Prepare
     clock_id  = readInt( & stream );
     resIsNull = readInt( & stream );
+    ta_debug_printf( "clock_getres_cmd : ( clock_id, resIsNull ) is ( %d, %d )\n", clock_id, resIsNull );
     errno = 0;
 
     // Execute
     START_TARGET_OPERATION(thread);
+    ta_debug_printf( "clock_getres_cmd : before clock_getres\n" );
     result = clock_getres( clock_id, resIsNull != 0 ? NULL : & res );
+    ta_debug_printf( "clock_getres_cmd : after  clock_getres\n" );
     END_TARGET_OPERATION(thread);
 
     // Response

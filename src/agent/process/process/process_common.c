@@ -186,6 +186,30 @@ TACommandVerdict fwreadFile_cmd( TAThread thread, TAInputStream stream ) {
 }
 
 /********************************************************************/
+/**                     trace function call                        **/
+/********************************************************************/
+
+static int appendIfFileExists( const char * fileName, const char * data, int erasePrevious ) {
+    FILE * file = fopen( fileName, "r" );
+    if ( file == NULL ) { return 0; }
+    fclose( file );
+    file = fopen( fileName, erasePrevious == 1 ? "w" : "a" );
+    fprintf( file, "%s", data );
+    fclose( file );
+    return 1;
+}
+
+TACommandVerdict appendIfFileExists_cmd( TAThread thread, TAInputStream stream ) {
+    char * fileName      = readString( & stream );
+    char * data          = readString( & stream );
+    int    erasePrevious = readInt   ( & stream );
+    int result = appendIfFileExists( fileName, data, erasePrevious );
+    writeInt( thread, result );
+    sendResponse( thread );
+    return taDefaultVerdict;
+}
+
+/********************************************************************/
 /**                  execute function with ...                     **/
 /********************************************************************/
 

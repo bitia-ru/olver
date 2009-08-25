@@ -1,3 +1,7 @@
+#!/bin/bash
+#
+#
+
 DIR=${0%/*}
 cd $DIR
 

@@ -32,6 +32,7 @@
 #define NEWREQ
 
 #include "util/format/time_model.seh"
+#include "process/process/process_model.seh"
 
 
 #pragma SEC subsystem format "util.format"
@@ -40,10 +41,38 @@
 
 /*
    The group of functions 'util.format.time' consists of:
-       getdate [1]
+       getdate  [1]
        strftime [2]
        strptime [1]
  */
+
+
+/********************************************************************/
+/**                      TmT Data Type                             **/
+/********************************************************************/
+ 
+invariant specification typedef struct TmT TmT = {};
+
+
+/********************************************************************/
+/**                      Helper Data Types                         **/
+/********************************************************************/
+
+bool isRight_TmTAnsw(TmT* tm, TmTAnsw answ)
+{
+    if( answ.bSec   && tm->tm_sec   != answ.tm_sec   ) return false;
+    if( answ.bMin   && tm->tm_min   != answ.tm_min   ) return false;
+    if( answ.bHour  && tm->tm_hour  != answ.tm_hour  ) return false;
+    if( answ.bMDay  && tm->tm_mday  != answ.tm_mday  ) return false;
+    if( answ.bMon   && tm->tm_mon   != answ.tm_mon   ) return false;
+    if( answ.bYear  && tm->tm_year  != answ.tm_year  ) return false;
+    if( answ.bWDay  && tm->tm_wday  != answ.tm_wday  ) return false;
+    if( answ.bYDay  && tm->tm_yday  != answ.tm_yday  ) return false;
+    if( answ.bIsDst && tm->tm_isdst != answ.tm_isdst ) return false;
+
+    return true;
+}
+
 
 /********************************************************************/
 /**                      Interface Functions                       **/
@@ -57,7 +86,7 @@ Copyright (c) 2004, 2005 Free Standards Group
 
 The Open Group Base Specifications Issue 6
 IEEE Std 1003.1, 2004 Edition
-Copyright © 2001-2004 The IEEE and The Open Group, All Rights reserved.
+Copyright  2001-2004 The IEEE and The Open Group, All Rights reserved.
 
 -------------------------------------------------------------------------------
 
@@ -263,136 +292,102 @@ ERRORS
         in seconds since the Epoch).
 */
 
-invariant specification typedef struct TmT TmT = {};
-
 specification
-TmT* getdate_spec( CallContext context, CString* str)
+TmT* getdate_spec(CallContext context, CString* str, TmTAnsw corrRes, IntTObj * getdate_err )
 {
     pre
     {
         /*
-        * The results are undefined if the conversion specifications %c, %x, and %X
-        * include unsupported conversion specifications.
-        */
+         * The results are undefined if the conversion specifications %c, %x, and %X 
+         * include unsupported conversion specifications.
+         */
         REQ("app.getdate.14", "", TODO_REQ());
 
         /*
-        * If a conversion specification in the DATEMSK file does not correspond to one of
-        * the conversion specifications above, the behavior is unspecified.
-        */
+         * If a conversion specification in the DATEMSK file does not correspond to one of 
+         * the conversion specifications above, the behavior is unspecified.
+         */
         REQ("app.getdate.16", "", TODO_REQ());
 
         return true;
     }
+
     post
     {
-        /*
-         * The external variable or macro getdate_err is used by getdate() to return error
-         * values.
-         */
-        REQ("getdate.02", "", TODO_REQ());
+        char reqs[1024] = "";
+        CString* sNULL = _CS("<NULL>");
+        CString* sDATEMSK = getEnv_CallContext(context, _CS("DATEMSK"));
+    
+        traceExtraProperty("expected getdate_err", create_IntTObj(corrRes.Error));
+        traceExtraProperty("getdate_err", create_IntTObj( * getdate_err ));
+        //traceExtraProperty("datemsk file data", getContent_FilePath(context, sDATEMSK));
+        traceExtraProperty("datemsk", sDATEMSK == NULL ? sNULL : sDATEMSK);
 
-        /*
-         * The process can request that the input date or time specification be in a
-         * specific language by setting the LC_TIME category (see setlocale()).
-         */
-        REQ("getdate.10", "", TODO_REQ());
+        strcat(reqs, corrRes.reqs);
 
+        if ( getdate_spec != NULL && corrRes.Error == 0 )
+        {
+            // Correct query
 
-        /*
-         * If %Z is being scanned, then getdate() shall initialize the broken-down time to
-         * be the current time in the scanned timezone.
-         */
-        REQ("getdate.15.01.01", "", TODO_REQ());
+            /*
+             * The templates are contained in a text file identified by the environment 
+             * variable DATEMSK .
+             */
+            /*
+             * The DATEMSK variable should be set to indicate the full pathname of the file 
+             * that contains the templates.
+             */
+            /*
+             * Upon successful completion, getdate() shall return a pointer to a struct tm.
+             */
+            strcat(reqs, "getdate.04;getdate.05;getdate.18.01");
 
-        /*
-         * Otherwise, it shall initialize the broken-down time based on the current local
-         * time as if localtime() had been called.
-         */
-        REQ("getdate.15.01.02", "", TODO_REQ());
+            REQ3 (
+                  reqs,
+                  "function shall convert a string representation of a date or time into a broken-down time",
+                  getdate_spec != NULL && isRight_TmTAnsw(getdate_spec, corrRes)
+                 );
+        }
+        else if ( getdate_spec == NULL && corrRes.Error != 0 )
+        {
+            // Error query
 
-        /*
-         * The getdate() function need not be reentrant. A function that is not required
-         * to be reentrant is not required to be thread-safe.
-         */
-        REQ("getdate.17", "", TODO_REQ());
+            /*
+             * The external variable or macro getdate_err is used by getdate() to return error 
+             * values.
+             */
+            strcat(reqs, "getdate.02");
 
-        /*
-         * Upon successful completion, getdate() shall return a pointer to a struct tm.
-         */
-        REQ("getdate.18.01", "", TODO_REQ());
+            /*
+             * Otherwise, it shall return a null pointer and set getdate_err to indicate the 
+             * error.
+             */
+            REQ3 (
+                  "getdate.18.02",
+                  "function shall return a null pointer",
+                  getdate_spec == NULL
+                 );
 
-        /*
-         * Otherwise, it shall return a null pointer and set getdate_err to indicate the
-         * error.
-         */
-        REQ("getdate.18.02", "", TODO_REQ());
+            /*
+             * The getdate() function shall fail in the following cases, setting 
+             * getdate_err to the value shown in the list below. Any changes to errno are unspecified.
+             *
+             * 1. The DATEMSK environment variable is null or undefined.
+             * 2. The template file cannot be opened for reading.
+             * 3. Failed to get file status information.
+             * 4. The template file is not a regular file.
+             * 5. An I/O error is encountered while reading the template file.
+             * 6. Memory allocation failed (not enough memory available).
+             * 7. There is no line in the template that matches the input.
+             * 8. Invalid input specification.
+             */
 
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * The DATEMSK environment variable is null or undefined.
-         */
-        REQ("getdate.19.01", "", TODO_REQ());
-
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * The template file cannot be opened for reading.
-         */
-        REQ("getdate.19.02", "", TODO_REQ());
-
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * Failed to get file status information.
-         */
-        REQ("getdate.19.03", "", TODO_REQ());
-
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * The template file is not a regular file.
-         */
-        REQ("getdate.19.04", "", TODO_REQ());
-
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * An I/O error is encountered while reading the template file.
-         */
-        REQ("getdate.19.05", "", TODO_REQ());
-
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * Memory allocation failed (not enough memory available).
-         */
-        REQ("getdate.19.06", "", TODO_REQ());
-
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * There is no line in the template that matches the input.
-         */
-        REQ("getdate.19.07", "", TODO_REQ());
-
-        /*
-         * The getdate() function shall fail in the following cases, setting getdate_err
-         * to the value shown in the list below. Any changes to errno are unspecified.
-         *
-         * Invalid input specification.
-         */
-        REQ("getdate.19.08", "", TODO_REQ());
-
-
+            REQ (
+                 reqs,
+                 "function shall set getdate_err to indicate the error",
+                 * getdate_err == corrRes.Error
+                );
+        }
 
         return true;
     }
@@ -406,7 +401,7 @@ Copyright (c) 2004, 2005 Free Standards Group
   refers
 
 IEEE Std 1003.1, 2004 Edition
-Copyright © 2001-2004 The IEEE and The Open Group, All Rights reserved.
+Copyright  2001-2004 The IEEE and The Open Group, All Rights reserved.
 
 -------------------------------------------------------------------------------
 
@@ -722,145 +717,19 @@ ERRORS
 */
 
 specification
-SizeT strftime_spec( CallContext context, StringTPtr s, SizeT maxsize, StringTPtr format, TmT* timeptr)
+SizeT strftime_spec(CallContext context, CString* s, SizeT maxsize, CString* format, TmT* timeptr)
 {
-    SizeT len;
-
-    CString* s_post;
-    CString* format_pre;
-    CString* format_post;
-
     pre
     {
-        REQ("", "format is not NULL", !isNULL_VoidTPtr(format));
-        REQ("", "s is not NULL", !isNULL_VoidTPtr(s));
-
-        REQ("", "Memory pointed to by format is available in the context", isValidPointer(context, format));
-        REQ("", "Memory pointed to by s is available in the context", isValidPointer(context, s));
-
-        format_pre = readCString_VoidTPtr(format);
-        len = length_CString(format_pre) + 1;
-
-        /*
-         * If copying takes place between objects that overlap, the behavior is undefined.
-         */
-        REQ("app.strftime.06", "If copying takes place between objects that overlap, the behavior is undefined", !areObjectsOverlapped(s, len, format, len));
-
-        /*
-         * timeptr is validated through invariant
-         */
-        /*
-         * If any of the specified values are outside the normal range, the characters
-         * stored are unspecified.
-         */
-        REQ("app.strftime.10", " If any of the specified values are outside the normal range, the characters stored are unspecified", true);
-
-        /*
-         * If a conversion specification does not correspond to any of the above, the
-         * behavior is undefined.
-         */
-        REQ("app.strftime.12", "", TODO_REQ());
-
-        /*
-         * If a struct tm broken-down time structure is created by localtime() or
-         * localtime_r(), or modified by mktime(), and the value of TZ is subsequently
-         * modified, the results of the %Z and %z strftime() conversion specifiers are
-         * undefined, when strftime() is called with such a broken-down time structure.
-         */
-        REQ("app.strftime.13", "", TODO_REQ());
-
-        /*
-         * If a struct tm broken-down time structure is created or modified by gmtime() or
-         * gmtime_r(), it is unspecified whether the result of the %Z and %z conversion
-         * specifiers shall refer to UTC or the current local timezone, when strftime() is
-         * called with such a broken-down time structure.
-         */
-        REQ("app.strftime.14", "", TODO_REQ());
-
-        /*
-         * If a conversion specifier is not one of the above, the behavior is undefined.
-         */
-        REQ("app.strftime.19", "", TODO_REQ());
-
         return true;
     }
+
     post
     {
-        format_post = readCString_VoidTPtr(format);
-        if (!isNULL_VoidTPtr(s))
-            s_post = readCString_VoidTPtr(s);
-        else
-            s_post = create_CString("");
-
-        REQ("", "format shall not be changed", equals(format_post, format_pre));
-
-        /*
-         * The format is a character string, beginning and ending in its initial shift
-         * state, if any.
-         */
-        REQ("strftime.02", "The format is a character string, beginning and ending in its initial shift state, if any", STRUCT_REQ());
-
-        /*
-         * The format string consists of zero or more conversion specifications and
-         * ordinary characters.
-         */
-        REQ("strftime.03", "The format string consists of zero or more conversion specifications and ordinary characters", STRUCT_REQ());
-
-        /*
-         * A conversion specification consists of a '%' character, possibly followed by an
-         * E or O modifier, and a terminating conversion specifier character that
-         * determines the conversion specification's behavior.
-         */
-        REQ("strftime.04", "A conversion specification consists of a '%' character, possibly followed by an E or O modifier, and a terminating conversion specifier", STRUCT_REQ());
-
-        /*
-         * No more than maxsize bytes are placed into the array.
-         */
-        REQ("strftime.07", "No more than maxsize bytes are placed into the array",
-            equals( readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(s), s, maxsize),
-                   @readCByteArray_MemoryBlockExceptFor(getTopMemoryBlock(s), s, maxsize)
-                )
-            );
-
-        /*
-         * The appropriate characters are determined using the LC_TIME category of the
-         * current locale and by the values of zero or more members of the broken-down
-         * time structure pointed to by timeptr, as specified in brackets in the
-         * description.
-         */
-        REQ("strftime.09", "The appropriate characters are determined using the LC_TIME category of the current locale and by the values of zero or more members of the broken-down time structure", STRUCT_REQ());
-
-        /*
-         * Some conversion specifiers can be modified by the E or O modifier characters to
-         * indicate that an alternative format or specification should be used rather than
-         * the one normally used by the unmodified conversion specifier.
-         */
-        REQ("strftime.15", "Some conversion specifiers can be modified by the E or O modifier characters to indicate that an alternative format", STRUCT_REQ());
-
-        /*
-         * If the alternative format or specification does not exist for the current
-         * locale (see ERA in the Base Definitions volume of IEEE Std 1003.1-2001, Section
-         * 7.3.5, LC_TIME), the behavior shall be as if the unmodified conversion
-         * specification were used.
-         */
-        REQ("strftime.16", "", TODO_REQ());
-
-
-        if(strftime_spec != 0)
-        {
-            /*
-             * If the total number of resulting bytes including the terminating null byte is
-             * not more than maxsize, strftime() shall return the number of bytes placed into
-             * the array pointed to by s, not including the terminating null byte.
-             */
-            REQ("strftime.20.01", "shall return the number of bytes placed into the array",
-                !isNULL_VoidTPtr(s) && length_CString(s_post) == strftime_spec
-                );
-        }
-
         return true;
     }
 }
+
 
 /*
 NAME
@@ -907,7 +776,7 @@ Copyright (c) 2004, 2005 Free Standards Group
 
 The Open Group Base Specifications Issue 6
 IEEE Std 1003.1, 2004 Edition
-Copyright © 2001-2004 The IEEE and The Open Group, All Rights reserved.
+Copyright  2001-2004 The IEEE and The Open Group, All Rights reserved.
 
 -------------------------------------------------------------------------------
 
@@ -1153,147 +1022,15 @@ ERRORS
 */
 
 specification
-CString* strptime_spec( CallContext context, StringTPtr buf, StringTPtr format, TmT* timeptr)
+CString* strptime_spec(CallContext context, CString* buf, CString* format, TmT* timeptr)
 {
-    CString* buf_pre;
-    CString* buf_post;
-    CString* format_pre;
-    CString* format_post;
-
     pre
     {
-        format_pre = readCString_VoidTPtr(format);
-        buf_pre = readCString_VoidTPtr(buf);
-
-        REQ("", "buf is not NULL", !isNULL_VoidTPtr(buf));
-        REQ("", "format is not NULL", !isNULL_VoidTPtr(format));
-
-        REQ("", "Memory pointed to by buf is available in the context", isValidPointer(context, buf));
-        REQ("", "Memory pointed to by format is available in the context", isValidPointer(context, format));
-
-        /*
-         * The ISO POSIX (2003) specifies fields for which "leading zeros are permitted
-         * but not required"; however, applications shall not expect to be able to supply
-         * more leading zeroes for these fields than would be implied by the range of the
-         * field. Implementations may choose to either match an input with excess leading
-         * zeroes, or treat this as a non-matching input. For example, %j has a range of
-         * 001 to 366, so 0, 00, 000, 001, and 045 are acceptable inputs, but inputs such
-         * as 0000, 0366 and the like are not.
-         */
-        REQ("app.strptime.30", "", TODO_REQ());
-
         return true;
     }
+
     post
     {
-        IntT oldpos = 0, pos = 0, err = 0;
-        format_post = readCString_VoidTPtr(format);
-        buf_post = readCString_VoidTPtr(buf);
-
-        REQ("", "format shall not be changed", equals(format_post, format_pre));
-        REQ("", "buf shall not be changed", equals(buf_post, buf_pre));
-
-
-        // Transformation of templates
-        pos = indexOfCharFrom_CString(format_post, '%', 0);
-
-        while(pos != -1)
-        {
-            oldpos = pos;
-            pos = indexOfCharFrom_CString(format_post, '%', pos + 1);
-            if(pos != -1)
-            {
-                if(pos == oldpos + 1)
-                {
-                    if(indexOfCharFrom_CString(format_post, '%', pos + 1) == pos + 1)
-                        err++;
-
-                    oldpos = pos + 1;
-                    pos++;
-                }
-                else
-                {
-                    if(charAt_CString(format_post, oldpos + 1) == 'E' || charAt_CString(format_post, oldpos + 1) == 'O')
-                    {
-                        if(pos <= oldpos + 3)
-                            err++;
-                    }
-                    else
-                    {
-                        if(pos <= oldpos + 2)
-                            err++;
-                    }
-                }
-            }
-        }
-
-        /*
-         * The application shall ensure that there is white-space or other non-
-         * alphanumeric characters between any two conversion specifications.
-         */
-        REQ("strptime.05", "there is white-space or other non-alphanumeric characters between any two conversion specifications",
-            err == 0
-            );
-
-
-
-
-
-
-
-        /*
-         * A conversion specification composed of white-space characters is executed by
-         * scanning input up to the first character that is not white-space (which remains
-         * unscanned), or until no more characters can be scanned.
-         */
-        REQ("strptime.10", "", TODO_REQ());
-
-
-        /*
-         * A conversion specification that is an ordinary character is executed by
-         * scanning the next character from the buffer.
-         */
-        REQ("strptime.11", "", TODO_REQ());
-
-
-        /*
-         * If the character scanned from the buffer differs from the one comprising the
-         * directive, the directive fails, and the differing and subsequent characters
-         * remain unscanned.
-         */
-        REQ("strptime.12", "", TODO_REQ());
-
-
-
-        /*
-         * A series of conversion specifications composed of %n, %t, white-space
-         * characters, or any combination is executed by scanning up to the first
-         * character that is not white space (which remains unscanned), or until no more
-         * characters can be scanned.
-         */
-        REQ("strptime.13", "", TODO_REQ());
-
-        /*
-         * Any other conversion specification is executed by scanning characters until a
-         * character matching the next directive is scanned, or until no more characters
-         * can be scanned.
-         */
-        REQ("strptime.14", "", TODO_REQ());
-
-        /*
-         * These characters, except the one matching the next directive, are then compared
-         * to the locale values associated with the conversion specifier.
-         */
-        REQ("strptime.15", "", TODO_REQ());
-
-        /*
-         * If a match is found, values for the appropriate tm structure members are set to
-         * values corresponding to the locale information.
-         */
-        REQ("strptime.16", "", TODO_REQ());
-
-
-     
         return true;
     }
 }
@@ -1303,23 +1040,51 @@ CString* strptime_spec( CallContext context, StringTPtr buf, StringTPtr format, 
 /**                       Helper Functions                         **/
 /********************************************************************/
 
-TmT* create_TmT(IntT tm_sec, IntT tm_min, IntT tm_hour, IntT tm_mday, IntT tm_mon, IntT tm_year, IntT tm_wday, IntT tm_yday, IntT tm_isdst, LongT tm_gmtoff, CString *tm_zone)
+TmT* create_TmT (
+                 IntT     tm_sec,
+                 IntT     tm_min,
+                 IntT     tm_hour,
+                 IntT     tm_mday,
+                 IntT     tm_mon,
+                 IntT     tm_year,
+                 IntT     tm_wday,
+                 IntT     tm_yday,
+                 IntT     tm_isdst,
+                 LongT    tm_gmtoff,
+                 CString *tm_zone
+                )
 {
-    return create(&type_TmT, tm_sec, tm_min, tm_hour, tm_mday, tm_mon, tm_year, tm_wday, tm_yday, tm_isdst, tm_gmtoff, tm_zone);
+    return create (
+                   &type_TmT,
+                   tm_sec,
+                   tm_min,
+                   tm_hour,
+                   tm_mday,
+                   tm_mon,
+                   tm_year,
+                   tm_wday,
+                   tm_yday,
+                   tm_isdst,
+                   tm_gmtoff,
+                   tm_zone
+                  );
 }
 
 invariant(TmT* time)
 {
-    if (time->tm_sec >= 0 && time->tm_sec <= 60)
-    if (time->tm_min >= 0 && time->tm_min <= 59)
-    if (time->tm_hour >= 0 && time->tm_hour <=23)
-    if (time->tm_mday >=1 && time->tm_mday <= 31)
-    if (time->tm_mon >= 0 && time->tm_mon <= 11)
-    if (time->tm_wday >= 0 && time->tm_wday <= 6)
-    if (time->tm_yday >= 0 && time->tm_yday <= 365)
-//    if (time->tm_isdst);
-//  TODO: Inadequate reaction on this parameter.
-    return true;
-    else return false;
+    if (
+        (time->tm_sec  >= 0 && time->tm_sec  <= 60  )  &&
+        (time->tm_min  >= 0 && time->tm_min  <= 59  )  &&
+        (time->tm_hour >= 0 && time->tm_hour <= 23  )  &&
+        (time->tm_mday >= 1 && time->tm_mday <= 31  )  &&
+        (time->tm_mon  >= 0 && time->tm_mon  <= 11  )  &&
+        (time->tm_wday >= 0 && time->tm_wday <= 6   )  &&
+        (time->tm_yday >= 0 && time->tm_yday <= 365 )
+       )
+        return true;
+   else return false;
+
+    // if (time->tm_isdst);
+    // TODO: Inadequate reaction on this parameter.
 }
 

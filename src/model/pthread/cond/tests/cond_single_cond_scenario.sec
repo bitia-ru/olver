@@ -1,12 +1,12 @@
 /*
  * Copyright (c) 2005-2006 Institute for System Programming
  * Russian Academy of Sciences
- * All rights reserved. 
+ * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at 
- * 
+ * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
@@ -22,6 +22,7 @@
 #include "system/system/system_model.seh"
 #include "common/common_scenario.seh"
 #include "common/common_media.seh"
+#include "process/process/process_common.seh"
 #include "atl/integer.h"
 
 #include "common/explicit_fsm.h"
@@ -51,7 +52,7 @@
                     break; \
                 } \
             } \
-            if (t_index_chk == t_list_sz) \
+            if ( ! traceFunctionCall( context, t_index_chk != t_list_sz, true, "t_index_chk == t_list_sz in MUTEX_UNLOCK_HARD", NULL ) ) \
             { \
                 Error = true; \
                 setBadVerdict("Incorrect Mutex owner!"); \
@@ -118,7 +119,7 @@ void cleanup_single_cond_scenario()
         {
             // TODO: delete thread
         }
-    }    
+    }
 
     /* deallocate memory */
     for(i = 0; i < COND_NUM; i++)
@@ -133,7 +134,7 @@ void cleanup_single_cond_scenario()
 bool init_single_cond_scenario(int argc, char** argv)
 {
     int i;
-    
+
     bool result = true;
 
     /* initialize arrays */
@@ -154,7 +155,7 @@ bool init_single_cond_scenario(int argc, char** argv)
     for(i = 1; i < THREAD_NUM; i++)
     {
         context_array[i] = createThread();
-        
+
         if(isWrong_ThreadId(context_array[i]))
         {
             result = false;
@@ -181,16 +182,16 @@ bool init_single_cond_scenario(int argc, char** argv)
         cleanup_single_cond_scenario();
         return false;
     }
-    
+
     /* fill model state */
     condInitList = create_List(&type_Integer);
     for(i = 0; i < COND_NUM; i++)
     {
         append_List(condInitList, create_Integer(CONDITION_NOT_INITIALIZED));
     }
-    
+
     //initFibers(doScen);
-    
+
     setTSTimeModel(NotUseTSTime);
     setFindFirstSeriesOnly(true);
 
@@ -231,6 +232,55 @@ void restoreSingleCondState(SingleCondModelState* modelState)
 /**                          Test Actions                          **/
 /********************************************************************/
 
+/* Full OLVER Edition Source Start */
+scenario
+bool sc_full_conformance_scen()
+{
+    PThreadCondT* condObj = NULL;
+    PThreadCondTPtr cond = memory_blocks[0];
+    PThreadMutexTPtr mutex = memory_blocks[1];
+    Integer* condInitialized = get_List(condInitList, 0);
+
+    pthread_cond_init_spec(context_array[0], cond, NULL_VoidTPtr);
+    pthread_mutex_init_spec(context_array[0], mutex, NULL_VoidTPtr);
+    pthread_mutex_lock_spec(context_array[0], mutex);
+
+    while (!condObj->predicate)
+    {
+        pthread_cond_wait_spec(context_array[0], cond, mutex);
+        //serialize();
+    }
+
+    condObj->predicate = 0;
+    pthread_mutex_unlock_spec(context_array[0], mutex);
+    pthread_mutex_destroy_spec(context_array[0], mutex);
+    pthread_cond_destroy_spec(context_array[0], cond);
+
+
+    pthread_mutex_lock_spec(context_array[1], mutex);
+    pthread_cond_signal_spec(context_array[1], cond);
+    pthread_mutex_unlock_spec(context_array[1], mutex);
+    //sleep(context_array[1], 500);
+
+    while (true)
+    {
+        pthread_mutex_lock_spec(context_array[1], mutex);
+        if (!condObj->predicate)
+        {
+            condObj->predicate = 1;
+            pthread_cond_broadcast_spec(context_array[1], cond);
+            pthread_mutex_unlock_spec(context_array[1], mutex);
+            break;
+        }
+        else
+        {
+            pthread_mutex_unlock_spec(context_array[1], mutex);
+            continue;
+        }
+    }
+    return true;
+}
+/* Full OLVER Edition Source End */
 
 scenario
 bool sc_base_conformance_scen()
@@ -279,12 +329,114 @@ bool sc_base_conformance_scen()
     return true;
 }
 
+/* Full OLVER Edition Source Start */
+scenario
+bool sc_simple_scen()
+{
+    PThreadCondT* condObj = NULL;
+    PThreadCondTPtr cond = memory_blocks[0];
+    PThreadMutexTPtr mutex = memory_blocks[1];
 
+    iterate (int i=0; i<6; ++i;)
+    {
+        switch (i)
+        {
+        case 0:
+            pthread_cond_init_spec(context_array[0], cond, NULL_VoidTPtr);
+            pthread_mutex_init_spec(context_array[0], mutex, NULL_VoidTPtr);
+            break;
+        case 1:
+            condObj = getCondVariable(cond);
+            condObj->mutex = mutex;
+            pthread_mutex_lock_spec(context_array[0], mutex);
+            break;
+        case 2:
+            pthread_cond_wait_spec(context_array[0], cond, mutex);
+            break;
+        case 3:
+            pthread_cond_signal_spec(context_array[1], cond);
+            break;
+        case 4:
+            pthread_mutex_unlock_spec(context_array[0], mutex);
+            break;
+        case 5:
+            pthread_mutex_destroy_spec(context_array[0], mutex);
+            pthread_cond_destroy_spec(context_array[0], cond);
+            break;
+        }
+    }
 
+    return true;
+}
+/* Full OLVER Edition Source End */
+
+/* Full OLVER Edition Source Start */
+scenario
+bool sc_init_scen()
+{
+    iterate(int i = 0; i < THREAD_NUM; i++;)
+    {
+        iterate(int j = 0; j < COND_NUM; j++;)
+        {
+            Integer* condInitialized = get_List(condInitList, j);
+
+            if (*condInitialized == CONDITION_NOT_INITIALIZED)
+            {
+                pthread_cond_init_spec(context_array[i], memory_blocks[j], NULL_VoidTPtr);
+                *condInitialized = i;
+            }
+        }
+    }
+    return true;
+}
+/* Full OLVER Edition Source End */
+
+/* Full OLVER Edition Source Start */
+scenario
+bool sc_destroy_scen()
+{
+    iterate(int i = 0; i < THREAD_NUM; i++;)
+    {
+        iterate(int j = 0; j < COND_NUM; j++;)
+        {
+            Integer* condInitialized = get_List(condInitList, j);
+
+            if (*condInitialized != CONDITION_NOT_INITIALIZED)
+            {
+                pthread_cond_destroy_spec(context_array[i], memory_blocks[j]);
+                *condInitialized = CONDITION_NOT_INITIALIZED;
+            }
+        }
+    }
+    return true;
+}
+/* Full OLVER Edition Source End */
 
 /********************************************************************/
 /**                    Test Scenario Definition                    **/
 /********************************************************************/
+/* Full OLVER Edition Source Start */
+/*
+scenario dfsm pthread_cond_cond_single_scenario =
+{
+    .init = init_single_cond_scenario,
+    .finish = finish_single_cond_scenario,
+    .getState = (PtrGetState)get_SingleCondState,
+    .saveModelState = (PtrSaveModelState)saveSingleCondState,
+    .restoreModelState = (PtrRestoreModelState)restoreSingleCondState,
+    .isStationaryState = (PtrIsStationaryState)isCondModelStateStationary,
+    .actions = {
+            sc_base_conformance_scen,
+
+//            sc_simple_scen,
+//            sc_init_scen,
+//            sc_destroy_scen,
+              NULL
+    }
+};
+
+*/
+/* Full OLVER Edition Source End */
 
 /*
 void waitFiberFunc(void* x)
@@ -524,7 +676,7 @@ bool sc_forever_scen()
     return !Error;
 }
 
-scenario dfsm cond_single_cond_scenario =
+scenario dfsm pthread_cond_cond_single_scenario =
 {
     .init = init_single_cond_scenario,
     .finish = finish_single_cond_scenario,

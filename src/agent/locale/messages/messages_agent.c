@@ -38,6 +38,13 @@ static TACommandVerdict perror_cmd(TAThread thread, TAInputStream stream)
     errno = readInt(&stream);
 
     stderr = fopen(ta_get_test_file_path("stderr.dat"), "wb");
+    if(stderr == NULL)
+    {
+        stderr = temp_stderr;
+        ta_debug_printf("perror_cmd: [1] can't open file %s\n", ta_get_test_file_path("stderr.dat"));
+
+        return taDefaultVerdict;
+    }
 
     START_TARGET_OPERATION(thread);
 
@@ -50,6 +57,12 @@ static TACommandVerdict perror_cmd(TAThread thread, TAInputStream stream)
     stderr = temp_stderr;
 
     temp_stderr = fopen(ta_get_test_file_path("stderr.dat"), "rb");
+    if(temp_stderr == NULL)
+    {
+        ta_debug_printf("perror_cmd: [2] can't open file %s\n", ta_get_test_file_path("stderr.dat"));
+
+        return taDefaultVerdict;
+    }
 
     buf_size = fread(buf, 1, 4096, temp_stderr);
 
@@ -84,6 +97,13 @@ static TACommandVerdict strerror_cmd(TAThread thread, TAInputStream stream)
     return taDefaultVerdict;
 }
 
+// undef strerror_r to excluding using of __xpg_strerror_r
+#ifdef strerror_r
+  #undef strerror_r
+#endif
+
+char* strerror_r(int,char*,size_t);
+
 static TACommandVerdict strerror_r_cmd(TAThread thread, TAInputStream stream)
 {
     // Prepare
@@ -107,7 +127,6 @@ static TACommandVerdict strerror_r_cmd(TAThread thread, TAInputStream stream)
 
     return taDefaultVerdict;
 }
-
 
 
 /********************************************************************/

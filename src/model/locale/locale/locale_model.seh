@@ -21,15 +21,19 @@
 #define LOCALE_MODEL_SEH
 
 #include "common/common_model.seh"
+#include "system/system/system_model.seh"
 #include "data/errno_model.seh"
 #include "data/locale_model.seh"
 #include "locale/locale/locale_defs.seh"
 
-typedef enum { ProcessSelector, ThreadSelector, EnvironSelector } LSPlace;
 
 /********************************************************************/
-/**                        Specification Types                     **/
+/**                        Types Definitions                       **/
 /********************************************************************/
+
+typedef enum { ProcessSelector, ThreadSelector, EnvironSelector } LSPlace;
+
+
 specification typedef
 struct LocaleSelectorSt
 {
@@ -41,6 +45,7 @@ struct LocaleSelectorSt
     CString* Numeric;
     CString* Time;
 } LocaleSelector;
+
 
 specification typedef
 struct LConvSt
@@ -72,13 +77,27 @@ struct LConvSt
     CharT int_n_sign_posn;
 } LConv;
 
+
+/****************************************************************
+ * Struct description: characters group for LC_CTYPE category
+ *
+ * Note: these fields define which characters shall be present or
+ *       shall NOT be present in the locale; presence of other
+ *       characters is implementation defined.
+ */
 specification
 typedef struct CTypeGroupSt
 {
-    Set*/*<IntTObj*>*/ Syms;
+    // explicitly defined characters ("symbols"):
+    Set*/*<IntTObj*>*/    Syms;
+
+    // characters inherited from other groups:
     Set*/*<CTypeGroup*>*/ Inherits;
+
+    // characters which shall NOT be present in the locale (see Note):
     Set*/*<CTypeGroup*>*/ NotInherits;
 } CTypeGroup;
+
 
 // Locale model summary
 specification typedef
@@ -93,52 +112,78 @@ struct LocaleInfoSt
     // nl_langinfo() model state
     Map*/*<NLItem, CString*>*/      mapNLLangInfo;
 
+    /*
+     * Lists of all uppercase and lowercase characters.
+     * These lists are used for __ctype_to[upper,lower]_loc functions
+     * and are loaded from the target system (for paranoiac checks).
+     */
     List*/*<IntT>*/ CTypeToLower;
     List*/*<IntT>*/ CTypeToUpper;
-    
+
+    /* Mapping from lowercase characters to uppercase ones (composed in insruments system) */
     Map*/*<IntT, IntT>*/ toUpper;
-    
+
+    /* Named characters groups: */
     Map*/*<CString*, CTypeGroup*>*/ mapGroups;
 } LocaleInfo;
+
 
 LocaleSelector* create_LocaleSelector(CString* BaseLoc);
 LConv* create_LConv(void);
 LocaleInfo* create_LocaleInfo(void);
 
+// Creating an empty characters group
 CTypeGroup*       create_CTypeGroup(CString* sSyms);
+
+// Getting all characters from the characters group with inheritances
 Set*          getFullSet_CTypeGroup(CTypeGroup* tg);
+
+// Adding(!) characters groups to the list of inherited or NOT inherited characters
 void             include_CTypeGroup(CTypeGroup* dst, CTypeGroup* src);
 void             exclude_CTypeGroup(CTypeGroup* dst, CTypeGroup* src);
+
+// Checking presence of character in the characters group with inheritances
 bool            contains_CTypeGroup(CTypeGroup* grp, IntT c);
 bool         containsNot_CTypeGroup(CTypeGroup* grp, IntT c);
 
-bool isInCTypeGroup_Locale(CallContext context, CString* group, IntT c);
+// Checking presence of character in the named characters group with inheritances
+bool    isInCTypeGroup_Locale(CallContext context, CString* group, IntT c);
 bool isNotInCTypeGroup_Locale(CallContext context, CString* group, IntT c);
 
-bool isUpperCase(CallContext context, IntT c);
-bool isLowerCase(CallContext context, IntT c);
+// Checking and getting uppercase characters from the current locale
+bool  isUpperCase(CallContext context, IntT c);
 IntT getUpperCase(CallContext context, IntT c);
+
+// Checking and getting lowercase characters from the current locale
+bool  isLowerCase(CallContext context, IntT c);
 IntT getLowerCase(CallContext context, IntT c);
+
 
 /********************************************************************/
 /**                      Locale Model State API                    **/
 /********************************************************************/
-void init_Locale(CallContext context);
-CString* getLocale_Locale(CallContext context, IntT category);
+void                     init_Locale(SystemState* ss);
+void               initAtExec_Locale(CallContext context);
+CString*            getLocale_Locale(CallContext context, IntT category);
 
-LocaleInfo* createLocale_Locale(CallContext context, CString* locName, LocaleInfo* pBase);
-bool nameLocale_Locale(CallContext context, CString* locName, CString* newName);
+LocaleInfo* createLocale_SystemState(SystemState* ss, CString* locName, LocaleInfo* pBase);
+LocaleInfo*      createLocale_Locale(CallContext context, CString* locName, LocaleInfo* pBase);
 
+bool          nameLocale_SystemState(SystemState* ss, CString* locName, CString* newName);
+bool               nameLocale_Locale(CallContext context, CString* locName, CString* newName);
+
+LocaleInfo* getLocaleInfo_SystemState(SystemState* ss, CString* locName);
+LocaleInfo*     getLocaleInfo_Locale(CallContext context, CString* locName);
 LocaleInfo* getCurrLocaleInfo_Locale(CallContext context, IntT category);
-LocaleInfo* getLocaleInfo_Locale(CallContext context, CString* locName);
 
-Object* get_Locale(CallContext context, CString* locName, IntT locVar);
-bool set_Locale(CallContext context, CString* locName, IntT locVar, Object* value);
+Object*                   get_Locale(LocaleInfo* li, CString* locName, IntT locVar);
+bool                      set_Locale(LocaleInfo* li, CString* locName, IntT locVar, Object* value);
 
-bool isKnown_Locale(CallContext context, CString* locName);
+bool                  isKnown_Locale(CallContext context, CString* locName);
 
-Bool3 equals_Locale(CallContext context, CString* locName, IntT locVar, Object* value);
-Bool3 equalsCurrent_Locale(CallContext context, IntT locVar, Object* value);
+Bool3                  equals_Locale(CallContext context, CString* locName, IntT locVar, Object* value);
+Bool3           equalsCurrent_Locale(CallContext context,                   IntT locVar, Object* value);
+
 
 /********************************************************************/
 /**                      Interface Functions                       **/
@@ -200,13 +245,14 @@ LocaleT uselocale_spec(CallContext context, LocaleT newloc);
 
 void onUseLocale(CallContext context, LocaleT newloc, LocaleT res);
 
+
 /********************************************************************/
 /**                       Helper Functions                         **/
 /********************************************************************/
 
 bool isValid_Category(int category);
 
-LSPlace whatIs_LocaleSelector(CallContext context, IntT category);
+LSPlace whereIs_LocaleSelector(CallContext context, IntT category);
 
 LocaleSelector* getProcessLocaleSelector(CallContext context);
 CString* selectLocale_LocaleSelector (  LocaleSelector* LocaleSelector,
@@ -221,5 +267,6 @@ CString* selectProcessLocale (  CallContext context,
 
 LocaleT getThreadLocaleSelector(CallContext context);
 LocaleT selectThreadLocale(CallContext context, LocaleT locale);
+
 
 #endif

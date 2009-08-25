@@ -28,7 +28,7 @@
 /**            Data Types Readers And Writers                      **/
 /********************************************************************/
 
-void readTimeTm(TAInputStream * stream, struct tm * tmval)
+void readTimeTm(TAInputStream* stream, struct tm* tmval)
 {
     
     verifyType_TAInputStream(stream, "tm");
@@ -47,7 +47,7 @@ void readTimeTm(TAInputStream * stream, struct tm * tmval)
 }
 
 
-void writeTimeTm(TAThread  thread, struct tm * tmval)
+void writeTimeTm(TAThread thread, struct tm* tmval)
 {
     writeInt(thread, tmval->tm_sec);
     writeInt(thread, tmval->tm_min);
@@ -71,12 +71,16 @@ static TACommandVerdict getdate_cmd(TAThread thread,TAInputStream stream)
     struct tm * res;
     char *str;
 
+
     // Prepare
     str = readString(&stream);
+
+    getdate_err = 0;
     
     START_TARGET_OPERATION(thread);
     res = getdate(str); 
     END_TARGET_OPERATION(thread);
+
 
     // Response
     writeInt(thread, res != NULL);
@@ -84,6 +88,8 @@ static TACommandVerdict getdate_cmd(TAThread thread,TAInputStream stream)
     {
         writeTimeTm(thread, res);
     }
+    writeString(thread, str);
+    writeInt(thread, getdate_err);
     
     sendResponse(thread);
 
@@ -92,17 +98,17 @@ static TACommandVerdict getdate_cmd(TAThread thread,TAInputStream stream)
 
 static TACommandVerdict strftime_cmd(TAThread thread,TAInputStream stream)
 {
-    size_t res;
+    size_t     res;
+    char      *s;
+    size_t     maxsize;
+    char      *format;
+    struct tm  time;
 
-    char *s;
-    size_t maxsize;
-    char * format;
-    struct tm time;
 
     // Prepare
-    s = (char *)readPointer(&stream);
+    s = readString(&stream);
     maxsize = readSize(&stream);
-    format = (char *)readPointer(&stream);
+    format = readString(&stream);
     readTimeTm(&stream, &time);
     
     START_TARGET_OPERATION(thread);
@@ -112,6 +118,8 @@ static TACommandVerdict strftime_cmd(TAThread thread,TAInputStream stream)
 
     // Response
     writeSize(thread, res);
+    writeString(thread, s);
+    writeString(thread, format);
 
     sendResponse(thread);
     
@@ -120,14 +128,14 @@ static TACommandVerdict strftime_cmd(TAThread thread,TAInputStream stream)
 
 static TACommandVerdict strptime_cmd(TAThread thread,TAInputStream stream)
 {
-    char* res = NULL;
+    char* res;
     char* buf;
     char* format;
     struct tm time;
 
     // Prepare
-    buf = (char *)readPointer(&stream);
-    format = (char *)readPointer(&stream);
+    buf = readString(&stream);
+    format = readString(&stream);
     readTimeTm(&stream, &time);
 
     START_TARGET_OPERATION(thread);
@@ -136,11 +144,13 @@ static TACommandVerdict strptime_cmd(TAThread thread,TAInputStream stream)
     
     // Response
     writeInt(thread, res != NULL);
-    if (res != NULL)
+    if(res != NULL)
     {
         writeString(thread, res);
     }
     writeTimeTm(thread, &time);
+    writeString(thread, buf);
+    writeString(thread, format);
 
     sendResponse(thread);
     

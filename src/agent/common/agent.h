@@ -190,7 +190,7 @@ int ta_auto_registration_enable(int enable);
 struct TAThread
 {
   TAOuputStream* stream;
-  jmp_buf start_point;
+  sigjmp_buf start_point;
   struct timespec start_time;
   struct timespec end_time;
   int level;

@@ -21,15 +21,16 @@ include $(MODULES:%=%/Makefile)
 ###########################################################
 # Parameters of compilation
 ###########################################################
+SHELL   = /bin/bash
 CC      = gcc
-LD      = g++
+LD      = gcc
 SEC         = "$(CTESK_HOME)/bin/massive-sec.sh"
 SECPP       = "$(CTESK_HOME)/bin/sec-pp.sh"
 LIBTYPE     = gcc
 CTESK_LIBPATH   = $(CTESK_HOME)/lib/$(LIBTYPE)
 
-CFLAGS = -g -std=c99 -D_POSIX_C_SOURCE=200112L $(INCLUDE) -I. "-I$(CTESK_HOME)/include"
-LIB = $(XLIB) -g -Wl,--relax -rdynamic "-L$(CTESK_LIBPATH)" "-L." -lctesk -lstdc++ -lpthread
+CFLAGS = -g -std=c99 -D_POSIX_C_SOURCE=200112L $(INCLUDE) -I. -I../testdata "-I$(CTESK_HOME)/include"
+LIB = $(XLIB) -g -Wl,--relax -rdynamic "-L$(CTESK_LIBPATH)" "-L." -lctesk -lpthread -lm
 LDFLAGS = $(LIB)
 
 DEPENDS = $(patsubst %.sec,%.d,$(SEC_SOURCES))

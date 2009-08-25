@@ -1,12 +1,12 @@
 /*
  * Copyright (c) 2005-2006 Institute for System Programming
  * Russian Academy of Sciences
- * All rights reserved. 
+ * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at 
- * 
+ * You may obtain a copy of the License at
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
@@ -21,6 +21,7 @@
 
 #include "fs/ftw/ftw_agent.h"
 #include "fs/meta/meta_agent.h"
+#include "process/process/process_common.h"
 
 /********************************************************************/
 /**                            Writers                             **/
@@ -115,9 +116,9 @@ void writeFTW64FunctionCall
 /********************************************************************/
 /**       Functions for ftw(), ftw64(), nftw(), and nftw64()       **/
 /********************************************************************/
-static int ftw_function_type = 0;
-static int ftw_function_param = 0;
-static int ftw_function_result = 0;
+volatile static int ftw_function_type = 0;
+volatile static int ftw_function_param = 0;
+volatile static int ftw_function_result = 0;
 
 static int ftw_function(const char *path, const struct stat *file_stat, int flags)
 {
@@ -132,7 +133,7 @@ static int ftw_function(const char *path, const struct stat *file_stat, int flag
     }
 
     writeFTWFunctionCall(thread, path, file_stat, flags, NULL, getcwd(buffer, 1024), result);
- 
+
     return result;
 }
 
@@ -195,7 +196,7 @@ static int readNFTWFlags(TAInputStream *stream)
     int res = 0;
 
     // TODO: Bug in LSB 3.1 environment
-    int FTW_PHYS  = 1; 
+    int FTW_PHYS  = 1;
     int FTW_MOUNT = 2;
     int FTW_DEPTH = 8;
     int FTW_CHDIR = 4;
@@ -291,22 +292,22 @@ static TACommandVerdict ftw_cmd(TAThread thread, TAInputStream stream)
     path = readString(&stream);
     fn = readFTWFunction(&stream);
     ndirs = readInt(&stream);
-    
+
     START_TARGET_OPERATION(thread);
-    
+
     // Execute
     errno = 0;
     res = ftw(path, fn, ndirs);
-    
+
     END_TARGET_OPERATION(thread);
-    
+
     // Response
     writeString(thread, NULL);
 
     writeInt(thread, res);
     writeInt(thread, errno);
     sendResponse(thread);
-    
+
     return taDefaultVerdict;
 }
 
@@ -320,22 +321,22 @@ static TACommandVerdict ftw64_cmd(TAThread thread, TAInputStream stream)
     path = readString(&stream);
     fn = readFTW64Function(&stream);
     ndirs = readInt(&stream);
-    
+
     START_TARGET_OPERATION(thread);
-    
+
     // Execute
     errno = 0;
     res = ftw64(path, fn, ndirs);
-    
+
     END_TARGET_OPERATION(thread);
-    
+
     // Response
     writeString(thread, NULL);
 
     writeInt(thread, res);
     writeInt(thread, errno);
     sendResponse(thread);
-    
+
     return taDefaultVerdict;
 }
 
@@ -352,20 +353,20 @@ static TACommandVerdict nftw_cmd(TAThread thread, TAInputStream stream)
     flags = readNFTWFlags(&stream);
 
     START_TARGET_OPERATION(thread);
-    
+
     // Execute
     errno = 0;
     res = nftw(path, fn, fd_limit, flags);
-    
+
     END_TARGET_OPERATION(thread);
-    
+
     // Response
     writeString(thread, NULL);
 
     writeInt(thread, res);
     writeInt(thread, errno);
     sendResponse(thread);
-    
+
     return taDefaultVerdict;
 }
 
@@ -380,22 +381,22 @@ static TACommandVerdict nftw64_cmd(TAThread thread, TAInputStream stream)
     fn = readNFTW64Function(&stream);
     fd_limit = readInt(&stream);
     flags = readNFTWFlags(&stream);
-    
+
     START_TARGET_OPERATION(thread);
-    
+
     // Execute
     errno = 0;
     res = nftw64(path, fn, fd_limit, flags);
-    
+
     END_TARGET_OPERATION(thread);
-    
+
     // Response
     writeString(thread, NULL);
 
     writeInt(thread, res);
     writeInt(thread, errno);
     sendResponse(thread);
-    
+
     return taDefaultVerdict;
 }
 
@@ -408,5 +409,6 @@ void register_fs_ftw_commands(void)
     ta_register_command("ftw64", ftw64_cmd);
     ta_register_command("nftw", nftw_cmd);
     ta_register_command("nftw64", nftw64_cmd);
-}
 
+    ta_register_command( "appendIfFileExists", appendIfFileExists_cmd );
+}

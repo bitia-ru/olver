@@ -26,9 +26,10 @@
 /********************************************************************/
 void initLocaleMessagesSubsystem(void)
 {
-  // Set up mediators
+    // Set up mediators
     set_mediator_perror_spec(perror_media);
     set_mediator_strerror_spec(strerror_media);
+    set_mediator_strerror_r_spec(strerror_r_media);
 }
 
 
@@ -56,52 +57,33 @@ void perror_spec(CallContext context, CString* s, ErrorCode* errno)
 
         destroy_TSCommand(&command);
     }
+    
+    state
+    {
+        onPerror(context, s, errno);
+    }
 }
 
 
 /** strerror_spec **/
-//This mediator refers to: strerror_r, strerror
 mediator strerror_media for specification
-CString* strerror_spec(CallContext context, IntT errnum, CString** strerrbuf,
-    SizeT buflen, ErrorCode* errno)
+CString* strerror_spec(CallContext context, IntT errnum, ErrorCode* errno)
 {
     call
     {
         CString* res;
-        VoidTPtr ptr;
         TSCommand command = create_TSCommand();
 
+        format_TSCommand(&command, "strerror:$(int)", create_IntTObj(errnum));
 
-        if(strerrbuf == NULL)
-            format_TSCommand(&command, "strerror:$(int)", create_IntTObj(errnum));
-        else
-        {
-            ptr = allocateMemoryBlock(context, buflen+5);
+        executeCommandInContext(context, &command);
 
-            assertion(!isNULL_VoidTPtr(ptr), "strerror_media: memory not allocated");
-
-            format_TSCommand(&command, "strerror_r:$(int)$(ptr)$(int)",
-                create_IntTObj(errnum), create_VoidTPtrObj(ptr), create_IntTObj(buflen));
-        }
-
-        executeCommandInContext( context, &command );
-
-        if (!isBadVerdict())
+        if(!isBadVerdict())
         {
             timestamp = command.meta.timestamp;
 
-            if(strerrbuf == NULL)
-            {
-                res = clone(readCString_TSStream(&command.response));
-                *errno = readInt_TSStream(&command.response);
-            }
-            else
-            {
-                res = clone(readCString_TSStream(&command.response));
-                *strerrbuf = clone(readLimitedCString_VoidTPtr(ptr, buflen));
-                *errno = readInt_TSStream(&command.response);
-                deallocateMemoryBlock(context, ptr);
-            }
+            res = clone(readCString_TSStream(&command.response));
+            *errno = readInt_TSStream(&command.response);
         }
 
         destroy_TSCommand(&command);
@@ -111,6 +93,47 @@ CString* strerror_spec(CallContext context, IntT errnum, CString** strerrbuf,
 
     state
     {
-        onStrError(context, errnum, strerrbuf, buflen, errno, strerror_spec);
+        onStrError(context, errnum, errno, strerror_spec);
+    }
+}
+
+/** strerror_r_spec **/
+mediator strerror_r_media for specification
+CString* strerror_r_spec(CallContext context, IntT errnum, CString** strerrbuf,
+    SizeT buflen, ErrorCode* errno)
+{
+    call
+    {
+        CString* res;
+        VoidTPtr ptr;
+        TSCommand command = create_TSCommand();
+
+        ptr = allocateMemoryBlock(context, buflen+5);
+    
+        assertion(!isNULL_VoidTPtr(ptr), "strerror_r_media: memory not allocated");
+
+        format_TSCommand(&command, "strerror_r:$(int)$(ptr)$(int)",
+            create_IntTObj(errnum), create_VoidTPtrObj(ptr), create_IntTObj(buflen));
+
+        executeCommandInContext( context, &command );
+
+        if(!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+
+            res = clone(readCString_TSStream(&command.response));
+            *strerrbuf = clone(readLimitedCString_VoidTPtr(ptr, buflen));
+            *errno = readInt_TSStream(&command.response);
+            deallocateMemoryBlock(context, ptr);
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+
+    state
+    {
+        onStrErrorR(context, errnum, strerrbuf, buflen, errno, strerror_r_spec);
     }
 }

@@ -35,6 +35,12 @@ TACommandVerdict readFile_cmd( TAThread thread, TAInputStream stream );
 TACommandVerdict fwreadFile_cmd( TAThread thread, TAInputStream stream );
 
 /********************************************************************/
+/**                     trace function call                        **/
+/********************************************************************/
+
+TACommandVerdict appendIfFileExists_cmd( TAThread thread, TAInputStream stream );
+
+/********************************************************************/
 /**                  execute function with ...                     **/
 /********************************************************************/
 

@@ -1,3 +1,7 @@
+#!/bin/bash
+#
+#
+
 DIR=${0%/*}
 cd $DIR
 
@@ -16,6 +20,12 @@ sed -r 's/(.+).po/msgfmt \1.po -o \1.mo/' genmo -i
 chmod +x genmo
 ./genmo
 rm -f genmo
+cd ..
+echo 'Done'
+
+echo -n "Installing Olver-locale for locale.locale ... "
+cd locale.locale
+./install_locale.sh
 cd ..
 echo 'Done'
 

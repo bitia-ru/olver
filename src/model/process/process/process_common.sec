@@ -253,6 +253,14 @@ List * createProcesses( bool needGetpwentSpecCalls ) {
     return result;
 } // createProcesses
 
+static void terminateProcessIfExists( CallContext context ) {
+    SystemState * system = getSystemState( context.system );
+    if ( system != NULL ) {
+        ProcessIdObj * processIdObj = create_ProcessIdObj( create_ProcessId( context.system, context.process ) );
+        if ( containsKey_Map( system->processes, processIdObj ) ) { terminateProcess( context ); }
+    }
+}
+
 bool terminateProcesses( List * threadIdsOrPars ) {
    int i;
    if ( threadIdsOrPars == NULL ) { return true; }
@@ -266,7 +274,7 @@ bool terminateProcesses( List * threadIdsOrPars ) {
       } else {
          return false;
       }
-      terminateProcess( * threadIdObj );
+      terminateProcessIfExists( * threadIdObj );
    }
    return true;
 }
@@ -303,6 +311,10 @@ int indexOfCStringC_String( CString * cs, CString * csToFind ) {
 
 int lastIndexOfCharC_String( CString * cs, int ch ) { return lastIndexOfChar_String( toString( cs ), ch ); }
 
+int lastIndexOfCStringC_String( CString * cs, CString * csToFind ) {
+    return lastIndexOfString_String( toString( cs ), toString( csToFind ) );
+}
+
 CString * replaceC_String( CString * cs, char oldChar, char newChar ) {
     String * s = replace_String( toString( cs ), oldChar, newChar );
     return create_CString( (char *)toCharArray_String( s ) );
@@ -328,16 +340,16 @@ void printC_String( const char * prefix, /* const */ CString * cs ) {
     verbose( "%s%s\n", prefix == NULL ? "" : prefix, toCharArray_String( tmp ) );
 }
 
+CString * cutOffSubstring_CString( CString * cs, int beginIndex, int endIndex ) {
+    CString * part1 = substring_CString( cs, 0, beginIndex );
+    CString * part2 = substringFrom_CString( cs, endIndex );
+}
+
 /********************************************************************/
 /**                           WString                              **/
 /********************************************************************/
 
 WString * createW_String( char * s ) { return createFromCharArray_WString( s ); }
-//    WString * res = createFromCharArray_WString( s );
-//    VERBOSE( "createW_String : s is %s\n"          , s           );
-//    VERBOSE( "createW_String : res->length is %d\n", res->length );
-//    return res;
-//}
 
 WString * substringW_String( WString * ws, int first, int last ) {
     WString * cloneWs;
@@ -442,6 +454,48 @@ WString * fwreadFile( CallContext context, FILETPtr * file, CString * fileName, 
     destroy_TSCommand( & command );
     return res;
 }
+
+/********************************************************************/
+/**                     trace function call                        **/
+/********************************************************************/
+
+bool appendIfFileExists( CallContext context, const char * fileName, String * data, bool erasePrevious ) {
+    bool fileExists;
+    TSCommand command = create_TSCommand();
+    format_TSCommand( & command, "appendIfFileExists:$(str)$(str)$(int)",
+                                 create_CString( (char *)fileName ), data, create_IntTObj( erasePrevious ? 1 : 0 )
+                    );
+    executeCommandInContext( context, & command );
+    if ( ! isBadVerdict() ) { fileExists = ( readInt_TSStream( & command.response ) == 1 ); }
+    destroy_TSCommand( & command );
+    return fileExists;
+}
+
+/* ... == "data1Name", data1AsString, ..., "dataNName", dataNAsString, NULL */
+bool traceFunctionCall
+         ( CallContext context, bool functionCallResult, bool needResultCorrect, const char * functionName, ... )
+{
+    static int callNumber = 0;
+    const char * dataName;
+    String * dataAsString;
+    String * toOutput;
+    callNumber++;
+    toOutput = format_String( "traceFunctionCall : call number %d, function %s return %s\n",
+                              callNumber, functionName, functionCallResult ? "true" : "false"
+                            );
+    va_list list;
+    va_start( list, functionName );
+    while ( ( dataName = va_arg( list, const char * ) ) != NULL ) {
+        dataAsString = va_arg( list, String * );
+        toOutput = concat_String( toOutput, format_String( "traceFunctionCall :     data %s is %s\n",
+                                                           dataName, toCharArray_String( dataAsString )
+                                                         )
+                                );
+    }
+    va_end( list );
+    appendIfFileExists( context, "traceFunctionCallOutput.txt", toOutput, callNumber == 1 );
+    return needResultCorrect || functionCallResult;
+} // traceFunctionCall
 
 /********************************************************************/
 /**                  execute function with ...                     **/
@@ -931,6 +985,11 @@ void setExpectedResultAndReqIds( const char * funcName, Object * expectedResult,
     currentExpectedReqIds = expectedReqIds;
 }
 
+void modifyExpectedResult( const char * funcName, Object * modifiedExpectedResult ) {
+    assertion( equals( currentFuncName, create_String( (char *)funcName ) ), "modifyExpectedResult : funcName" );
+    currentExpectedResult = modifiedExpectedResult;
+}
+
 bool checkExpectedResult( const char * funcName, Object * result, const char * prefixForCommonReq ) {
     String * reqPrefix       = concat_String( create_String( (char *)funcName           ), create_String( "." ) );
     String * commonReqPrefix = concat_String( create_String( (char *)prefixForCommonReq ), create_String( "." ) );
@@ -941,12 +1000,15 @@ bool checkExpectedResult( const char * funcName, Object * result, const char * p
     if ( ! verdict ) {
         String * expectedResultAsString = toString( currentExpectedResult );
         String * resultAsString         = toString( result                );
-        traceFormattedUserInfo( "checkExpectedResult\n"                                                                         );
-        traceFormattedUserInfo( "checkExpectedResult : expectedResult is [%s]\n" , toCharArray_String( expectedResultAsString ) );
-        traceFormattedUserInfo( "checkExpectedResult : result         is [%s]\n" , toCharArray_String( resultAsString         ) );
+        const char * eras = toCharArray_String( expectedResultAsString );
+        const char * ras  = toCharArray_String( resultAsString         );
+        traceFormattedUserInfo( "checkExpectedResult for %s\n"                            , funcName       );
+        traceFormattedUserInfo( "checkExpectedResult for %s : [expectedResult] is [%s]\n" , funcName, eras );
+        traceFormattedUserInfo( "checkExpectedResult for %s : [result]         is [%s]\n" , funcName, ras  );
         for ( i = 0; i < size_List( currentExpectedReqIds ); i++ ) {
             String * reqId = get_List( currentExpectedReqIds, i );
-            traceFormattedUserInfo( "checkExpectedResult : reqId %2d       is [%s]\n", i, toCharArray_String( reqId ) );
+            const char * ri  = toCharArray_String( reqId );
+            traceFormattedUserInfo( "checkExpectedResult for %s : [reqId %2d]       is [%s]\n", funcName, i, ri );
         }
     }
     for ( i = 0; i < size_List( currentExpectedReqIds ); i++ ) {
@@ -970,13 +1032,10 @@ Object * getExpectedResult( const char * funcName ) {
                                                                      else { return currentExpectedResult; }
 }
 
-List /* String */ * getExpectedReqIds( const char * funcName ) {
-    if ( ! equals( currentFuncName, create_String( (char *)funcName ) ) ) { return NULL                 ; }
-                                                                     else { return currentExpectedReqIds; }
-}
-
 void clearExpectedResultAndReqIds( const char * funcName ) {
-    currentFuncName = create_String( (char *)funcName );
+    assertion( equals( currentFuncName, create_String( (char *)funcName ) ), "clearExpectedResultAndReqIds : funcName" );
+    // currentFuncName = create_String( (char *)funcName );
+    currentFuncName = NULL;
     currentExpectedResult = NULL;
     currentExpectedReqIds = NULL;
 }

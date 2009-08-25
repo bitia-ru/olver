@@ -201,13 +201,13 @@ static TACommandVerdict readdir64_cmd(TAThread thread,TAInputStream stream)
     // Prepare
     DIR *dirp = readPointer(&stream);
 
-    struct dirent *dirent;
+    struct dirent64 *dirent;
 
     START_TARGET_OPERATION(thread);
 
     // Execute
     errno = 0;
-    dirent = readdir(dirp);
+    dirent = readdir64(dirp);
 
     END_TARGET_OPERATION(thread);
 
