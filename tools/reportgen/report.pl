@@ -56,17 +56,18 @@ sub origin{
 
 sub isRequirementFailed{
     my $self = shift;
-    my $req_list = shift;
-    my %reqs = map { $_ => 1 } split (';', $req_list);
     
     return 0 if ! defined $self->{'property'};
+    
+    my $req_list = shift;
+    my %reqs = map { $_ => 1 } split (';', $req_list);
         
     foreach my $p (@{$self->{'property'}}){
         if ($p->{'name'} =~ /req_id\.(.*)/){
-            return 1 if (defined $reqs{$1});
+            return 0 if not defined $reqs{$1};
         }
     }
-    return 0;
+    return 1;
 }
 
 sub modelOperation{
@@ -105,6 +106,11 @@ sub getCoveredElementId{
 sub transitionName{
     my $self = shift;
     return $self->{'transition'};
+}
+
+sub scenarioName{
+    my $self = shift;
+    return $self->{'scenario'};
 }
 
 package Operation;
@@ -186,17 +192,19 @@ sub processBugDB{
     while (my ($id , $bug) = each(%{$bugDB->{'bug'}})){
         ### normalize text ###
         my $pattern_union;
-        foreach my $pattern (values %{$bug->{'pattern'}}){
-            $pattern->{'content'} =~ s/\n\s*/ /go;
-            $pattern->{'content'} =~ s/^\s+//o;
-            $pattern->{'content'} =~ s/\s+$//o;
-            $pattern->{'content'} =~ s/\s*&&\s*/ && /go;
-            $pattern->{'content'} =~ s/\s*\|\|\s*/ || /go;
+                
+        foreach my $pattern_el (@{$bug->{'pattern'}}){
+            my $pattern = ref $pattern_el ? $pattern_el->{'content'} : $pattern_el;
+            $pattern =~ s/\n\s*/ /go;
+            $pattern =~ s/^\s+//o;
+            $pattern =~ s/\s+$//o;
+            $pattern =~ s/\s*&&\s*/ && /go;
+            $pattern =~ s/\s*\|\|\s*/ || /go;
             if(! defined $pattern_union){
-                $pattern_union = $pattern->{'content'};
+                $pattern_union = $pattern;
             }
             else{
-                $pattern_union = '('.$pattern_union.') || ('.$pattern->{'content'}.')';
+                $pattern_union = '('.$pattern_union.') || ('.$pattern.')';
             }
         }
         $bug->{'body'} =~ s/\n\s*/ /go;
@@ -221,7 +229,7 @@ sub processBugDB{
         my $old = $pattern;
         ### convert bug pattern to internal format ###
         
-        my $key_words = "get|kind|info|isRequirementFailed|modelOperation|modelOperationSeries|size|transitionName|interimFailures|name|returnValue|getParameterValue|getCoveredElementId";
+        my $key_words = "get|kind|info|isRequirementFailed|modelOperation|modelOperationSeries|size|transitionName|scenarioName|interimFailures|name|returnValue|getParameterValue|getCoveredElementId";
         
         $pattern =~ s/(?<!\.)(?:\b)($key_words)(\b)/\$exc->$1/go;
         $pattern =~ s/\.($key_words)(\b)/->$1/go;
@@ -310,7 +318,6 @@ sub start_element {
         
         if(defined $operation->{$model_id}){
             generate_struct_exception($self, "Duplicate model id '$model_id'");
-            print Dumper($operation);
         }
         
         $operation->{$model_id} = \%atts;
@@ -361,7 +368,7 @@ sub start_element {
             $exception{$exc_id}{'model'}{$model_id} = $operation->{$model_id};
         }
         elsif($atts{'kind'} eq 'SERIALIZATION_FAILED'){
-            $exception{$exc_id}{'model'} = $operation;
+            $exception{$exc_id}{'model'} = $operation if defined $operation;
         }
                 
         if ($atts{'kind'} eq 'SERIALIZATION_FAILED'){
@@ -451,7 +458,7 @@ sub start_element {
     }
     elsif($name eq 'transition_end'){
         foreach my $c_id (sort {$a <=> $b} keys %exception){
-            next if(defined $main::mfpsc and $c_id > $main::mfpsc);
+            next if(defined $main::mfpsc and $f_id > $main::mfpsc);
             
             my $exc = $exception{$c_id};
             
@@ -468,13 +475,13 @@ sub start_element {
                         }
                     }
                 }
-                
+                                
                 foreach my $b_id (keys %{$bugDB->{'bug'}}){
                     if ($bugDB->{'bug'}{$b_id}{'func'}($exc) ){
                         $exc->{'bug'} = $b_id;
                     }
                 }
-                
+
                 $self->{'failure'}{'failure '.(++$f_id)} = $exc;
 
                 prepare_for_printing($exc);
@@ -705,7 +712,7 @@ if(-f $bug_db_file){
     $bugDB = XMLin($bug_db_file,
         ForceArray => ["pattern", "bug", "property"],
         KeyAttr => {
-            "pattern" => "origin",
+#            "pattern" => "origin",
             "bug" => "id",
             "property" => "name"
             }
@@ -717,7 +724,7 @@ our $trace_file_name;
 our $is_struct_fail;
 
 my $handler = ReportHandler->new();
-our $parser = XML::SAX::ParserFactory->parser(Handler => $handler);
+our $parser;
 
 my $tmp_file = tmpnam();
 foreach $trace_file_name (sort @ARGV){
@@ -751,10 +758,12 @@ foreach $trace_file_name (sort @ARGV){
     (my $short_file_name = $trace_file_name) =~ s/.*\///;
     print "Processing entry: $short_file_name\n";
 
+    $parser = XML::SAX::ParserFactory->parser(Handler => $handler);
     eval { $parser->parse({Source => {SystemId => $tmp_file}}) };
     if($@){
         ReportHandler::generate_struct_exception($handler, $@);
     }
+    undef $parser;
     
     print "error: structural failures detected\n" if $is_struct_fail;
 }
@@ -874,7 +883,7 @@ foreach my $fid ( sort keys %{$handler->{'interim'}}){
 sub print_failure{
     my $fid = shift;
     my $fail = shift;
-    
+
     my ($p, $s) = $fail->origin;
     my $info = $fail->{'info'};
     my $scen = $fail->{'scenario'};
@@ -886,7 +895,7 @@ sub print_failure{
   <FailureDesc identifier="$fid" scenarioDesc="$scen" structural="$structural" interim="$interim" traceName="$trace_name" currentOracleSignature="$s" info="$info">
 XML
     my $model = $fail->modelOperation;
-    
+
     if (not defined $fail->{'series'}){
         if(defined $model->{'formula'}){
             foreach my $id ( sort keys %{$model->{'formula'}}){
@@ -920,24 +929,27 @@ XML
 XML
         }
     }
-    foreach my $id (sort keys %{$fail->{'model'}}){
-        my $model = $fail->{'model'}{$id};
-        my $channel = $model->channel;
-        my $signature = $model->{'signature'};
-        my $package = $model->{'package'};
-        print RES <<XML;
+
+    if(defined $fail->{'model'}){
+        foreach my $id (sort keys %{$fail->{'model'}}){
+            my $model = $fail->{'model'}{$id};
+            my $channel = $model->channel;
+            my $signature = $model->{'signature'};
+            my $package = $model->{'package'};
+            print RES <<XML;
     <ModelCall refid="$id" channel="$channel" signature="$signature" package="$package">
 XML
-        foreach my $param (@{$model->{'model_value'}}){
-            if ($param->{'kind'} eq 'argument'){
-                print RES <<XML;
+            foreach my $param (@{$model->{'model_value'}}){
+                if ($param->{'kind'} eq 'argument'){
+                    print RES <<XML;
       <Parameter type="$param->{type}" name="$param->{name}" value="$param->{value}" />
 XML
+                }
             }
-        }
-        print RES <<XML;
+            print RES <<XML;
     </ModelCall>
 XML
+        }
     }
     if(defined $fail->{'series'}){
         foreach (@{$fail->{'series'}}){

@@ -142,6 +142,10 @@ sub end_element {
         $chars =~ s/\n^[\s\t]+(.*)/$1 /gm;
         $chars =~ s/\s+$//;
         
+        $chars =~ s/&/&amp;/go;
+        $chars =~ s/</&lt;/go;
+        $chars =~ s/\"/&quot;/go;
+        
         $chars =~ s/(http\:\/\/www\.nabble\.com.+\.html)/<a href="$1">$1<\/a>/g;
         $chars =~ s/(http\:\/\/bugs\..+show_bug\.cgi\?id\=\d+)/<a href="$1">$1\<\/a>/g;
         $chars =~ s/(http\:\/\/sources\..+show_bug\.cgi\?id\=\d+)/<a href="$1">$1\<\/a>/g;
@@ -224,6 +228,9 @@ foreach (keys %{$handler->{'grouping'}}){
         # Obtain failure kind
         /([^;]+)$/;
         my $id = $1;
+        if (/;[^;]+;([^;]+);/) {
+            $id = $1.': '.$id;
+        }
         
         foreach my $fid (@{$handler->{'grouping'}{$_}}){
             my $scen = $failure->{$fid}{'scenario'};
