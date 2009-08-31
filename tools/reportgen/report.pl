@@ -19,6 +19,17 @@ use Getopt::Long;
 use File::Temp qw/tmpnam/;
 use Time::Local;
 
+sub model_sort{
+    my $ma = $a->{'name'};
+    my $mb = $b->{'name'};
+    
+    my $cmp_at = 0;
+    $cmp_at-- if ( $ma =~ s/^\@// );
+    $cmp_at++ if ( $mb =~ s/^\@// );
+    
+    $ma cmp $mb || $cmp_at;
+}
+
 my $bugDB;
 
 package Exception;
@@ -281,6 +292,7 @@ my $operation;
 my %exception;
 my $series;
 
+my $f_sc = 0;
 my $f_id = 0;
 my $im_id = 0;
 
@@ -439,6 +451,7 @@ sub start_element {
         $self->{'scenario'}{$scenario} = \%atts;
         $self->{'scenario'}{$scenario}{'trace'} = $main::trace_file_name;
         $exc_id = 0;
+        $f_sc = 0;
     }
     elsif($name eq 'scenario_end'){
         $self->{'scenario'}{$scenario}{'end_time'} = $atts{'time'};
@@ -458,8 +471,8 @@ sub start_element {
     }
     elsif($name eq 'transition_end'){
         foreach my $c_id (sort {$a <=> $b} keys %exception){
-            next if(defined $main::mfpsc and $f_id > $main::mfpsc);
-            
+            next if(defined $main::mfpsc and $f_sc >= $main::mfpsc);
+            $f_sc++;
             my $exc = $exception{$c_id};
             
             if(! defined $exc->{'interim'} or $exc->{'interim'} eq 'false'){
@@ -490,12 +503,12 @@ sub start_element {
                 push(@{$self->{'scenario'}{$scenario}{'failure'}}, "failure $f_id");
                 
                 ### failure grouping according to failure.grouping.xml ###
-                my ($p, $s) = $exception{$c_id}->origin;
+                my ($p, $s) = $exc->origin;
                 
-                if(my $b_id = $exception{$c_id}{'bug'}){
+                if(my $b_id = $exc->{'bug'}){
                     push(@{$self->{'grouping'}{'known bugs'}{$p}{$s}{$b_id}}, "failure $f_id");
                 }
-                elsif ($exception{$c_id}->reqs ){
+                elsif ($exc->reqs ){
                     push(@{$self->{'grouping'}{'req failures'}{$p}{$s}}, "failure $f_id");
                 }
                 else{
@@ -1369,26 +1382,27 @@ if(not defined $fail->{'series'}){
 </tr>
 HTM
     }
-    
         
-    foreach my $param (@{$model->{'model_value'}}){
-        if ($param->{'kind'} eq 'argument'){
+    if(defined $model->{'model_value'}){
+        foreach my $param (sort model_sort @{$model->{'model_value'}}){
+            if ($param->{'kind'} eq 'argument'){
             print FAIL <<HTM;
 <tr>
   <td>parameter value</td>
   <td><nobr>&nbsp;$param->{type} $param->{name} =<wbr/> $param->{value}</nobr></td>
 </tr>
 HTM
+            }
         }
-    }
-    foreach my $param (@{$model->{'model_value'}}){
-        if ($param->{'kind'} eq 'result'){
-            print FAIL <<HTM;
+        foreach my $param (@{$model->{'model_value'}}){
+            if ($param->{'kind'} eq 'result'){
+                print FAIL <<HTM;
 <tr>
   <td>return value</td>
   <td><nobr>&nbsp;$param->{type}<wbr/> $param->{value}</nobr></td>
 </tr>
 HTM
+            }
         }
     }
 
@@ -1465,7 +1479,7 @@ HTM
 HTM
         my $first = 1;
 
-        foreach my $param (@{$model->{'model_value'}}){
+        foreach my $param (sort model_sort @{$model->{'model_value'}}){
             if ($param->{'kind'} eq 'argument'){
 
                 if(! $first){
