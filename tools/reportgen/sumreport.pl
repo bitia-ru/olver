@@ -63,8 +63,8 @@ sub start_element {
         $self->{'scenario'}{$atts{'identifier'}} = 0;
     }
     elsif($name eq 'ScenarioEnvironment'){
-        if($atts{'startTime'} =~ /\w+\s(\w+)\s(\d+)\s([\d:]+)\s*\w*\s(\d+)/){
-            my $start_time = "$4_$month{$1}_$2 $3";
+        if($atts{'startTime'} =~ /\w+\s(\w+)\s{1,2}(\d+)\s([\d:]+)\s*\w*\s(\d+)/){
+            my $start_time = sprintf("%04d_%02d_%02d %s", $4, $month{$1}, $2, $3);
                if(! defined $self->{'date'} or $start_time lt $self->{'date'}){
                    $self->{'env'}{'start_time'} = $start_time;
                }

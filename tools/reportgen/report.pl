@@ -71,12 +71,16 @@ sub isRequirementFailed{
     return 0 if ! defined $self->{'property'};
     
     my $req_list = shift;
-    my %reqs = map { $_ => 1 } split (';', $req_list);
+    my %reqs;
         
     foreach my $p (@{$self->{'property'}}){
-        if ($p->{'name'} =~ /req_id\.(.*)/){
-            return 0 if not defined $reqs{$1};
+        if ($p->{'name'} =~ /^req_id\./o){
+            $reqs{$p->{'value'}} = 1;
         }
+    }
+    
+    foreach ( split (';', $req_list) ){
+        return 0 if not defined $reqs{$_};
     }
     return 1;
 }
