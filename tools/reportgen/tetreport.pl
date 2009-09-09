@@ -248,8 +248,8 @@ foreach my $pack (sort keys %{$tests}){
             print "200|$activity $tp_num ".&mtime."|$reqs\n";
             my $ii = 0;
             
-            my $link = "./test_logs/olver_full/results/failures/${fid}_0.html";
-            $link =~ s/ /\&\#32\;/g;
+            my $link = "./test_logs/olver_full/report/failures/${fid}_0.html";
+            $link =~ s/ /\%20/g;
             # Test Case Information: 520|activity TPnumber context block sequence|text
             print "520|$activity $tp_num $context 1 ".++$ii."|{noreplace}<a href=\"$link\">$fid</a>{/noreplace}\n";
             print "520|$activity $tp_num $context 1 ".++$ii."|--------------------------------\n";

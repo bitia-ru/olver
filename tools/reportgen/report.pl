@@ -182,20 +182,20 @@ package List;
 
 sub new {
     my $self = shift;
-    $self = {} unless $self;
+    $self = [] unless $self;
     bless($self, "List");
 }
 
 sub size{
     my $self = shift;
-    return defined $self ? scalar @{$self} : 0;
+    return scalar @{$self};
 }
 
 sub get{
     my $self = shift;
     my $num = shift;
     
-    return defined $self ? @{$self}[$num] : undef;
+    return defined @{$self}[$num] ? @{$self}[$num] : undef;
 }
 
 
@@ -496,6 +496,7 @@ sub start_element {
                 foreach my $b_id (keys %{$bugDB->{'bug'}}){
                     if ($bugDB->{'bug'}{$b_id}{'func'}($exc) ){
                         $exc->{'bug'} = $b_id;
+                        last;
                     }
                 }
 
