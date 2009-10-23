@@ -23,21 +23,31 @@
 #include "common/common_scenario.seh"
 
 #include "config/system_config.seh"
-
+#include "process/meta/meta_model.seh"
 #include "system/user/tests/account_scenario.seh"
 #include "system/user/account_model.seh"
 #include "system/user/account_media.seh"
+
+#include "io/file/file_model.seh"
 
 /********************************************************************/
 /**                       Test Scenario Data                       **/
 /********************************************************************/
 static CallContext context;
 
-static VoidTPtr ptr1;
-CString * line1;
-CString * name1;
-CString * host1;
-CString * dbname1;
+static VoidTPtr ptr;
+VoidTPtr addr;
+//VoidTPtr addr2;
+CString * ut_line;
+CString * ut_id;
+CString * ut_user;
+CString * ut_host;
+CString * dbname;
+PidT ut_pid;
+TimeVal * ut_tv;
+
+//UtmpT * utmp;
+UtmpxT* utmpx;
 
 /********************************************************************/
 /**                  Test Scenario Initialization                  **/
@@ -45,27 +55,49 @@ CString * dbname1;
 
 static bool init_account_scenario(int argc, char** argv)
 {
-
     /* Init test scenario data */
     context = getContext();
 
+    // make sure process has appropriate priviledges
     INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+    
+    dbname = getTestScenarioSandboxPathCh("utmp");
+    close_spec(context, creat_spec(context, dbname, create_FilePermissions_String("rwxrwxrwx"), requestErrorCode(), false), requestErrorCode());
+    
+    addr = allocateMemoryBlock(context, 500);
+    //addr2 = allocateMemoryBlock(context, 500);
 
-    ptr1 = allocateMemoryBlock( context, sizeof_Type(context, "void*") );
-    line1 = create_CString( "testdevice" );
-    name1 = create_CString( "tester" );
-    host1 = create_CString( "localhost" );
-    dbname1 = create_CString( "/var/log/wtmp" );
-	{
-		VoidTPtr address=allocateMemoryBlock(context, 1000);
-	    pututxline_spec(context, address, requestErrorCode() );
-	}
+    ptr = allocateMemoryBlock( context, sizeof_Type(context, "void*") );
+    ut_id = create_CString( "olvr" );
+    ut_line = create_CString( "/tmp/olver/device" );
+    ut_user = create_CString( "olver_tester" );
+    ut_host = create_CString( "localhost" );
+    ut_pid = getpid_spec(context).process;
+    ut_tv = create_TimeVal(100000, 100);
+	
+	utmpx = create_UtmpxT(addr, SUT_USER_PROCESS, ut_pid, ut_line, ut_id, ut_user, ut_host, ut_tv);
+    // should be better created as utmp = logwtmp_spec( context, ut_line, ut_user, ut_host );
+    // switch ut_type to SUT_DEAD_PROCESS in order to remove line from utmp file
+
+    utmpname_spec(context, dbname);
+	pututxline_spec(context, utmpx, requestErrorCode());
+    
     return true;
 }
 
 static void finish_account_scenario(void)
 {
-    deallocateMemoryBlock( context, ptr1 );
+    endutent_spec(context);
+    utmpname_spec(context, create_CString("/var/run/utmp"));
+    
+    removeTestScenarioSandboxDir(context);
+    
+    deallocateMemoryBlock( context, ptr );
+    deallocateMemoryBlock( context, addr );
 }
 
 /********************************************************************/
@@ -84,6 +116,7 @@ bool endutxent_scen(void)
 scenario
 bool getutxent_scen(void)
 {
+    setutxent_spec(context);
     getutxent_spec(context);
 
     return true;
@@ -92,10 +125,8 @@ bool getutxent_scen(void)
 scenario
 bool getutxid_scen(void)
 {
-    UtmpxT * utmpx;
     setutxent_spec(context); // reset cursor
-    utmpx = getutxent_spec(context);
-   	getutxid_spec(context, utmpx->address );
+   	getutxid_spec(context, utmpx );
 
     return true;
 }
@@ -103,10 +134,8 @@ bool getutxid_scen(void)
 scenario
 bool getutxline_scen(void)
 {
-    UtmpxT * utmpx;
     setutxent_spec(context); // reset cursor
-    utmpx = getutxent_spec(context);
-    getutxline_spec(context, utmpx->address );
+    getutxline_spec(context, utmpx );
 
     return true;
 }
@@ -114,10 +143,8 @@ bool getutxline_scen(void)
 scenario
 bool pututxline_scen(void)
 {
-    UtmpxT * utmpx;
     setutxent_spec(context); // reset cursor
-    utmpx = getutxent_spec(context);
-    pututxline_spec(context, utmpx->address, requestErrorCode() );
+    pututxline_spec(context, utmpx, requestErrorCode() );
 
     return true;
 }
@@ -134,24 +161,26 @@ scenario
 bool getutent_scen(void)
 {
     UtmpT * utmp;
+    setutent_spec(context);
     do{
-    utmp = getutent_spec(context);
+        utmp = getutent_spec(context);
         if(utmp!=NULL)
-            DUMP("TEST: %s\n",toCharArray_CString(utmp->ut_line));
-    }while(utmp);/**/
+            DUMP("getutent: %s\n",toCharArray_CString(utmp->ut_line));
+    }while(utmp);
     return true;
 }
 
 scenario
 bool getutent_r_scen(void)
 {
-    UtmpxT * utmpx;
-    setutxent_spec(context); // reset cursor
-    utmpx = getutxent_spec(context);
+    VoidTPtr addr2 = allocateMemoryBlock(context, 500);
+    UtmpT * utmp = create_UtmpT(addr2, SUT_USER_PROCESS, ut_pid, ut_line, ut_id, ut_user, ut_host, ut_tv);
+    
+    setutent_spec(context); // reset cursor
+    getutent_r_spec( context, utmp, ptr );
 
-    writeInt_VoidTPtr( ptr1, utmpx->address.address );
-    getutent_r_spec( context, utmpx->address, ptr1 );
-
+    deallocateMemoryBlock( context, addr2 );
+    
     return true;
 }
 
@@ -159,17 +188,35 @@ scenario
 bool login_scen(void)
 {
     UtmpT * utmp;
-    setutent_spec(context); // reset cursor
-    utmp = getutent_spec(context);
-    login_spec( context, utmp->address );
-
+    IntT res;
+    
+    utmp = create_UtmpT(addr, SUT_USER_PROCESS, ut_pid, ut_line, ut_id, ut_user, ut_host, ut_tv);
+    login_spec( context, utmp );
+    
+    utmpx->ut_id = utmp->ut_id;
+    
+    // we should get real line value after login in order to logout successfully
+    // back to main db
+    utmpname_spec(context, create_CString("/var/run/utmp"));
+    setutent_spec(context);
+    utmpx = getutxid_spec(context, utmpx);
+    endutent_spec(context);
+    utmpname_spec(context, dbname);
+    
+    utmp->ut_line = utmpx->ut_line;
+    
+    verbose("line: %s\n", toCharArray_CString(utmp->ut_line));
+    res = logout_spec( context, utmp->ut_line );
+    verbose("logout(1 on success): %d\n", res);
+    
     return true;
 }
 
 scenario
 bool logout_scen(void)
 {
-    logout_spec( context, line1 );
+    // just stab, see login_scen
+    logout_spec( context, ut_line );
 
     return true;
 }
@@ -177,7 +224,7 @@ bool logout_scen(void)
 scenario
 bool logwtmp_scen(void)
 {
-    logwtmp_spec( context, line1, name1, host1 );
+    logwtmp_spec( context, ut_line, ut_user, ut_host );
 
     return true;
 }
@@ -193,7 +240,7 @@ bool setutent_scen(void)
 scenario
 bool utmpname_scen(void)
 {
-    utmpname_spec( context, dbname1 );
+    utmpname_spec( context, dbname );
 
     return true;
 }
@@ -226,7 +273,6 @@ scenario ndfsm system_user_account_scenario =
         setutent_scen,
         utmpname_scen,
         endutent_scen,
-
         NULL
     }
 };

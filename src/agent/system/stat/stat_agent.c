@@ -41,6 +41,7 @@ static TACommandVerdict acct_cmd(TAThread thread,TAInputStream stream)
     {
         filename = readString(&stream);
     }
+    errno = 0;
 
     START_TARGET_OPERATION(thread);
     res = acct(filename);
@@ -107,6 +108,7 @@ static TACommandVerdict times_cmd(TAThread thread,TAInputStream stream)
     clock_t res;
     struct tms buffer;
 
+    errno = 0;
 
     START_TARGET_OPERATION(thread);
     res = times(&buffer);
