@@ -20,11 +20,62 @@
 #include "system/user/account_agent.h"
 #include <utmp.h>
 #include <utmpx.h>
+#include <string.h>
 #include <errno.h>
 
 /********************************************************************/
 /**                        Helper Functions                        **/
 /********************************************************************/
+
+static TACommandVerdict write_utmp_cmd(TAThread thread,TAInputStream stream)
+{
+    struct utmp * utmp;
+
+    // Prepare
+    utmp = (struct utmp *)readPointer(&stream);
+    memset(utmp, 0, sizeof(struct utmp));
+        
+    // Execute
+    utmp->ut_type = readShort(&stream);
+    utmp->ut_pid = readInt(&stream);
+    strcpy(utmp->ut_line, readString(&stream));
+    strcpy(utmp->ut_id, readString(&stream));
+    strcpy(utmp->ut_user, readString(&stream));
+    strcpy(utmp->ut_host, readString(&stream));
+    utmp->ut_tv.tv_sec = readLong(&stream);
+    utmp->ut_tv.tv_usec = readLong(&stream);
+    
+    // Response
+    writeString(thread,"Ok");
+    sendResponse(thread);
+    
+    return taDefaultVerdict;
+}
+
+static TACommandVerdict write_utmpx_cmd(TAThread thread,TAInputStream stream)
+{
+    struct utmpx * utmpx;
+
+    // Prepare
+    utmpx = (struct utmpx *)readPointer(&stream);
+    memset(utmpx, 0, sizeof(struct utmpx));
+    
+    // Execute
+    utmpx->ut_type = readShort(&stream);
+    utmpx->ut_pid = readInt(&stream);
+    strcpy(utmpx->ut_line, readString(&stream));
+    strcpy(utmpx->ut_id, readString(&stream));
+    strcpy(utmpx->ut_user, readString(&stream));
+    strcpy(utmpx->ut_host, readString(&stream));
+    utmpx->ut_tv.tv_sec = readLong(&stream);
+    utmpx->ut_tv.tv_usec = readLong(&stream);
+    
+    // Response
+    writeString(thread,"Ok");
+    sendResponse(thread);
+    
+    return taDefaultVerdict;
+}
 
 void writeUtmp(TAThread thread, struct utmp * utmp)
 {
@@ -34,12 +85,12 @@ void writeUtmp(TAThread thread, struct utmp * utmp)
     {
         writeInt( thread, 0 );
         writePointer( thread, utmp );
-        writeString( thread, utmp->ut_name );
-        writeString( thread, utmp->ut_host );
-        writeString( thread, utmp->ut_id );
-        writeString( thread, utmp->ut_line );
-        writeInt( thread, utmp->ut_pid );
         writeShort( thread, utmp->ut_type );
+        writeInt( thread, utmp->ut_pid );
+        writeString( thread, utmp->ut_line );
+        writeString( thread, utmp->ut_id );
+        writeString( thread, utmp->ut_user );
+        writeString( thread, utmp->ut_host );
         writeLong( thread, utmp->ut_tv.tv_sec );
         writeLong( thread, utmp->ut_tv.tv_usec );
     }
@@ -53,13 +104,14 @@ void writeUtmpx(TAThread thread, struct utmpx * utmpx)
     {
         writeInt( thread, 0 );
         writePointer( thread, utmpx );
-        writeString( thread, utmpx->ut_user ); // User login name.
-        writeString( thread, utmpx->ut_id ); // Unspecified initialization process identifier.
-        writeString( thread, utmpx->ut_line ); // Device name.
-        writeInt( thread, utmpx->ut_pid ); // Process ID.
-        writeShort( thread, utmpx->ut_type ); // Type of entry.
+        writeShort( thread, utmpx->ut_type );
+        writeInt( thread, utmpx->ut_pid );
+        writeString( thread, utmpx->ut_line );
+        writeString( thread, utmpx->ut_id );
+        writeString( thread, utmpx->ut_user );
+        writeString( thread, utmpx->ut_host );
         writeLong( thread, utmpx->ut_tv.tv_sec );
-        writeLong( thread, utmpx->ut_tv.tv_usec ); // Time entry was made.
+        writeLong( thread, utmpx->ut_tv.tv_usec );
     }
 }
 
@@ -176,17 +228,6 @@ static TACommandVerdict pututxline_cmd(TAThread thread,TAInputStream stream)
     utmpx = readPointer(&stream);
     errno = readInt(&stream);
 
-    utmpx->ut_user[0]='m';
-    utmpx->ut_user[1]='\0';
-    utmpx->ut_id[0]='c';
-    utmpx->ut_id[1]='\0';
-    utmpx->ut_line[0]='u';
-    utmpx->ut_line[1]='\0';
-    utmpx->ut_pid=0;
-    utmpx->ut_type=BOOT_TIME;
-    utmpx->ut_tv.tv_sec=10000;
-    utmpx->ut_tv.tv_usec=1000;
-        
     START_TARGET_OPERATION(thread);
 
     // Execute
@@ -241,7 +282,7 @@ static TACommandVerdict getutent_r_cmd(TAThread thread,TAInputStream stream)
 {
     int res;
     struct utmp * buffer;
-    struct utmp * result;
+    struct utmp ** result;
     // Prepare
     buffer = readPointer(&stream);
     result = readPointer(&stream);
@@ -255,6 +296,7 @@ static TACommandVerdict getutent_r_cmd(TAThread thread,TAInputStream stream)
 
     // Response
     writeInt( thread, res);
+    writePointer( thread, result);
     sendResponse(thread);
 
     return taDefaultVerdict;
@@ -388,5 +430,8 @@ void register_system_user_account_commands(void)
     ta_register_command("setutent",setutent_cmd);
     ta_register_command("setutxent",setutxent_cmd);
     ta_register_command("utmpname",utmpname_cmd);
+    
+    ta_register_command("write_utmp",write_utmp_cmd);
+    ta_register_command("write_utmpx",write_utmpx_cmd);
 }
 
