@@ -4,10 +4,11 @@ include $(MODULES:%=%/GNUmakefile)
 
 DEBUG 		= -g3
 RELEASE 	= -O
-INCLUDE		= -I.
-CC		= gcc
+INCLUDE		= -I /opt/lsb/include -I.
+CC		= lsbcc
 # CPP		= g++
-LD		= g++
+#LD		= g++
+LD		= lsbcc
 AR		= ar r
 
 CFLAGS 		= $(INCLUDE) $(DEBUG) $(RELEASE)

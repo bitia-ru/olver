@@ -36,6 +36,7 @@
 #include "util/inet/inet_model.seh"
 #include "socket/netdata/netdata_model.seh"
 #include "socket/socket/socket_model.seh"
+#include "process/process/process_common.seh"
 
 #pragma SEC subsystem netdb "socket.netdb"
 
@@ -268,7 +269,7 @@ ServentT * getservbyname_spec( CallContext context, CString *name, CString *prot
          */
         REQ("getservbyname.09", "", TODO_REQ());
 
-  
+
 
         return true;
     }
@@ -1725,7 +1726,7 @@ IntT getaddrinfo_spec( CallContext context, CString * nodename,
                      */
                     REQ("getaddrinfo.50", "", TODO_REQ()); //
 
-               
+
                 }
             }
 
@@ -2178,7 +2179,6 @@ IntT getnameinfo_spec( CallContext context, SockaddrT * sa,
              * A system error occurred. The error code can be found in errno.
              */
             ERROR_SHALL(POSIX_GETNAMEINFO, EAI_SYSTEM, "getnameinfo.15.09", TODO_ERR(EAI_SYSTEM) )
-
         ERROR_END()
 
         /*
@@ -2200,15 +2200,6 @@ IntT getnameinfo_spec( CallContext context, SockaddrT * sa,
          */
         REQ("getnameinfo.06", "", TODO_REQ()); //
         // TODO: if `node` is numeric then it corresponds to `sa`
-
-
-        /*
-         * If the service's name cannot be located, the numeric form of the service
-         * address (for example, its port number) shall be returned instead of its name.
-         */
-        REQ("getnameinfo.08", "", TODO_REQ()); //
-        // TODO: check the service is numeric or exists in the serv_db
-
 
         if(flags & SUT_NI_NOFQDN )
         {
@@ -2252,47 +2243,25 @@ IntT getnameinfo_spec( CallContext context, SockaddrT * sa,
         }
         else
         {
-            if(service && serv_db)
-            {
+            if ( service != NULL && serv_db != NULL ) {
                 IntT port;
-                ServentT * se;
-                CString * servname_cut;
-                if(sa->family == SUT_AF_INET)
-                    port = getInetSocket_sin_port(sa);
-                else
-                if(sa->family == SUT_AF_INET6)
-                    port = getInet6Socket_sin6_port(sa);
-                else
-                    port=-1;
+                if      ( sa->family == SUT_AF_INET  ) { port = getInetSocket_sin_port  ( sa ); }
+                else if ( sa->family == SUT_AF_INET6 ) { port = getInet6Socket_sin6_port( sa ); }
+                                                  else { port = -1                            ; }
 
-                se = findserv_model(context, NULL, port, NULL, NULL);
-                if(se)
-                {
-                    servname_cut = substring_CString(se->s_name, 0, min(length_CString(service), min(length_CString(se->s_name), servicelen)));
-
-                    if(POSIX_GETNAMEINFO_FULL_SERVICENAME_RESOLUTION)
-                    {
-                        traceFormattedUserInfo("`$(obj)` ?= `$(obj)`",servname_cut, service);
-                        REQ("getnameinfo.09.04","service name",equals(service, servname_cut) );
-                    }
-                    else
-                    {
-                        if (!equals(service, servname_cut) && !equals(service, numericserv(sa,servicelen)))
-                        {
-                            VERBOSE("-----------------------\n");
-                            DUMP("service = $(obj)\n", service);
-                            DUMP("servname_cut = $(obj)\n", servname_cut);
-                            DUMP("numericserv = $(obj)\n", numericserv(sa,servicelen));
-                            VERBOSE("servicelen = %d\n", servicelen);
-                            DUMP("se->s_name = $(obj)\n", se->s_name);
-
-                            traceFormattedUserInfo("expected: $(obj), returned: $(obj)",servname_cut, service);
-                        }
-
-                        REQ("getnameinfo.09.04","service name",
-                            equals(service, servname_cut) || equals(service, numericserv(sa,servicelen) )
-                           );
-                    }
+                if ( equals( service, numericserv( sa, servicelen ) ) ) {
+                    /*
+                     * If the service's name cannot be located, the numeric form of the service
+                     * address (for example, its port number) shall be returned instead of its name.
+                     */
+                    REQ( "getnameinfo.08", "numeric form of the service address", true );
+                } else {
+                    /*
+                     * Upon successful completion, getnameinfo() shall return the node and service
+                     * names, if requested, in the buffers provided.
+                     * The returned names are always null-terminated strings.
+                     */
+                    REQ( "getnameinfo.13", "node and service name", checkServiceAndPortPair( service, port ) );
                 }
             }
         }
@@ -2350,8 +2319,6 @@ IntT getnameinfo_spec( CallContext context, SockaddrT * sa,
          * The returned names are always null-terminated strings.
          */
         REQ("getnameinfo.13", "", TODO_REQ()); //
-
-    
 
         /*
          * The getnameinfo() function shall be thread-safe.
@@ -2598,7 +2565,7 @@ HostentT * gethostbyaddr_spec( CallContext context, VoidTPtr addr, sut_socklen_t
                 isNULL_VoidTPtr( readPointer_VoidTPtr(context, h_addr_list_at1) ) );
             REQ("gethostbyaddr.09", "length check", gethostbyaddr_spec->h_length == len );
 
-           
+
         }
 
         /*
@@ -3051,6 +3018,22 @@ bool reset_serv_db(void)
         return false;
 
     return true;
+}
+
+bool checkServiceAndPortPair( CString * service, IntT port ) {
+    int i;
+    if ( serv_db == NULL ) {
+        traceUserInfo( "checkServiceAndPort : serv_db is not initialized!" );
+        return false;
+    }
+    for( i = 0; i < size_List( serv_db ); i++ ) {
+        ServentT * servent = get_List( serv_db, i );
+        if ( servent->s_port == port ) {
+            if ( service == NULL ) { return true; }
+            else if ( startsWithC_String( servent->s_name, service ) ) { return true; }
+        }
+    }
+    return false;
 }
 
 // port shall be in host byte order

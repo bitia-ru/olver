@@ -22,15 +22,16 @@ include $(MODULES:%=%/Makefile)
 # Parameters of compilation
 ###########################################################
 SHELL   = /bin/bash
-CC      = gcc
-LD      = gcc
+CC      = lsbcc
+LD      = lsbcc
 SEC         = "$(CTESK_HOME)/bin/massive-sec.sh"
 SECPP       = "$(CTESK_HOME)/bin/sec-pp.sh"
 LIBTYPE     = gcc
+INCLUDE     = -I /opt/lsb/include
 CTESK_LIBPATH   = $(CTESK_HOME)/lib/$(LIBTYPE)
 
 CFLAGS = -g -std=c99 -D_POSIX_C_SOURCE=200112L $(INCLUDE) -I. -I../testdata "-I$(CTESK_HOME)/include"
-LIB = $(XLIB) -g -Wl,--relax -rdynamic "-L$(CTESK_LIBPATH)" "-L." -lctesk -lpthread -lm
+LIB = $(XLIB) -g -Wl,--relax -rdynamic "-L$(CTESK_LIBPATH)" "-L." -lctesk -lpthread -lm -ldl
 LDFLAGS = $(LIB)
 
 DEPENDS = $(patsubst %.sec,%.d,$(SEC_SOURCES))
@@ -73,6 +74,9 @@ clean:
 	-rm -f $(DEPENDS)
 	-rm -f $(SEI_DEPENDS)
 	-rm -f $(OLVER)
+
+gentags:
+	@pushd ../..; ctags -f model.tags $(patsubst %,src/model/%,$(SEC_SOURCES)); find src/model -name '*.seh' -exec ctags -a -f model.tags '{}' \;; popd
 
 olver_dc: $(OLVER_DC_SOURCES:%.c=%.o)
 	$(LD) $(OLVER_DC_SOURCES:%.c=%.o) -o $@

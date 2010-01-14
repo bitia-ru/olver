@@ -796,6 +796,7 @@ bool was_accidental_transition_traced;
 AssertionExit prev_assert = NULL;
 TestSystemParameters* pars;
 bool verdict;
+bool verdict_init;
 
 #ifdef _DEBUG_REFCNT
   printf("*** start: start_dfsm()\n");
@@ -837,14 +838,14 @@ bool verdict;
 
     // Call 'init' function
     clearOracleVerdict();
-    verdict = GD->init(pars->argc,pars->argv);
-    verdict = verdict && getOracleVerdict();
+    verdict_init = GD->init(pars->argc,pars->argv);
+    verdict = verdict_init && getOracleVerdict();
 
     // Frame end
     verdict = onFrameEnd( &model_state_manager, verdict );
 
     // Trace initialization failed message
-    if (!verdict)
+    if (!verdict_init)
      {
       traceException(SCENARIO_INITIALIZATION_FAILED_MESSAGE);
       testVerdict = TD_faulted;

@@ -73,10 +73,10 @@ sub start_element {
     elsif($name eq 'EnvironmentProperty'){
         if($atts{'name'} eq 'Host'){
             $self->{'env'}{'host'} = $atts{'value'};
-           }
-           elsif($atts{'name'} eq 'Operating System'){
+        }
+        elsif($atts{'name'} eq 'Operating System'){
             $self->{'env'}{'os'} = $atts{'value'};
-           }
+        }
     }
     elsif($name eq 'FailureDesc'){
         $cur_fail = $atts{'identifier'};
@@ -93,7 +93,7 @@ sub start_element {
         $self->{'failure'}{$cur_fail}{'property'}{'info'} = $atts{'info'};
     }
     elsif($name eq 'Property'){
-           $self->{'failure'}{$cur_fail}{'property'}{$atts{'name'}} = $atts{'value'};
+        $self->{'failure'}{$cur_fail}{'property'}{$atts{'name'}} = $atts{'value'};
     }
     elsif($name eq 'bug'){
         $cur_bug = $atts{'id'};
@@ -217,7 +217,7 @@ foreach (keys %{$handler->{'grouping'}}){
     }
     elsif($_ =~ /req failures/){
         foreach my $fid (@{$handler->{'grouping'}{$_}}){
-            my $id = join ('; ', sort map { s/req_id.//; $_ } grep { /req_id/ } keys %{$failure->{$fid}{'property'}} );
+            my $id = join ('; ', sort map { s/^REQ failed://; $_ } grep { /^REQ failed:/ } keys %{$failure->{$fid}{'property'}} );
             my $scen = $failure->{$fid}{'scenario'};
             push (@{$grouping->{'New'}{$scen}{$id}{'failures'}}, $fid);
             $grouping->{'New'}{$scen}{$id}{'descr'} = $failure->{$fid}{'property'}{'info'};

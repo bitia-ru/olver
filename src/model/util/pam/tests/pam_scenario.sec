@@ -1,251 +1,1 @@
-/*
- * Copyright (c) 2005-2006 Institute for System Programming
- * Russian Academy of Sciences
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-#include "util/pam/tests/pam_scenario.seh"
-#include "util/pam/pam_model.seh"
-#include "config/system_config.seh"
-#include "common/common_media.seh"
-#include "common/common_scenario.seh"
-#include "process/meta/user_model.seh"
-/********************************************************************/
-/**                     Test Scenario Parameters                   **/
-/********************************************************************/
-static UInt32T htonl_ntohl[]={
-    1,
-    15,
-    32,
-    33,
-    255,
-    256,
-    257,
-    1000,
-    22222,
-    30000,
-    65535,
-    65536,
-    8000000,
-    16777215,
-    16777216,
-    100000000,
-    1000000000,
-    2000000000,
-    3333333333,
-    4294967295
-};
-static UInt16T htons_ntohs[]={
-    1,
-    15,
-    32,
-    33,
-    255,
-    256,
-    257,
-    1000,
-    22222,
-    30000,
-    65535
-};
-
-static int htonl_ntohl_size =   sizeof(htonl_ntohl) /   sizeof(UInt32T);
-static int htons_ntohs_size =   sizeof(htons_ntohs) /   sizeof(UInt16T);
-static int maxSize = 1024;
-/********************************************************************/
-/**                       Test Scenario Data                       **/
-/********************************************************************/
-static CallContext context;
-static VoidTPtr item;
-/********************************************************************/
-/**                  Test Scenario Initialization                  **/
-/********************************************************************/
-static bool init_pam_scenario(int argc, char** argv)
-{
-    // Init test scenario data
-    context = getContext();
-
-    item = allocateMemoryBlock(context, maxSize);
-
-    return true;
-}
-static void finish_pam_scenario(void)
-{
-    deallocateMemoryBlock(context, item);
-
-    TEST_SCENARIO_VERDICT_VERBOSE(util_pam_scenario);
-}
-/********************************************************************/
-/**                          Test Actions                          **/
-/********************************************************************/
-
-scenario
-bool pam_min_scen() {
-    PamHandleT pamh = NULL_VoidTPtr;
-    IntT res;
-    List /* CString */ * lst = create_List( & type_CString );
-
-    setuid_spec( context, 0, requestErrorCode() );
-    setgid_spec( context, 0, requestErrorCode() );
-
-    res = pam_start_spec( context, create_CString( "other" ), create_CString( "nobody" ), 0, & pamh );
-    DUMP( "start res == %d\n", res );
-
-    if ( res == SUT_PAM_SUCCESS ) {
-        res = pam_acct_mgmt_spec( context, pamh, SUT_PAM_ESTABLISH_CRED );
-        DUMP( "acct_mgmt res == %d\n", res );
-
-        res = pam_chauthtok_spec( context, pamh, 0 );
-        DUMP( "chauthtok res == %d\n", res );
-
-        writeCString_VoidTPtr( item, create_CString( "qwerty" ) );
-        res = pam_set_item_spec( context, pamh, SUT_PAM_SERVICE, item );
-        DUMP( "set1 res == %d\n", res );
-
-        res = pam_get_item_spec( context, pamh, SUT_PAM_SERVICE, & item );
-        DUMP( "service == $(obj), ", readCString_VoidTPtr( item ) );
-        DUMP( "get1 res == %d\n", res );
-
-        writeCString_VoidTPtr( item, create_CString( "nobody" ) );
-        res = pam_set_item_spec( context, pamh, SUT_PAM_USER, item );
-        DUMP( "set2 res == %d\n", res );
-
-        res = pam_get_item_spec( context, pamh, SUT_PAM_USER, & item );
-        DUMP( "user == $(obj), ", readCString_VoidTPtr( item ) );
-        DUMP( "get2 res == %d\n", res );
-
-        res = pam_fail_delay_spec( context, pamh, 1000 );
-        DUMP( "fail_delay res == %d\n", res );
-
-        lst = pam_getenvlist_spec( context, pamh );
-        DUMP( "getenvlist res == $(obj)\n", lst );
-
-        res = pam_authenticate_spec( context, pamh, 0 );
-        DUMP( "auth res == %d\n", res );
-
-        res = pam_open_session_spec( context, pamh, 0 );
-        DUMP( "open_session res == %d\n", res );
-
-        res = pam_setcred_spec( context, pamh, SUT_PAM_ESTABLISH_CRED );
-        DUMP( "setcred res == %d\n", res );
-
-        res = pam_close_session_spec( context, pamh, 0 );
-        DUMP( "close_session res == %d\n", res );
-
-        res = pam_end_spec( context, pamh, SUT_PAM_SUCCESS );
-        DUMP( "end res == %d\n", res );
-    } // if res for pam_start_spec
-
-    return true;
-}
-
-scenario
-bool pam_strerror_scen() {
-    PamHandleT pamh = NULL_VoidTPtr;
-    IntT res;
-    IntT errNum;
-    CString * str;
-
-    setuid_spec( context, 0, requestErrorCode() );
-    setgid_spec( context, 0, requestErrorCode() );
-
-    res = pam_start_spec( context, create_CString( "other" ), create_CString( "nobody" ), 0, & pamh );
-    DUMP( "start res == %d\n", res );
-
-    if ( res == SUT_PAM_SUCCESS ) {
-        for ( errNum = SUT_PAM_SUCCESS; errNum <= SUT_PAM_BAD_ITEM + 1; errNum++ ) {
-            str = pam_strerror_spec( context, pamh, errNum );
-            DUMP( "strerror res == $(obj)\n", str );
-        }
-
-        res = pam_end_spec( context, pamh, SUT_PAM_SUCCESS );
-        DUMP( "end res == %d\n", res );
-    } // if res for pam_start_spec
-
-    return true;
-}
-
-/********************************************************************/
-/**                    Test Scenario Definition                    **/
-/********************************************************************/
-
-scenario dfsm util_pam_scenario = { .init = init_pam_scenario    ,
-                                    .finish = finish_pam_scenario,
-                                    .actions = { pam_min_scen     ,
-                                                 pam_strerror_scen,
-                                                 NULL
-                                               }
-                                  };
-
-bool main_socket_pam(int argc, char** argv)
-{
-    util_pam_scenario(argc,argv);
-    return true;
-}
-
-#ifdef UTIL_PAM_LOCAL_MAIN
-
-#include "common/init.seh"
-
-#include "common/common_media.seh"
-#include "common/common_scenario.seh"
-#include "common/control_center.seh"
-#include "config/system_config.seh"
-#include "system/system/system_model.seh"
-#include "process/process/process_model.seh"
-#include "pthread/pthread/pthread_media.seh"
-#include "pthread/mutex/mutexattr_media.seh"
-#include "pthread/mutex/mutex_media.seh"
-#include "process/meta/user_media.seh"
-#include "util/pam/pam_media.seh"
-
-
-/********************************************************************/
-/**                     Test System Initialization                 **/
-/********************************************************************/
-void reinitTestSystem(void)
-{
-    reinitControlCenter();
-    initCommonModel();
-    initCommonMedia();
-    initCommonScenarioState();
-
-    initSystemConfiguration();
-    initSystemModel();
-    initProcessModel();
-    initPThreadModel();
-    initProcessMetaUserSubsystem();
-
-    initUtilPamSubsystem();
-}
-
-int main(int argc, char** argv)
-{
-    //
-    initTestSystem();
-    loadSUT();
-
-    // Set up tracer
-    setTraceEncoding("windows-1251");
-
-    addTraceToFile("trace.xml");
-
-    // Run test scenario
-    main_socket_pam(argc,argv);
-
-    //  unloadSUT();
-    return 0;
-}
-#endif
+/* * Copyright (c) 2005-2006 Institute for System Programming * Russian Academy of Sciences * All rights reserved. * * Licensed under the Apache License, Version 2.0 (the "License"); * you may not use this file except in compliance with the License. * You may obtain a copy of the License at * *     http://www.apache.org/licenses/LICENSE-2.0 * * Unless required by applicable law or agreed to in writing, software * distributed under the License is distributed on an "AS IS" BASIS, * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. * See the License for the specific language governing permissions and * limitations under the License. */#include "util/pam/tests/pam_scenario.seh"#include "util/pam/pam_model.seh"#include "config/system_config.seh"#include "common/common_media.seh"#include "common/common_scenario.seh"#include "process/meta/user_model.seh"/********************************************************************//**                     Test Scenario Parameters                   **//********************************************************************/static UInt32T htonl_ntohl[]={    1,    15,    32,    33,    255,    256,    257,    1000,    22222,    30000,    65535,    65536,    8000000,    16777215,    16777216,    100000000,    1000000000,    2000000000,    3333333333,    4294967295};static UInt16T htons_ntohs[]={    1,    15,    32,    33,    255,    256,    257,    1000,    22222,    30000,    65535};static int htonl_ntohl_size = sizeof(htonl_ntohl) / sizeof(UInt32T);static int htons_ntohs_size = sizeof(htons_ntohs) / sizeof(UInt16T);static int maxSize = 1024;/********************************************************************//**                       Test Scenario Data                       **//********************************************************************/static CallContext context;static VoidTPtr item;/********************************************************************//**                  Test Scenario Initialization                  **//********************************************************************/static bool init_pam_scenario(int argc, char** argv){    // Init test scenario data    context = getContext();    item = allocateMemoryBlock(context, maxSize);    return true;}static void finish_pam_scenario(void){    // deallocateMemoryBlock(context, item);    TEST_SCENARIO_VERDICT_VERBOSE(util_pam_scenario);}/********************************************************************//**                          Test Actions                          **//********************************************************************/scenariobool pam_min_scen() {    PamHandleT pamh = NULL_VoidTPtr;    IntT res;    List /* CString */ * lst = create_List( & type_CString );    setuid_spec( context, 0, requestErrorCode() );    setgid_spec( context, 0, requestErrorCode() );    res = pam_start_spec( context, create_CString( "other" ), create_CString( "nobody" ), 0, & pamh );    DUMP( "start return %d\n", res );    if ( res == SUT_PAM_SUCCESS ) {        lst = pam_getenvlist_spec( context, pamh );        DUMP( "getenvlist 1 return $(obj)\n", lst );        writeCString_VoidTPtr( item, create_CString( "qwerty" ) );        DUMP( "set_item 1 return %d\n", pam_set_item_spec( context, pamh, SUT_PAM_SERVICE, item ) );        DUMP( "get_item 1 return %d, ", pam_get_item_spec( context, pamh, SUT_PAM_SERVICE, & item ) );        DUMP( "service is $(obj)\n", readCString_VoidTPtr( item ) );        writeCString_VoidTPtr( item, create_CString( "nobody" ) );        res = pam_set_item_spec( context, pamh, SUT_PAM_USER, item );        DUMP( "set_item 2 return %d\n", res );        DUMP( "get_item 2 return %d, ", pam_get_item_spec( context, pamh, SUT_PAM_USER, & item ) );        DUMP( "user is $(obj)\n", readCString_VoidTPtr( item ) );        DUMP( "fail_delay res == %d\n", pam_fail_delay_spec( context, pamh, 1000 ) );        if ( res == SUT_PAM_SUCCESS ) {            res = pam_authenticate_spec( context, pamh, 0 );            DUMP( "authenticate return %d\n", res );            if ( res == SUT_PAM_SUCCESS ) {                DUMP( "acct_mgmt return %d\n", pam_acct_mgmt_spec( context, pamh, SUT_PAM_ESTABLISH_CRED ) );                res = pam_chauthtok_spec( context, pamh, 0 );                DUMP( "chauthtok return %d\n", res );                if ( res == SUT_PAM_SUCCESS ) {                    res = pam_setcred_spec( context, pamh, SUT_PAM_ESTABLISH_CRED );                    DUMP( "setcred return %d\n", res );                    if ( res == SUT_PAM_SUCCESS ) {                        res = pam_open_session_spec( context, pamh, 0 );                        DUMP( "open_session return %d\n", res );                        if ( res == SUT_PAM_SUCCESS ) {                            lst = pam_getenvlist_spec( context, pamh );                            DUMP( "getenvlist 2 return $(obj)\n", lst );                            DUMP( "close_session return %d\n", pam_close_session_spec( context, pamh, 0 ) );                        } // if res for open_session                    } // if res for setcred                } // if res for chauthtok            } // if res for authenticate        } // if res for set_item 2        res = pam_end_spec( context, pamh, SUT_PAM_SUCCESS );        DUMP( "end return %d\n", res );    } // if res for start    return true;}scenariobool pam_strerror_scen() {    PamHandleT pamh = NULL_VoidTPtr;    IntT res;    IntT errNum;    CString * str;    setuid_spec( context, 0, requestErrorCode() );    setgid_spec( context, 0, requestErrorCode() );    res = pam_start_spec( context, create_CString( "other" ), create_CString( "nobody" ), 0, & pamh );    DUMP( "start res == %d\n", res );    if ( res == SUT_PAM_SUCCESS ) {        for ( errNum = SUT_PAM_SUCCESS; errNum <= SUT_PAM_BAD_ITEM + 1; errNum++ ) {            str = pam_strerror_spec( context, pamh, errNum );            DUMP( "strerror res == $(obj)\n", str );        }        res = pam_end_spec( context, pamh, SUT_PAM_SUCCESS );        DUMP( "end res == %d\n", res );    } // if res for pam_start_spec    return true;}/********************************************************************//**                    Test Scenario Definition                    **//********************************************************************/scenario dfsm util_pam_scenario = { .init    = init_pam_scenario  ,                                    .finish  = finish_pam_scenario,                                    .actions = { pam_min_scen     ,                                                 pam_strerror_scen,                                                 NULL                                               }                                  };bool main_socket_pam(int argc, char** argv){    util_pam_scenario(argc,argv);    return true;}#ifdef UTIL_PAM_LOCAL_MAIN#include "common/init.seh"#include "common/common_media.seh"#include "common/common_scenario.seh"#include "common/control_center.seh"#include "config/system_config.seh"#include "system/system/system_model.seh"#include "process/process/process_model.seh"#include "pthread/pthread/pthread_media.seh"#include "pthread/mutex/mutexattr_media.seh"#include "pthread/mutex/mutex_media.seh"#include "process/meta/user_media.seh"#include "util/pam/pam_media.seh"/********************************************************************//**                     Test System Initialization                 **//********************************************************************/void reinitTestSystem(void){    reinitControlCenter();    initCommonModel();    initCommonMedia();    initCommonScenarioState();    initSystemConfiguration();    initSystemModel();    initProcessModel();    initPThreadModel();    initProcessMetaUserSubsystem();    initUtilPamSubsystem();}int main(int argc, char** argv){    //    initTestSystem();    loadSUT();    // Set up tracer    setTraceEncoding("windows-1251");    addTraceToFile("trace.xml");    // Run test scenario    main_socket_pam(argc,argv);    //  unloadSUT();    return 0;}#endif

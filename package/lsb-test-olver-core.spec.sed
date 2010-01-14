@@ -106,6 +106,7 @@ cp -rf $SOURCE/src/testdata/math.exp testdata/
 cp -rf $SOURCE/src/testdata/math.trig testdata/
 cp -rf $SOURCE/src/testdata/math.bessel testdata/
 cp -rf $SOURCE/src/testdata/locale.locale testdata/
+cp -rf $SOURCE/src/testdata/util.format.time testdata/
 
 mkdir -p testdata/util.dl
 cp -f $SOURCE/src/testdata/util.dl/libmy.so testdata/util.dl
@@ -167,7 +168,7 @@ fi
 TESTER=olver_tester
 id $TESTER > /dev/null 2>/dev/null
 if [ $? -ne 0 ]; then
-	useradd -g olver -d /home/$TESTER -s /bin/sh -c "OLVER tester login" $TESTER -m > /dev/null 2>/dev/null
+	useradd -g olver -d /home/$TESTER -m -s /bin/sh -p "" -c "OLVER tester login" $TESTER > /dev/null 2>/dev/null
 	if [ $? = 0 ]; then
 		echo "User '$TESTER' was successfully added"
 	else
@@ -176,7 +177,7 @@ if [ $? -ne 0 ]; then
 	fi
 else
 	if [ `id $TESTER -g -n` != "olver" ]; then
-		usermod -g olver -d /home/$TESTER -m -s /bin/sh -c "OLVER tester login" $TESTER > /dev/null 2>/dev/null
+		usermod -g olver -d /home/$TESTER -m -s /bin/sh -p "" -c "OLVER tester login" $TESTER > /dev/null 2>/dev/null
 		if [ `id $TESTER -g -n` != "olver" ]; then
 			echo "Error: failed to change initial group of '$TESTER' to 'olver'"
 			echo "Try to do it manually"

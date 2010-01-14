@@ -143,11 +143,7 @@ static TACommandVerdict strptime_cmd(TAThread thread,TAInputStream stream)
     END_TARGET_OPERATION(thread);
     
     // Response
-    writeInt(thread, res != NULL);
-    if(res != NULL)
-    {
-        writeString(thread, res);
-    }
+    writeString(thread, res);
     writeTimeTm(thread, &time);
     writeString(thread, buf);
     writeString(thread, format);

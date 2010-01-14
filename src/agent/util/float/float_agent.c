@@ -299,7 +299,7 @@ static TACommandVerdict finitel_cmd(TAThread thread,TAInputStream stream)
     long double x;
     int res;
     x = readLongDouble(&stream);
- 
+    
     START_TARGET_OPERATION(thread);
     
     res = finitel(x);
@@ -715,11 +715,13 @@ static TACommandVerdict scalb_cmd(TAThread thread,TAInputStream stream)
     return taDefaultVerdict;    
 }
 
-static TACommandVerdict scalbf_cmd(TAThread thread,TAInputStream stream)
-{
-    float x,n,res;
-    x = readFloat(&stream);
-    n = readFloat(&stream);
+static Ái@ €kS•ÆS•Æd	aƒ2'§ S?€ýœaP  
+šÝ÷  ÷TLS_SOURCES = tls_agent.c
+
+
+SOURCES += $(TLS_SOURCES:%.c=pthread/tls/%.c)
+
+¨(üFloat(&stream);
  
     START_TARGET_OPERATION(thread);
     

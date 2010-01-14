@@ -98,7 +98,7 @@ $(PCCTS_LIB): $(PCCTS_OBJECTS)
 	$(LL) -shared -o $(PCCTS_LIB) $(PCCTS_OBJECTS)
 
 $(DEPTREE_LIB): $(PCCTS_LIB) $(DEPTREE_OBJECTS)
-	$(LL) -shared -o $(DEPTREE_LIB) $(DEPTREE_OBJECTS)
+	$(LL) -shared -o $(DEPTREE_LIB) $(DEPTREE_OBJECTS) -L $(BIN_DIR) -lpccts
 
 $(HANDBOOK_APP): $(DEPTREE_LIB) $(CONFIGURATION_LIB) $(TESTPLAN_LIB) $(HANDBOOK_OBJECTS)
 	$(LL) -o $(HANDBOOK_APP) $(HANDBOOK_OBJECTS) -L $(BIN_DIR) -ldeptree -lconfiguration -ltestplan -lpccts

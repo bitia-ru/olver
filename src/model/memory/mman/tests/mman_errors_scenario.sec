@@ -1,9 +1,9 @@
-/* 
+/*
  * File: memory/mman/tests/mman_errors_scenario.sec
- * 
+ *
  * Author:
- * Version:  $Id: mman_errors_scenario.sec,v 1.10 2007/07/25 09:25:03 egor Exp $
- * 
+ * Version:  $Id: mman_errors_scenario.sec,v 1.11 2009/11/10 15:28:09 ivanov Exp $
+ *
  * Copyright (c) 2005 ISP RAS.
  * 25, B.Communisticheskaya, Moscow, Russia.
  * All rights reserved.
@@ -16,12 +16,12 @@
 #include "common/common_scenario.seh"
 #include "fs/meta/meta_model.seh"
 #include "fs/fs/fs_model.seh"
- 
+
 // context of process
 static CallContext context_pr1;
 
 /*
- * parameters of good maps for file and shm object and of testing map 
+ * parameters of good maps for file and shm object and of testing map
  * (addr - returned addr)
  */
 static VoidTPtr file_addr;
@@ -37,11 +37,11 @@ static MmanProtFlags file_prot;
 static MmanProtFlags test_prot;
 static MmanProtFlags shm_prot;
 
-// names and descriptors of testing file and shared memory object 
+// names and descriptors of testing file and shared memory object
 static CString* filename;
 static CString* shared_object_name;
-static FileDescId shared_desc_id; 
-static FileDescId file_desc_id; 
+static FileDescId shared_desc_id;
+static FileDescId file_desc_id;
 
 // permissions for file and shm_object when open
 static FilePermissions* file_mode;
@@ -53,6 +53,8 @@ static Shm_openOflags shm_oflags;
 // size of page for process with context context_pr1
 static LongT pagesize;
 
+static bool shmOpenInInitSuccess = true;
+
 static bool init_memory_mman_errors_scenario(int argc, char** argv)
 {
     ProcessId pid;
@@ -62,25 +64,25 @@ static bool init_memory_mman_errors_scenario(int argc, char** argv)
     FilePermission* full_control2;
     FilePermission* full_control3;
     ErrorCode* errno;
-    
+
     MmapFlags flags; //flags for map shm object and file
 
     ProcessState* prSt;
 
     initReqFilters();
-    setFinishMode(UNTIL_END); 
+    setFinishMode(UNTIL_END);
 
     errno = requestErrorCode();
     //init global variables context_pr1 and pagesize
-    context_pr1 = getContext(); 
+    context_pr1 = getContext();
     prSt = getProcessState_CallContext(context_pr1);
     put_Map(prSt->sysconf, create_IntTObj(SUT_SC_XOPEN_UNIX), create_LongTObj(1));
     pagesize = sysconf_spec( context_pr1, SUT_SC_PAGE_SIZE, requestErrorCode() );
-    if ( pagesize == -1) 
+    if ( pagesize == -1)
     {
       return false;
     }
-    else 
+    else
     {
         setSystemConfigurationValue( context_pr1, SUT_SC_PAGE_SIZE, pagesize);
     }
@@ -92,7 +94,7 @@ static bool init_memory_mman_errors_scenario(int argc, char** argv)
     temp_addr.address = (sut_ptr_t) 0;
     temp_addr.process = pid.process;
     temp_addr.system = pid.system;
-    
+
     full_control1 = create_FilePermission(true, true, true);
     full_control2 = create_FilePermission(true, true, true);
     full_control3 = create_FilePermission(true, true, true);
@@ -108,7 +110,7 @@ static bool init_memory_mman_errors_scenario(int argc, char** argv)
     file_prot.PROT_READ_Flag = true;
     file_prot.PROT_WRITE_Flag = true;
     shm_prot = file_prot;
-    
+
     //init size
     file_size = (SizeT) pagesize * 4;
     shm_size = file_size;
@@ -123,7 +125,7 @@ static bool init_memory_mman_errors_scenario(int argc, char** argv)
                                         False_Bool3, False_Bool3, False_Bool3);
     shm_mode = create_FilePermissions(full_control1, full_control2, full_control3,
                                        False_Bool3, False_Bool3, False_Bool3);
-    
+
     //init names of files
     filename = create_CString("/filename");
     shared_object_name = create_CString("/shared_object1");
@@ -134,22 +136,23 @@ static bool init_memory_mman_errors_scenario(int argc, char** argv)
     shm_oflags.O_RDONLY_Flag = false;
     shm_oflags.O_RDWR_Flag = true;
     shm_oflags.O_TRUNC_Flag = false;
-    
+
     //create shm object and base map for it
-    shared_desc_id = shm_open_spec(context_pr1, shared_object_name, shm_oflags, 
+    shared_desc_id = shm_open_spec(context_pr1, shared_object_name, shm_oflags,
                                    shm_mode, requestErrorCode());
-    if (shared_desc_id.filedesc == -1)
-    {
+    if ( shared_desc_id.filedesc == -1 ) {
         traceUserInfo("Can't create basic shared memory object");
-        return false;
-    }
-    
-    shm_addr = mmap_spec(context_pr1, temp_addr, shm_size, shm_prot, flags, 
-                         shared_desc_id, shm_off, false, errno);
-    if (isInvalid_VoidTPtr(shm_addr))
-    {
-        traceUserInfo("Can't create basic map to shared memory object");
-        return false;
+        shmOpenInInitSuccess = false;
+    } else {
+        shmOpenInInitSuccess = true;
+
+        shm_addr = mmap_spec(context_pr1, temp_addr, shm_size, shm_prot, flags,
+                             shared_desc_id, shm_off, false, errno);
+        if (isInvalid_VoidTPtr(shm_addr))
+        {
+            traceUserInfo("Can't create basic map to shared memory object");
+            return false;
+        }
     }
 
     return true;
@@ -157,14 +160,18 @@ static bool init_memory_mman_errors_scenario(int argc, char** argv)
 
 static void finish_memory_mman_errors_scenario(void)
 {
-    munmap_spec(context_pr1, shm_addr, shm_size, requestErrorCode());
-    shm_unlink_spec(context_pr1, shared_object_name, requestErrorCode());
+    if ( shmOpenInInitSuccess ) {
+        munmap_spec(context_pr1, shm_addr, shm_size, requestErrorCode());
+        shm_unlink_spec(context_pr1, shared_object_name, requestErrorCode());
+    }
     TEST_SCENARIO_VERDICT_VERBOSE(memory_mman_errors_scenario);
     return;
 }
 
 scenario bool mlock_errors_scen()
 {
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     test_addr = shm_addr;
     test_addr.address += pagesize;
     test_size = pagesize;
@@ -180,15 +187,18 @@ scenario bool mlock_errors_scen()
 scenario bool mlockall_errors_scen()
 {
     MLockallFlags flags;
+
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     flags.MCL_CURRENT_Flag = true;
     flags.MCL_FUTURE_Flag = true;
-    
+
     flags.MCL_CURRENT_Flag = false;
     flags.MCL_FUTURE_Flag = false;
     mlockall_spec(context_pr1, flags, requestErrorCode());
     flags.MCL_CURRENT_Flag = true;
     flags.MCL_FUTURE_Flag = true;
-    
+
     return true;
 }
 
@@ -196,6 +206,8 @@ scenario bool mmap_errors_scen()
 {
     VoidTPtr mmap_res;
     MmapFlags flags;
+
+    if ( ! shmOpenInInitSuccess ) { return true; }
 
     flags.MAP_FIXED_Flag = true;
     flags.MAP_PRIVATE_Flag = false;
@@ -206,7 +218,7 @@ scenario bool mmap_errors_scen()
     test_size = pagesize;
     test_prot = shm_prot;
     test_off = shm_off;
-    
+
     //len = 0
     test_size = (SizeT)0;
     mmap_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
@@ -217,19 +229,19 @@ scenario bool mmap_errors_scen()
     mmap_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
                          shared_desc_id, test_off, false, requestErrorCode());
     test_off = pagesize;
-    
+
     test_addr = shm_addr;
     test_addr.address += pagesize/2;
     mmap_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
                          shared_desc_id, test_off, true, requestErrorCode());
     test_addr = shm_addr;
     test_addr.address += pagesize;
-    
+
     flags.MAP_PRIVATE_Flag = true;
     mmap_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
                          shared_desc_id, test_off, true, requestErrorCode());
     flags.MAP_PRIVATE_Flag = false;
-    
+
     flags.MAP_SHARED_Flag =  false;
     mmap_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
                          shared_desc_id, test_off, false, requestErrorCode());
@@ -239,67 +251,13 @@ scenario bool mmap_errors_scen()
     return true;
 }
 
-/* Full OLVER Edition Source Start */
-//scenario bool mmap64_errors_scen()
-//{
-//    VoidTPtr mmap64_res;
-//    MmapFlags flags;
-//
-//    flags.MAP_FIXED_Flag = true;
-//    flags.MAP_PRIVATE_Flag = false;
-//    flags.MAP_SHARED_Flag = true;
-//
-//    test_addr = shm_addr;
-//    test_addr.address += pagesize;
-//    test_size = pagesize;
-//    test_prot = shm_prot;
-//    test_off = shm_off;
-//    
-//    //len = 0
-//    test_size = (SizeT)0;
-//    mmap64_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
-//                         shared_desc_id, test_off, true, requestErrorCode());
-//    test_size = shm_size;
-//
-//    test_off = pagesize / 2;
-//    mmap64_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
-//                         shared_desc_id, test_off, true, requestErrorCode());
-//    test_off = pagesize;
-//    
-//    test_addr = shm_addr;
-//    test_addr.address += pagesize/2;
-//    mmap64_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
-//                         shared_desc_id, test_off, true, requestErrorCode());
-//    test_addr = shm_addr;
-//    test_addr.address += pagesize;
-//    
-//    flags.MAP_PRIVATE_Flag = true;
-//    mmap64_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
-//                         shared_desc_id, test_off, true, requestErrorCode());
-//    flags.MAP_PRIVATE_Flag = false;
-//    
-//    flags.MAP_SHARED_Flag =  false;
-//    mmap64_res = mmap_spec(context_pr1, test_addr, test_size, test_prot, flags,
-//                         shared_desc_id, test_off, true, requestErrorCode());
-//    flags.MAP_SHARED_Flag = true;
-//
-//
-//    return true;
-//}
-/* Full OLVER Edition Source End */
 
-/* Full OLVER Edition Source Start */
-/*
-scenario bool mmap64_scen()
-{
-    return true;
-}
-*/
-/* Full OLVER Edition Source End */
 
 scenario bool mprotect_errors_scen()
 {
     MmanProtFlags prot;
+
+    if ( ! shmOpenInInitSuccess ) { return true; }
 
     prot.PROT_EXEC_Flag = false;
     prot.PROT_NONE_Flag = false;
@@ -326,13 +284,16 @@ scenario bool mprotect_errors_scen()
 scenario bool msync_errors_scen()
 {
     MsyncFlags flags;
+
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     flags.MS_ASYNC_Flag = false;
     flags.MS_INVALIDATE_Flag = false;
     flags.MS_SYNC_Flag = true;
 
     test_addr = shm_addr;
     test_size = shm_size;
-    
+
     test_addr = shm_addr;
     test_addr.address += pagesize/2;
     test_size = pagesize;
@@ -345,6 +306,8 @@ scenario bool msync_errors_scen()
 
 scenario bool munlock_errors_scen()
 {
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     test_addr = shm_addr;
     test_addr.address += pagesize;
     test_size = pagesize;
@@ -357,16 +320,11 @@ scenario bool munlock_errors_scen()
     return true;
 }
 
-/* Full OLVER Edition Source Start */
-/*scenario bool munlockall_errors_scen()
-{
-  //  munlockall_spec(context_pr1);
-    return true;
-}*/
-/* Full OLVER Edition Source End */
 
 scenario bool munmap_errors_scen()
 {
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     test_addr = shm_addr;
     test_addr.address += pagesize;
     test_size = pagesize;
@@ -389,13 +347,15 @@ scenario bool shm_open_errors_scen()
     Shm_openOflags oflag;
     CString* new_obj;
 
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     test_mode = shm_mode;
     oflag.O_CREAT_Flag = true;
     oflag.O_EXCL_Flag = false;
     oflag.O_RDONLY_Flag = false;
     oflag.O_RDWR_Flag = true;
     oflag.O_TRUNC_Flag = false;
-    
+
     oflag.O_CREAT_Flag = false;
     new_obj = create_CString("/not_existing_shared_obj");
     shm_open_spec(context_pr1, new_obj, oflag, test_mode, requestErrorCode());
@@ -406,6 +366,9 @@ scenario bool shm_open_errors_scen()
 scenario bool shm_unlink_errors_scen()
 {
     CString* obj_name;
+
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     obj_name = create_CString("/not_existing_shared_object");
     shm_unlink_spec(context_pr1, obj_name,requestErrorCode());
     return true;
@@ -418,7 +381,9 @@ scenario bool read_write_errors_scen()
     MappedMemoryBlock* res_read;
     String* value;
     SizeT len;
-    
+
+    if ( ! shmOpenInInitSuccess ) { return true; }
+
     value = create_String("1234567890abcdefghi");
     len = length_String(value);
     data = create_CByteArray( (ByteT*)toCharArray_String(value), len + 1 );
@@ -440,17 +405,11 @@ scenario dfsm memory_mman_errors_scenario = //TODO shm_open agent also call ftru
     .actions = {
         read_write_errors_scen,
         mmap_errors_scen,
-        /* Full OLVER Edition Source Start */
-//        mmap64_errors_scen,
-        /* Full OLVER Edition Source End */
         mlock_errors_scen,
         mlockall_errors_scen,
         mprotect_errors_scen,
         msync_errors_scen,
         munlock_errors_scen,
-        /* Full OLVER Edition Source Start */
-//        munlockall_errors_scen,  //no errors are expected
-        /* Full OLVER Edition Source End */
         munmap_errors_scen,
         shm_open_errors_scen,
         shm_unlink_errors_scen,

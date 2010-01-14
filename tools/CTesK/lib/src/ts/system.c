@@ -269,6 +269,37 @@ void end_exception_protected_section(void)
 }
 
 #ifndef __CYGWIN__
+
+static int (*my_backtrace)(void **, int);
+static char **(*my_backtrace_symbols)(void * const *, int);
+static int try_open_libc = 0;
+
+int get_bt_ifaces(){
+    void* libc;
+#ifdef __ia64__
+    char* libc_so = "libc.so.6.1";
+#else
+    char* libc_so = "libc.so.6";
+#endif
+    if(try_open_libc == 0){
+        try_open_libc = 1;
+        libc = dlopen(libc_so,RTLD_NOW);
+        
+        if(libc == NULL){
+            return 1;
+        }
+        
+        my_backtrace = dlsym(libc, "backtrace");
+        my_backtrace_symbols = dlsym(libc, "backtrace_symbols");
+    }
+    
+    if( my_backtrace == NULL || my_backtrace_symbols == NULL ){
+        return 1;
+    }
+    
+    return 0;
+}
+
 char* ts_print_backtrace(char* prefix)
 {
 void*  bt[128];
@@ -278,8 +309,12 @@ size_t res_size;
 char* res;
 int i,j;
 
-    bt_size = backtrace( bt, sizeof(bt) / sizeof(void *) );
-    bt_strings = backtrace_symbols( bt, bt_size );
+    if(! get_bt_ifaces()){
+        return NULL;
+    }
+
+    bt_size = my_backtrace( bt, sizeof(bt) / sizeof(void *) );
+    bt_strings = my_backtrace_symbols( bt, bt_size );
     if (bt_strings == NULL)
     {
         return NULL;

@@ -6,5 +6,5 @@ case `uname -a` in
     ;;
 esac
 
-gcc -xc -E -D__SEC__ "-I$CTESK_HOME/include" -include "$CTESK_HOME/include/ts/ts.h" "$@"
+lsbcc -xc -E -D__SEC__ "-I$CTESK_HOME/include" -include "$CTESK_HOME/include/ts/ts.h" "$@"
 

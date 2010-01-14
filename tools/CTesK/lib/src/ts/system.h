@@ -18,6 +18,7 @@
 #define TS_SYSTEM_H
 
 #include <time.h>
+#include <dlfcn.h>
 #include "utils/boolean.h"
 
 

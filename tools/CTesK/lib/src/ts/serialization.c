@@ -587,7 +587,7 @@ OracleVerdict       lastVerdict;
    {// trace oracle failure
     traceSeriesStart();
     traceSeriesEnd();
-    traceException( SERIALIZATION_FAILED_MESSAGE );
+//    traceException( SERIALIZATION_FAILED_MESSAGE );
     // set bad verdict
     testVerdict = TD_bad_verdict;
     return false;

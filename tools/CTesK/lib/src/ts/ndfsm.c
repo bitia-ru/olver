@@ -862,6 +862,7 @@ bool was_accidental_transition_traced;
 AssertionExit prev_assert = NULL;
 TestSystemParameters* pars;
 bool verdict;
+bool verdict_init;
 
   // Initialize test engine data
   init_NDFSM_TestEngineData( &ndfsm_state, test );
@@ -897,14 +898,14 @@ bool verdict;
 
     // Call 'init' function
     clearOracleVerdict();
-    verdict = test->init(pars->argc, pars->argv);
-    verdict = verdict && getOracleVerdict();
+    verdict_init = test->init(pars->argc, pars->argv);
+    verdict = verdict_init && getOracleVerdict();
 
     // Frame end
     verdict = onFrameEnd( &ndfsm_state.executor.model_state, verdict );
 
     // Trace initialization failed message
-    if (!verdict)
+    if (!verdict_init)
      {
       traceException(SCENARIO_INITIALIZATION_FAILED_MESSAGE);
       testVerdict = TD_faulted;

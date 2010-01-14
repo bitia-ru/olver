@@ -42,6 +42,7 @@
 #include "fs/meta/access_model.seh"
 #include "data/sys/wait_model.seh"
 #include "data/stdlib_model.seh"
+#include "locale/locale/locale_model.seh"
 
 #pragma SEC subsystem process "process.process"
 
@@ -3609,6 +3610,8 @@ void onExecNewProcessReturn( CallContext context )
         processState->childInCreation->meta.parent = processState->processid;
         registerProcessState( processState->childInCreation->processid, processState->childInCreation );
         processState->childInCreation = NULL;
+
+        initAtExec_Locale(processState->childInCreation->processid);
     } else {
         processState->wasSuccessfulExecCall = true;
         clear_Set( processState->dir_descriptors );
@@ -9707,9 +9710,9 @@ FinishedChild * create_FinishedChild( ProcessState * processState, IntT returned
 specification typedef struct ProcessState ProcessState = {};
 
 /* quasi constructor */
-ProcessState * create_ProcessState( ProcessId processid ) {
+ProcessState* create_ProcessState( ProcessId processid ) {
     // ProcessState * process;
-    return create( & type_ProcessState,
+    ProcessState* res = create( & type_ProcessState,
                    processid,
                    // Process Environment
                    NULL,
@@ -9792,6 +9795,8 @@ ProcessState * create_ProcessState( ProcessId processid ) {
                    // Compiled regular expressions
                    NULL
                  );
+
+    return res;
 } // create_ProcessState
 
 // void ProcessState::initCompiledRegularExpressionsAsObject( Object * compiledRegularExpressionsAsObject )
@@ -9890,29 +9895,29 @@ ProcessState* getProcessState_FileDescId( FileDescId file_desc_id )
 /********************************************************************/
 /**                       Static Process State                     **/
 /********************************************************************/
-Map* getProcessStaticDataMap(CallContext context)
+Map* getProcessStaticDataMap_ProcessId(ProcessId processid)
 {
-    ProcessState* processState = getProcessState_CallContext(context);
+    ProcessState* processState = getProcessState(processid);
 
-    assertion(processState != NULL, "getProcessStateMap: processState is NULL");
+    assertion(processState != NULL, "getProcessStateMap_ProcessId: processState is NULL");
 
     return processState->staticData;
 }
 
-Object* getProcessStaticData(CallContext context, CString* sDataName)
+Object* getProcessStaticData_ProcessId(ProcessId processid, CString* sDataName)
 {
-    Map* staticData = getProcessStaticDataMap(context);
+    Map* staticData = getProcessStaticDataMap_ProcessId(processid);
 
     return get_Map(staticData, sDataName);
 }
 
-void setProcessStaticData(CallContext context, CString* sDataName, Object* Data)
+void setProcessStaticData_ProcessId(ProcessId processid, CString* sDataName, Object* Data)
 {
-    Map* staticData = getProcessStaticDataMap(context);
+    Map* staticData = getProcessStaticDataMap_ProcessId(processid);
 
     if(!containsKey_Map(staticData, sDataName))
     {
-        registerProcessStaticData(context, sDataName, Data);
+        registerProcessStaticData_ProcessId(processid, sDataName, Data);
         
         return;
     }
@@ -9920,15 +9925,43 @@ void setProcessStaticData(CallContext context, CString* sDataName, Object* Data)
     put_Map(staticData, sDataName, Data);
 }
 
-int registerProcessStaticData(CallContext context, CString* sDataName, Object* initData)
+int registerProcessStaticData_ProcessId(ProcessId processid, CString* sDataName, Object* initData)
 {
-    Map* staticData = getProcessStaticDataMap(context);
+    Map* staticData = getProcessStaticDataMap_ProcessId(processid);
 
     if(containsKey_Map(staticData, sDataName)) return 1;
 
     put_Map(staticData, sDataName, initData);
 
     return 0;
+}
+
+Map* getProcessStaticDataMap(CallContext context)
+{
+    ProcessId processid = getProcessId_ThreadId(context);
+
+    return getProcessStaticDataMap_ProcessId(processid);
+}
+
+Object* getProcessStaticData(CallContext context, CString* sDataName)
+{
+    ProcessId processid = getProcessId_ThreadId(context);
+
+    return getProcessStaticData_ProcessId(processid, sDataName);
+}
+
+void setProcessStaticData(CallContext context, CString* sDataName, Object* Data)
+{
+    ProcessId processid = getProcessId_ThreadId(context);
+
+    setProcessStaticData_ProcessId(processid, sDataName, Data);
+}
+
+int registerProcessStaticData(CallContext context, CString* sDataName, Object* initData)
+{
+    ProcessId processid = getProcessId_ThreadId(context);
+
+    return registerProcessStaticData_ProcessId(processid, sDataName, initData);
 }
 
 /********************************************************************/

@@ -48,7 +48,7 @@ sub start_element {
         }
     }
     elsif($name eq "Property"){
-        if($req =~ s/req_id.//){
+        if($req =~ s/REQ failed://){
             $self->{'coverage'}{$req}{'failed'} = 1;
         }
     }

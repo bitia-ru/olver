@@ -5,7 +5,7 @@
 #
 # Copyright (c) 2005-2009 Institute for System Programming
 #
-# 24/07/2009 Roman Zybin, ISP RAS
+# 10/26/2009 Roman Zybin, ISP RAS
 
 BEGIN{
     chomp(my $program_dir = `dirname $0`);
@@ -49,7 +49,7 @@ sub reqs{
     my $self = shift;
     
     return undef if ! defined $self->{'property'};
-    return join (';', sort map { $_->{'name'} =~ /req_id\.(.*)/; $1 } grep { $_->{'name'} =~ /req_id/ } @{$self->{'property'}} );
+    return join (';', sort map { $_->{'value'} } grep { $_->{'name'} =~ /^REQ failed:/ } @{$self->{'property'}} );
 }
 
 sub origin{
@@ -74,7 +74,7 @@ sub isRequirementFailed{
     my %reqs;
         
     foreach my $p (@{$self->{'property'}}){
-        if ($p->{'name'} =~ /^req_id\./o){
+        if ($p->{'name'} =~ /^REQ failed:/){
             $reqs{$p->{'value'}} = 1;
         }
     }
@@ -126,6 +126,20 @@ sub transitionName{
 sub scenarioName{
     my $self = shift;
     return $self->{'scenario'};
+}
+
+# just hack, should return environment
+sub env{
+    my $self = shift;
+    return $self;
+}
+
+sub getProperty{
+    my $self = shift;
+    my $name = shift;
+    if(defined $self->{'environment'} && defined $self->{'environment'}{$name}){
+        return $self->{'environment'}{$name};
+    }
 }
 
 package Operation;
@@ -244,7 +258,7 @@ sub processBugDB{
         my $old = $pattern;
         ### convert bug pattern to internal format ###
         
-        my $key_words = "get|kind|info|isRequirementFailed|modelOperation|modelOperationSeries|size|transitionName|scenarioName|interimFailures|name|returnValue|getParameterValue|getCoveredElementId";
+        my $key_words = "get|kind|info|isRequirementFailed|modelOperation|modelOperationSeries|size|transitionName|scenarioName|interimFailures|name|returnValue|getParameterValue|getCoveredElementId|env|getProperty";
         
         $pattern =~ s/(?<!\.)(?:\b)($key_words)(\b)/\$exc->$1/go;
         $pattern =~ s/\.($key_words)(\b)/->$1/go;
@@ -300,6 +314,7 @@ my $f_sc = 0;
 my $f_id = 0;
 my $im_id = 0;
 
+my $environment;
 my $scenario;
 my $transition;
 my $transition_id;
@@ -368,6 +383,7 @@ sub start_element {
         $exc_id++;
 
         $exception{$exc_id} = \%atts;
+        $exception{$exc_id}{'environment'} = $environment;
         $exception{$exc_id}{'transition'} = $transition;
         $exception{$exc_id}{'scenario'} = $scenario;
         $exception{$exc_id}{'traceName'} = $main::trace_file_name.", transition $transition (id=$transition_id)";
@@ -449,6 +465,11 @@ sub start_element {
             $s = 'unknown model operation';
         }
         $self->{'coverage'}{$p}{$s}{'mark'}{$atts{'name'}}++;
+    }
+    elsif($name eq 'environment'){
+        if($atts{'name'} eq 'arch'){
+            $environment->{$atts{'name'}} = $atts{'value'};
+        }
     }
     elsif($name eq 'scenario_start'){
         $scenario = delete $atts{'name'};
@@ -748,6 +769,7 @@ my $tmp_file = tmpnam();
 foreach $trace_file_name (sort @ARGV){
     $is_struct_fail = 0;
     undef $ReportHandler::scenario;
+    undef $ReportHandler::environment;
     
     if(! -f $trace_file_name){next};
     chomp($trace_file_name = `readlink -f $trace_file_name`);
@@ -1445,6 +1467,7 @@ HTM
     }
     
     foreach my $param (@{$fail->{'property'}}){
+        $param->{name} =~ s/(?<!:):[^:]*//g;
         print FAIL <<HTM;
 <tr>
   <td>$param->{name}</td>

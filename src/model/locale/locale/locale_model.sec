@@ -101,6 +101,7 @@ LocaleInfo* create_LocaleInfo(void)
                     NULL,
                     NULL,
                     create_Map(&type_IntTObj, &type_IntTObj),
+                    create_Map(&type_IntTObj, &type_IntTObj),
                     create_Map(&type_CString, &type_CTypeGroup)
                   );
 }
@@ -247,9 +248,9 @@ bool isLowerCase(CallContext context, IntT c)
     LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
     
     assertion(li != NULL, "isLowerCase: li is NULL!");
-    assertion(li->toUpper != NULL, "isLowerCase: li->toUpper is NULL!");
+    assertion(li->toLower != NULL, "isLowerCase: li->toLower is NULL!");
 
-    return !containsKey_Map(li->toUpper, create_IntTObj(c));
+    return containsValue_Map(li->toLower, create_IntTObj(c));
 }
 
 IntT getUpperCase(CallContext context, IntT c)
@@ -268,10 +269,10 @@ IntT getLowerCase(CallContext context, IntT c)
     LocaleInfo* li = getCurrLocaleInfo_Locale(context, SUT_LC_CTYPE);
     IntTObj* res;
 
-    assertion(li != NULL, "getUpperCase: li is NULL!");
-    assertion(li->toUpper != NULL, "getUpperCase: li->toUpper is NULL!");
+    assertion(li != NULL, "getLowerCase: li is NULL!");
+    assertion(li->toLower != NULL, "getLowerCase: li->toUpper is NULL!");
 
-    return (res = getKey_Map(li->toUpper, create_IntTObj(c))) == NULL ? c : *res;
+    return (res = get_Map(li->toLower, create_IntTObj(c))) == NULL ? c : *res;
 }
 
 /********************************************************************/
@@ -395,6 +396,7 @@ CString* setlocale_spec(CallContext context, IntT category, CString* locale)
         REQ("", "category is known",
                     category == SUT_LC_ALL ||
                     category == SUT_LC_COLLATE ||
+                    category == SUT_LC_CTYPE ||
                     category == SUT_LC_MESSAGES ||
                     category == SUT_LC_MONETARY ||
                     category == SUT_LC_NUMERIC ||
@@ -976,6 +978,7 @@ void onSetLocale (  CallContext context,
         {
         case SUT_LC_ALL:
         case SUT_LC_COLLATE:
+        case SUT_LC_CTYPE:
         case SUT_LC_MESSAGES:
         case SUT_LC_MONETARY:
         case SUT_LC_NUMERIC:
@@ -1144,7 +1147,10 @@ void init_Locale(SystemState* ss)
     set_Locale(pCLocale, _CS("C"), SUT_LV_INT_N_SIGN_POSN, create_CharTObj(127));
     
     for(i = 'a', j = 'A'; i <= 'z'; i++, j++)
+    {
         put_Map(pCLocale->toUpper, create_IntTObj(i), create_IntTObj(j));
+        put_Map(pCLocale->toLower, create_IntTObj(j), create_IntTObj(i));
+    }
     
     put_Map(pCLocale->mapGroups, _CS("upper"),
         create_CTypeGroup(_CS("ABCDEFGHIJKLMNOPQRSTUVWXYZ")));
@@ -1191,15 +1197,15 @@ void init_Locale(SystemState* ss)
         create_CTypeGroup(_CS(" \t")));
 }
 
-void initAtExec_Locale(CallContext context)
+void initAtExec_Locale(ProcessId processid)
 {
-    selectProcessLocale(context, SUT_LC_ALL,      _CS("C"));
-    selectProcessLocale(context, SUT_LC_COLLATE,  _CS("C"));
-    selectProcessLocale(context, SUT_LC_CTYPE,    _CS("C"));
-    selectProcessLocale(context, SUT_LC_MESSAGES, _CS("C"));
-    selectProcessLocale(context, SUT_LC_MONETARY, _CS("C"));
-    selectProcessLocale(context, SUT_LC_NUMERIC,  _CS("C"));
-    selectProcessLocale(context, SUT_LC_TIME,     _CS("C"));
+    selectProcessLocale_ProcessId(processid, SUT_LC_ALL,      _CS("C"));
+    selectProcessLocale_ProcessId(processid, SUT_LC_COLLATE,  _CS("C"));
+    selectProcessLocale_ProcessId(processid, SUT_LC_CTYPE,    _CS("C"));
+    selectProcessLocale_ProcessId(processid, SUT_LC_MESSAGES, _CS("C"));
+    selectProcessLocale_ProcessId(processid, SUT_LC_MONETARY, _CS("C"));
+    selectProcessLocale_ProcessId(processid, SUT_LC_NUMERIC,  _CS("C"));
+    selectProcessLocale_ProcessId(processid, SUT_LC_TIME,     _CS("C"));
 }
 
 CString* getLocale_Locale(CallContext context, IntT category)
@@ -1225,13 +1231,13 @@ CString* getLocale_Locale(CallContext context, IntT category)
     
     switch(category)
     {
-    case SUT_LC_ALL:       return getEnv_CallContext(context, _CS("SUT_LC_ALL"));
-    case SUT_LC_COLLATE:   return getEnv_CallContext(context, _CS("SUT_LC_COLLATE"));
-    case SUT_LC_CTYPE:     return getEnv_CallContext(context, _CS("SUT_LC_CTYPE"));
-    case SUT_LC_MESSAGES:  return getEnv_CallContext(context, _CS("SUT_LC_MESSAGES"));
-    case SUT_LC_MONETARY:  return getEnv_CallContext(context, _CS("SUT_LC_MONETARY"));
-    case SUT_LC_NUMERIC:   return getEnv_CallContext(context, _CS("SUT_LC_NUMERIC"));
-    case SUT_LC_TIME:      return getEnv_CallContext(context, _CS("SUT_LC_TIME"));
+    case SUT_LC_ALL:       return getEnv_CallContext(context, _CS("LC_ALL"));
+    case SUT_LC_COLLATE:   return getEnv_CallContext(context, _CS("LC_COLLATE"));
+    case SUT_LC_CTYPE:     return getEnv_CallContext(context, _CS("LC_CTYPE"));
+    case SUT_LC_MESSAGES:  return getEnv_CallContext(context, _CS("LC_MESSAGES"));
+    case SUT_LC_MONETARY:  return getEnv_CallContext(context, _CS("LC_MONETARY"));
+    case SUT_LC_NUMERIC:   return getEnv_CallContext(context, _CS("LC_NUMERIC"));
+    case SUT_LC_TIME:      return getEnv_CallContext(context, _CS("LC_TIME"));
     }
     
     assertion(false, "getLocale_Locale: invalid category");
@@ -1587,19 +1593,26 @@ LSPlace whereIs_LocaleSelector(CallContext context, IntT category)
     return EnvironSelector;
 }
 
-LocaleSelector* getProcessLocaleSelector(CallContext context)
+LocaleSelector* getProcessLocaleSelector_ProcessId(ProcessId processid)
 {
     LocaleSelector* localeSelector =
-        (LocaleSelector*)getProcessStaticData(context, _CS("LocaleSel"));
+        (LocaleSelector*)getProcessStaticData_ProcessId(processid, _CS("LocaleSel"));
 
     if(localeSelector == NULL) {
-        registerProcessStaticData(context, _CS("LocaleSel"),
+        registerProcessStaticData_ProcessId(processid, _CS("LocaleSel"),
             create_LocaleSelector(NULL));
 
-        return (LocaleSelector*)getProcessStaticData(context, _CS("LocaleSel"));
+        return (LocaleSelector*)getProcessStaticData_ProcessId(processid, _CS("LocaleSel"));
     }
 
     return localeSelector;
+}
+
+LocaleSelector* getProcessLocaleSelector(CallContext context)
+{
+    ProcessId processid = getProcessId_ThreadId(context);
+
+    return getProcessLocaleSelector_ProcessId(processid);
 }
 
 LocaleT getThreadLocaleSelector(CallContext context)
@@ -1658,11 +1671,18 @@ CString* getLocale_LocaleSelector(LocaleSelector* ls, IntT category)
     return NULL;
 }
 
-CString* selectProcessLocale(CallContext context, IntT category, CString* val)
+CString* selectProcessLocale_ProcessId(ProcessId processid, IntT category, CString* val)
 {
-    LocaleSelector* localeSelector = getProcessLocaleSelector(context);
+    LocaleSelector* localeSelector = getProcessLocaleSelector_ProcessId(processid);
 
     return selectLocale_LocaleSelector(localeSelector, category, val);
+}
+
+CString* selectProcessLocale(CallContext context, IntT category, CString* val)
+{
+    ProcessId processid = getProcessId_ThreadId(context);
+
+    return selectProcessLocale_ProcessId(processid, category, val);
 }
 
 LocaleT selectThreadLocale(CallContext context, LocaleT locale)
