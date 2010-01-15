@@ -715,13 +715,11 @@ static TACommandVerdict scalb_cmd(TAThread thread,TAInputStream stream)
     return taDefaultVerdict;    
 }
 
-static Ái@ €kS•ÆS•Æd	aƒ2'§ S?€ýœaP  
-šÝ÷  ÷TLS_SOURCES = tls_agent.c
-
-
-SOURCES += $(TLS_SOURCES:%.c=pthread/tls/%.c)
-
-¨(üFloat(&stream);
+static TACommandVerdict scalbf_cmd(TAThread thread,TAInputStream stream)
+{
+    float x,n,res;
+    x = readFloat(&stream);
+    n = readFloat(&stream);
  
     START_TARGET_OPERATION(thread);
     
