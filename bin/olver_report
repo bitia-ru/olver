@@ -36,14 +36,18 @@ MEM=$((MEM / 1024))
 if [ ! $MEM -gt 0 ]; then MEM=256; fi
 if [ $MEM -gt 1024 ]; then MEM=1024; fi
 GENERATE="../tools/TraceTools/bin/stargen -J-Xmx${MEM}m"
-GENOPT="-crpfm false -d $REPORT_DIR/report -x $REPORT_DIR/res.xml -mfpsc 1000 -bdbs xml:../tools/BugDB/BugDB.xml"
 TTIMEMARK=${TTIMEMARK:-`date +%Y-%m-%d_%H-%M-%S`}
 REPORT_DIR=${REPORT_DIR:-`ls -1vd /var/opt/lsb/test/olver-core/* | tail -1`}
+GENOPT="-crpfm false -d $REPORT_DIR/report -x $REPORT_DIR/res.xml -mfpsc 1000 -bdbs xml:../tools/BugDB/BugDB.xml"
 
 #
 # Define appropriate XML parser
 #
 ../tools/reportgen/select_xml_parser.pl $OLVER_XML_PARSER > ../tools/share/perl/SAX.ini
+
+if test ! -w $REPORT_DIR; then
+    echo "Warning: '$REPORT_DIR' is not writable"
+fi
 
 #
 # Generate UniTesK report
@@ -59,33 +63,28 @@ if [ $? -eq 0 -a -z "$REPORT_NO_JAVA" ]; then
     fi
 fi
 
-perl <<SCRIPT
-open(RES, '$REPORT_DIR/res.xml');
-while(<RES>){
-    exit 0 if(/<\/Report>/o);
-}
-close(RES);
-exit 1;
-SCRIPT
-
+test -f $REPORT_DIR/res.xml && grep '</Report>' $REPORT_DIR/res.xml >/dev/null
 if [ $? -ne 0 ]; then
+    echo "Java report generator failed"
+    echo "Trying to use perl instead"
+    echo -n "Using XML::SAX parser "
+    tail -1 ../tools/share/perl/SAX.ini | awk '{print $3}'
+    echo ""
+
     ls $REPORT_DIR/*.ut* >/dev/null 2>&1
     if [ $? -eq 0 ]; then
         ../tools/reportgen/report.pl $GENOPT $REPORT_DIR/*.ut*
     fi
 fi
 
-perl <<SCRIPT
-open(RES, '$REPORT_DIR/res.xml');
-while(<RES>){
-    exit 0 if(/<\/Report>/o);
-}
-close(RES);
-exit 1;
-SCRIPT
+if test ! -f $REPORT_DIR/res.xml; then
+    echo "Error: res.xml is not found"
+    exit 1
+fi
 
+grep '</Report>' $REPORT_DIR/res.xml >/dev/null
 if [ $? -ne 0 ]; then
-    echo "error: Couldn't generate report"
+    echo "Error: res.xml is invalid"
     exit 1
 fi
 

@@ -1,4 +1,4 @@
-# $Id: Simple.pm,v 1.5 2009/07/28 13:29:42 phoenix Exp $
+# $Id: Simple.pm,v 1.6 2010/09/10 11:28:34 phoenix Exp $
 
 package XML::Simple;
 
@@ -1776,14 +1776,14 @@ sub start_element {
       $name = '{' . $element->{NamespaceURI} . '}' . $name;
     }
   }
+use Data::Dumper;
   my $attributes = {};
-  if($element->{Attributes}) {  # Might be undef
-    while (my ( $name, $value ) = each %{$element->{Attributes}}){
+  if($element->{Attributes} && %{$element->{Attributes}}) {  # Might be undef
+    while ( my ( $name, $value ) = each %{$element->{Attributes}}){
       if(not ref $value){
-        $value = { Name => $name, Value => $value };
+        $element->{Attributes}{$name} = { Name => $name, Value => $value };
       }
     }
-      
     foreach my $attr (values %{$element->{Attributes}}) {
       if($self->{opt}->{nsexpand}) {
         my $name = $attr->{LocalName} || '';
