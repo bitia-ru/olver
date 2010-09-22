@@ -87,7 +87,7 @@ exit_memterm ()
     free (out_filename);
 
   close (listen_sockfd);
-  unlink (SOCK_FNAME_ENV);
+  unlink (getenv (SOCK_FNAME_ENV));
 
   exit (0);
 }
@@ -111,7 +111,7 @@ parse_sequence (void)
   int  read_bytes;
   int  accepted_sockfd;
   struct sockaddr_un accepted_addr;
-  size_t accepted_addr_len;
+  socklen_t accepted_addr_len;
 
   accepted_sockfd = accept (listen_sockfd,
     (struct sockaddr *)&accepted_addr, &accepted_addr_len);

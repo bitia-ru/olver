@@ -1776,7 +1776,7 @@ sub start_element {
       $name = '{' . $element->{NamespaceURI} . '}' . $name;
     }
   }
-use Data::Dumper;
+
   my $attributes = {};
   if($element->{Attributes} && %{$element->{Attributes}}) {  # Might be undef
     while ( my ( $name, $value ) = each %{$element->{Attributes}}){
