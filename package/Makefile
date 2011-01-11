@@ -1,5 +1,5 @@
 PACKAGE=lsb-test-olver-core
-VERSION=4.0.91
+VERSION=4.1.0
 RELEASE=1
 
 # Derive date string for daily snapshots
