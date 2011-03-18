@@ -1,6 +1,9 @@
 PACKAGE=lsb-test-olver-core
-VERSION=4.1.0
+VERSION=4.1.1
 RELEASE=1
+
+# for pkgchk
+DEPS=
 
 # Derive date string for daily snapshots
 ISO_DATE=$(shell date +"%Y%m%d")
@@ -53,7 +56,7 @@ all: rpm_package
 endif
 
 clean:
-	@rm -f *.rpm *.deb *.tgz $(PACKAGE).spec
+	@rm -f *.rpm *.deb *.tgz $(PACKAGE).spec journal.*
 
 tarball: $(TARBALL)
 
@@ -95,6 +98,9 @@ endif
 	@mv $(RPM_BINARY_DIR)/$(RPM_BINARY_NAME) .
 	@mv $(RPM_SRPM_DIR)/$(RPM_SOURCE_NAME) .
 	@rm -rf $(RPM_TMP_BUILD_DIR)
+
+pkgchk: $(RPM_BINARY_NAME)
+	/opt/lsb/bin/lsbpkgchk -L lsb $(DEPS) -t $(RPM_BINARY_NAME)
 
 $(TARBALL):
 	bzr export $(EXPORT_TAG) $(SRC_DIR) $(BZRTREES)/$(BZR_MODULE)
