@@ -28,6 +28,7 @@ fi
 %setup -q
 
 %build
+export LSBCC_BESTEFFORT=1
 ./build_conf_tests.sh -p
 
 %install
