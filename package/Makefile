@@ -1,6 +1,6 @@
 PACKAGE=lsb-test-olver-core
-VERSION=4.1.2
-RELEASE=4
+VERSION=4.1.3
+RELEASE=1
 
 # for pkgchk
 DEPS=
@@ -97,6 +97,12 @@ else
 	@$(RPM_BUILD_CMD) --rcfile $(RCFILELIST) --macros=$(MACROFILELIST) --define="_sourcedir $(PWD)" --define="_topdir $(RPM_TMP_BUILD_DIR)" --define="_target_cpu $(RPM_BUILD_ARCH)" -ba $(PACKAGE).spec
 endif
 	@mv $(RPM_BINARY_DIR)/$(RPM_BINARY_NAME) .
+	@mv $(RPM_SRPM_DIR)/$(RPM_SOURCE_NAME) .
+	@rm -rf $(RPM_TMP_BUILD_DIR)
+
+src_rpm: $(PACKAGE).spec $(TARBALL)
+	@mkdir -p $(RPM_TMP_BUILD_DIR)/SRPMS
+	@$(RPM_BUILD_CMD) --rcfile ${RCFILELIST} --macros=$(MACROFILELIST) --define="_sourcedir $(PWD)" --define="_topdir $(RPM_TMP_BUILD_DIR)" --define="_target_cpu $(RPM_BUILD_ARCH)" -bs $(PACKAGE).spec $(NOCLEAN) $(NOJOURNAL)
 	@mv $(RPM_SRPM_DIR)/$(RPM_SOURCE_NAME) .
 	@rm -rf $(RPM_TMP_BUILD_DIR)
 
