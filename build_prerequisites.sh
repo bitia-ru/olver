@@ -111,8 +111,8 @@ if [ $check_ncurses = 0 ] ; then
 fi
 
 if [ $check_lsbcc = 0 ]; then
-	echo "$issue_count) LSB 3.1 Software Development Kit (SDK) should be installed."
-	echo "   You may download it at  http://www.linux-foundation.org/en/Downloads."
+	echo "$issue_count) LSB 4.1 Software Development Kit (SDK) should be installed."
+	echo "   You may download it at http://www.linuxfoundation.org/collaborate/workgroups/lsb/download."
 	echo
 	((issue_count++))
 else
