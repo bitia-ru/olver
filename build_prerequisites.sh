@@ -45,42 +45,14 @@ which /opt/lsb/bin/lsbcc &> /dev/null
 if [ $? -eq 0 ]; then
 	check_lsbcc=1
 	# LSB Runtime
-	ls -l /lib/ld-lsb*.3 &> /dev/null
+	ls -l /lib64/ld-lsb*.3 &> /dev/null
 	if [ $? -eq 0  ]; then
 		check_lsb_so=1
-#	else
-#		echo "Creating symbolic link for the LSB Runtime loader..."
-#		CUR_ARCH=`uname -m`
-#		
-#		if [ `id -u` -ne 0 ]; then 
-#			echo "Need root privileges"
-#			OLVER_SU_CMD="su root -- -c"
-#			which sudo 2>&1 > /dev/null
-#			if [ $? -eq 0 ]; then
-#				echo -n "You have sudo available.  Should I use it? "
-#				read answer
-#				answer=`echo ${answer} | cut -c1`
-#				if [ "${answer}" = "y" -o "${answer}" = "Y" ]; then
-#					OLVER_SU_CMD="sudo /bin/sh -c"
-#				fi
-#				echo
-#			fi
-#			
-#			echo "Using the command "${OLVER_SU_CMD}" to gain root access.  Please type the"
-#			echo "appropriate password if prompted."
-#			echo " "
-#		else
-#			echo "Already have root privileges"
-#			OLVER_SU_CMD="/bin/sh -c"
-#		fi
-#
-#		if [ -f /lib/ld-linux.so.2 ]; then
-#			$OLVER_SU_CMD "ln -s /lib/ld-linux.so.2 /lib/ld-lsb.so.3"
-#		fi
-#		if [ -f /lib/ld-linux-$CUR_ARCH.so.2 ]; then
-#			$OLVER_SU_CMD "ln -s /lib/ld-linux-$CUR_ARCH.so.2 /lib/ld-lsb-$CUR_ARCH.so.3"
-#		fi
-#		check_lsb_so=1
+	else
+		ls -l /lib/ld-lsb*.3 &> /dev/null
+		if [ $? -eq 0  ]; then
+			check_lsb_so=1
+		fi
 	fi
 fi
 
