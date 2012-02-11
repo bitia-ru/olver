@@ -120,7 +120,7 @@ static TACommandVerdict sched_getparam_cmd(TAThread thread,TAInputStream stream)
 {
     int res;
     pid_t pid;
-    struct sched_param *param;
+    struct sched_param param;
     
     // Prepare
     pid = readInt(&stream);
