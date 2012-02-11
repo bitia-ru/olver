@@ -27,12 +27,12 @@ TACommandVerdict create_ncurses_process_cmd(TAThread thread, TAInputStream strea
     char* termname = readString(&stream);
     int sx = readInt(&stream);
     int sy = readInt(&stream);
-    char* sockname[256];
-    char* termdump[256];
-    char* termexp[256];
-    char* termdiff[256];
-    char* dumpfile[256];
-    char* termsize[30];
+    char sockname[256];
+    char termdump[256];
+    char termexp[256];
+    char termdiff[256];
+    char dumpfile[256];
+    char termsize[30];
     char size[30];
 
   // Init test system descriptor
