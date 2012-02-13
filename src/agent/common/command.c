@@ -29,6 +29,9 @@
 // 'io.file' agents
 #include "io/file/file_agent.h"
 
+// 'io.syslog' agents
+#include "io/syslog/syslog_agent.h"
+
 // 'io.term' agents
 #include "io/term/term_agent.h"
 
@@ -125,6 +128,9 @@
 #include "time/timer/timer_agent.h"
 
 // 'util' agents
+// 'util.assert' agents
+#include "util/assert/assert_agent.h"
+
 // 'util.bit' agents
 #include "util/bit/bit_agent.h"
 
@@ -176,6 +182,7 @@
 #include "util/conversion/wchar_agent.h"
 #include "util/conversion/wstrint_agent.h"
 #include "util/conversion/strint_agent.h"
+#include "util/conversion/wstrreal_agent.h"
 
 // 'util.dl' agents
 #include "util/dl/dl_agent.h"
@@ -188,6 +195,42 @@
 
 // 'math.math' agents
 #include "math/math/math_agent.h"
+
+//'math.real' agents
+#include "math/real/real_agent.h"
+
+//'math.bessel' agents
+#include "math/bessel/bessel_agent.h"
+
+//'math.complex' agents
+#include "math/complex/complex_agent.h"
+
+//'math.chyper' agents
+#include "math/chyper/chyper_agent.h"
+
+//'math.rand' agents
+#include "math/rand/rand_agent.h"
+
+//'math.gamma' agents
+#include "math/gamma/gamma_agent.h"
+
+//'math.error' agents
+#include "math/error/error_agent.h"
+
+//'math.trig' agents
+#include "math/trig/trig_agent.h"
+
+//'math.exp' agents
+#include "math/exp/exp_agent.h"
+
+// 'math.ctrig' agents
+#include "math/ctrig/ctrig_agent.h"
+
+// 'math.cexp' agents
+#include "math/cexp/cexp_agent.h"
+
+// 'math.hyper' agent agents
+#include "math/hyper/hyper_agent.h"
 
 // 'memory.mman' agents
 #include "memory/mman/mman_agent.h"
@@ -899,11 +942,19 @@ void ta_register_commands(void)
   register_math_error_commands();
 
   //'math.trig' commands
-
   register_math_trig_commands();
 
   //'math.exp' commands
   register_math_exp_commands();
+
+  // 'math.ctrig' commands
+  register_math_ctrig_commands();
+
+  // 'math.cexp' commands
+  register_math_cexp_commands();
+
+  // 'math.hyper' commands
+  register_math_hyper_commands();
 
   //'util.float' commands
   register_util_float_commands();
@@ -944,31 +995,14 @@ void ta_register_commands(void)
   // 'util.format.fmtmsg' agents
   register_util_format_fmtmsg_commands();
 
-
-
-  // 'math.ctrig' agents
-
-  register_math_ctrig_commands();
-
   // util.string.wcasecmp
   register_util_string_wcasecmp_commands();
 
   // util.format.wtime
   register_util_format_wtime_commands();
 
-
-  // 'math.cexp'
-
-  register_math_cexp_commands();
-
-
   // socket.rpc.secure
   register_socket_rpc_secure_commands();
-
-
-  // 'math.hyper' agent
-
-  register_math_hyper_commands();
 
 
 }
