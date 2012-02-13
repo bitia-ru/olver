@@ -26,6 +26,7 @@ echo "Checking build prerequisites..."
 gcc -v &> /dev/null
 if [ $? -eq 0 ]; then
 	check_gcc=1
+	CC=gcc
 fi
 
 # Check for g++
@@ -34,16 +35,11 @@ if [ $? -eq 0 ]; then
 	check_gpp=1
 fi
 
-# Check for ncurses
-NCURSES_STR=`gcc -lncurses -v 2>&1 | grep "cannot find -lncurses"`
-if test "_$NCURSES_STR" = "_" ;then
-	check_ncurses=1
-fi
-
 # Check for lsbcc
 which /opt/lsb/bin/lsbcc &> /dev/null
 if [ $? -eq 0 ]; then
 	check_lsbcc=1
+	CC=/opt/lsb/bin/lsbcc
 	# LSB Runtime
 	ls -l /lib64/ld-lsb*.3 &> /dev/null
 	if [ $? -eq 0  ]; then
@@ -54,6 +50,27 @@ if [ $? -eq 0 ]; then
 			check_lsb_so=1
 		fi
 	fi
+fi
+
+# Check for ncurses
+cat > hello-ncurses.c << EOF
+#include <ncurses.h>
+
+int main()
+{	
+	initscr();			/* Start curses mode 		  */
+	printw("Hello World !!!");	/* Print Hello World		  */
+	refresh();			/* Print it on to the real screen */
+	getch();			/* Wait for user input */
+	endwin();			/* End curses mode		  */
+
+	return 0;
+}
+EOF
+NCURSES_STR=`$CC -lncurses hello-ncurses.c -o hello-ncurses -v 2>&1 | grep "cannot find -lncurses"`
+if test "_$NCURSES_STR" = "_" ;then
+	check_ncurses=1
+	rm -f hello-ncurses*
 fi
 
 # Java Runtime Environment

@@ -14,20 +14,20 @@ License: GPL
 URL: http://www.linux-foundation.org/en/Downloads
 Group: Development/Tools
 Buildroot: %{_builddir}/%{name}-root
+Buildrequires: lsb-build-cc lsb-build-c++
 AutoReqProv: no
 
 %description
 OLVER Test Suite checks the operating system interfaces for conformance to the LSB 3.1 Core (ISO/IEC 23360) standard.
 
 %prep
-if [ ! -x /opt/lsb/bin/lsbcc ] ; then
-    echo "lsbcc not found, required for compilation, aborting"
-    exit 1
-fi
-
 %setup -q
 
 %build
+export CC=/opt/lsb/bin/lsbcc
+# (sb) FIXME these fall down in config
+#export CXX=/opt/lsb/bin/lsbc++
+#export LL=/opt/lsb/bin/lsbc++
 export LSBCC_BESTEFFORT=1
 ./build_conf_tests.sh -p
 

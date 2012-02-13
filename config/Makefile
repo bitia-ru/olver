@@ -1,6 +1,6 @@
 SHELL=/bin/bash
-CC=g++
-LL=g++
+CXX?=g++
+LL?=g++
 
 PCCTS_DIR=./external/PCCTS
 ANTLR = $(PCCTS_DIR)/bin/antlr
@@ -79,11 +79,11 @@ all: $(HANDBOOK_APP) $(CONFIGPROCESSOR_APP) $(TESTPLANPROCESSOR_APP)
 include $(DEPENDS)
 
 $(DEPENDS):%.d:$(DEPTREE_GRAMMAR_SRC)
-	@set -e; $(CC) -MM $(INCLUDES) $(CFLAGS) $*.cpp > $@
+	@set -e; $(CXX) -MM $(INCLUDES) $(CFLAGS) $*.cpp > $@
 	@echo "$*.d $(*D)/`cat $@`" > $@
 
 $(OBJECTS):%.o:
-	$(CC) $(INCLUDES) $(CFLAGS) $*.cpp -o $*.o
+	$(CXX) $(INCLUDES) $(CFLAGS) $*.cpp -o $*.o
 
 $(DEPTREE_GRAMMAR_SRC) $(DEPTREE_GRAMMAR_INC): $(DEPTREE_GRAMMAR) $(ANTLR) $(DLG)
 	$(ANTLR) -CC $(DEPTREE_GRAMMAR) -o ./src/deptree -ft dtokens.h  -nopurify
