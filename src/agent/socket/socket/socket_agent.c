@@ -20,6 +20,7 @@
 #include "socket/socket/socket_agent.h"
 #include <stdio.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>

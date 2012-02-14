@@ -12,7 +12,7 @@
 #include "ncurses/chstr/input_agent.h"
 #include <curses.h>
 
-
+void writeChType(TAThread thread, chtype val);
 
 void writeChStr(TAThread thread, chtype *chstr, int lim)
 {

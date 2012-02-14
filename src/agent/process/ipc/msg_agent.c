@@ -23,6 +23,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <utime.h>
+#include <string.h>
 
 #include "process/ipc/msg_agent.h"
 

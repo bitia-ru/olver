@@ -19,6 +19,7 @@
 
 #include "locale/ctype/ctype_agent.h"
 #include <ctype.h>
+#include <stdlib.h>
 
 const unsigned short int** __ctype_b_loc(void);
 

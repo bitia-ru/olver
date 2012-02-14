@@ -12,6 +12,8 @@
 #include "ncurses/char/insert_agent.h"
 #include <curses.h>
 
+chtype readChType(TAInputStream *stream);
+
 /********************************************************************/
 /**                         Agent Commands                         **/
 /********************************************************************/

@@ -13,6 +13,9 @@
 #include "ncurses/border/border_agent.h"
 #include <curses.h>
 
+chtype readChType(TAInputStream *stream);
+void writeChType(TAThread thread, chtype val);
+
 /********************************************************************/
 /**                         Agent Commands                         **/
 /********************************************************************/

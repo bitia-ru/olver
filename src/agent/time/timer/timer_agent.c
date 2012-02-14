@@ -21,6 +21,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <string.h>
 #include "time/timer/timer_agent.h"
 #include "process/process/process_common.h"
 

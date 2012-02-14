@@ -12,7 +12,7 @@
 #include "ncurses/chstr/add_agent.h"
 #include <curses.h>
 
-
+chtype readChType(TAInputStream *stream);
 
 /********************************************************************/
 /**                           Readers                             **/

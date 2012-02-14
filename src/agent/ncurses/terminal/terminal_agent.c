@@ -274,7 +274,7 @@ static TACommandVerdict set_term_cmd(TAThread thread,TAInputStream stream)
 
 static TACommandVerdict termattrs_cmd(TAThread thread,TAInputStream stream)
 {
-    chtype * res;
+    chtype res;
     
     START_TARGET_OPERATION(thread);
     res = termattrs();

@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #define __USE_XOPEN
 #include <wchar.h>
 #include "screen_row.h"

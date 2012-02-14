@@ -18,6 +18,8 @@
 
 #include <stdio.h>
 #include <err.h>
+#include <assert.h>
+#include <stdlib.h>
 #include "util/assert/assert_agent.h"
 #include "process/process/process_common.h"
 

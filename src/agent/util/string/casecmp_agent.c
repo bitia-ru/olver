@@ -18,6 +18,7 @@
 
 
 #include "util/string/casecmp_agent.h"
+#include <string.h>
 #include <strings.h>
 
 /********************************************************************/

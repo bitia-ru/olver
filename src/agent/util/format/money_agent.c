@@ -19,6 +19,7 @@
 
 #include "util/format/money_agent.h"
 #include <errno.h>
+#include <string.h>
 #include <monetary.h>
 
 double* readDoubleList(TAInputStream* stream, int* list_size)

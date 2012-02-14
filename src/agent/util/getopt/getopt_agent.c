@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <stdlib.h>
+#include <string.h>
 #include "util/getopt/getopt_agent.h"
 
 char** readListStr(TAInputStream* stream)

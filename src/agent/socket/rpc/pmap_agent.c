@@ -19,6 +19,7 @@
 
 #include "socket/rpc/pmap_agent.h"
 #include "socket/socket/socket_agent.h"
+#include <stdlib.h>
 #include <rpc/pmap_clnt.h>
 
 

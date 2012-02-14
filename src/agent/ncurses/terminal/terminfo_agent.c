@@ -15,6 +15,7 @@
 #include <term.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 	
 #define NCURSES_STACK_BUFFSIZE 1024*256
 #define NCURSES_TERMDUMP ta_get_test_file_path("agent.termdump")
@@ -259,7 +260,7 @@ static TACommandVerdict restartterm_cmd(TAThread thread, TAInputStream stream)
 
 
     START_TARGET_OPERATION(thread);
-    res =  restartterm(term, stdout, &errret);
+    res =  restartterm(term, fileno(stdout), &errret);
     END_TARGET_OPERATION(thread);
 
 
@@ -319,7 +320,7 @@ static TACommandVerdict setupterm_cmd(TAThread thread, TAInputStream stream)
 
 
     START_TARGET_OPERATION(thread);
-    res =  setupterm(term, stdout, &errret);
+    res =  setupterm(term, fileno(stdout), &errret);
     END_TARGET_OPERATION(thread);
 
 

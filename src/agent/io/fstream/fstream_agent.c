@@ -28,7 +28,13 @@
 #include <sys/file.h>
 #include <sys/uio.h>
 
-typedef struct FILE _IO_FILE;
+/* typedef struct FILE _IO_FILE; */
+
+/* since these are binary-only, we need prototypes here */
+int _IO_feof(struct _IO_FILE *);
+int _IO_putc(int, struct _IO_FILE *);
+int _IO_getc(struct _IO_FILE *);
+int _IO_puts(const char *);
 
 /********************************************************************/
 /**                       Helper Functions                         **/
@@ -52,10 +58,10 @@ static TACommandVerdict a_fileno_cmd( TAThread thread, TAInputStream stream ) {
 
 static TACommandVerdict _IO_feof_cmd(TAThread thread,TAInputStream stream)
 {
-    _IO_FILE * file;
+    struct _IO_FILE * file;
     int res;
 
-    file=(_IO_FILE*)readPointer(&stream);
+    file=(struct _IO_FILE*)readPointer(&stream);
 
     START_TARGET_OPERATION(thread);
     res =  _IO_feof(file);
@@ -69,10 +75,10 @@ static TACommandVerdict _IO_feof_cmd(TAThread thread,TAInputStream stream)
 
 static TACommandVerdict _IO_getc_cmd(TAThread thread,TAInputStream stream)
 {
-    _IO_FILE * file;
+    struct _IO_FILE * file;
     int res;
 
-    file=(_IO_FILE*)readPointer(&stream);
+    file=(struct _IO_FILE*)readPointer(&stream);
 
     START_TARGET_OPERATION(thread);
     res =  _IO_getc(file);
@@ -86,12 +92,12 @@ static TACommandVerdict _IO_getc_cmd(TAThread thread,TAInputStream stream)
 
 static TACommandVerdict _IO_putc_cmd(TAThread thread,TAInputStream stream)
 {
-    _IO_FILE * file;
+    struct _IO_FILE * file;
     int res;
     int __c;
 
     __c=readInt(&stream);
-    file=(_IO_FILE*)readPointer(&stream);
+    file=(struct _IO_FILE*)readPointer(&stream);
 
     START_TARGET_OPERATION(thread);
     res =  _IO_putc(__c, file);
@@ -311,10 +317,10 @@ static TACommandVerdict fgetpos64_cmd(TAThread thread,TAInputStream stream)
 {
     int    res;
     FILE*  file ;
-    fpos_t * pos;
+    fpos64_t * pos;
 
     file=(FILE*)readPointer(&stream);
-    pos=(fpos_t*)readPointer(&stream);
+    pos=(fpos64_t*)readPointer(&stream);
     errno = 0;
 
     START_TARGET_OPERATION(thread);
@@ -644,10 +650,10 @@ static TACommandVerdict fsetpos64_cmd(TAThread thread,TAInputStream stream)
 {
     int    res;
     FILE*  file ;
-    fpos_t *pos;
+    fpos64_t *pos;
 
     file=(FILE*)readPointer(&stream);
-    pos=(fpos_t *)readPointer(&stream);
+    pos=(fpos64_t *)readPointer(&stream);
     errno = 0;
 
     START_TARGET_OPERATION(thread);
