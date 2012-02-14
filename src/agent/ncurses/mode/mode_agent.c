@@ -10,6 +10,7 @@
  */
 
 #include "ncurses/mode/mode_agent.h"
+#include <curses.h>
 
 
 /********************************************************************/
@@ -81,7 +82,7 @@ static TACommandVerdict reset_shell_mode_cmd(TAThread thread, TAInputStream stre
     START_TARGET_OPERATION(thread);
     
     // Execute
-    res = reset_shell_mode(res);
+    res = reset_shell_mode();
     
     END_TARGET_OPERATION(thread);
     
@@ -100,7 +101,7 @@ static TACommandVerdict resetty_cmd(TAThread thread, TAInputStream stream)
     START_TARGET_OPERATION(thread);
     
     // Execute
-    res = resetty(res);
+    res = resetty();
     
     END_TARGET_OPERATION(thread);
     
@@ -119,7 +120,7 @@ static TACommandVerdict savetty_cmd(TAThread thread, TAInputStream stream)
     START_TARGET_OPERATION(thread);
     
     // Execute
-    res = savetty(res);
+    res = savetty();
     
     END_TARGET_OPERATION(thread);
     

@@ -10,6 +10,7 @@
  */
 
 #include "ncurses/screen/screen_agent.h"
+#include <curses.h>
 
 
 /********************************************************************/

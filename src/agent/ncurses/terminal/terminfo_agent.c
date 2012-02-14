@@ -14,6 +14,7 @@
 #include "../olverterm/addon.h"
 #include <term.h>
 #include <stdlib.h>
+#include <string.h>
 	
 #define NCURSES_STACK_BUFFSIZE 1024*256
 #define NCURSES_TERMDUMP ta_get_test_file_path("agent.termdump")
