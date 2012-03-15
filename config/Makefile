@@ -1,6 +1,6 @@
 SHELL=/bin/bash
-CXX?=g++
-LL?=g++
+CXX=g++
+LL=g++
 
 PCCTS_DIR=./external/PCCTS
 ANTLR = $(PCCTS_DIR)/bin/antlr

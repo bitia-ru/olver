@@ -24,10 +24,12 @@ OLVER Test Suite checks the operating system interfaces for conformance to the L
 %setup -q
 
 %build
+# FIXME (sb) - if we were to use lsbcc/lsbc++ everywhere
+# we'd need this to pick up the internal .so files in config
+#export LSB_SHAREDLIBPATH=`pwd`/config/bin
 export CC=/opt/lsb/bin/lsbcc
-# (sb) FIXME these fall down in config
-#export CXX=/opt/lsb/bin/lsbc++
-#export LL=/opt/lsb/bin/lsbc++
+export CXX=/opt/lsb/bin/lsbc++
+export LL=/opt/lsb/bin/lsbc++
 export LSBCC_BESTEFFORT=1
 ./build_conf_tests.sh -p
 
