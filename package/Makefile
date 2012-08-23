@@ -1,6 +1,6 @@
 PACKAGE=lsb-test-olver-core
 VERSION=4.1.3
-RELEASE=7
+RELEASE=8
 
 # for pkgchk
 DEPS=
