@@ -69,8 +69,8 @@ static TACommandVerdict clock_getres_cmd(TAThread thread,TAInputStream stream)
     // Response
     writeInt( thread, result );
     if ( resIsNull == 0 ) {
-        writeInt( thread, res.tv_sec  );
-        writeInt( thread, res.tv_nsec );
+        writeLong( thread, res.tv_sec  );
+        writeLong( thread, res.tv_nsec );
     }
     writeInt( thread, errno );
     sendResponse( thread );
@@ -95,8 +95,8 @@ static TACommandVerdict clock_gettime_cmd(TAThread thread,TAInputStream stream)
 
     // Response
     writeInt( thread, res );
-    writeInt( thread, tp.tv_sec  );
-    writeInt( thread, tp.tv_nsec );
+    writeLong( thread, tp.tv_sec  );
+    writeLong( thread, tp.tv_nsec );
     writeInt( thread, errno );
     sendResponse( thread );
 
@@ -115,11 +115,11 @@ static TACommandVerdict clock_nanosleep_cmd(TAThread thread,TAInputStream stream
     // Prepare
     clock_id     = readInt( & stream );
     flags        = readInt( & stream );
-    rqtp.tv_sec  = readInt( & stream );
-    rqtp.tv_nsec = readInt( & stream );
+    rqtp.tv_sec  = readLong( & stream );
+    rqtp.tv_nsec = readLong( & stream );
     if ( ( rmtpIsNull = readInt( & stream ) ) == 0 ) {
-        rmtp.tv_sec  = readInt( & stream );
-        rmtp.tv_nsec = readInt( & stream );
+        rmtp.tv_sec  = readLong( & stream );
+        rmtp.tv_nsec = readLong( & stream );
     }
 
     BEFORE_BLOCKED_TARGET_OPERATION(thread);
@@ -138,8 +138,8 @@ static TACommandVerdict clock_nanosleep_cmd(TAThread thread,TAInputStream stream
     writeInt( thread, res );
     writeInt( thread, rmtpIsNull );
     if ( rmtpIsNull == 0 ) {
-        writeInt( thread, rmtp.tv_sec  );
-        writeInt( thread, rmtp.tv_nsec );
+        writeLong( thread, rmtp.tv_sec  );
+        writeLong( thread, rmtp.tv_nsec );
     }
     sendResponse( thread );
 
@@ -154,8 +154,8 @@ static TACommandVerdict clock_settime_cmd(TAThread thread,TAInputStream stream)
 
     // Prepare
     clock_id   = readInt( & stream );
-    tp.tv_sec  = readInt( & stream );
-    tp.tv_nsec = readInt( & stream );
+    tp.tv_sec  = readLong( & stream );
+    tp.tv_nsec = readLong( & stream );
     errno = 0;
 
     // Execute
