@@ -112,7 +112,6 @@ static TACommandVerdict closedir_cmd(TAThread thread,TAInputStream stream)
     writeInt(thread, errno);
     sendResponse(thread);
 
-
     return taDefaultVerdict;
 }
 
@@ -162,7 +161,6 @@ static TACommandVerdict opendir_cmd(TAThread thread, TAInputStream stream)
     writePointer(thread, dirp);
     writeInt(thread, errno);
     sendResponse(thread);
-
 
     return taDefaultVerdict;
 }
@@ -361,6 +359,27 @@ static TACommandVerdict telldir_cmd(TAThread thread,TAInputStream stream)
     return taDefaultVerdict;
 }
 
+static TACommandVerdict dirfd_cmd(TAThread thread,TAInputStream stream)
+{
+    // Prepare
+    DIR *dirp = readPointer(&stream);
+    int res;
+
+    START_TARGET_OPERATION(thread);
+   
+    // Execute
+    errno = 0;
+    res = dirfd(dirp);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread, res);
+    writeInt(thread, errno);
+    sendResponse(thread);
+
+    return taDefaultVerdict;
+}
 
 
 /********************************************************************/
@@ -379,5 +398,6 @@ void register_fs_dir_commands(void)
     ta_register_command("seekdir",seekdir_cmd);
     ta_register_command("telldir",telldir_cmd);
     ta_register_command("remove_dir_recursive", remove_dir_recursive_cmd);
+    ta_register_command("dirfd",dirfd_cmd);
 }
 
