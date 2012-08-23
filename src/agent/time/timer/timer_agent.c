@@ -20,8 +20,8 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/time.h>
-#include <errno.h>
 #include <string.h>
+#include <errno.h>
 #include "time/timer/timer_agent.h"
 #include "process/process/process_common.h"
 
@@ -263,7 +263,7 @@ static TACommandVerdict timer_create_cmd(TAThread thread,TAInputStream stream)
     
     // Response
     writeInt( thread, res     );
-    writeInt( thread, timerid );
+    writePointer( thread, timerid );
     writeInt( thread, errno   );
     sendResponse( thread );
 
@@ -276,7 +276,7 @@ static TACommandVerdict timer_delete_cmd(TAThread thread,TAInputStream stream)
     int     res    ;
 
     // Prepare
-    timerid = readInt( & stream );
+    timerid = readPointer( & stream );
     errno = 0;
 
     // Execute
@@ -300,7 +300,7 @@ static TACommandVerdict timer_getoverrun_cmd(TAThread thread,TAInputStream strea
     int     res    ;
 
     // Prepare
-    timerid = readInt( & stream );
+    timerid = readPointer( & stream );
     errno = 0;
 
     ta_debug_printf("timer_getoverrun: %d, %d\n", timerid, (int)sizeof(timerid));
@@ -325,7 +325,7 @@ static TACommandVerdict timer_gettime_cmd(TAThread thread,TAInputStream stream)
     struct  itimerspec value;
 
     // Prepare
-    timerid = readInt( & stream );
+    timerid = readPointer( & stream );
     errno = 0;
 
     // Execute
@@ -353,7 +353,7 @@ static TACommandVerdict timer_settime_cmd(TAThread thread,TAInputStream stream)
     int                res         ;
 
     // Prepare
-    timerid = readInt( & stream );
+    timerid = readPointer( & stream );
     flags = readInt( & stream );
     readITimerSpec( & stream, & value );
     ovalueIsNull = readInt( & stream );
