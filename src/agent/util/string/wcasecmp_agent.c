@@ -33,8 +33,8 @@ static TACommandVerdict wcscasecmp_cmd(TAThread thread,TAInputStream stream)
     
     // Prepare
     
-    s1 = readWString(&stream);
-    s2 = readWString(&stream);
+    s1 = ta_wcsalign(readWString(&stream)); //align on copy
+    s2 = ta_wcsalign(readWString(&stream)); //align on copy
     
     START_TARGET_OPERATION(thread);
     res =  wcscasecmp(s1, s2);
@@ -46,6 +46,8 @@ static TACommandVerdict wcscasecmp_cmd(TAThread thread,TAInputStream stream)
     writeInt(thread,res);
     sendResponse(thread);
     
+    ta_dealloc_memory(s1);
+    ta_dealloc_memory(s2);
     
     return taDefaultVerdict;
 }
@@ -58,9 +60,9 @@ static TACommandVerdict wcsncasecmp_cmd(TAThread thread,TAInputStream stream)
     size_t n;
     
     // Prepare
-    
-    s1 = readWString(&stream);
-    s2 = readWString(&stream);
+
+    s1 = ta_wcsalign(readWString(&stream)); //align on copy
+    s2 = ta_wcsalign(readWString(&stream)); //align on copy    
     n = readSize(&stream);
     
     START_TARGET_OPERATION(thread);
@@ -72,6 +74,9 @@ static TACommandVerdict wcsncasecmp_cmd(TAThread thread,TAInputStream stream)
     writeInt(thread,res);
     sendResponse(thread);
     
+    ta_dealloc_memory(s1);
+    ta_dealloc_memory(s2);
+
     return taDefaultVerdict;
 }
 

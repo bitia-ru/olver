@@ -272,3 +272,10 @@ void clear_timemark(struct timespec* timemark);
 /**                        Test Agent Sandbox                      **/
 /********************************************************************/
 const char* ta_get_test_file_path(const char* path);
+
+/********************************************************************/
+/**                        Test Agent Helper                       **/
+/********************************************************************/
+size_t ta_wcslen(const wchar_t *ws);
+wchar_t *ta_wcsalign(const wchar_t *ws);
+

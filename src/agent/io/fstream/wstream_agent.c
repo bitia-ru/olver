@@ -99,7 +99,7 @@ static TACommandVerdict fputws_cmd(TAThread thread,TAInputStream stream)
     wchar_t * ws;
     FILE*  file ;
 
-    ws = readWString( & stream );
+    ws = ta_wcsalign(readWString( & stream )); //align on copy
     file=(FILE*)readPointer(&stream);
 
     START_TARGET_OPERATION(thread);
@@ -109,6 +109,8 @@ static TACommandVerdict fputws_cmd(TAThread thread,TAInputStream stream)
     writeInt(thread, res);
     writeInt(thread, errno);
     sendResponse(thread);
+    
+    ta_dealloc_memory(ws);
 
     return taDefaultVerdict;
 }
@@ -160,7 +162,7 @@ static TACommandVerdict getwchar_cmd(TAThread thread,TAInputStream stream)
     int    savedErrno;
     FILE * stdinAsFile;
 
-    input           = readWString( & stream );
+    input           = ta_wcsalign(readWString( & stream )); //align on copy
     stdinAsFileName = readString ( & stream );
     stdinAsFile = fopen( stdinAsFileName, "w" );
     fputws( input, stdinAsFile );
@@ -175,6 +177,8 @@ static TACommandVerdict getwchar_cmd(TAThread thread,TAInputStream stream)
     writeUInt( thread, res        );
     writeInt ( thread, savedErrno );
     sendResponse( thread );
+    
+    ta_dealloc_memory(input);
 
     return taDefaultVerdict;
 }

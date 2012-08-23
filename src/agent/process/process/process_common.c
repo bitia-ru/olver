@@ -310,9 +310,7 @@ static int useInputOrWInputTypedValues( TAThread thread, long functionAsLong, Ty
         argumentsPlus.elements[ 0 ].type         = CStringCode;
         argumentsPlus.elements[ 0 ].data.CString = inputCopy  ;
     } else if ( functionAsLong == (long)wscanf || functionAsLong == (long)vwscanfDotsShell ) {
-        wInputCopy = (wchar_t *)ta_alloc_memory( ( wcslen( wInput ) + 1 ) * sizeof( wchar_t ) );
-        // wcscpy( wInputCopy, wInput ); !!! it seems to be an error in wcscpy!!!
-        for ( i = 0; i < wcslen( wInput ) + 1; i++ ) { wInputCopy[ i ] = wInput[ i ]; }
+        wInputCopy = ta_wcsalign(wInput);
         newFunctionAsLong = (long)swscanf;
         argumentsPlus.elements[ 0 ].type         = WStringCode;
         argumentsPlus.elements[ 0 ].data.WString = wInputCopy ;
@@ -395,7 +393,7 @@ static int functionWithDotsTypedValuesCall( TAThread thread, long functionAsLong
                                             char ** outputPtr, wchar_t ** wOutputPtr, char ** errputPtr
                                           ) {
     int result;
-    if ( strlen( input ) != 0 || wcslen( wInput ) != 0 ) {
+    if ( strlen( input ) != 0 || ta_wcslen( wInput ) != 0 ) {
         result = useInputOrWInputTypedValues( thread, functionAsLong, arguments, input, wInput, savedErrnoPtr );
     } else {
         // Когда Хорошилов сделает подмену ввода с терминала, останется только этот блок.
@@ -426,9 +424,7 @@ static int useInputOrWInputLongValues( TAThread thread, const long * arguments, 
         argumentsPlus[ 0 ] = (long)sscanf;
         argumentsPlus[ 1 ] = (long)inputCopy;
     } else if ( arguments[ 0 ] == (long)wscanf || arguments[ 0 ] == (long)vwscanfDotsShell ) {
-        wInputCopy = (wchar_t *)ta_alloc_memory( ( wcslen( wInput ) + 1 ) * sizeof( wchar_t ) );
-        // wcscpy( wInputCopy, wInput ); !!! it seems to be an error in wcscpy!!!
-        for ( i = 0; i < wcslen( wInput ) + 1; i++ ) { wInputCopy[ i ] = wInput[ i ]; }
+        wInputCopy = ta_wcsalign(wInput);
         argumentsPlus[ 0 ] = (long)swscanf;
         argumentsPlus[ 1 ] = (long)wInputCopy;
     } else {
@@ -495,7 +491,7 @@ static int functionWithDotsLongValuesCall( TAThread thread, long * arguments, in
     //ta_debug_printf( "functionWithDotsCall : enter\n" );
     //ta_debug_printf( "functionWithDotsCall : input  is [%s]\n" , input  == NULL ? "NULL"  : input  );
     //ta_debug_printf( "functionWithDotsCall : wInput is [%ls]\n", wInput == NULL ? L"NULL" : wInput );
-    if ( strlen( input ) != 0 || wcslen( wInput ) != 0 ) {
+    if ( strlen( input ) != 0 || ta_wcslen( wInput ) != 0 ) {
         result = useInputOrWInputLongValues( thread, arguments, argumentsSize, input, wInput, savedErrnoPtr );
     } else {
         if ( 0 ) {
@@ -571,10 +567,18 @@ TACommandVerdict functionWithDotsCall_cmd( TAThread thread, TAInputStream stream
     functionAsLong = getFunctionAsLongByName( funcName );
     ta_debug_printf( "search for %s (%u)...\n", funcName, (unsigned long)pthread_self() );
     if ( useTypedCall ) {
+        // align WString aruments
+        for ( int i = 0; i < typedArguments.size; ++i )
+            if (typedArguments.elements[i].type == WStringCode)
+                typedArguments.elements[i].data.WString = ta_wcsalign(typedArguments.elements[i].data.WString);
+        
         result = functionWithDotsTypedValuesCall( thread, functionAsLong, & typedArguments,
                                                   input, wInput, & savedErrno, & output, & wOutput, & errput
                                                 );
         writeTypedList( thread, & typedArguments );
+        for ( int i = 0; i < typedArguments.size; ++i )
+            if (typedArguments.elements[i].type == WStringCode)
+                ta_dealloc_memory(typedArguments.elements[i].data.WString);
     } else {
         longArguments[ 0 ] = functionAsLong;
         result = functionWithDotsLongValuesCall

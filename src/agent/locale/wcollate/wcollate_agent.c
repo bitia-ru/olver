@@ -34,8 +34,8 @@ static TACommandVerdict wcscoll_cmd(TAThread thread, TAInputStream stream)
     int save_errno;
 
     // Prepare
-    ws1 = readWString(&stream);
-    ws2 = readWString(&stream);
+    ws1 = ta_wcsalign(readWString(&stream)); //align on copy
+    ws2 = ta_wcsalign(readWString(&stream)); //align on copy
 
     START_TARGET_OPERATION(thread);
 
@@ -51,6 +51,9 @@ static TACommandVerdict wcscoll_cmd(TAThread thread, TAInputStream stream)
     writeInt(thread, save_errno);
 
     sendResponse(thread);
+    
+    ta_dealloc_memory(ws1);
+    ta_dealloc_memory(ws2);
 
     return taDefaultVerdict;
 }
@@ -69,7 +72,7 @@ static TACommandVerdict wcsxfrm_cmd(TAThread thread, TAInputStream stream)
     int i;
 
     // Prepare
-    ws2 = readWString(&stream);
+    ws2 = ta_wcsalign(readWString(&stream)); //align on copy
     n = readSize(&stream);
     ws1 = ta_alloc_memory((n + BUFFER_TAIL) * sizeof(wchar_t));
     for (i=0; i<BUFFER_TAIL; ++i)
@@ -104,6 +107,7 @@ static TACommandVerdict wcsxfrm_cmd(TAThread thread, TAInputStream stream)
     sendResponse(thread);
 
     ta_dealloc_memory(ws1);
+    ta_dealloc_memory(ws2);
 
     return taDefaultVerdict;
 }

@@ -75,6 +75,7 @@ void verifyType_TAInputStream(TAInputStream* stream,const char* type)
 int len = strlen(type);
 
   verifyLength_TAInputStream( stream, len + 1 );
+  assertion(pointer_TAInputStream(stream)[0],"verifyType_TAInputStream failed: unexpected NULL in stream");
   assertion(memcmp(pointer_TAInputStream(stream),type,len) == 0,"verifyType_TAInputStream failed: %s expected, %s found", type, pointer_TAInputStream(stream) );
   shift_TAInputStream(stream,len);
   assertion(pointer_TAInputStream(stream)[0] == ':',"verifyType_TAInputStream failed: ':' expected");
@@ -225,6 +226,7 @@ size_t i;
    }
 }
 
+//!returns unaligned string!
 wchar_t * readWString(TAInputStream* stream)
 {
     wchar_t* res;
@@ -247,10 +249,11 @@ wchar_t * readWString(TAInputStream* stream)
         if ( stream->size % 10 != 0 ) { verbose( "\n" ); }
     }
     verifyType_TAInputStream(stream, "wstr");
-    align_TAInputStream( stream );
+    //alignment checking is delegated to the target interface wrapper
+    //align_TAInputStream( stream );
     res = (wchar_t*)pointer_TAInputStream(stream);
     //ta_debug_printf( "readWString : res is [%p]\n", res );
-    shift_TAInputStream(stream, (wcslen(res) + 1) * sizeof(wchar_t));
+    shift_TAInputStream(stream, (ta_wcslen(res) + 1) * sizeof(wchar_t));
     return res;
 }
 

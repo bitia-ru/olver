@@ -1405,3 +1405,34 @@ const char* ta_get_test_file_path(const char* path)
     
     return full_path;
 }
+
+/********************************************************************/
+/**                        Test Agent Helper                       **/
+/********************************************************************/
+
+// Works properly on unaligned data
+size_t ta_wcslen(const wchar_t *ws)
+{
+    const wchar_t *save;
+
+    if (ws == 0)
+        return 0;
+    for (save = ws; *save; ++save);
+    return save-ws;
+}
+
+// Works properly on unaligned data
+// align on copy
+wchar_t *ta_wcsalign(const wchar_t *ws)
+{
+    wchar_t *res;
+    size_t size;
+
+    if (ws == 0)
+         return 0;
+    size = (ta_wcslen(ws)+1) * sizeof(wchar_t);
+    res = (wchar_t *)ta_alloc_memory(size);
+    memcpy(res, (const char *)ws, size);
+    return res;
+}
+
