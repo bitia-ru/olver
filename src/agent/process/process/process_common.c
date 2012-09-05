@@ -754,15 +754,15 @@ int readTimeVal( TAInputStream * stream, struct timeval * value )
     }
 
     verifyType_TAInputStream( stream, "timeval" );
-    value->tv_sec  = readInt( stream );
-    value->tv_usec = readInt( stream );
+    value->tv_sec  = readLong( stream );
+    value->tv_usec = readLong( stream );
 
     return 1;
 }
 
 void writeTimeVal( TAThread thread, const struct timeval * value ) {
-    writeInt( thread, value->tv_sec  );
-    writeInt( thread, value->tv_usec );
+    writeLong( thread, value->tv_sec  );
+    writeLong( thread, value->tv_usec );
 }
 
 /* $(itimerval) */
@@ -780,17 +780,17 @@ void writeITimerVal( TAThread thread, const struct itimerval * value ) {
 /* $(itimerspec) */
 void readITimerSpec( TAInputStream * stream, struct itimerspec * value ) {
     verifyType_TAInputStream( stream, "itimerspec" );
-    value->it_value   .tv_sec  = readInt( stream );
-    value->it_value   .tv_nsec = readInt( stream );
-    value->it_interval.tv_sec  = readInt( stream );
-    value->it_interval.tv_nsec = readInt( stream );
+    value->it_value   .tv_sec  = readLong( stream );
+    value->it_value   .tv_nsec = readLong( stream );
+    value->it_interval.tv_sec  = readLong( stream );
+    value->it_interval.tv_nsec = readLong( stream );
 }
 
 void writeITimerSpec( TAThread thread, const struct itimerspec * value ) {
-    writeInt( thread, value->it_value   .tv_sec  );
-    writeInt( thread, value->it_value   .tv_nsec );
-    writeInt( thread, value->it_interval.tv_sec  );
-    writeInt( thread, value->it_interval.tv_nsec );
+    writeLong( thread, value->it_value   .tv_sec  );
+    writeLong( thread, value->it_value   .tv_nsec );
+    writeLong( thread, value->it_interval.tv_sec  );
+    writeLong( thread, value->it_interval.tv_nsec );
 }
 
 /* $(errorcode) - write only */

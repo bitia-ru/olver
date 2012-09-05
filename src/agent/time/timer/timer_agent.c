@@ -106,11 +106,11 @@ static TACommandVerdict nanosleep_cmd(TAThread thread,TAInputStream stream)
     int             res       ;
 
     // Prepare
-    rqtp.tv_sec  = readInt( & stream );
-    rqtp.tv_nsec = readInt( & stream );
+    rqtp.tv_sec  = readLong( & stream );
+    rqtp.tv_nsec = readLong( & stream );
     if ( ( rmtpIsNull = readInt( & stream ) ) == 0 ) {
-        rmtp.tv_sec  = readInt( & stream );
-        rmtp.tv_nsec = readInt( & stream );
+        rmtp.tv_sec  = readLong( & stream );
+        rmtp.tv_nsec = readLong( & stream );
     }
     errno = 0;
 
@@ -130,8 +130,8 @@ static TACommandVerdict nanosleep_cmd(TAThread thread,TAInputStream stream)
     writeInt   ( thread, res         );
     writeInt   ( thread, rmtpIsNull  );
     if ( rmtpIsNull == 0 ) {
-        writeInt( thread, rmtp.tv_sec  );
-        writeInt( thread, rmtp.tv_nsec );
+        writeLong( thread, rmtp.tv_sec  );
+        writeLong( thread, rmtp.tv_nsec );
     }
     writeInt   ( thread, errno       );
     sendResponse( thread );
