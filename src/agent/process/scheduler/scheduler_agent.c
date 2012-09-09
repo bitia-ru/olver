@@ -83,7 +83,8 @@ static TACommandVerdict sched_get_priority_max_cmd(TAThread thread,TAInputStream
 
     // Prepare
     policy = readInt(&stream);
-     
+    errno = 0;
+
     START_TARGET_OPERATION(thread);
     res = sched_get_priority_max(policy);
     END_TARGET_OPERATION(thread);
@@ -103,7 +104,8 @@ static TACommandVerdict sched_get_priority_min_cmd(TAThread thread,TAInputStream
         
     // Prepare
     policy = readInt(&stream);
-    
+    errno = 0;    
+
     START_TARGET_OPERATION(thread);
     res = sched_get_priority_min(policy);
     END_TARGET_OPERATION(thread);
@@ -124,7 +126,8 @@ static TACommandVerdict sched_getparam_cmd(TAThread thread,TAInputStream stream)
     
     // Prepare
     pid = readInt(&stream);
-    
+    errno = 0;
+
     START_TARGET_OPERATION(thread);
     res = sched_getparam(pid, &param); 
     END_TARGET_OPERATION(thread);
@@ -146,6 +149,7 @@ static TACommandVerdict sched_getscheduler_cmd(TAThread thread,TAInputStream str
     
     // Prepare
     pid = readInt(&stream);
+    errno = 0;
     
     START_TARGET_OPERATION(thread);
     res = sched_getscheduler(pid); 
@@ -168,6 +172,7 @@ static TACommandVerdict sched_rr_get_interval_cmd(TAThread thread,TAInputStream 
     
     // Prepare
     pid = readInt(&stream);
+    errno = 0;
     
     START_TARGET_OPERATION(thread);
     res = sched_rr_get_interval(pid, &interval); 
@@ -194,6 +199,7 @@ static TACommandVerdict sched_setparam_cmd(TAThread thread,TAInputStream stream)
     // Prepare
     pid = readInt(&stream);
     readSchedParam(&stream, &param);
+    errno = 0;
     
     START_TARGET_OPERATION(thread);
     res =  sched_setparam(pid, &param); 
@@ -219,7 +225,8 @@ static TACommandVerdict sched_setscheduler_cmd(TAThread thread,TAInputStream str
     pid = readInt(&stream);
     policy = readInt(&stream);
     readSchedParam(&stream, &param);
-    
+    errno = 0;    
+
     START_TARGET_OPERATION(thread);
     res = sched_setscheduler(pid, policy, &param); 
     END_TARGET_OPERATION(thread);
@@ -236,6 +243,7 @@ static TACommandVerdict sched_setscheduler_cmd(TAThread thread,TAInputStream str
 static TACommandVerdict sched_yield_cmd(TAThread thread,TAInputStream stream)
 {
     int res;
+    errno = 0;
     
     START_TARGET_OPERATION(thread);
     

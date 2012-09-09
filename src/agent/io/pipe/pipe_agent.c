@@ -36,6 +36,7 @@ static TACommandVerdict pipe_cmd(TAThread thread,TAInputStream stream)
 {
     int fildes[2];
     int res;
+    errno = 0;
 
     START_TARGET_OPERATION(thread);
 

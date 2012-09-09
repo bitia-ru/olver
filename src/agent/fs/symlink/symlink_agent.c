@@ -41,6 +41,7 @@ static TACommandVerdict readlink_cmd(TAThread thread,TAInputStream stream)
 
   assertion( buf != NULL || oldBuf!=NULL, "readlink_cmd: not enough memory" );
   memcpy(oldBuf, buf, bufsize);
+  errno = 0;
 
   START_TARGET_OPERATION(thread);
   res=readlink(path, buf, bufsize);
@@ -63,7 +64,7 @@ static TACommandVerdict symlink_cmd(TAThread thread,TAInputStream stream)
 
   path1=readString(&stream);
   path2=readString(&stream);
-
+  errno = 0;
 
   START_TARGET_OPERATION_WHICH_MAY_CONTAIN_CANCELPOINT(thread);
   res=symlink(path1, path2);

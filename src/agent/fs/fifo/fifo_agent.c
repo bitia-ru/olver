@@ -43,7 +43,7 @@ static TACommandVerdict mkfifo_cmd(TAThread thread,TAInputStream stream)
     // Prepare
     path = readString(&stream);
     mode = readFilePermissions(&stream);
-
+    errno = 0;
 
     START_TARGET_OPERATION(thread);
 
@@ -77,6 +77,7 @@ static TACommandVerdict write_fifo_cmd(TAThread thread,TAInputStream stream)
 
     writeString(thread,"Ok");
     sendResponse(thread);
+    errno = 0;
 
 
     START_TARGET_OPERATION(thread);
@@ -113,6 +114,7 @@ static TACommandVerdict read_fifo_cmd(TAThread thread,TAInputStream stream)
 
     writeString(thread,"Ok");
     sendResponse(thread);
+    errno = 0;
 
 
     START_TARGET_OPERATION(thread);
@@ -160,6 +162,7 @@ static TACommandVerdict writev_fifo_cmd(TAThread thread,TAInputStream stream)
 
     writeString(thread,"Ok");
     sendResponse(thread);
+    errno = 0;
 
 
     START_TARGET_OPERATION(thread);
@@ -209,6 +212,7 @@ static TACommandVerdict readv_fifo_cmd(TAThread thread,TAInputStream stream)
 
     writeString(thread,"Ok");
     sendResponse(thread);
+    errno = 0;
 
 
     START_TARGET_OPERATION(thread);
@@ -254,6 +258,7 @@ static TACommandVerdict open_fifo_cmd(TAThread thread,TAInputStream stream)
 
     writeString(thread,"Ok");
     sendResponse(thread);
+    errno = 0;
 
 
     START_TARGET_OPERATION(thread);
@@ -307,6 +312,7 @@ static TACommandVerdict open64_fifo_cmd(TAThread thread,TAInputStream stream)
 
     writeString(thread,"Ok");
     sendResponse(thread);
+    errno = 0;
 
     START_TARGET_OPERATION(thread);
 

@@ -593,18 +593,24 @@ void ta_close_socket(int sockid)
 
 void ta_gethostaddress(struct sockaddr_in* addr,const char* host,int port)
 {
-    struct hostent* hp;
+    int s;
+    struct addrinfo hints;
+    struct addrinfo *result;
 
-    // Family
-    addr->sin_family = AF_INET;
-    // Host
-    hp = gethostbyname(host);
-    if (hp == NULL)
-    {
-        assertion(0,"Can not find host by name [%s]",host);
+    // Family and Host
+    memset(&hints, 0, sizeof(struct addrinfo));
+    hints.ai_family = AF_INET;      /* Allow IPv4 */
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = 0;
+    hints.ai_protocol = IPPROTO_TCP;
+
+    if ( (s = getaddrinfo(host, NULL /* specify a port as a char* */, &hints, &result)) != 0 ){
+        assertion(0,"Can not find host by name [%s], %s",host,gai_strerror(s));
         return;
     }
-    memcpy((char*)&addr->sin_addr,(char*)hp->h_addr,hp->h_length);
+    memcpy((char*)addr,(char*)result->ai_addr,result->ai_addrlen);
+    freeaddrinfo(result);
+    
     // Port
     addr->sin_port = htons(port);
 }
@@ -717,11 +723,11 @@ void send_message_tcp_communicator(TAThread thread,const char* buffer,int length
 
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,&cancelstate);
 
-//    for (i=0;i<length;i++)
-//    {
-//        ta_debug_printf("%c", buffer[i]);
- //   }
- //   ta_debug_printf("\n");
+    //for (i=0;i<length;i++)
+    //{
+    //    ta_debug_printf("%c", buffer[i]);
+    //}
+    //ta_debug_printf("\n");
 
     if (send(COMMUNICATOR_DATA(thread).sockid,(char*)buffer,length,0) != length)
         assertion(0,"Send of message failed");

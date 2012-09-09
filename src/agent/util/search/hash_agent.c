@@ -137,6 +137,7 @@ static TACommandVerdict hcreate_cmd(TAThread thread,TAInputStream stream)
 
     // Prepare
     n = readSize(&stream);
+    errno = 0;
 
     // Execute
     START_TARGET_OPERATION(thread);
@@ -193,6 +194,7 @@ static TACommandVerdict hsearch_cmd(TAThread thread,TAInputStream stream)
 
     inEntry.key =  inKey;
     inEntry.data = inData;
+    errno = 0;
 
     START_TARGET_OPERATION(thread);
 

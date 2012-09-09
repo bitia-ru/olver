@@ -35,7 +35,8 @@ static TACommandVerdict ftok_cmd(TAThread thread,TAInputStream stream)
 
     // Prepare
     path = readString(&stream);
-    id= readInt(&stream);
+    id = readInt(&stream);
+    errno = 0;
     
     START_TARGET_OPERATION(thread);
     res = ftok(path, id); 
