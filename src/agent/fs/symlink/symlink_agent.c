@@ -20,6 +20,7 @@
 #include "fs/symlink/symlink_agent.h"
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
 
 
 /********************************************************************/

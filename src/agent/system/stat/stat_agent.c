@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <time.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <math.h>
 #include <sys/times.h>
 

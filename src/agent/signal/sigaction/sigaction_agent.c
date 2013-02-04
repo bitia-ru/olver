@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <signal.h>
+#include <unistd.h>
 
 /********************************************************************/
 /**                         Data Types Readers And Writers         **/

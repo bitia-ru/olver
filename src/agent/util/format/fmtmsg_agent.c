@@ -22,6 +22,7 @@
 #define MM_CONSOLE 0x200
 #include <fmtmsg.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 /********************************************************************/
 /**                         Agent Commands                         **/
