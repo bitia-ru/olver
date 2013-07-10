@@ -1,5 +1,5 @@
 PACKAGE=lsb-test-olver-core
-VERSION=4.1.80
+VERSION=4.1.81
 RELEASE=1
 
 # for pkgchk
@@ -16,11 +16,10 @@ SRC_DIR=$(PACKAGE)-$(VERSION)
 # Handle different version generation for snapshots than for official builds
 # OFFICIAL_RELEASE should be set to the tag to extract from BZR
 ifdef OFFICIAL_RELEASE
-	VERSION_SUFFIX=
 	# EXPORT_TAG should be set to the bzr tag to use
 	EXPORT_TAG=--revision=$(OFFICIAL_RELEASE)
 else
-	VERSION_SUFFIX=.$(ISO_DATE)
+	RELEASE=0.$(ISO_DATE)
 	EXPORT_TAG=
 endif
 
