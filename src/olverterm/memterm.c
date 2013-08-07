@@ -111,7 +111,7 @@ parse_sequence (void)
   int  read_bytes;
   int  accepted_sockfd;
   struct sockaddr_un accepted_addr;
-  socklen_t accepted_addr_len;
+  socklen_t accepted_addr_len = sizeof (struct sockaddr_un);
 
   accepted_sockfd = accept (listen_sockfd,
     (struct sockaddr *)&accepted_addr, &accepted_addr_len);
