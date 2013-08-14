@@ -295,6 +295,7 @@ static TACommandVerdict vidattr_cmd(TAThread thread,TAInputStream stream)
     START_TARGET_OPERATION(thread);
     res = vidattr(ch);
     putchar(letter);
+    fflush(stdout);
     refresh();
     END_TARGET_OPERATION(thread);
     
@@ -313,6 +314,7 @@ static TACommandVerdict vidputs_cmd(TAThread thread,TAInputStream stream)
     START_TARGET_OPERATION(thread);
     res = vidputs(ch, putchar);
     putchar(letter);
+    fflush(stdout);
     refresh();
     END_TARGET_OPERATION(thread);
     
