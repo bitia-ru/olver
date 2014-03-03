@@ -50,7 +50,6 @@ static bool attr_destroyed = false;
 /********************************************************************/
 static bool init_mutexattr_scenario(int argc,char** argv)
 {
-
     CallContext contexts[3];
 
     // Create additional threads
@@ -92,22 +91,24 @@ specification typedef
 struct MutexAttrGenState
 {
     MutexType       type;
+    MutexProtocol   protocol;
     PThreadPShared  pshared;
 
 } MutexAttrGenState;
 
 MutexAttrGenState * create_MutexAttrGenState(
     MutexType       type,
+    MutexProtocol   protocol,
     PThreadPShared  pshared
     )
 {
-    return create(&type_MutexAttrGenState, type, pshared);
+    return create(&type_MutexAttrGenState, type, protocol, pshared);
 }
 
 static
 String* to_string_MutexAttrGenState( struct MutexAttrGenState* gen_state )
 {
-    String *stype, *spshared, *res;
+    String *stype, *spshared, *sprotocol, *res;
 
     switch (gen_state->type)
     {
@@ -141,7 +142,24 @@ String* to_string_MutexAttrGenState( struct MutexAttrGenState* gen_state )
             break;
     }
 
+    switch (gen_state->protocol)
+    {
+        case SUT_PTHREAD_PRIO_NONE:
+            sprotocol = create_String("PTHREAD_PRIO_NONE");
+            break;
+        case SUT_PTHREAD_PRIO_INHERIT:
+            sprotocol = create_String("PTHREAD_PRIO_INHERIT");
+            break;
+        case SUT_PTHREAD_PRIO_PROTECT:
+            sprotocol = create_String("PTHREAD_PRIO_PROTECT");
+            break;
+        default :
+            assertion( false, "Incorrect  value of 'protocol': %d", gen_state->protocol );
+            break;
+    }
     res = concat_String(stype, create_String("; "));
+    res = concat_String(sprotocol, create_String("; "));
+    res = concat_String(spshared, create_String("; "));
     res = concat_String(res, spshared);
 
     return res;
@@ -163,8 +181,33 @@ MutexAttrGenState* get_MutexAttrGenState(void)
 
     if (mutexAttr == NULL)
         return NULL;
+    {
+        String *stype;
 
-    return create_MutexAttrGenState( mutexAttr->type, mutexAttr->pshared );
+        switch (mutexAttr->type)
+        {
+            case SUT_PTHREAD_MUTEX_NORMAL :
+                stype = create_String("PTHREAD_MUTEX_NORMAL");
+                break;
+            case SUT_PTHREAD_MUTEX_ERRORCHECK :
+                stype = create_String("PTHREAD_MUTEX_ERRORCHECK");
+                break;
+            case SUT_PTHREAD_MUTEX_RECURSIVE :
+                stype = create_String("PTHREAD_MUTEX_RECURSIVE");
+                break;
+            case SUT_PTHREAD_MUTEX_DEFAULT :
+                stype = create_String("PTHREAD_MUTEX_DEFAULT");
+                break;
+            default :
+                assertion( false, 
+                    "Incorrect value of 'type': %d", 
+                    mutexAttr->type );
+                break;
+        }
+    }
+    return create_MutexAttrGenState( mutexAttr->type,
+                                     mutexAttr->protocol,
+                                     mutexAttr->pshared );
 }
 
 
@@ -254,6 +297,71 @@ bool mutexattr_setpshared_scen()
 }
 
 scenario
+bool mutexattr_getprioceiling_scen()
+{
+    DUMP("start\n");
+    IntT prioceiling=-1;
+
+    if (pre pthread_mutexattr_getprioceiling_spec( context, pattr, &prioceiling ))
+    {
+        DUMP("start2\n");
+        pthread_mutexattr_getprioceiling_spec( context, pattr, &prioceiling );
+        DUMP("res = %d \n", prioceiling);
+    }
+
+    return true;
+}
+
+scenario
+bool mutexattr_setprioceiling_scen()
+{
+    IntT prioceiling=-1;
+    PThreadMutexAttrT* mutexAttr;
+
+    mutexAttr = getMutexAttributes(pattr);
+    if (mutexAttr != NULL )
+    {
+        pthread_mutexattr_setprioceiling_spec( context, pattr, 5 );
+
+        pthread_mutexattr_getprioceiling_spec( context, pattr, &prioceiling );
+        DUMP("res = %d \n", prioceiling);
+    }
+
+    return true;
+}
+
+scenario
+bool mutexattr_getprotocol_scen()
+{
+    IntT protocol;
+
+    if (pre pthread_mutexattr_getprotocol_spec( context, pattr, &protocol ))
+    {
+        pthread_mutexattr_getprotocol_spec( context, pattr, &protocol );
+        DUMP("get protocol=%d\n", protocol);
+    }
+
+    return true;
+}
+
+scenario
+bool mutexattr_setprotocol_scen()
+{
+    PThreadMutexAttrT* mutexAttr;
+
+    mutexAttr = getMutexAttributes(pattr);
+    if (mutexAttr != NULL)
+    {
+        iterate(IntT protocol = SUT_PTHREAD_PRIO_NONE-1; protocol <= SUT_PTHREAD_PRIO_PROTECT+1; protocol ++; )
+        {   //NOT IMPLEMENTED YET
+            if (protocol != SUT_PTHREAD_PRIO_INHERIT)
+                pthread_mutexattr_setprotocol_spec( context, pattr, protocol );
+        }
+    }
+
+    return true;
+}
+scenario
 bool mutexattr_destroy_scen()
 {
     if (pre pthread_mutexattr_destroy_spec( context, pattr ))
@@ -330,6 +438,10 @@ scenario dfsm pthread_mutex_mutexattr_scenario =
         mutexattr_settype_scen,
         mutexattr_getpshared_scen,
         mutexattr_setpshared_scen,
+        mutexattr_getprioceiling_scen,
+        mutexattr_setprioceiling_scen,
+        mutexattr_getprotocol_scen,
+        mutexattr_setprotocol_scen,
         mutexattr_destroy_scen,
         mutex_verification_use_case_scen,
         NULL

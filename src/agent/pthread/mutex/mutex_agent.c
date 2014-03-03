@@ -190,6 +190,61 @@ int res;
 }
 
 
+static TACommandVerdict pthread_mutex_getprioceiling_cmd(TAThread thread,TAInputStream stream)
+{
+pthread_mutex_t* mutex;
+int prioceiling;
+int res;
+
+    // Prepare
+    mutex = readPointer(&stream);
+
+    START_TARGET_OPERATION(thread);
+
+    // Execute
+    res = pthread_mutex_getprioceiling(mutex, &prioceiling);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread,res);
+    writeInt(thread,prioceiling);
+    sendResponse(thread);
+
+    return taDefaultVerdict;
+}
+
+static TACommandVerdict pthread_mutex_setprioceiling_cmd(TAThread thread,TAInputStream stream)
+{
+pthread_mutex_t* mutex;
+int new_prioceiling;
+int old_prioceiling;
+int res;
+
+    // Prepare
+    mutex = readPointer(&stream);
+    new_prioceiling = readInt(&stream);
+
+    BEFORE_BLOCKED_TARGET_OPERATION(thread);
+
+    writeString(thread,"Ok");
+    sendResponse(thread);
+
+    START_TARGET_OPERATION(thread);
+
+    // Execute
+    res = pthread_mutex_setprioceiling(mutex, new_prioceiling, &old_prioceiling);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeDeferredReaction(thread,"pthread_mutex_setprioceiling_return");
+    writeInt(thread,res);
+    writeInt(thread,old_prioceiling);
+    sendResponse(thread);
+
+    return taDefaultVerdict;
+}
 /********************************************************************/
 /**                      Agent Initialization                      **/
 /********************************************************************/
@@ -201,5 +256,7 @@ void register_pthread_mutex_mutex_commands(void)
     ta_register_command("pthread_mutex_lock",pthread_mutex_lock_cmd);
     ta_register_command("pthread_mutex_trylock",pthread_mutex_trylock_cmd);
     ta_register_command("pthread_mutex_unlock",pthread_mutex_unlock_cmd);
+    ta_register_command("pthread_mutex_getprioceiling",pthread_mutex_getprioceiling_cmd);
+    ta_register_command("pthread_mutex_setprioceiling",pthread_mutex_setprioceiling_cmd);
 }
 
