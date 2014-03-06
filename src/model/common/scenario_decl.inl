@@ -35,6 +35,7 @@ extern bool start_locale_ctype_simple_scenario(int argc, char** argv);
 extern bool start_process_process_daemon_scenario(int argc, char** argv);
 extern bool start_destruct_scenario(int argc, char** argv);
 extern bool start_fs_dir_scenario(int argc, char** argv);
+extern bool start_fs_scandir_scenario(int argc, char** argv);
 extern bool start_util_dl_scenario(int argc, char** argv);
 extern bool start_socket_netdb_ent_scenario(int argc, char** argv);
 extern bool start_process_environ_scenario(int argc, char** argv);

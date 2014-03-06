@@ -371,6 +371,42 @@ void traceExceptionValue(const char *name, const char *value)
   tracer_traceExceptionValue(tracer,name,value);
 }
 
+void traceFormattedExceptionValue(const char *name, const char *format,...)
+{
+  StringBuffer * buffer = create_StringBuffer();
+  int i, j, len;
+  va_list arg_list;
+  String *str, *res;
+
+  class_Tracer *tracer = tracer_getDefaultTracer();
+  va_start(arg_list, format);
+
+  len = strlen(format);
+  j = 0;
+  for(i=0; i<len; i++) {
+    if (format[i] == '$') {
+      if (i < len - 5 && memcmp(format+i,"$(obj)",6) == 0) {
+        void* obj = va_arg( arg_list, void* );
+
+        appendCharArray_StringBuffer( r(buffer), format+j, i-j );
+        appendString_StringBuffer( r(buffer), toString(obj) );
+
+        i = i + 5;
+        j = i + 1;
+      }
+    }
+  }
+  appendCharArray_StringBuffer( r(buffer), format+j, i-j );
+
+  str = toString( buffer );		// destroy buffer
+  res = vformat_String( toCharArray_String( r(str) ), arg_list );
+
+  tracer_traceExceptionValue(tracer, name, toCharArray_String( r(res) ));
+
+  destroy(str);
+  destroy(res);
+  va_end(arg_list);
+}
 void traceExceptionInfo(const char *info)
 {
   class_Tracer *tracer = tracer_getDefaultTracer();
