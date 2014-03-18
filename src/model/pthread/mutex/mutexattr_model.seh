@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2006 Institute for System Programming
+ * Copyright (c) 2005-2014 Institute for System Programming
  * Russian Academy of Sciences
  * All rights reserved. 
  *
