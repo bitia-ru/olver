@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2006 Institute for System Programming
+ * Copyright (c) 2014 Institute for System Programming
  * Russian Academy of Sciences
  * All rights reserved.
  *
@@ -18,9 +18,9 @@
 
 /*
  * Portions of this text are reprinted and reproduced in electronic form
- * from IEEE Std 1003.1, 2004 Edition, Standard for Information Technology
+ * from IEEE Std 1003.1, 2008 Edition, Standard for Information Technology
  * -- Portable Operating System Interface (POSIX), The Open Group Base
- * Specifications Issue 6, Copyright (C) 2001-2004 by the Institute of
+ * Specifications Issue 7, Copyright (C) 2001-2008 by the Institute of
  * Electrical and Electronics Engineers, Inc and The Open Group. In the
  * event of any discrepancy between this version and the original IEEE and
  * The Open Group Standard, the original IEEE and The Open Group Standard
@@ -54,12 +54,12 @@
 
 /*
 Linux Standard Base Core Specification 4.0 
-Copyright (c) 2004, 2005 Free Standards Group
+Copyright (c) 2008 Free Standards Group
     refers
 
 The Open Group Base Specifications Issue 7
-IEEE Std 1003.1, 2013 Edition
-Copyright (c) 2001-2013 The IEEE and The Open Group
+IEEE Std 1003.1, 2008 Edition
+Copyright (c) 2001-2008 The IEEE and The Open Group
 
 NAME
 
@@ -167,14 +167,14 @@ IntT alphasort_spec( CallContext context, DirEntT* d1, DirEntT* d2, ErrorCode *e
          * scandir() function to sort the directory entries, d1 and d2, into alphabetical 
          * order.
          */
-        REQ("app.alphasort.01", "", true);
+        REQ_UNCHECKABLE("app.alphasort.01", "");
 
         /*
          * Since no return value is reserved to indicate an error, an application wishing 
          * to check for error situations should set errno to 0, then call alphasort(), 
          * then check errno.
          */
-        REQ("app.alphasort.02", "", true);
+        REQ_UNCHECKABLE("app.alphasort.02", "");
 
         return true;
     }
@@ -209,7 +209,6 @@ specification
 IntT scandir_spec( CallContext context, CString *dir, List* namelist, IntT sel_type, IntT compar_type, ErrorCode *errno)
 {
     Bool3 isELOOP;
-    //CString* abspath = convertToAbsolute_Path(context, dir);
     FileSystem* file_system = getFileSystem(context);
     CString *abspath = resolvePath_Ext(context, file_system, dir, &isELOOP);
 
@@ -219,11 +218,24 @@ IntT scandir_spec( CallContext context, CString *dir, List* namelist, IntT sel_t
     }
 
     coverage COMPAR_ALPHA_C{
-        if (compar_type==0){
-            if (sel_type==0){
-                return{NoSel, "without selection"};
+        if (compar_type == SCANDIR_COMP_NORMAL)
+            switch(sel_type){
+                case SCANDIR_SELECT_EVERYTHING: 
+                    return{Normal_NoSel, "normal order, without selection"};
+                case SCANDIR_SELECT_START_NUM:
+                    return{Normal_StNum, "normal order, select starting with number"};
+                case SCANDIR_SELECT_LENGTH_MORE_3:
+                    return{Normal_Len3, "normal order, select having length>3"};
             }
-        }
+        else if (compar_type ==  SCANDIR_COMP_REVERSE)
+            switch(sel_type){
+                case SCANDIR_SELECT_EVERYTHING: 
+                    return{Reverse_NoSel, "reverse order, without selection"};
+                case SCANDIR_SELECT_START_NUM:
+                    return{Reverse_StNum, "reverse order, select starting with number"};
+                case SCANDIR_SELECT_LENGTH_MORE_3:
+                    return{Reverse_Len3, "reverse order, select having length>3"};
+            }
     }
 
     post
@@ -342,7 +354,7 @@ IntT scandir_spec( CallContext context, CString *dir, List* namelist, IntT sel_t
          * except that compar need not provide total ordering.
          */
         REQ("scandir.03", "sort of strings doesn't match compar function",      
-                    checkCompareByType(scandir_spec, namelist, compar_type));
+            checkCompareByType(scandir_spec, namelist, compar_type));
 
         /*
          * If sel is a null pointer, all entries shall be selected.
@@ -351,17 +363,21 @@ IntT scandir_spec( CallContext context, CString *dir, List* namelist, IntT sel_t
          * Entries for which the function referenced by sel returns non-zero shall be 
          * stored in strings allocated as if by a call to malloc(),
          */
-        REQ("scandir.02;scandir.05", "return strings doesn't match selector", checkSelectorByType(file_system, abspath, namelist, sel_type));
+        REQ("scandir.02;scandir.05", "return strings doesn't match selector", 
+            checkSelectorByType(file_system, abspath, namelist, sel_type));
 
         /*
          * The strings are collected in array namelist which shall be allocated as if by a 
          * call to malloc().
          */
+        REQ("scandir.01","strings shall be allocated as if by a call to malloc()", 
+            TODO_REQ());
+
         /*
          * The scandir() function shall scan the directory dir, calling the function 
          * referenced by sel on each directory entry.
          */
-        REQ("scandir.01;scandir.04", "", true);
+        REQ_UNCHECKABLE("scandir.04", "already checked in selector selection");
 
         return true;
     }
@@ -378,6 +394,7 @@ int sign(int x)
     if (x<0) return -1;
     return 0;
 }
+
 int comparFuncByType(DirEntT* dirent, DirEntT* direntNext, int compar_type)
 {
     switch (compar_type){
