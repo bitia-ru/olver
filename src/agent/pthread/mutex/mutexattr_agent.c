@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2006 Institute for System Programming
+ * Copyright (c) 2005-2014 Institute for System Programming
  * Russian Academy of Sciences
  * All rights reserved.
  *
@@ -88,6 +88,53 @@ int res;
   return res;
 }
 
+void writeMutexProtocol(TAThread thread,int protocol)
+{
+    writeType_TAStream(thread,"muprotocol");
+    switch (protocol)
+    {
+        case PTHREAD_PRIO_INHERIT:
+            writeString( thread, "PTHREAD_PRIO_INHERIT" );
+            return;
+        case PTHREAD_PRIO_NONE:
+            writeString( thread, "PTHREAD_PRIO_NONE" );
+            return;
+        case PTHREAD_PRIO_PROTECT:
+            writeString( thread, "PTHREAD_PRIO_PROTECT" );
+            return;
+    }
+    writeInt( thread, protocol );
+}
+
+int readMutexProtocol(TAInputStream* stream)
+{
+    int res;
+
+    verifyType_TAInputStream(stream,"muprotocol");
+
+    if (startsWith_TAInputStream(stream,"str")){
+
+        char* value = readString(stream);
+
+        if (strcmp(value,"PTHREAD_PRIO_INHERIT") == 0)
+            return PTHREAD_PRIO_INHERIT;
+        if (strcmp(value,"PTHREAD_PRIO_NONE") == 0)
+            return PTHREAD_PRIO_NONE;
+        if (strcmp(value,"PTHREAD_PRIO_PROTECT") == 0)
+            return PTHREAD_PRIO_PROTECT;
+        assertion( 0, "Invalid mutex type: %s", value );
+    }
+    res = readInt(stream);
+    switch (res)
+    {
+        case PTHREAD_PRIO_INHERIT:
+        case PTHREAD_PRIO_NONE:
+        case PTHREAD_PRIO_PROTECT:
+            res = PTHREAD_MUTEX_INVALID_VALUE;
+            break;
+    }
+    return res;
+}
 
 /********************************************************************/
 /**                         Agent Commands                         **/
@@ -231,6 +278,103 @@ int res;
     return taDefaultVerdict;
 }
 
+static TACommandVerdict pthread_mutexattr_getprioceiling_cmd(TAThread thread,TAInputStream stream)
+{
+pthread_mutexattr_t* attr;
+int prioceiling;
+int res;
+
+    // Prepare
+    attr = readPointer(&stream);
+
+    START_TARGET_OPERATION(thread);
+
+    // Execute
+    res = pthread_mutexattr_getprioceiling(attr, &prioceiling);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread,res);
+    writeInt(thread,prioceiling);
+    sendResponse(thread);
+
+    return taDefaultVerdict;
+}
+
+static TACommandVerdict pthread_mutexattr_setprioceiling_cmd(TAThread thread,TAInputStream stream)
+{
+pthread_mutexattr_t* attr;
+int prioceiling;
+int res;
+
+    // Prepare
+    attr = readPointer(&stream);
+    prioceiling = readInt(&stream);
+
+    START_TARGET_OPERATION(thread);
+
+    // Execute
+    res = pthread_mutexattr_setprioceiling(attr,prioceiling);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread,res);
+    sendResponse(thread);
+
+    return taDefaultVerdict;
+}
+
+
+static TACommandVerdict pthread_mutexattr_getprotocol_cmd(TAThread thread,TAInputStream stream)
+{
+pthread_mutexattr_t* attr;
+int protocol;
+int res;
+
+    // Prepare
+    attr = readPointer(&stream);
+
+    START_TARGET_OPERATION(thread);
+
+    // Execute
+    res = pthread_mutexattr_getprotocol(attr, &protocol);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread,res);
+    writeMutexProtocol(thread, protocol);
+    sendResponse(thread);
+
+    return taDefaultVerdict;
+}
+
+static TACommandVerdict pthread_mutexattr_setprotocol_cmd(TAThread thread,TAInputStream stream)
+{
+pthread_mutexattr_t* attr;
+int protocol;
+int res;
+
+    // Prepare
+    attr = readPointer(&stream);
+    protocol = readMutexProtocol(&stream);
+
+    START_TARGET_OPERATION(thread);
+
+    // Execute
+    res = pthread_mutexattr_setprotocol(attr,protocol);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread,res);
+    sendResponse(thread);
+
+    return taDefaultVerdict;
+}
+
 static TACommandVerdict pthread_mutexattr_destroy_cmd(TAThread thread,TAInputStream stream)
 {
 pthread_mutexattr_t* attr;
@@ -264,6 +408,10 @@ void register_pthread_mutex_mutexattr_commands(void)
     ta_register_command("pthread_mutexattr_settype",pthread_mutexattr_settype_cmd);
     ta_register_command("pthread_mutexattr_getpshared",pthread_mutexattr_getpshared_cmd);
     ta_register_command("pthread_mutexattr_setpshared",pthread_mutexattr_setpshared_cmd);
+    ta_register_command("pthread_mutexattr_getprioceiling",pthread_mutexattr_getprioceiling_cmd);
+    ta_register_command("pthread_mutexattr_setprioceiling",pthread_mutexattr_setprioceiling_cmd);
+    ta_register_command("pthread_mutexattr_getprotocol",pthread_mutexattr_getprotocol_cmd);
+    ta_register_command("pthread_mutexattr_setprotocol",pthread_mutexattr_setprotocol_cmd);
     ta_register_command("pthread_mutexattr_destroy",pthread_mutexattr_destroy_cmd);
 }
 

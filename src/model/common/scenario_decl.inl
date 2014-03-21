@@ -118,6 +118,8 @@ extern bool start_ncurses_mode_scenario(int argc, char** argv);
 extern bool start_util_format_money_scenario(int argc, char** argv);
 extern bool start_ncurses_move_scenario(int argc, char** argv);
 extern bool start_pthread_mutex_mutex_mixed_scenario(int argc, char** argv);
+extern bool start_pthread_mutex_mutex_tree_scenario(int argc, char** argv);
+extern bool start_pthread_mutex_mutex_protocol_scenario(int argc, char** argv);
 extern bool start_pthread_mutex_mutex_mixed_types_scenario(int argc, char** argv);
 extern bool start_pthread_mutex_mutex_simple_scenario(int argc, char** argv);
 extern bool start_pthread_mutex_mutex_static_init_scenario(int argc, char** argv);

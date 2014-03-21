@@ -54,6 +54,21 @@ static void pthread_mutex_unlock_return_processor(ThreadId threadId,TSStream* st
         );
 }
 
+static void pthread_mutex_setprioceiling_return_processor(ThreadId threadId,TSStream* stream,TSMetaData* meta)
+{
+    ErrorCode* code = create_ErrorCode(0);
+    *code = readInt_TSStream(stream);
+    IntT old_prio = readInt_TSStream(stream);
+
+    registerReactionWithTimeInterval
+        ( 
+        getThreadChannelID(threadId),
+        NULL,
+        pthread_mutex_setprioceiling_return,
+        create_MutexSetPrioceilingReturnType(threadId, code, old_prio),
+        meta->timestamp
+        );
+}
 
 /********************************************************************/
 /**                    Initialization Function                     **/
@@ -69,9 +84,13 @@ void initPThreadMutexSubsystem(void)
     set_mediator_pthread_mutex_trylock_spec(pthread_mutex_trylock_media);
     set_mediator_pthread_mutex_unlock_spec(pthread_mutex_unlock_media);
     set_mediator_pthread_mutex_unlock_return(pthread_mutex_unlock_return_media);
+    set_mediator_pthread_mutex_getprioceiling_spec(pthread_mutex_getprioceiling_media);
+    set_mediator_pthread_mutex_setprioceiling_spec(pthread_mutex_setprioceiling_media);
+    set_mediator_pthread_mutex_setprioceiling_return(pthread_mutex_setprioceiling_return_media);
     // Set up dr processors
     registerDRProcessor("pthread_mutex_lock_return",pthread_mutex_lock_return_processor);
     registerDRProcessor("pthread_mutex_unlock_return",pthread_mutex_unlock_return_processor);
+    registerDRProcessor("pthread_mutex_setprioceiling_return",pthread_mutex_setprioceiling_return_processor);
 }
 
 
@@ -253,3 +272,68 @@ MutexUnlockReturnType* pthread_mutex_unlock_return(void)
         onPThreadMutexUnlockReturn( pthread_mutex_unlock_return->context, pthread_mutex_unlock_return->returned_value );
     }
 }
+
+
+/** pthread_mutex_getprioceiling_spec **/
+mediator pthread_mutex_getprioceiling_media for specification
+ErrorCode* pthread_mutex_getprioceiling_spec( CallContext context, PThreadMutexTPtr mutex, IntT* prioceiling)
+{
+    call
+    {
+        ErrorCode* res = create_ErrorCode(0);
+        TSCommand command = create_TSCommand();
+            
+        format_TSCommand( &command, "pthread_mutex_getprioceiling:$(ptr)", 
+                                        create_VoidTPtrObj(mutex)
+                        );
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+            *res = readInt_TSStream( &command.response );
+            if (prioceiling != NULL)
+            {
+              *prioceiling = readInt_TSStream( &command.response );
+            }
+        }
+
+        destroy_TSCommand(&command);
+
+        return res;
+    }
+}
+
+/** pthread_mutex_setprioceiling_spec **/
+mediator pthread_mutex_setprioceiling_media for specification
+void pthread_mutex_setprioceiling_spec( CallContext context, PThreadMutexTPtr mutex, IntT new_prioceiling)
+{
+    call
+    {
+        TSCommand command = create_TSCommand();
+            
+        format_TSCommand( &command, "pthread_mutex_setprioceiling:$(ptr)$(int)",
+                                                    create_VoidTPtrObj(mutex),
+                                                    create_IntTObj(new_prioceiling));
+        executeCommandInContext( context, &command );
+        if (!isBadVerdict())
+        {
+            timestamp = command.meta.timestamp;
+        }
+        destroy_TSCommand(&command);
+    }
+    state
+    {
+        onPThreadMutexSetPrioceiling( context, mutex, new_prioceiling);
+    }
+}
+
+mediator pthread_mutex_setprioceiling_return_media for reaction
+MutexSetPrioceilingReturnType* pthread_mutex_setprioceiling_return(void)
+{
+    state
+    {
+        onPThreadMutexSetPrioceilingReturn( pthread_mutex_setprioceiling_return->context, 
+                                            pthread_mutex_setprioceiling_return->returned_value);
+    }
+}
+

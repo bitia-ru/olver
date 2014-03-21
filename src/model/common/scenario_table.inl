@@ -120,6 +120,8 @@
 {"util_format_money_scenario", start_util_format_money_scenario},
 {"ncurses_move_scenario", start_ncurses_move_scenario},
 {"pthread_mutex_mutex_mixed_scenario", start_pthread_mutex_mutex_mixed_scenario},
+{"pthread_mutex_mutex_tree_scenario", start_pthread_mutex_mutex_tree_scenario},
+{"pthread_mutex_mutex_protocol_scenario", start_pthread_mutex_mutex_protocol_scenario},
 {"pthread_mutex_mutex_mixed_types_scenario", start_pthread_mutex_mutex_mixed_types_scenario},
 {"pthread_mutex_mutex_simple_scenario", start_pthread_mutex_mutex_simple_scenario},
 {"pthread_mutex_mutex_static_init_scenario", start_pthread_mutex_mutex_static_init_scenario},
