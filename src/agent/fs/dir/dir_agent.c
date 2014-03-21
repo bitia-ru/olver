@@ -17,12 +17,14 @@
  */
 
 #include <sys/stat.h>
+#include <stdlib.h>
 #include <dirent.h>
 #include <errno.h>
 #include <unistd.h>
 #include "fs/dir/dir_agent.h"
 #include "fs/fs/fs_agent.h"
 #include <string.h>
+#include <ctype.h>
 
 /********************************************************************/
 /**                         Agent Commands                         **/
@@ -381,7 +383,109 @@ static TACommandVerdict dirfd_cmd(TAThread thread,TAInputStream stream)
     return taDefaultVerdict;
 }
 
+static TACommandVerdict alphasort_cmd(TAThread thread,TAInputStream stream)
+{
 
+    // Prepare
+    struct dirent *d1, *d2;
+    int res;
+
+    d1 = readPointer(&stream);
+    d2 = readPointer(&stream);
+    errno = readInt(&stream);
+
+    START_TARGET_OPERATION(thread);
+     
+    // Execute
+    res = alphasort(&d1, &d2);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread, res);
+    writeInt(thread, errno);
+    sendResponse(thread);
+
+
+    return taDefaultVerdict;
+}
+
+int rev_alphasort(const struct dirent **d1, const struct dirent **d2)
+{
+    return -alphasort(d1, d2);
+}
+
+int sel_start_num(const struct dirent * dirent)
+{
+    if (isdigit(dirent->d_name[0]))
+        return 1;
+    return 0;
+}
+int sel_len_more_3(const struct dirent * dirent)
+{
+    if (strlen(dirent->d_name)>3)
+        return 1;
+    return 0;
+}
+static TACommandVerdict scandir_cmd(TAThread thread,TAInputStream stream)
+{
+    // Prepare
+    char *dirname;
+    int sel_type, compar_type;
+    int (*compar_func)(const struct dirent **, const struct dirent **);
+    int (*sel_func)(const struct dirent *);
+    struct dirent **namelist;
+    int i,n;
+
+    dirname = readString(&stream);
+    sel_type = readInt(&stream);
+    compar_type = readInt(&stream);
+
+    START_TARGET_OPERATION(thread);
+    // Execute
+    switch (compar_type){
+        case SCANDIR_COMP_NORMAL:
+            compar_func = alphasort;
+            break;
+        case SCANDIR_COMP_REVERSE:
+            compar_func = rev_alphasort;
+            break;
+    }
+    switch (sel_type){
+        case SCANDIR_SELECT_EVERYTHING:
+            sel_func = NULL;
+            break;
+        case SCANDIR_SELECT_START_NUM:
+            sel_func=sel_start_num;
+            break;
+        case SCANDIR_SELECT_LENGTH_MORE_3:
+            sel_func=sel_len_more_3;
+            break;
+    }
+
+    errno = 0;
+    n = scandir(dirname, &namelist, sel_func, compar_func);
+
+    END_TARGET_OPERATION(thread);
+
+    // Response
+    writeInt(thread, n);
+    for (i = 0; i < n; i++) {
+        writePointer(thread, namelist[i]);
+        if(NULL!=namelist[i])
+        {
+            writeULLong(thread, namelist[i]->d_ino);
+            writeString(thread, namelist[i]->d_name);
+        }
+        free(namelist[i]);
+    }
+    writeInt(thread, errno);
+    sendResponse(thread);
+
+    if (n>0) 
+        free(namelist);
+    return taDefaultVerdict;
+}
 /********************************************************************/
 /**                      Agent Initialization                      **/
 /********************************************************************/
@@ -399,5 +503,7 @@ void register_fs_dir_commands(void)
     ta_register_command("telldir",telldir_cmd);
     ta_register_command("remove_dir_recursive", remove_dir_recursive_cmd);
     ta_register_command("dirfd",dirfd_cmd);
+    ta_register_command("alphasort", alphasort_cmd);
+    ta_register_command("scandir", scandir_cmd);
 }
 

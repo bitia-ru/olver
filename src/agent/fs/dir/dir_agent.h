@@ -23,6 +23,17 @@
 #include "common/agent.h"
 
 
+enum{
+    SCANDIR_COMP_NORMAL,
+    SCANDIR_COMP_REVERSE
+}compare_type;
+
+enum{
+    SCANDIR_SELECT_EVERYTHING,
+    SCANDIR_SELECT_START_NUM,
+    SCANDIR_SELECT_LENGTH_MORE_3
+}selector_type;
+
 /********************************************************************/
 /**                      Agent Initialization                      **/
 /********************************************************************/

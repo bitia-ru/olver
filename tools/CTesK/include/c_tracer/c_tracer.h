@@ -109,6 +109,7 @@ extern "C" {
   void traceException(const char *kind);
   void traceInterimException(const char *kind);
   void traceExceptionValue(const char *name, const char *value);
+  void traceFormattedExceptionValue(const char *name, const char *format,...);
   void traceExceptionInfo(const char *info);
   void traceInternalError(const char *info);
   void traceSystemInfo(const char *info);

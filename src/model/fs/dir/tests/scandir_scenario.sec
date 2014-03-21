@@ -1,0 +1,186 @@
+  /*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <atl/integer.h>
+
+#include "fs/dir/tests/dir_scenario.seh"
+
+#include "system/system/system_model.seh"
+#include "fs/dir/dir_model.seh"
+#include "fs/fifo/fifo_model.seh"
+#include "fs/symlink/symlink_model.seh"
+#include "fs/dir/scandir_model.seh"
+#include "common/common_scenario.seh"
+#include "common/common_media.seh"
+#include "process/meta/fs_model.seh"
+#include "fs/fs/fs_model.seh"
+
+#include "fs/symlink/symlink_model.seh"
+
+static CallContext context;
+
+/********************************************************************/
+bool init_scandir_scenario(int argc, char** argv)
+{
+    context = getContext();
+    initPathSystemConfiguration();
+    setTSTimeModel(DistributedTSTime);
+    // make sure process has appropriate priviledges
+    INIT_SCENARIO_ACTION( makeSureProcessHasAppropriatePrivileges(context) );
+
+    FilePermissions * cmask=create_FilePermissions_String( "-----x--x" );
+
+    umask_spec(context, cmask);
+
+    // update the current working directory of the process
+    INIT_SCENARIO_ACTION( updateProcessWorkDirectory(context) );
+
+    // prepare test data dir
+    INIT_SCENARIO_ACTION( createTestScenarioSandboxDir(context) );
+
+    return true;
+}
+
+void finish_scandir_scenario(void)
+{
+    //clean up
+    CallContext rmContext = createProcess();
+    removeTestScenarioSandboxDir(rmContext);
+}
+
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+#define MKDIR_A(path, perms)\
+    mkdir_spec(context, path, create_FilePermissions_String(perms), requestErrorCode())
+//MKDIR_A(SANDBOX_FILE("dir1"), "rwxrwxrwx");
+
+scenario
+bool alphasort_init_scen()
+{
+    MKDIR_A(SANDBOX_FILE("dir3"), "rwxrwxrwx");
+    createTestFile(context, SANDBOX_FILE("dir3/file11"), create_CString("Test\nSuite"));
+    createTestFile(context, SANDBOX_FILE("dir3/filea1"), create_CString("Test\nSuite"));
+}
+scenario
+bool alphasort_scen()
+{
+
+    DIRTPtr dirp = opendir_spec(context, SANDBOX_FILE("dir3"), requestErrorCode(), cancel_status);
+    DirEntT *dirEntp1;
+    DirEntT *dirEntp2;
+
+    //pass "." and ".." dirEntries
+    dirEntp1 = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+    dirEntp1 = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+    dirEntp1 = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+    dirEntp2 = readdir_spec(context, dirp, requestErrorCode(), cancel_status);
+
+    alphasort_spec(context, dirEntp1, dirEntp2, requestErrorCode());
+
+    return true;
+}
+
+scenario
+bool scandir_init_scen()
+{
+    //Different types of files
+
+    MKDIR_A(SANDBOX_FILE("dir2"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir2/abc"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir2/cd1"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir2/123"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir2/dr12"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir2/000"), "rwxrwxrwx");
+    MKDIR_A(SANDBOX_FILE("dir2/~*&"), "rwxrwxrwx");
+
+    createTestFile(context, SANDBOX_FILE("dir2/fil11"), create_CString("Test 1"));
+    createTestFile(context, SANDBOX_FILE("dir2/fi21sdfsfkj451"), create_CString("Test 2"));
+
+    mkfifo_spec(context, SANDBOX_FILE("dir2/woi-2"), create_FilePermissions_String("rwxrwxrwx"), requestErrorCode());
+    mkfifo_spec(context, SANDBOX_FILE("dir2/2!4gl"), create_FilePermissions_String("rwxrwxrwx"), requestErrorCode());
+
+    symlink_spec( context, SANDBOX_FILE("dir2/sy11"), SANDBOX_FILE("dir2/sym22"), requestErrorCode(), cancel_status );
+    symlink_spec( context, SANDBOX_FILE("dir2/sym1sd1"), SANDBOX_FILE("dir2/a=df234"), requestErrorCode(), cancel_status );
+}
+
+scenario
+bool scandir_diff_types_scen()
+{
+    int i,j;
+    List *nameList = create_List(&type_DirEntT);
+
+    for (i=SCANDIR_SELECT_EVERYTHING; i<=SCANDIR_SELECT_LENGTH_MORE_3; i++)
+        for (j=SCANDIR_COMP_NORMAL; j<=SCANDIR_COMP_REVERSE; j++){
+            nameList = create_List(&type_DirEntT);
+            scandir_spec(context, SANDBOX_FILE("dir2"), nameList, i, j,  requestErrorCode());
+        }
+}
+
+scenario
+bool scandir_scen()
+{
+    List *nameList = create_List(&type_DirEntT);
+
+    /* [ENOTDIR] */
+    nameList = create_List(&type_DirEntT);
+    scandir_spec(context, SANDBOX_FILE("dir2/fil11"), nameList, SCANDIR_SELECT_EVERYTHING, SCANDIR_COMP_NORMAL,  requestErrorCode());
+
+    /* [ENOENT] (empty string) */
+    nameList = create_List(&type_DirEntT);
+    scandir_spec(context, create_CString(""), nameList, SCANDIR_SELECT_EVERYTHING, SCANDIR_COMP_NORMAL,  requestErrorCode());
+
+    /* [ENOENT] */
+    nameList = create_List(&type_DirEntT);
+    scandir_spec(context, SANDBOX_FILE("dir22222"), nameList, SCANDIR_SELECT_EVERYTHING, SCANDIR_COMP_NORMAL,  requestErrorCode());
+
+    return true;
+}
+
+scenario
+bool scandir_loop_scen()
+{
+    List *nameList = create_List(&type_DirEntT);
+
+    symlink_spec( context, SANDBOX_FILE("dir2/sym1"), SANDBOX_FILE("dir2/sym2"), requestErrorCode(), cancel_status );
+    symlink_spec( context, SANDBOX_FILE("dir2/sym2"), SANDBOX_FILE("dir2/sym1"), requestErrorCode(), cancel_status );
+
+    nameList = create_List(&type_DirEntT);
+    scandir_spec(context, SANDBOX_FILE("dir2/sym1"), nameList, SCANDIR_SELECT_EVERYTHING, SCANDIR_COMP_NORMAL,  requestErrorCode());
+}
+
+scenario dfsm fs_scandir_scenario =
+{
+    .init=init_scandir_scenario,
+
+    .actions=
+    {
+        alphasort_init_scen,
+        alphasort_scen,
+        scandir_init_scen,
+        scandir_diff_types_scen,
+        scandir_scen,
+        NULL
+    },
+    .finish=finish_scandir_scenario
+};
+
+

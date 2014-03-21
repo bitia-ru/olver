@@ -35,6 +35,7 @@
 {"process_process_daemon_scenario", start_process_process_daemon_scenario},
 {"destruct_scenario", start_destruct_scenario},
 {"fs_dir_scenario", start_fs_dir_scenario},
+{"fs_scandir_scenario", start_fs_scandir_scenario},
 {"util_dl_scenario", start_util_dl_scenario},
 {"socket_netdb_ent_scenario", start_socket_netdb_ent_scenario},
 {"process_environ_scenario", start_process_environ_scenario},
