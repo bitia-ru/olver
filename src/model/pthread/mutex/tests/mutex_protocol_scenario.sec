@@ -1,0 +1,217 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "pthread/mutex/mutex_model.seh"
+#include "pthread/scheduler/scheduler_model.seh"
+#include "pthread/mutex/tests/mutex_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static int numberOfThreads = 5;
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static CallContext *contexts;
+static PThreadMutexAttrTPtr pattr;
+static PThreadMutexTPtr pmutex, pmutex2, pmutex3, pmutex4;
+static bool mutex_destroyed = false;
+
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_mutex_protocol_scenario(int argc,char** argv)
+{
+    int i;
+
+    contexts = (CallContext*) calloc(numberOfThreads, sizeof(CallContext));
+
+    // Create additional threads
+    for(i=0; i<numberOfThreads; i++)
+    {
+        createThread();
+    }
+
+    // Init test scenario data
+    getContexts(numberOfThreads,contexts);
+    context  = contexts[0];
+
+    pattr = allocateMemoryBlock(context,sizeof_Type(context,"pthread_mutexattr_t"));
+    pmutex  = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutex_t"));
+    pmutex2 = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutex_t"));
+    pmutex3 = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutex_t"));
+    pmutex4 = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutex_t"));
+
+    ProcessState* process_state;
+    process_state = getProcessState_CallContext(context);
+
+    IntT policy;
+    SchedParam param;
+    
+    policy = SUT_SCHED_FIFO;
+    for (i=1; i<numberOfThreads; i++){
+        param.sched_priority = i*2;
+        pthread_setschedparam_spec(context, contexts[i].thread, policy, &param);
+    }
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec( 70 );
+    return true;
+}
+
+static void finish_mutex_protocol_scenario(void)
+{
+    // Deallocate resources
+    deallocateMemoryBlock(context, pmutex);
+}
+
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+
+scenario
+bool mutex_init_scen()
+{
+    if (!isNULL_VoidTPtr(pattr) )
+    {
+        pthread_mutexattr_init_spec( context, pattr );
+        pthread_mutexattr_setprotocol_spec( context, pattr, SUT_PTHREAD_PRIO_PROTECT );
+
+        pthread_mutexattr_setprioceiling_spec( context, pattr, 3 );
+        if(!isNULL_VoidTPtr(pmutex))
+            pthread_mutex_init_spec( context, pmutex, pattr );
+
+        pthread_mutexattr_setprioceiling_spec( context, pattr, 5 );
+        if(!isNULL_VoidTPtr(pmutex3))
+            pthread_mutex_init_spec( context, pmutex3, pattr );
+
+        pthread_mutexattr_setprioceiling_spec( context, pattr, 7 );
+        if(!isNULL_VoidTPtr(pmutex4))
+            pthread_mutex_init_spec( context, pmutex4, pattr );
+
+
+        pthread_mutexattr_destroy_spec(context,pattr);
+    }
+
+    pthread_mutex_init_spec(context, pmutex2, NULL_VoidTPtr);
+
+    return true;
+}
+
+scenario
+bool mutex_lock_protect_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex);
+        if (mutex != NULL)
+        {
+            pthread_mutex_lock_spec(contexts[1], pmutex3);
+            pthread_mutex_lock_spec(contexts[1], pmutex4);
+            pthread_mutex_lock_spec(contexts[1], pmutex);
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_lock_inherit_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex);
+        if (mutex != NULL)
+        {
+            pthread_mutex_lock_spec(contexts[1], pmutex);
+            pthread_mutex_lock_spec(contexts[4], pmutex);
+        }
+    }
+    return true;
+}
+
+scenario 
+bool mutex_lock_none_scen()
+{
+    pthread_mutex_lock_spec(contexts[3], pmutex2);
+    pthread_mutex_lock_spec(contexts[2], pmutex2);
+    pthread_mutex_lock_spec(contexts[1], pmutex2);
+}
+
+scenario
+bool mutex_unlock_protect_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex);
+        if (mutex != NULL)
+        {
+            pthread_mutex_unlock_spec(contexts[1], pmutex);
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_unlock_none_scen()
+{
+    if (!isNULL_VoidTPtr(pmutex2))
+    {
+        Mutex* mutex;
+        mutex = getMutex(pmutex2);
+        if (mutex != NULL)
+        {
+            pthread_mutex_unlock_spec(contexts[3], pmutex2);
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm pthread_mutex_mutex_protocol_scenario =
+{
+    .init = init_mutex_protocol_scenario,
+    .finish = finish_mutex_protocol_scenario,
+    .saveModelState = (PtrSaveModelState)saveMutexModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreMutexModelState,
+    .isStationaryState = (PtrIsStationaryState)isMutexModelStateStationary,
+    .actions = {
+        mutex_init_scen,
+        mutex_lock_protect_scen,
+        mutex_unlock_protect_scen,
+        mutex_lock_none_scen,
+        mutex_unlock_none_scen,
+        NULL
+    }
+};

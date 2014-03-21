@@ -1,0 +1,376 @@
+/*
+ * Copyright (c) 2005-2006 Institute for System Programming
+ * Russian Academy of Sciences
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "common/control_center.seh"
+#include "common/common_media.seh"
+#include "common/common_scenario.seh"
+#include "common/tree.seh"
+#include "pthread/mutex/mutex_model.seh"
+#include "pthread/scheduler/scheduler_model.seh"
+#include "pthread/mutex/tests/mutex_scenario.seh"
+
+
+/********************************************************************/
+/**                     Test Scenario Parameters                   **/
+/********************************************************************/
+static int numberOfThreads = 2;
+static int numberOfMutexes = 2;
+
+/********************************************************************/
+/**                         Auxiliary Types                        **/
+/********************************************************************/
+
+/********************************************************************/
+/**                       Test Scenario Data                       **/
+/********************************************************************/
+static CallContext context;
+static CallContext *contexts;
+static PThreadMutexAttrTPtr pattr;
+static PThreadMutexTPtr pmutexes[5];
+static bool mutex_destroyed = false;
+static bool mutex_initialised = false;
+
+/********************************************************************/
+/**                  Test Scenario Initialization                  **/
+/********************************************************************/
+static bool init_mutex_tree_scenario(int argc,char** argv)
+{
+    int i;
+    contexts = (CallContext*) calloc(numberOfThreads, sizeof(CallContext));
+
+    // Create additional threads
+    for(i=0; i<numberOfThreads; i++)
+    {
+        createThread();
+    }
+
+    // Init test scenario data
+    getContexts(numberOfThreads, contexts);
+    context  = contexts[0];
+
+    pattr = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutexattr_t"));
+
+    for (i=0; i<numberOfMutexes; i++)
+        pmutexes[i] = allocateMemoryBlock(context, sizeof_Type(context, "pthread_mutex_t"));
+
+    IntT policy;
+    SchedParam param;
+
+    policy = SUT_SCHED_FIFO;
+    for (i=0; i<numberOfThreads; i++){
+        param.sched_priority = i+1;
+        pthread_setschedparam_spec(context, contexts[i].thread, policy, &param);
+    }
+
+    setTSTimeModel(NotUseTSTime);
+    setFindFirstSeriesOnly(true);
+    setWTimeMSec( 70 );
+    return true;
+}
+
+static void finish_mutex_tree_scenario(void)
+{
+    // Deallocate resources
+    int i;
+    for (i=0; i<numberOfMutexes; i++)
+        deallocateMemoryBlock(context, pmutexes[i]);
+}
+
+
+/********************************************************************/
+/**                Test Scenarios Generalized States               **/
+/********************************************************************/
+specification typedef
+struct TreeNodeStruct 
+{
+    int   prio;
+    bool  isMutex;
+
+} TreeNodeStruct;
+
+TreeNodeStruct * create_TreeNodeStruct(bool isMutex, int prio)
+{
+    return create(&type_TreeNodeStruct, prio, isMutex);
+}
+
+static
+String* to_string_TreeNodeStruct( struct TreeNodeStruct* nodeStruct )
+{
+    String *res;
+    res = format_String( "%s %d",nodeStruct->isMutex?"mutex":"thread", nodeStruct->prio);
+    return res;
+}
+
+specification typedef struct TreeNodeStruct TreeNodeStruct = 
+{
+    .to_string = (ToString)to_string_TreeNodeStruct,
+};
+
+specification typedef
+struct MutextreeGenState
+{
+    Tree* tree;
+} MutextreeGenState;
+
+MutextreeGenState * create_MutextreeGenState(Tree *tree)
+{
+    return create(&type_MutextreeGenState, tree);
+}
+
+static
+String* to_string_MutextreeGenState( struct MutextreeGenState* gen_state )
+{
+    String *res;
+    res = toString(gen_state->tree);
+    return res;
+}
+
+specification typedef struct MutextreeGenState MutextreeGenState = 
+{
+    .to_string = (ToString)to_string_MutextreeGenState,
+};
+
+/*return list of indexes in contexs for non blocked thread*/
+List* listOfNotBlockedThreads(void)
+{
+    int i, j;
+    List * thread_list;
+    thread_list = create_List(&type_ThreadIdObj);
+    for (i=0; i<numberOfThreads; i++){
+        /* skip if thread is blocked */
+        for (j=0; j<numberOfMutexes; j++){
+            Mutex* mutex = getMutex(pmutexes[j]);
+            if (mutex != NULL && contains_List(mutex->wait_list, create_ThreadIdObj(contexts[i])))
+                break;
+        }
+        if (j==numberOfMutexes)
+            insert_ThreadIdList(thread_list, contexts[i]);
+    }
+    if (isEmpty_List(thread_list)){
+        assertion(false, "Deadlock");
+    }
+    return thread_list;
+}
+
+ThreadId getFirstUnblockedThread(void)
+{
+    int j;
+    List *threads_list = listOfNotBlockedThreads();
+    for (j=0; j<numberOfThreads; j++)
+        if (contains_List(threads_list, create_ThreadIdObj(contexts[j])))
+            break;
+    assertion(j<numberOfThreads,"Deadlock"); //paranoid check :)
+    return contexts[j];
+}
+
+void add_wait_list(TreeNode* root, List *list)
+{
+    int i,j;
+
+    TreeNode* node;
+    TreeNode* node_mutex;
+
+    if (isEmpty_List(list))
+        return;
+    
+    for (i=0; i<numberOfThreads; i++){
+        if (!contains_List(list, create_ThreadIdObj(contexts[i])))
+            continue;
+        ThreadState *thread_i=getThreadState_CallContext(contexts[i]);
+        node = create_TreeNode(create_TreeNodeStruct(false, i));
+        addChild_TreeNode(root, node);
+
+        for (j=0; j<numberOfMutexes; j++){
+            Mutex* mutex = getMutex(pmutexes[j]);
+            if(mutex==NULL || !isOwner_Mutex(mutex, contexts[i]))
+                continue;
+            node_mutex = create_TreeNode(create_TreeNodeStruct(true, 10+j));
+            add_wait_list(node_mutex, mutex->wait_list);
+            addChild_TreeNode(node, node_mutex);
+        }
+    }
+}
+
+Tree * buildTree(void)
+{
+    int i, j;
+    Tree *tree;
+    TreeNode* root;
+    TreeNode* node;
+
+    root = create_TreeNode(create_CString("root"));
+    tree = create_Tree(root);
+    
+    /* free mutexes */
+    for (i=0; i<numberOfMutexes; i++){
+        Mutex* mutex = getMutex(pmutexes[i]);
+
+        if(mutex == NULL)
+            node = create_TreeNode(create_TreeNodeStruct(true, -1));
+        else{
+            if (!isWrong_ThreadId(mutex->owner))
+                continue;
+            node = create_TreeNode(create_TreeNodeStruct(true, 10+i));
+        }
+        addChild_TreeNode(root, node);
+    }
+
+    add_wait_list(root, listOfNotBlockedThreads());
+
+    return tree;
+}
+MutextreeGenState* get_MutextreeGenState(void)
+{
+   Tree * tree = buildTree();
+   return create_MutextreeGenState(tree);
+}
+
+List * getMutexesOwnedByThread(ThreadId thread)
+{
+    int i,j;
+    List * list;
+    list = create_List(&type_Integer);
+
+    for (j=0; j<numberOfMutexes; j++){
+        Mutex* mutex = getMutex(pmutexes[j]);
+        if(mutex==NULL || !isOwner_Mutex(mutex, thread))
+            continue;
+        append_List(list, create_Integer(j));
+        for (i=0; i<numberOfMutexes; i++){
+            if (contains_List(mutex->wait_list, create_ThreadIdObj(contexts[i])))
+                 appendAll_List(list, getMutexesOwnedByThread(contexts[i]));
+        }
+    }
+    return list;
+}
+/********************************************************************/
+/**                          Test Actions                          **/
+/********************************************************************/
+scenario
+bool mutex_init_tree_scen()
+{
+    int i;
+    ThreadId thread = getFirstUnblockedThread();
+
+    for (i=0; i<numberOfThreads; i++)
+        if (!isNULL_VoidTPtr(pmutexes[i]) && getMutex(pmutexes[i])==NULL)
+        {
+            pthread_mutex_init_spec(thread, pmutexes[i], NULL_VoidTPtr);
+        }
+    return true;
+}
+
+scenario
+bool mutex_lock_scen()
+{
+    Mutex* mutex;
+    List* threads_list = listOfNotBlockedThreads();
+
+    iterate (int j=0; j<numberOfMutexes; j++) 
+    {
+        iterate (int i=0; i<numberOfThreads; i++) 
+        {
+            if (contains_List(threads_list, create_ThreadIdObj(contexts[i]))
+                && !contains_List(getMutexesOwnedByThread(contexts[i]), create_Integer(j)))//check to possible deadlock
+            {
+                mutex = getMutex(pmutexes[j]);
+                if (mutex != NULL && !isOwner_Mutex(mutex, contexts[i])) 
+                {
+                    pthread_mutex_lock_spec(contexts[i], pmutexes[j]);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_unlock_scen()
+{
+    List* threads_list = listOfNotBlockedThreads();
+
+    Mutex* mutex;
+    iterate (int j=0; j<numberOfMutexes; j++) 
+    {
+        iterate (int i=0; i<numberOfThreads; i++) 
+        {
+            if (contains_List(threads_list, create_ThreadIdObj(contexts[i]))){
+                mutex = getMutex(pmutexes[j]);
+                if (mutex!=NULL && isOwner_Mutex(mutex, contexts[i])){
+                    pthread_mutex_unlock_spec(contexts[i], pmutexes[j]);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+scenario
+bool mutex_destroy_tree_scen()
+{
+    int i;
+    iterate (int i=0; i<numberOfMutexes; i++) 
+    {
+        Mutex* mutex = getMutex(pmutexes[i]);
+        if (mutex==NULL)
+            return true;
+        if (isWrong_ThreadId(mutex->owner))
+        {
+            ThreadId thread = getFirstUnblockedThread();
+            if ( pre pthread_mutex_destroy_spec(thread, pmutexes[i]))
+            {
+                ErrorCode* code;
+                code = pthread_mutex_destroy_spec(thread, pmutexes[i]);
+                if (*code == 0 && i==0)
+                {
+                    mutex_destroyed = true;
+                }
+            }
+        } else {
+            if ( pre pthread_mutex_destroy_spec(mutex->owner, pmutexes[i]))
+            {
+                ErrorCode* code;
+                code = pthread_mutex_destroy_spec(mutex->owner, pmutexes[i]);
+                if (*code == 0)
+                {
+                    mutex_destroyed = true;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+/********************************************************************/
+/**                    Test Scenario Definition                    **/
+/********************************************************************/
+scenario dfsm pthread_mutex_mutex_tree_scenario =
+{
+    .init = init_mutex_tree_scenario,
+    .finish = finish_mutex_tree_scenario,
+    .getState = (PtrGetState)get_MutextreeGenState,
+    .saveModelState = (PtrSaveModelState)saveMutexModelState,
+    .restoreModelState = (PtrRestoreModelState)restoreMutexModelState,
+    .isStationaryState = (PtrIsStationaryState)isMutexModelStateStationary,
+    .actions = {
+        mutex_init_tree_scen,
+        mutex_lock_scen,
+        mutex_unlock_scen,
+        mutex_destroy_tree_scen,
+        NULL
+    }
+};
