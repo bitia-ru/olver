@@ -1,6 +1,6 @@
 PACKAGE=lsb-test-olver-core
 VERSION=4.1.82
-RELEASE=1
+BUILDNO=2
 
 # for pkgchk
 DEPS=
@@ -16,11 +16,12 @@ SRC_DIR=$(PACKAGE)-$(VERSION)
 # Handle different version generation for snapshots than for official builds
 # OFFICIAL_RELEASE should be set to the tag to extract from BZR
 ifdef OFFICIAL_RELEASE
-	# EXPORT_TAG should be set to the bzr tag to use
-	EXPORT_TAG=--revision=$(OFFICIAL_RELEASE)
+RELEASE=$(BUILDNO)
+# EXPORT_TAG should be set to the bzr tag to use
+EXPORT_TAG=--revision=$(OFFICIAL_RELEASE)
 else
-	RELEASE=0.$(ISO_DATE)
-	EXPORT_TAG=
+RELEASE=0.$(ISO_DATE).$(BUILDNO)
+EXPORT_TAG=
 endif
 
 # Determine whether to use rpm or rpmbuild to build the packages
